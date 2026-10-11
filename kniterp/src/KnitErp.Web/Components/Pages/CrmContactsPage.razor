@@ -1,0 +1,179 @@
+@page "/crm/contacts"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject CrmContactService Contacts
+@inject CrmDealService Deals
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Контакты") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_page is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Контакты")</h1>
+        @if (CurrentAccess.Has(Permissions.CrmEdit) && !_creating)
+        {
+            <button type="button" @onclick="() => _creating = true" disabled="@_busy">@L("Новый контакт")</button>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+
+    @if (_creating)
+    {
+        <div class="panel">
+            <h2>@L("Новый контакт")</h2>
+            <form @onsubmit="CreateAsync">
+                <div class="grid">
+                    <label>@L("ФИО") <input @bind="_name" maxlength="@CrmContact.NameMaxLength" required /></label>
+                    <label>@L("Должность") <input @bind="_position" maxlength="@CrmContact.PositionMaxLength" /></label>
+                    <label>@L("Телефон") <input type="tel" @bind="_phone" @bind:after="CheckDuplicatesAsync" placeholder="+7 900 000-00-01" maxlength="@CrmText.PhoneMaxLength" /></label>
+                    <label>@L("Почта") <input type="email" @bind="_email" @bind:after="CheckDuplicatesAsync" maxlength="@CrmText.EmailMaxLength" /></label>
+                    <label>@L("Компания") <input @bind="_companySearch" @bind:after="SearchCompaniesAsync" placeholder="@L("Название или ИНН")" aria-label="@L("Поиск компании")" /></label>
+                    <label>
+                        @L("Найденные")
+                        <select @bind="_company">
+                            <option value="">—</option>
+                            @foreach (var c in _companies)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Создать")</button>
+                    <button type="button" class="secondary" @onclick="() => _creating = false">@L("Отмена")</button>
+                </div>
+            </form>
+            <CrmDuplicates Items="_duplicates" />
+        </div>
+    }
+
+    <form class="inline-form" @onsubmit="ReloadAsync">
+        <label>@L("Поиск") <input @bind="_search" placeholder="@L("ФИО, компания, телефон, почта")" /></label>
+        <label class="inline"><input type="checkbox" @bind="_archived" /> @L("С архивом")</label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("ФИО")</th><th class="opt">@L("Должность")</th><th>@L("Компания")</th><th class="opt">@L("Телефон")</th><th class="opt">@L("Почта")</th><th class="opt">@L("Ответственный")</th></tr></thead>
+            <tbody>
+                @if (_page.Rows.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Контактов нет.")</td></tr>
+                }
+                @foreach (var c in _page.Rows)
+                {
+                    <tr class="@(c.IsArchived ? "archived" : null)">
+                        <td><a href="crm/contacts/@c.Id">@c.FullName</a> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }</td>
+                        <td>@(c.Position ?? "—")</td>
+                        <td>@if (c.CounterpartyId is { } cp) { <a href="counterparties/@cp">@c.Counterparty</a> } else { <span>—</span> }</td>
+                        <td>@(c.Phone is { } p ? CrmText.FormatPhone(p) : "—")</td>
+                        <td>@(c.Email ?? "—")</td>
+                        <td>@c.Responsible</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <CrmPager Total="_page.Total" Page="_page.Page" PageSize="_page.PageSize" Shown="_page.Rows.Count" PageChanged="PageAsync" Busy="_busy" />
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private CrmPage<CrmContactRowDto>? _page;
+    private IReadOnlyList<CrmDuplicateDto> _duplicates = [];
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto> _companies = [];
+    private bool _busy;
+    private bool _creating;
+    private string? _denied;
+    private string? _error;
+    private string? _search;
+    private bool _archived;
+    private int _pageNo;
+    private string? _name;
+    private string? _position;
+    private string? _phone;
+    private string? _email;
+    private string? _companySearch;
+    private string _company = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync() => _page = await Contacts.ListAsync(_search, null, _archived, _pageNo);
+
+    private Task ReloadAsync()
+    {
+        _pageNo = 0;
+        return RunAsync(LoadAsync);
+    }
+
+    private Task PageAsync(int page)
+    {
+        _pageNo = page;
+        return RunAsync(LoadAsync);
+    }
+
+    private Task CheckDuplicatesAsync() => RunAsync(async () => _duplicates = await Contacts.DuplicatesAsync(_phone, _email));
+
+    private Task SearchCompaniesAsync() => RunAsync(async () =>
+    {
+        _companies = await Deals.CounterpartiesAsync(_companySearch);
+        _company = _companies.FirstOrDefault()?.Id.ToString() ?? "";
+    });
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        var id = await Contacts.CreateAsync(new CrmContactValues(_name, _position, long.TryParse(_company, out var c) ? c : null, _phone, _email));
+        Navigation.NavigateTo($"crm/contacts/{id}");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

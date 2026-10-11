@@ -215,4 +215,19 @@ public static class AuditActions
     public const string IntegrityChecked = "security.integrity.checked";
     public const string OrganizationCreated = "organization.created";
     public const string OrganizationRequisitesChanged = "organization.requisites.changed";
+
+    // CRM (D600–D699). Телефоны и почты — только маской (D612).
+    public const string CrmLeadCreated = "crm.lead.created";
+    public const string CrmLeadChanged = "crm.lead.changed";
+    public const string CrmLeadQualified = "crm.lead.qualified";
+    public const string CrmLeadRejected = "crm.lead.rejected";
+    public const string CrmLeadMerged = "crm.lead.merged";
+    public const string CrmDealCreated = "crm.deal.created";
+    public const string CrmDealChanged = "crm.deal.changed";
+    public const string CrmDealStageChanged = "crm.deal.stage_changed";
+    public const string CrmDealReassigned = "crm.deal.reassigned";
+    public const string CrmDealOrderCreated = "crm.deal.order_created";
+    public const string CrmContactCreated = "crm.contact.created";
+    public const string CrmContactChanged = "crm.contact.changed";
+    public const string CrmSettingsChanged = "crm.settings.changed";
 }

@@ -123,6 +123,16 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines => Set<KnitErp.Domain.Hr.PayrollLine>();
     public DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings => Set<KnitErp.Domain.Hr.HrSettings>();
 
+    // CRM (D600–D699).
+    public DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines => Set<KnitErp.Domain.Crm.CrmPipeline>();
+    public DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages => Set<KnitErp.Domain.Crm.CrmStage>();
+    public DbSet<KnitErp.Domain.Crm.CrmReference> CrmReferences => Set<KnitErp.Domain.Crm.CrmReference>();
+    public DbSet<KnitErp.Domain.Crm.CrmLead> CrmLeads => Set<KnitErp.Domain.Crm.CrmLead>();
+    public DbSet<KnitErp.Domain.Crm.CrmContact> CrmContacts => Set<KnitErp.Domain.Crm.CrmContact>();
+    public DbSet<KnitErp.Domain.Crm.CrmDeal> CrmDeals => Set<KnitErp.Domain.Crm.CrmDeal>();
+    public DbSet<KnitErp.Domain.Crm.CrmDealStageHistory> CrmDealStageHistory => Set<KnitErp.Domain.Crm.CrmDealStageHistory>();
+    public DbSet<KnitErp.Domain.Crm.CrmDealOrder> CrmDealOrders => Set<KnitErp.Domain.Crm.CrmDealOrder>();
+
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней
     /// транзакции: фиксирует и откатывает её только внешний сценарий.

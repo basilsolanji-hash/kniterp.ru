@@ -17,9 +17,15 @@ public static class SystemRoles
     /// <summary>Кадровик (D205) — роль модуля «Сотрудники», её права заданы в <see cref="HrRoleMatrix"/>, а не столбцом матрицы P0.</summary>
     public const string HrOfficer = "hr_officer";
 
+    /// <summary>Менеджер продаж (D600, CRM) — права в <see cref="CrmRoleMatrix"/>.</summary>
+    public const string SalesManager = "sales_manager";
+
+    /// <summary>Руководитель продаж (D600, CRM) — права в <see cref="CrmRoleMatrix"/>.</summary>
+    public const string SalesHead = "sales_head";
+
     /// <summary>Порядок столбцов матрицы ТЗ §4.8.</summary>
     public static readonly IReadOnlyList<string> Ordered =
-        [Owner, Administrator, DepartmentHead, SeniorStorekeeper, Storekeeper, Accountant, Auditor, Employee, HrOfficer];
+        [Owner, Administrator, DepartmentHead, SeniorStorekeeper, Storekeeper, Accountant, Auditor, Employee, HrOfficer, SalesManager, SalesHead];
 
     public static string NameOf(string code) => code switch
     {
@@ -32,6 +38,8 @@ public static class SystemRoles
         Auditor => "Аудитор",
         Employee => "Сотрудник",
         HrOfficer => "Кадровик",
+        SalesManager => "Менеджер продаж",
+        SalesHead => "Руководитель продаж",
         _ => code,
     };
 
@@ -108,6 +116,13 @@ public static class RoleMatrixP0
         (Permissions.BundleEdit,              [Full, Full, None, None, None, None, None, None]),
         // Допущение D306: массовую переоценку проводят Владелец и Администратор (цены видят — право «Цены и суммы»).
         (Permissions.PriceEdit,               [Full, Full, None, None, None, None, None, None]),
+        // Допущение D600 (CRM): Владелец — всё; Администратор видит CRM и настраивает воронки (сделки ведут менеджеры).
+        // Менеджер и руководитель продаж — роли CRM, их права в CrmRoleMatrix.
+        (Permissions.CrmView,                 [Full, Full, None, None, None, None, None, None]),
+        (Permissions.CrmEdit,                 [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmAll,                  [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmSettings,             [Full, Full, None, None, None, None, None, None]),
+        (Permissions.CrmExport,               [Full, None, None, None, None, None, None, None]),
         // Допущение D310: МойСклад подключают Владелец и Администратор (ТЗ каталога, этап 4).
         (Permissions.MoySkladManage,          [Full, Full, None, None, None, None, None, None]),
     ];
@@ -119,6 +134,11 @@ public static class RoleMatrixP0
         if (roleCode == SystemRoles.HrOfficer)
         {
             return HrRoleMatrix.LevelOf(permissionCode);
+        }
+
+        if (CrmRoleMatrix.Of(roleCode) is { } crm)
+        {
+            return crm.TryGetValue(permissionCode, out var level) ? level : None;
         }
 
         var col = IndexOfRole(roleCode);
@@ -139,6 +159,11 @@ public static class RoleMatrixP0
         if (roleCode == SystemRoles.HrOfficer)
         {
             return HrRoleMatrix.HrOfficer.Select(p => (p.Key, p.Value)).ToArray();
+        }
+
+        if (CrmRoleMatrix.Of(roleCode) is { } crm)
+        {
+            return crm.Select(p => (p.Key, p.Value)).ToArray();
         }
 
         var col = IndexOfRole(roleCode);
@@ -179,4 +204,42 @@ public static class HrRoleMatrix
     };
 
     public static PermissionLevel LevelOf(string permissionCode) => HrOfficer.TryGetValue(permissionCode, out var level) ? level : None;
+}
+
+/// <summary>
+/// Права ролей CRM (D600): «Менеджер продаж» ведёт свои лиды и сделки, «Руководитель продаж» — все, настраивает воронки
+/// и выгружает. Обоим нужны продажи и цены базы: из сделки создаётся заказ покупателя, а его сумма видна только с правом цен.
+/// Отдельный список, как у «Кадровика» (D205), чтобы модули не задевали столбцы матрицы P0.
+/// </summary>
+public static class CrmRoleMatrix
+{
+    public static readonly IReadOnlyDictionary<string, PermissionLevel> SalesManager = new Dictionary<string, PermissionLevel>(StringComparer.Ordinal)
+    {
+        [Permissions.CrmView] = Full,
+        [Permissions.CrmEdit] = Full,
+        [Permissions.SalesView] = Full,
+        [Permissions.SalesEdit] = Full,
+        [Permissions.PriceView] = Full,
+        [Permissions.CatalogView] = Full,
+    };
+
+    public static readonly IReadOnlyDictionary<string, PermissionLevel> SalesHead = new Dictionary<string, PermissionLevel>(StringComparer.Ordinal)
+    {
+        [Permissions.CrmView] = Full,
+        [Permissions.CrmEdit] = Full,
+        [Permissions.CrmAll] = Full,
+        [Permissions.CrmSettings] = Full,
+        [Permissions.CrmExport] = Full,
+        [Permissions.SalesView] = Full,
+        [Permissions.SalesEdit] = Full,
+        [Permissions.PriceView] = Full,
+        [Permissions.CatalogView] = Full,
+    };
+
+    public static IReadOnlyDictionary<string, PermissionLevel>? Of(string roleCode) => roleCode switch
+    {
+        SystemRoles.SalesManager => SalesManager,
+        SystemRoles.SalesHead => SalesHead,
+        _ => null,
+    };
 }

@@ -121,6 +121,10 @@ public static class ObjectDirectory
                         e.Position, $"employees/{e.Id}")).ToList();
             }
 
+            case TaggedEntity.CrmLead or TaggedEntity.CrmDeal or TaggedEntity.CrmContact:
+                // D601 (CRM): видимость лида, сделки и контакта решает CRM — ответственный, наблюдатель или право crm.all.
+                return await Crm.CrmVisibility.DescribeAsync(db, ctx, entity, ids, ct);
+
             default:
                 return Modules.TryGetValue(entity, out var describe) ? await describe(db, ctx, ids, ct) : [];
         }

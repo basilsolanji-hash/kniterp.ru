@@ -34,6 +34,11 @@ public enum TaggedEntity : byte
     // 11–19 — производство и другие модули; 20–29 — модуль «Сотрудники» (D202); 30–39 — CRM, 40–49 — «Разработка»,
     // 50–99 — следующие модули (D117: объекты подключаются через ObjectDirectory.Register, CHECK в базе — 1…99).
     Employee = 20,
+
+    // 30–39 — CRM (D601).
+    CrmLead = 30,
+    CrmDeal = 31,
+    CrmContact = 32,
 }
 
 public static class TagColors
@@ -80,6 +85,9 @@ public static class TagColors
         TaggedEntity.ExpenseReport => "Авансовые отчёты",
         TaggedEntity.ProductionOrder => "Производственные заказы",
         TaggedEntity.Employee => "Сотрудники",
+        TaggedEntity.CrmLead => "Лиды",
+        TaggedEntity.CrmDeal => "Сделки",
+        TaggedEntity.CrmContact => "Контакты",
         _ => entity.ToString(),
     };
 }

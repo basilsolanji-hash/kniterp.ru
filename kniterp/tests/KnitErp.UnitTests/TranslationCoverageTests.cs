@@ -119,6 +119,11 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(KnitErp.Domain.Hr.TimesheetCodes.All.Select(c => c.Name));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.PayrollLineKind>().Select(KnitErp.Domain.Hr.PayrollRules.KindName));
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
+
+        // CRM (D600–D699): статусы лидов, итоги сделок, виды справочников; готовая воронка и справочники выводятся как данные организации.
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmLeadStatus>().Select(KnitErp.Domain.Crm.CrmLead.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmDealOutcome>().Select(KnitErp.Domain.Crm.CrmDeal.OutcomeName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmReferenceKind>().Select(KnitErp.Domain.Crm.CrmReference.KindName));
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.Select(c => c.Name));
         keys.UnionWith(["без НДС", "ещё не действует", "Без роли", "Вся организация"]);
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.SelectMany(c => KnitErp.Domain.Catalog.VatRate.DefaultsFor(1, c.Code)).Select(r => r.Name));
