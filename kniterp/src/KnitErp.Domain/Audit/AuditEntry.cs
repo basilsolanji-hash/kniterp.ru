@@ -143,6 +143,10 @@ public static class AuditActions
     public const string StockDocumentPosted = "stock.document.posted";
     public const string StockDocumentReversed = "stock.document.reversed";
     public const string TechCardActivated = "production.techcard.activated";
+    public const string ProductionOrderCreated = "production.order.created";
+    public const string ProductionOrderChanged = "production.order.changed";
+    public const string ProductionOrderReleased = "production.order.released";
+    public const string ProductionOrderCancelled = "production.order.cancelled";
     public const string PurchaseOrderCreated = "purchase.order.created";
     public const string PurchaseOrderChanged = "purchase.order.changed";
     public const string PurchaseOrderConfirmed = "purchase.order.confirmed";

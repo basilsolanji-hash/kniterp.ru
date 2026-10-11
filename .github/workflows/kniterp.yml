@@ -66,6 +66,23 @@ jobs:
         if: success() || failure()
         run: dotnet test tests/KnitErp.IntegrationTests --no-build -c Release --logger "trx;LogFileName=integration.trx" --results-directory ../test-results
 
+      # Сквозные тесты в браузере (Playwright): приложение запускается на временной тестовой базе.
+      - name: E2E tests (Playwright)
+        if: success() || failure()
+        env:
+          KNITERP_E2E_ARTIFACTS: ${{ github.workspace }}/e2e-artifacts
+        run: |
+          pwsh tests/KnitErp.E2ETests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+          dotnet test tests/KnitErp.E2ETests --no-build -c Release --logger "trx;LogFileName=e2e.trx" --results-directory ../test-results
+
+      - name: Upload E2E failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kniterp-e2e-artifacts
+          path: e2e-artifacts/
+          if-no-files-found: ignore
+
       - name: Migration SQL script (idempotent)
         if: success()
         run: |

@@ -74,6 +74,10 @@ public static class RoleMatrixP0
         // Допущение D65: продажи — так же, как закупки.
         (Permissions.SalesView,               [Full, Full, None, Full, None, Full, Full, None]),
         (Permissions.SalesEdit,               [Full, Full, None, None, None, Full, None, None]),
+        // Допущение D91: производственные заказы ведут Владелец, Администратор и Руководитель подразделения (начальник цеха);
+        // кладовщики, Бухгалтер и Аудитор видят их. Плановая себестоимость видна только с правом «Цены и суммы».
+        (Permissions.ProductionOrderView,     [Full, Full, Full, Full, Full, Full, Full, None]),
+        (Permissions.ProductionOrderEdit,     [Full, Full, Full, None, None, None, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();

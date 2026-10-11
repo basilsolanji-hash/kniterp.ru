@@ -8,5 +8,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/KnitErp.UnitTests/KnitErp.UnitTests.csproj" />
     <Project Path="tests/KnitErp.IntegrationTests/KnitErp.IntegrationTests.csproj" />
+    <Project Path="tests/KnitErp.E2ETests/KnitErp.E2ETests.csproj" />
   </Folder>
 </Solution>

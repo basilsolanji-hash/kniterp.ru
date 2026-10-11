@@ -1,0 +1,254 @@
+@page "/production-orders/{Id:long}"
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ProductionOrderService Orders
+
+<PageTitle>@(_order is null ? L("Производственный заказ") : _order.Number) — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <h1>@L("Производственный заказ не найден")</h1>
+    <p><a href="production-orders">@L("К списку заказов")</a></p>
+}
+else if (_order is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <p><a href="production-orders">@L("← Производственные заказы")</a></p>
+    <div class="page-head">
+        <h1>@_order.Number · @_order.ItemCode @_order.ItemName <span class="tag @ProductionOrdersPage.StatusClass(_order.Status)">@L(_order.StatusName)</span></h1>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_options is not null)
+    {
+        <div class="panel">
+            <h2>@L("Изменить черновик")</h2>
+            <ProductionOrderForm Options="_options" FixedItem="FixedItem()" Initial="Command()" Busy="_busy" SubmitText="@L("Сохранить")"
+                                 OnSubmit="SaveAsync" OnCancel="() => _options = null" />
+        </div>
+    }
+    else
+    {
+        <dl class="facts">
+            <dt>@L("Количество")</dt><dd>@Quantities.Format(_order.Quantity) @_order.UnitSymbol</dd>
+            <dt>@L("Дата заказа")</dt><dd>@_order.OrderDate.ToString("dd.MM.yyyy")</dd>
+            <dt>@L("Срок выпуска")</dt><dd>@(_order.DueDate?.ToString("dd.MM.yyyy") ?? "—")</dd>
+            <dt>@L("Источник")</dt><dd>@L(_order.SourceName)@(_order.SalesOrderNumber is null ? "" : $" {_order.SalesOrderNumber}")</dd>
+            <dt>@L("Склад цеха (НЗП)")</dt><dd>@_order.WipWarehouseName</dd>
+            <dt>@L("Склад готовой продукции")</dt><dd>@_order.OutputWarehouseName</dd>
+            <dt>@L("Техкарта")</dt>
+            <dd>
+                @if (_order.TechCardId is { } cardId)
+                {
+                    <a href="tech-cards/@cardId">@L("версия {0}", _order.TechCardVersion!.Value)</a>
+                    @if (_order.TechCardItemName != _order.ItemName)
+                    {
+                        <span class="muted"> (@L("основная модель: {0}", _order.TechCardItemName!))</span>
+                    }
+                    @if (!_order.MaterialsFixed)
+                    {
+                        <span class="muted"> — @L("зафиксируется при запуске")</span>
+                    }
+                }
+                else
+                {
+                    <span class="error">@L("нет действующей техкарты")</span>
+                }
+            </dd>
+            @if (_order.Comment is not null)
+            {
+                <dt>@L("Комментарий")</dt><dd>@_order.Comment</dd>
+            }
+            <dt>@L("Автор")</dt><dd>@_order.CreatedBy, @Local(_order.CreatedAtUtc)</dd>
+            @if (_order.ReleasedBy is not null)
+            {
+                <dt>@L("Запустил")</dt><dd>@_order.ReleasedBy, @Local(_order.ReleasedAtUtc!.Value)</dd>
+            }
+            @if (_order.CancelledBy is not null)
+            {
+                <dt>@L("Отменил")</dt><dd>@_order.CancelledBy, @Local(_order.CancelledAtUtc!.Value): @_order.CancelReason</dd>
+            }
+        </dl>
+
+        <div class="actions">
+            @if (_order.CanEdit)
+            {
+                <button type="button" class="secondary" @onclick="EditAsync" disabled="@_busy">@L("Изменить")</button>
+            }
+            @if (_order.CanRelease)
+            {
+                <ConfirmButton Class="" OnConfirm="ReleaseAsync" Disabled="@_busy" Question='@L("Запустить? Версия техкарты и нормы зафиксируются.")'>@L("Запустить")</ConfirmButton>
+            }
+            @if (_order.CanCancel && !_cancelling)
+            {
+                <button type="button" class="secondary" @onclick="() => _cancelling = true" disabled="@_busy">@L("Отменить заказ")</button>
+            }
+        </div>
+
+        @if (_cancelling)
+        {
+            <form class="inline-form" @onsubmit="CancelAsync">
+                <label>@L("Причина отмены") <input @bind="_reason" maxlength="@ProductionOrder.ReasonMaxLength" size="40" /></label>
+                <button type="submit" disabled="@_busy">@L("Отменить заказ")</button>
+                <button type="button" class="secondary" @onclick="() => _cancelling = false">@L("Отмена")</button>
+            </form>
+        }
+    }
+
+    <h2 style="margin-top: 24px">@(_order.MaterialsFixed ? L("Материалы по нормам заказа") : L("Материалы по действующей техкарте"))</h2>
+    <div class="scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>@L("Код")</th><th>@L("Материал")</th><th class="opt num">@L("По норме")</th><th class="num">@L("Отход, %")</th><th class="num">@L("С отходом")</th><th>@L("Ед.")</th>
+                    @if (_order.PricesVisible) { <th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th> }
+                </tr>
+            </thead>
+            <tbody>
+                @if (_order.Materials.Count == 0)
+                {
+                    <tr><td colspan="8" class="muted">@L("Материалов нет.")</td></tr>
+                }
+                @foreach (var m in _order.Materials)
+                {
+                    <tr>
+                        <td>@m.Code</td>
+                        <td>@m.Name</td>
+                        <td class="num">@Quantities.Format(m.Net)</td>
+                        <td class="num">@m.WastePercent.ToString("0.##")</td>
+                        <td class="num"><b>@Quantities.Format(m.Gross)</b></td>
+                        <td>@m.UnitSymbol</td>
+                        @if (_order.PricesVisible)
+                        {
+                            <td class="num">@(m.Price?.ToString("N2") ?? "—")</td>
+                            <td class="num">@(m.Amount?.ToString("N2") ?? "—")</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_order.PricesVisible && _order.Materials.Count > 0)
+    {
+        <p>
+            @if (_order.PlannedCost is { } cost)
+            {
+                @L("Плановая себестоимость: {0} ₽, на единицу — {1} ₽.", cost.ToString("N2"), _order.PlannedUnitCost!.Value.ToString("N2"))
+            }
+            else
+            {
+                <span class="muted">@L("Плановая себестоимость неизвестна: нет цены хотя бы одного материала (нет закупок по заказам поставщикам).")</span>
+            }
+        </p>
+    }
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private ProductionOrderDto? _order;
+    private ProductionOrderOptions? _options;
+    private bool _busy;
+    private bool _notFound;
+    private bool _cancelling;
+    private string? _denied;
+    private string? _message;
+    private bool _messageIsError;
+    private string? _reason;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _order = null;
+        _notFound = false;
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync() => _order = await Orders.GetAsync(Id);
+
+    private ProductionProductOptionDto FixedItem() =>
+        _options!.Products.FirstOrDefault(p => p.Id == _order!.ItemId)
+        ?? new ProductionProductOptionDto(_order!.ItemId, _order.ItemCode, _order.ItemName, _order.UnitSymbol, _order.Precision, _order.IsModification,
+            _order.TechCardVersion, false);
+
+    private ProductionOrderCommand Command() =>
+        new(_order!.ItemId, _order.Quantity, _order.OrderDate, _order.DueDate, _order.Source, _order.SalesOrderId,
+            _order.WipWarehouseId, _order.OutputWarehouseId, _order.Comment);
+
+    private Task EditAsync() => RunAsync(async () => _options = await Orders.OptionsAsync(), null);
+
+    private Task SaveAsync(ProductionOrderCommand command) => RunAsync(async () =>
+    {
+        await Orders.UpdateAsync(Id, command, _order!.RowVersion);
+        _options = null;
+    }, L("Сохранено."));
+
+    private Task ReleaseAsync() => RunAsync(() => Orders.ReleaseAsync(Id, _order!.RowVersion), L("Заказ запущен."));
+
+    private Task CancelAsync() => RunAsync(async () =>
+    {
+        await Orders.CancelAsync(Id, _reason, _order!.RowVersion);
+        _cancelling = false;
+    }, L("Заказ отменён."));
+
+    /// <summary>Одна операция за раз, затем свежая карточка: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+}

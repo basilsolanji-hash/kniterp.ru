@@ -1,0 +1,96 @@
+using KnitErp.Domain.Access;
+using KnitErp.Domain.Catalog;
+using KnitErp.Domain.Organizations;
+using KnitErp.Domain.Production;
+using KnitErp.Domain.Sales;
+using KnitErp.Domain.Warehousing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace KnitErp.Infrastructure.Persistence;
+
+// Конфигурации модуля «Производство» (D90–D99) — отдельным файлом, чтобы не пересекаться с правками общих конфигураций.
+
+internal sealed class ProductionOrderConfiguration : IEntityTypeConfiguration<ProductionOrder>
+{
+    public void Configure(EntityTypeBuilder<ProductionOrder> b)
+    {
+        b.ToTable("production_orders", t =>
+        {
+            t.HasCheckConstraint("ck_production_orders_status", "[Status] IN (1, 2, 3, 4, 5, 9)");
+            t.HasCheckConstraint("ck_production_orders_quantity", "[Quantity] > 0");
+            t.HasCheckConstraint("ck_production_orders_source",
+                "([Source] = 1 AND [SalesOrderId] IS NULL) OR ([Source] = 2 AND [SalesOrderId] IS NOT NULL)");
+            t.HasCheckConstraint("ck_production_orders_warehouses", "[WipWarehouseId] <> [OutputWarehouseId]");
+            t.HasCheckConstraint("ck_production_orders_due", "[DueDate] IS NULL OR [DueDate] >= [OrderDate]");
+            // Запущен и дальше — с отметкой о запуске; черновик — без неё; отменённый — с причиной.
+            t.HasCheckConstraint("ck_production_orders_released",
+                "([Status] = 1 AND [ReleasedByUserId] IS NULL) OR ([Status] IN (2, 3, 4, 5) AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL)"
+                + " OR [Status] = 9");
+            t.HasCheckConstraint("ck_production_orders_cancelled",
+                "([Status] = 9 AND [CancelledByUserId] IS NOT NULL AND [CancelledAtUtc] IS NOT NULL AND [CancelReason] IS NOT NULL)"
+                + " OR ([Status] <> 9 AND [CancelledByUserId] IS NULL AND [CancelReason] IS NULL)");
+            // Изделие, количество и техкарта запущенного заказа не меняются — триггер в миграции AddProductionOrders.
+            t.HasTrigger("tr_production_orders_fixed_after_release");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Number).HasMaxLength(30).IsRequired();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.Source).HasConversion<byte>();
+        b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.Comment).HasMaxLength(ProductionOrder.CommentMaxLength);
+        b.Property(x => x.CancelReason).HasMaxLength(ProductionOrder.ReasonMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_production_orders_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.Number }).IsUnique().HasDatabaseName("ux_production_orders_org_number");
+        // Изделие, техкарта, склады и заказ покупателя — только своей организации: составные ключи.
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_orders_item");
+        b.HasOne<TechCard>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.TechCardId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_orders_tech_card");
+        b.HasOne<Warehouse>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.WipWarehouseId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_orders_wip_warehouse");
+        b.HasOne<Warehouse>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.OutputWarehouseId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_orders_output_warehouse");
+        b.HasOne<SalesOrder>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SalesOrderId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_orders_sales_order");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ReleasedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CancelledByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.Status }).HasDatabaseName("ix_production_orders_org_status");
+        b.HasIndex(x => new { x.OrganizationId, x.SalesOrderId }).HasDatabaseName("ix_production_orders_org_sales_order");
+        b.HasMany(x => x.Materials).WithOne().HasForeignKey(x => x.ProductionOrderId).OnDelete(DeleteBehavior.Restrict);
+        b.Navigation(x => x.Materials).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_materials");
+    }
+}
+
+internal sealed class ProductionOrderMaterialConfiguration : IEntityTypeConfiguration<ProductionOrderMaterial>
+{
+    public void Configure(EntityTypeBuilder<ProductionOrderMaterial> b)
+    {
+        b.ToTable("production_order_materials", t =>
+        {
+            t.HasCheckConstraint("ck_production_order_materials_net", "[PlannedNet] > 0");
+            t.HasCheckConstraint("ck_production_order_materials_gross", "[PlannedGross] >= [PlannedNet]");
+            t.HasCheckConstraint("ck_production_order_materials_waste", "[WastePercent] >= 0 AND [WastePercent] < 100");
+            t.HasCheckConstraint("ck_production_order_materials_price", "[PlannedPrice] IS NULL OR [PlannedPrice] >= 0");
+            // Снимок норм пишется один раз при запуске — триггер в миграции AddProductionOrders.
+            t.HasTrigger("tr_production_order_materials_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.PlannedNet).HasColumnType("decimal(18,6)");
+        b.Property(x => x.PlannedGross).HasColumnType("decimal(18,6)");
+        b.Property(x => x.WastePercent).HasColumnType("decimal(5,2)");
+        b.Property(x => x.PlannedPrice).HasColumnType("decimal(19,4)");
+        b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.ProductionOrderId, x.ItemId }).IsUnique().HasDatabaseName("ux_production_order_materials_order_item");
+    }
+}

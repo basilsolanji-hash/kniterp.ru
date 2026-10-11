@@ -2259,6 +2259,185 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrder", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("CancelledByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly?>("DueDate")
+                        .HasColumnType("date");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateOnly>("OrderDate")
+                        .HasColumnType("date");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OutputWarehouseId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<DateTime?>("ReleasedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("ReleasedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("SalesOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Source")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("TechCardId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("WipWarehouseId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_production_orders_org_id");
+
+                    b.HasIndex("CancelledByUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("ReleasedByUserId");
+
+                    b.HasIndex("OrganizationId", "ItemId");
+
+                    b.HasIndex("OrganizationId", "Number")
+                        .IsUnique()
+                        .HasDatabaseName("ux_production_orders_org_number");
+
+                    b.HasIndex("OrganizationId", "OutputWarehouseId");
+
+                    b.HasIndex("OrganizationId", "SalesOrderId")
+                        .HasDatabaseName("ix_production_orders_org_sales_order");
+
+                    b.HasIndex("OrganizationId", "Status")
+                        .HasDatabaseName("ix_production_orders_org_status");
+
+                    b.HasIndex("OrganizationId", "TechCardId");
+
+                    b.HasIndex("OrganizationId", "WipWarehouseId");
+
+                    b.ToTable("production_orders", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_production_orders_fixed_after_release");
+
+                            t.HasCheckConstraint("ck_production_orders_cancelled", "([Status] = 9 AND [CancelledByUserId] IS NOT NULL AND [CancelledAtUtc] IS NOT NULL AND [CancelReason] IS NOT NULL) OR ([Status] <> 9 AND [CancelledByUserId] IS NULL AND [CancelReason] IS NULL)");
+
+                            t.HasCheckConstraint("ck_production_orders_due", "[DueDate] IS NULL OR [DueDate] >= [OrderDate]");
+
+                            t.HasCheckConstraint("ck_production_orders_quantity", "[Quantity] > 0");
+
+                            t.HasCheckConstraint("ck_production_orders_released", "([Status] = 1 AND [ReleasedByUserId] IS NULL) OR ([Status] IN (2, 3, 4, 5) AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL) OR [Status] = 9");
+
+                            t.HasCheckConstraint("ck_production_orders_source", "([Source] = 1 AND [SalesOrderId] IS NULL) OR ([Source] = 2 AND [SalesOrderId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_production_orders_status", "[Status] IN (1, 2, 3, 4, 5, 9)");
+
+                            t.HasCheckConstraint("ck_production_orders_warehouses", "[WipWarehouseId] <> [OutputWarehouseId]");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrderMaterial", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("PlannedGross")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("PlannedNet")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal?>("PlannedPrice")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<long>("ProductionOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("WastePercent")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("ProductionOrderId", "ItemId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_production_order_materials_order_item");
+
+                    b.ToTable("production_order_materials", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_production_order_materials_immutable");
+
+                            t.HasCheckConstraint("ck_production_order_materials_gross", "[PlannedGross] >= [PlannedNet]");
+
+                            t.HasCheckConstraint("ck_production_order_materials_net", "[PlannedNet] > 0");
+
+                            t.HasCheckConstraint("ck_production_order_materials_price", "[PlannedPrice] IS NULL OR [PlannedPrice] >= 0");
+
+                            t.HasCheckConstraint("ck_production_order_materials_waste", "[WastePercent] >= 0 AND [WastePercent] < 100");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Production.TechCard", b =>
                 {
                     b.Property<long>("Id")
@@ -5060,6 +5239,85 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_legal_entity_accounts_entity");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrder", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CancelledByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ReleasedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_orders_item");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "OutputWarehouseId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_orders_output_warehouse");
+
+                    b.HasOne("KnitErp.Domain.Sales.SalesOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SalesOrderId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_production_orders_sales_order");
+
+                    b.HasOne("KnitErp.Domain.Production.TechCard", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "TechCardId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_orders_tech_card");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "WipWarehouseId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_orders_wip_warehouse");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrderMaterial", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Production.ProductionOrder", null)
+                        .WithMany("Materials")
+                        .HasForeignKey("ProductionOrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Production.TechCard", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -5934,6 +6192,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("KnitErp.Domain.Finance.ExpenseReport", b =>
                 {
                     b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrder", b =>
+                {
+                    b.Navigation("Materials");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Production.TechCard", b =>

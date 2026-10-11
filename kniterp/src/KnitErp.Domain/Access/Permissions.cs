@@ -31,6 +31,8 @@ public static class Permissions
     public const string PurchaseEdit = "purchase.document.edit";
     public const string SalesView = "sales.document.view";
     public const string SalesEdit = "sales.document.edit";
+    public const string ProductionOrderView = "production.order.view";
+    public const string ProductionOrderEdit = "production.order.edit";
 
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
@@ -60,6 +62,8 @@ public static class Permissions
         [PurchaseEdit] = "Закупки: заказы поставщикам и оплаты",
         [SalesView] = "Продажи: просмотр",
         [SalesEdit] = "Продажи: заказы покупателей и оплаты",
+        [ProductionOrderView] = "Производство: просмотр заказов",
+        [ProductionOrderEdit] = "Производство: заказы — создание, запуск и отмена",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;
