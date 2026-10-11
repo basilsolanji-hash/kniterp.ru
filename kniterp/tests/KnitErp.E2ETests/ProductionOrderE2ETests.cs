@@ -332,6 +332,8 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         // Форма кода — обычный GET: работает и до подключения Blazor; неверный код — понятная ошибка.
         await page.GotoAsync("shop?code=abc");
         await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("Код не распознан");
+        // Поле пустое: следующий скан не допишется к ошибочному коду.
+        await Assertions.Expect(page.GetByLabel("Код операции")).ToHaveValueAsync("");
         await page.GotoAsync("shop");
 
         // Код, введённый до подключения Blazor, теряется: вводим заново, пока не откроется операция.
@@ -486,7 +488,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await ClickUntilAsync(page.GetByLabel("Брак", new() { Exact = true }), page.GetByLabel("Причина брака"));
         await page.GetByLabel("Количество").FillAsync("1");
         await page.GetByLabel("Причина брака").FillAsync("спущенные петли (e2e)");
-        await page.GetByLabel("Виновник брака").SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С. (0101)" });
+        await page.GetByLabel("Виновник брака").SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С." });
         await page.GetByRole(AriaRole.Button, new() { Name = "Отметить брак" }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Брак отмечен: 1 шт.");
 
@@ -508,6 +510,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await LoginAsync(page);
         await page.GotoAsync($"production-orders/{order}");
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Маршрутный лист с QR-кодами" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("Вязание → Сборка → ВТО → Контроль качества → Упаковка", new() { Exact = true })).ToBeVisibleAsync();
         await page.GotoAsync($"print/production-orders/{order}/route");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("^Маршрутный лист к производственному заказу") })).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator("td.qr img")).ToHaveCountAsync(5);

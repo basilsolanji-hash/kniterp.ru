@@ -78,7 +78,8 @@ else
     var route = _card.Route ?? ProductionFlow.Stages;
     @if (_card.CanEdit)
     {
-        <fieldset class="inline-form" aria-label="@L("Маршрут")">
+        @* @key по версии строки: после ошибки или конфликта флажки берут состояние с сервера, а не остаются как нажал пользователь. *@
+        <fieldset class="inline-form" aria-label="@L("Маршрут")" @key="_card.RowVersion">
             @foreach (var st in ProductionFlow.Stages)
             {
                 var required = st is ProductionStage.Knitting or ProductionStage.QualityControl;

@@ -55,6 +55,11 @@ else
             }
             <dt>@L("Склад цеха (НЗП)")</dt><dd>@_order.WipWarehouseName</dd>
             <dt>@L("Склад готовой продукции")</dt><dd>@_order.OutputWarehouseName</dd>
+            @if (_order.Route is { } route)
+            {
+                <dt>@L("Маршрут")</dt>
+                <dd>@string.Join(" → ", route.Select(st => L(ProductionFlow.StageName(st))))@(_order.Status == ProductionOrderStatus.Draft ? " " + L("(зафиксируется при запуске)") : "")</dd>
+            }
             <dt>@L("Техкарта")</dt>
             <dd>
                 @if (_order.TechCardId is { } cardId)

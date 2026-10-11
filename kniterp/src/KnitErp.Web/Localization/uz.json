@@ -3446,5 +3446,6 @@
   "Отправить на переделку": "Qayta ishlashga yuborish",
   "Отправлено на переделку: {0} {1}.": "Qayta ishlashga yuborildi: {0} {1}.",
   "Причина брака": "Nuqson sababi",
-  "Результат контроля": "Nazorat natijasi"
+  "Результат контроля": "Nazorat natijasi",
+  "(зафиксируется при запуске)": "(ishga tushirilganda qayd etiladi)"
 }

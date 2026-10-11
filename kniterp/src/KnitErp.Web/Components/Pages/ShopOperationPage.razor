@@ -65,7 +65,8 @@ else
                                 <option value="">@L("— не указан —")</option>
                                 @foreach (var e in people)
                                 {
-                                    <option value="@e.Id">@e.Name (@e.PersonnelNumber)</option>
+                                    @* Табельный номер — только чтобы различить однофамильцев: на общем телефоне цеха лишних данных не показываем. *@
+                                    <option value="@e.Id">@(people.Count(x => x.Name == e.Name) > 1 ? $"{e.Name} ({e.PersonnelNumber})" : e.Name)</option>
                                 }
                             </select>
                         </label>
