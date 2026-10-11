@@ -9,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace KnitErp.Application.Production;
 
 /// <summary>Строка печатной формы: материал или изделие, единица с кодом ОКЕИ, количество; цена и сумма — только с правом «Цены и суммы».</summary>
-public sealed record ProductionPrintLineDto(int No, string Code, string Name, string UnitName, string UnitCode, decimal Quantity, decimal? Price, decimal? Amount);
+public sealed record ProductionPrintLineDto(
+    int No, string Code, string Name, string UnitName, string UnitCode, decimal Quantity, decimal? Price, decimal? Amount, decimal? Norm = null);
 
 /// <summary>
 /// Данные печатной формы документа производственного заказа (D96): требование-накладная по образцу М-11 (выдача в цех, возврат остатка)
@@ -18,9 +19,15 @@ public sealed record ProductionPrintLineDto(int No, string Code, string Name, st
 public sealed record ProductionPrintDto(
     string Form, string Okud, string Title, string Number, DateOnly Date, string Organization, string? Inn, string? Kpp,
     string Sender, string Receiver, string OrderNumber, string ProductName, string? Reason, string? Comment,
-    IReadOnlyList<ProductionPrintLineDto> Lines, decimal? Total, bool PricesVisible, bool Reversed, string? DirectorName, string? DirectorPosition)
+    IReadOnlyList<ProductionPrintLineDto> Lines, decimal? Total, bool PricesVisible, bool Reversed, string? DirectorName, string? DirectorPosition,
+    string? Produced = null)
 {
     public bool IsOutput => Form == ProductionPrintService.OutputForm;
+
+    /// <summary>Акт (отходы или расход при выпуске) — собственная форма организации, без ОКУД.</summary>
+    public bool IsAct => Form is ProductionPrintService.WasteActForm or ProductionPrintService.ConsumptionActForm;
+
+    public bool IsConsumption => Form == ProductionPrintService.ConsumptionActForm;
 }
 
 /// <summary>
@@ -34,6 +41,8 @@ public sealed class ProductionPrintService(IKnitErpDbContext db, IAccessGuard gu
 {
     public const string RequisitionForm = "М-11";
     public const string OutputForm = "МХ-18";
+    public const string WasteActForm = "Акт об отходах";
+    public const string ConsumptionActForm = "Акт расхода";
 
     public async Task<ProductionPrintDto> DocumentAsync(long stockDocumentId, CancellationToken ct = default)
     {
@@ -41,11 +50,6 @@ public sealed class ProductionPrintService(IKnitErpDbContext db, IAccessGuard gu
         var link = await db.ProductionOrderDocuments.AsNoTracking()
                        .SingleOrDefaultAsync(l => l.StockDocumentId == stockDocumentId && l.OrganizationId == ctx.OrganizationId, ct)
                    ?? throw new NotFoundException("Документ");
-        if (link.Purpose is not (ProductionDocumentPurpose.Issue or ProductionDocumentPurpose.Return or ProductionDocumentPurpose.Output))
-        {
-            throw new BusinessRuleException("production.print.purpose",
-                "Печатаются выдача в цех и возврат (требование-накладная) и выпуск продукции (накладная на передачу готовой продукции).");
-        }
 
         var doc = await db.StockDocuments.AsNoTracking().Include(d => d.Lines).SingleAsync(d => d.Id == stockDocumentId, ct);
         if (doc.Status is not (StockDocumentStatus.Posted or StockDocumentStatus.Reversed))
@@ -90,6 +94,13 @@ public sealed class ProductionPrintService(IKnitErpDbContext db, IAccessGuard gu
                 x.Price is { } p ? decimal.Round(p, 2, MidpointRounding.AwayFromZero) : null, x.Price is { } q ? Money.Round(q * x.Line.Quantity) : null))
             .ToList();
         var output = link.Purpose == ProductionDocumentPurpose.Output;
+        if (link.Purpose is ProductionDocumentPurpose.Waste or ProductionDocumentPurpose.Consumption)
+        {
+            return await ActAsync(ctx, link, doc, order, lines, items.ToDictionary(x => x.Key, x => (x.Value.Code, x.Value.Name)), warehouses[doc.WarehouseId],
+                reason, entity?.Name ?? org.FullName, entity?.Inn ?? org.Inn, entity is null ? (org.KppVerified ? org.Kpp : null) : entity.Kpp,
+                pricesVisible, entity?.DirectorName, entity?.DirectorPosition, ct);
+        }
+
         var (sender, receiver) = output
             ? ($"Цех (производство), заказ {order.Number}", warehouses[doc.WarehouseId])
             : (warehouses[doc.WarehouseId], warehouses[doc.TargetWarehouseId!.Value]);
@@ -100,5 +111,45 @@ public sealed class ProductionPrintService(IKnitErpDbContext db, IAccessGuard gu
             sender, receiver, order.Number, $"{items[order.ItemId].Code} {items[order.ItemId].Name}", reason, doc.Comment,
             lines, lines.All(l => l.Amount is not null) && lines.Count > 0 ? lines.Sum(l => l.Amount!.Value) : null,
             pricesVisible, doc.Status == StockDocumentStatus.Reversed, entity?.DirectorName, entity?.DirectorPosition);
+    }
+
+    /// <summary>
+    /// Акт (D96, дополнение): списание отходов и брака из цеха с причиной или расход материалов при выпуске — с нормой на выпущенное
+    /// и фактом по каждому материалу. Унифицированной формы нет (ТОРГ-16 — для товаров в торговле): собственная форма с реквизитами
+    /// ч. 2 ст. 9 Федерального закона № 402-ФЗ, подписи комиссии и утверждение руководителем.
+    /// </summary>
+    private async Task<ProductionPrintDto> ActAsync(
+        AccessContext ctx, ProductionOrderDocument link, StockDocument doc, ProductionOrder order, IReadOnlyList<ProductionPrintLineDto> lines,
+        IReadOnlyDictionary<long, (string Code, string Name)> items, string wip, string? reason, string organization, string? inn, string? kpp,
+        bool pricesVisible, string? director, string? directorPosition, CancellationToken ct)
+    {
+        var consumption = link.Purpose == ProductionDocumentPurpose.Consumption;
+        string? produced = null;
+        if (consumption)
+        {
+            // Выпуск, проведённый в той же операции: следующая связь заказа с целью «выпуск».
+            var output = await (from l in db.ProductionOrderDocuments.AsNoTracking()
+                                where l.ProductionOrderId == order.Id && l.Purpose == ProductionDocumentPurpose.Output && l.Id > link.Id
+                                orderby l.Id
+                                join d in db.StockDocuments.AsNoTracking() on l.StockDocumentId equals d.Id
+                                select d).Include(d => d.Lines).FirstOrDefaultAsync(ct);
+            var qty = output?.Lines.Where(x => x.ItemId == order.ItemId).Sum(x => x.Quantity) ?? 0m;
+            if (qty > 0)
+            {
+                produced = $"{items[order.ItemId].Code} {items[order.ItemId].Name} — {Quantities.Format(qty)} (накладная {output!.Number})";
+                lines = lines.Select(l =>
+                {
+                    var material = order.Materials.FirstOrDefault(m => items[m.ItemId].Code == l.Code);
+                    return material is null ? l : l with { Norm = decimal.Round(material.PlannedNet * qty / order.Quantity, 6) };
+                }).ToList();
+            }
+        }
+
+        return new ProductionPrintDto(consumption ? ConsumptionActForm : WasteActForm, "",
+            consumption ? "АКТ РАСХОДА МАТЕРИАЛОВ В ПРОИЗВОДСТВО" : "АКТ О СПИСАНИИ МАТЕРИАЛОВ (ОТХОДЫ И БРАК ПРОИЗВОДСТВА)",
+            doc.Number, doc.DocumentDate, organization, inn, kpp, wip, consumption ? "Производство (затраты на выпуск)" : "Списание",
+            order.Number, $"{items[order.ItemId].Code} {items[order.ItemId].Name}", reason, doc.Comment, lines,
+            lines.All(l => l.Amount is not null) && lines.Count > 0 ? lines.Sum(l => l.Amount!.Value) : null,
+            pricesVisible, doc.Status == StockDocumentStatus.Reversed, director, directorPosition, produced);
     }
 }

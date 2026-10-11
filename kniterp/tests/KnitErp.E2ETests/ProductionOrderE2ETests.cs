@@ -196,9 +196,15 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
             // D96: накладная на передачу готовой продукции по образцу МХ-18.
             var print = await page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^Печать ПТ-") }).GetAttributeAsync("href");
+            var act = await page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^Печать СП-") }).GetAttributeAsync("href");
             await page.GotoAsync(print!);
             await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("^НАКЛАДНАЯ НА ПЕРЕДАЧУ ГОТОВОЙ ПРОДУКЦИИ") })).ToBeVisibleAsync();
             await Assertions.Expect(page.GetByText("0335018")).ToBeVisibleAsync();
+
+            // Акт расхода материалов при выпуске: норма на выпущенное и факт.
+            await page.GotoAsync(act!);
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("^АКТ РАСХОДА МАТЕРИАЛОВ В ПРОИЗВОДСТВО") })).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByText("Председатель комиссии")).ToBeVisibleAsync();
         }
 
         await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))

@@ -113,10 +113,7 @@
                             <td>@L(d.PurposeName)</td>
                             <td>@L(d.StatusName)</td>
                             <td>
-                                @if (d.Purpose is ProductionDocumentPurpose.Issue or ProductionDocumentPurpose.Return or ProductionDocumentPurpose.Output)
-                                {
-                                    <a href="print/production/@d.Id?order=@OrderId" target="_blank" aria-label="@L("Печать {0}", d.Number)">@L("Печать")</a>
-                                }
+                                <a href="print/production/@d.Id?order=@OrderId" target="_blank" aria-label="@L("Печать {0}", d.Number)">@L("Печать")</a>
                                 @if (_data.CanMove && d.Status == KnitErp.Domain.Warehousing.StockDocumentStatus.Posted && _reversing != d.Id)
                                 {
                                     <button type="button" class="secondary" @onclick="() => _reversing = d.Id" disabled="@_busy" aria-label="@L("Сторно {0}", d.Number)">@L("Сторно")</button>

@@ -435,7 +435,7 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
-    /// <summary>D96: требование-накладная (М-11) на выдачу и накладная (МХ-18) на выпуск; цены — только с правом, отходы не печатаются.</summary>
+    /// <summary>D96: требование-накладная (М-11) на выдачу, накладная (МХ-18) на выпуск, акты отходов и расхода; цены — только с правом.</summary>
     [SqlFact]
     public async Task Requisition_and_output_note_print_with_okei_and_prices_by_permission()
     {
@@ -464,7 +464,17 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             Assert.Equal(("МХ-18", "0335018", "Склад готовой продукции", 10m), (mx18.Form, mx18.Okud, mx18.Receiver, mx18.Lines.Single().Quantity));
             Assert.Equal("796", mx18.Lines.Single().UnitCode);
             Assert.Equal(354.6m, mx18.Lines.Single().Price); // плановая себестоимость единицы: (3,296 × 1 000 + 50 × 5) / 10
-            Assert.Equal("production.print.purpose", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ProductionPrint.DocumentAsync(waste))).Code);
+            // Акты (дополнение D96): отходы — с причиной и пояснением; расход при выпуске — норма на выпущенное и факт.
+            var act = await s.ProductionPrint.DocumentAsync(waste);
+            Assert.Equal((ProductionPrintService.WasteActForm, true, "Брак", "Производственный заказ " + mx18.OrderNumber + ": обрезки"),
+                (act.Form, act.IsAct, act.Reason, act.Comment));
+            Assert.Equal(0.1m, act.Lines.Single().Quantity);
+            var consumptionId = (await s.Materials.MaterialsAsync(order)).Documents.Single(d => d.Purpose == ProductionDocumentPurpose.Consumption).Id;
+            var used = await s.ProductionPrint.DocumentAsync(consumptionId);
+            Assert.Equal(ProductionPrintService.ConsumptionActForm, used.Form);
+            Assert.Contains("СВ-1 Свитер — 10", used.Produced);
+            var yarnUsed = used.Lines.Single(l => l.Code == "ПР-1");
+            Assert.Equal((3.2m, 3.2m), (yarnUsed.Norm!.Value, yarnUsed.Quantity)); // норма без отхода 3,2 кг на 10 шт; факт — по норме
         }
 
         await using (var s = host.As(f.Senior, f.Org.OrganizationId))

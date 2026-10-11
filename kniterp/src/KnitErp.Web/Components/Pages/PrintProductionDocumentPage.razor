@@ -30,6 +30,74 @@ else if (_doc is null)
 {
     <div class="sheet"><p>@L("Загрузка…")</p></div>
 }
+else if (_doc.IsAct)
+{
+    var d = _doc;
+    <div class="sheet">
+        @if (d.Reversed)
+        {
+            <div class="stamp">ДОКУМЕНТ СТОРНИРОВАН</div>
+        }
+        <table class="plain">
+            <tr>
+                <td><b>@d.Organization</b>@(d.Inn is null ? "" : $", ИНН {d.Inn}")@(d.Kpp is null ? "" : $", КПП {d.Kpp}")<div class="small">организация</div>
+                    @d.Sender<div class="small">структурное подразделение</div></td>
+                <td style="width: 320px">УТВЕРЖДАЮ<br />@(d.DirectorPosition ?? "Руководитель") <span class="line"></span> @d.DirectorName<br />«___» ____________ 20__ г.</td>
+            </tr>
+        </table>
+        <div class="small" style="text-align: right">Форма утверждена учётной политикой организации (ч. 4 ст. 9 Федерального закона № 402-ФЗ)</div>
+
+        <h1 style="text-align: center; margin: 12px 0 4px">@d.Title № @d.Number</h1>
+        <p style="text-align: center">от @d.Date.ToString("dd.MM.yyyy")</p>
+        <p>Основание: производственный заказ @d.OrderNumber (@d.ProductName)@(d.Reason is null ? "" : $"; причина: {d.Reason}").</p>
+        @if (d.Produced is not null)
+        {
+            <p>Выпущено: @d.Produced.</p>
+        }
+        <p>Комиссия в составе: председатель <span class="line wide"></span>, члены комиссии <span class="line wide"></span>
+            составила настоящий акт о том, что @(d.IsConsumption ? "на изготовление продукции израсходованы" : "списаны как отходы и брак производства") следующие материалы:</p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th rowspan="2">№ п/п</th><th rowspan="2">Материал: наименование</th><th rowspan="2">Номенклатурный номер</th>
+                    <th colspan="2">Единица измерения</th>
+                    @if (d.IsConsumption) { <th rowspan="2">По норме</th> }
+                    <th rowspan="2">@(d.IsConsumption ? "Фактически" : "Количество")</th>
+                    <th rowspan="2">Цена, руб. коп.</th><th rowspan="2">Сумма без учёта НДС, руб. коп.</th>
+                </tr>
+                <tr><th>код по ОКЕИ</th><th>наименование</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var l in d.Lines)
+                {
+                    <tr>
+                        <td class="num">@l.No</td><td>@l.Name</td><td>@l.Code</td><td>@l.UnitCode</td><td>@l.UnitName</td>
+                        @if (d.IsConsumption) { <td class="num">@(l.Norm is { } n ? Qty(n) : "")</td> }
+                        <td class="num">@Qty(l.Quantity)</td>
+                        <td class="num">@(l.Price?.ToString("N2", Ru) ?? "")</td>
+                        <td class="num">@(l.Amount?.ToString("N2", Ru) ?? "")</td>
+                    </tr>
+                }
+                <tr>
+                    <td colspan="@(d.IsConsumption ? 7 : 6)" style="text-align: right"><b>Итого</b></td>
+                    <td></td>
+                    <td class="num">@(d.Total?.ToString("N2", Ru) ?? "")</td>
+                </tr>
+            </tbody>
+        </table>
+        @if (d.Comment is not null)
+        {
+            <p class="small">Пояснение: @d.Comment</p>
+        }
+
+        <div class="sign">
+            <div>Председатель комиссии <span class="line"></span><div class="small">должность, подпись, расшифровка подписи</div></div>
+            <div>Члены комиссии <span class="line"></span><br /><span class="line"></span><div class="small">должность, подпись, расшифровка подписи</div></div>
+            <div>Материально ответственное лицо <span class="line"></span><div class="small">должность, подпись, расшифровка подписи</div></div>
+        </div>
+    </div>
+}
 else
 {
     var d = _doc;
