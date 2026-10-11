@@ -26,7 +26,7 @@ public sealed record TechCardLineDto(long ItemId, string Code, string Name, stri
 public sealed record TechCardDto(
     long Id, long ItemId, string ItemCode, string ItemName, string UnitSymbol, int Version, TechCardStatus Status, decimal OutputQuantity,
     string? Comment, string CreatedBy, DateTime CreatedAtUtc, string? ActivatedBy, DateTime? ActivatedAtUtc,
-    IReadOnlyList<TechCardLineDto> Lines, long? ActiveVersionId, bool CanEdit, byte[] RowVersion)
+    IReadOnlyList<TechCardLineDto> Lines, long? ActiveVersionId, bool CanEdit, byte[] RowVersion, IReadOnlyList<ProductionStage>? Route = null)
 {
     public string StatusName => TechCard.StatusName(Status);
 }
@@ -91,7 +91,7 @@ public sealed class TechCardService(IKnitErpDbContext db, IAccessGuard guard, IC
             card.Lines.Select(l => items[l.ItemId]).Zip(card.Lines)
                 .Select(x => new TechCardLineDto(x.Second.ItemId, x.First.Code, x.First.Name, x.First.Symbol, x.Second.Quantity, x.Second.WastePercent))
                 .OrderBy(l => l.Code).ToList(),
-            activeId, ctx.Permissions.Has(Permissions.CatalogEdit) && card.Status == TechCardStatus.Draft, card.RowVersion);
+            activeId, ctx.Permissions.Has(Permissions.CatalogEdit) && card.Status == TechCardStatus.Draft, card.RowVersion, card.RouteValue.Stages);
     }
 
     /// <summary>Изделия для новой карты: действующая готовая продукция и полуфабрикаты.</summary>
@@ -175,6 +175,16 @@ public sealed class TechCardService(IKnitErpDbContext db, IAccessGuard guard, IC
         var before = card.Lines.FirstOrDefault(l => l.ItemId == materialItemId) is { } old ? Norm(old.Quantity, old.WastePercent, material) : null;
         card.SetLine(materialItemId, quantity, wastePercent);
         Audit(ctx, AuditActions.CatalogChanged, id, before, Norm(quantity, wastePercent, material), $"Техкарта: {material.Code} {material.Name}");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>Маршрут изделия (D401): этапы из стандартного набора, вязание и контроль качества обязательны; только у черновика.</summary>
+    public async Task SetRouteAsync(long id, IReadOnlyCollection<ProductionStage> stages, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, card) = await LoadForEditAsync(id, rowVersion, ct);
+        var before = card.RouteValue.Describe();
+        card.SetRoute(ProductionRoute.Of(stages));
+        Audit(ctx, AuditActions.CatalogChanged, id, before, card.RouteValue.Describe(), "Техкарта: маршрут");
         await db.SaveOrConflictAsync(ct);
     }
 

@@ -5,7 +5,7 @@ description: Модуль «Производство» knitERP — произв�
 
 # Модуль «Производство» knitERP
 
-Общий порядок сборки и тестов — скилл `kniterp-tests` (ветка «Сотрудники»; после слияния он будет и здесь). Этот скилл — только про производство.
+Общий порядок сборки, тестов, слияния веток и переводов — скилл `kniterp-tests` (окружение готовит `.claude/hooks/session-start.sh`). Этот скилл — только про производство.
 
 ## Где что лежит
 - Домен: `src/KnitErp.Domain/Production/` — `ProductionOrder` (статусы, снимок норм), `ProductionStages.cs` (этапы, `ProductionFlow` — сколько можно отметить),
@@ -43,12 +43,15 @@ description: Модуль «Производство» knitERP — произв�
   Запуск: `dotnet build` всего решения, затем `dotnet test tests/KnitErp.E2ETests --no-build` (нужен `KNITERP_TEST_SQL`).
 
 ## Частые ошибки
+- Коммит — только после зелёной проверки: связывать `dotnet test … && git commit`, а не через `;` (иначе уходит коммит с красным тестом).
+- В e2e локаторы кнопок — с `Exact = true`: общие элементы (кнопка помощника «Открыть: Ника», D116) совпадают по началу имени.
 - В LINQ-запросе с синтаксисом запросов параметр `from` пишется как `@from` — иначе «Invalid expression term '&&'».
 - Docker в облачной сессии: `dockerd` запускать фоновой командой (`run_in_background`), иначе он умирает вместе с командой; затем `docker start kniterp-sql`.
 
 ## Переводы
-Ключи интерфейса — в `src/KnitErp.Web/Localization/{be,kk,uz}.json`, новые — в конец файла: `python3 -I .claude/skills/kniterp-production/append_tr.py <файл с T = {ключ: (be, kk, uz)}> kniterp/src/KnitErp.Web/Localization`.
-Списки из домена, которые выводятся как `L(переменная)` (этапы, причины невыполнения), регистрируются в `TranslationCoverageTests.UsedKeys`.
+Словари `src/KnitErp.Web/Localization/{be,kk,uz}.json` — скриптом `kniterp-tests`: `python3 -I .claude/skills/kniterp-tests/translations.py add new.json`
+(новые ключи в конец) и `… remove "ключ"` (лишние, которые назвал тест). Списки из домена, которые выводятся как `L(переменная)`
+(этапы, причины невыполнения, тексты главного экрана), регистрируются в `TranslationCoverageTests.UsedKeys`.
 
 ## Общие контракты с другими модулями (сверять при слиянии)
 - `TaggedEntity`: 1–10 общие, 11–19 производство (`ProductionOrder = 11`), 20–29 кадры; CHECK тегов и обсуждений — `BETWEEN 1 AND 29` (D202).

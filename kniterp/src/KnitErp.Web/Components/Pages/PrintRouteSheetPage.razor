@@ -38,13 +38,14 @@ else
     <div class="sheet">
         <h1 style="text-align: center; margin: 0 0 4px">Маршрутный лист к производственному заказу № @o.Number</h1>
         <p style="text-align: center">от @o.OrderDate.ToString("dd.MM.yyyy")@(o.DueDate is { } due ? $", срок — {due:dd.MM.yyyy}" : "")</p>
+        <p>Маршрут: @string.Join(" → ", (o.Route ?? ProductionFlow.Stages).Select(ProductionFlow.StageName)).</p>
         <p>Изделие: <b>@o.ItemCode @o.ItemName</b>; количество: <b>@Quantities.Format(o.Quantity) @o.UnitSymbol</b>@(o.TechCardVersion is { } v ? $"; техкарта, версия {v}" : "").</p>
         <p class="small">Отсканируйте QR-код этапа камерой рабочего телефона или введите код вручную в «Терминале цеха», отметьте сделанное.
             Если сделано не всё — укажите причину.</p>
         <table class="route">
             <thead><tr><th>QR-код этапа</th><th>Этап и код</th><th>Сделано</th><th>Исполнитель</th><th>Подпись мастера</th></tr></thead>
             <tbody>
-                @foreach (var stage in ProductionFlow.Stages)
+                @foreach (var stage in o.Route ?? ProductionFlow.Stages)
                 {
                     <tr>
                         <td class="qr"><img src="@QrCodes.PngDataUri(BaseUrl + ShopFloorCode.Path(o.Id, stage))" alt="QR-код этапа «@ProductionFlow.StageName(stage)»" /></td>

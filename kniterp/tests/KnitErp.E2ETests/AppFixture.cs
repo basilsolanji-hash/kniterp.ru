@@ -176,6 +176,21 @@ public sealed class AppFixture : IAsyncLifetime
         return id;
     }
 
+    /// <summary>Запущенный заказ, прошедший вязание, сборку и ВТО: ждёт контроля качества.</summary>
+    public async Task<long> CreateOrderReadyForQualityAsync(decimal quantity)
+    {
+        var order = await CreateReleasedOrderAsync(quantity);
+        await using var s = _host.As(_ownerId, _organizationId);
+        foreach (var stage in new[] { KnitErp.Domain.Production.ProductionStage.Knitting, KnitErp.Domain.Production.ProductionStage.Assembly,
+                     KnitErp.Domain.Production.ProductionStage.Steaming })
+        {
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(stage, KnitErp.Domain.Production.ProductionOperationKind.Done, quantity, null, null,
+                DateOnly.FromDateTime(DateTime.UtcNow)));
+        }
+
+        return order;
+    }
+
     /// <summary>Заказ, по которому выдана пряжа и пройдены все этапы: остаётся выпустить. Готовит Владелец.</summary>
     public async Task<long> CreatePackedOrderAsync(decimal quantity)
     {

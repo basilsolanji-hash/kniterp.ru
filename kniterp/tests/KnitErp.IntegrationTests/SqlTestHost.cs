@@ -204,13 +204,14 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Production.ShopFloorService(db, guard, Clock, new KnitErp.Application.Production.ProductionFloorService(db, guard, user, Clock)),
             new KnitErp.Application.Production.ShiftTaskService(db, guard, user, Clock),
             new KnitErp.Application.Production.ProductionSettingsService(db, guard, user, Clock),
-            new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock),
+            new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock, Spreadsheet),
             new RoleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.ItemTradeService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.RevaluationService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.PackService(db, guard, user, Clock),
-            new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)));
+            new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)),
+            new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock));
     }
 
     private static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
@@ -315,7 +316,8 @@ public sealed record Services(
     KnitErp.Application.Catalog.ItemTradeService Trade,
     KnitErp.Application.Catalog.RevaluationService Revaluations,
     KnitErp.Application.Catalog.PackService Packs,
-    KnitErp.Application.Catalog.CatalogQueryService CatalogQuery) : IAsyncDisposable
+    KnitErp.Application.Catalog.CatalogQueryService CatalogQuery,
+    KnitErp.Application.Catalog.ItemSupplierService Suppliers) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

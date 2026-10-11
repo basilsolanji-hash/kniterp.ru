@@ -61,7 +61,7 @@ else
                             <td class="num">@Quantities.Format(o.Quantity) @o.UnitSymbol</td>
                             @foreach (var d in o.StageDone)
                             {
-                                <td class="num">@Quantities.Format(d)</td>
+                                <td class="num">@(d is { } v ? Quantities.Format(v) : "—")</td>
                             }
                             <td class="num">@Quantities.Format(o.Defect)</td>
                             <td class="num">@Quantities.Format(o.Released)</td>

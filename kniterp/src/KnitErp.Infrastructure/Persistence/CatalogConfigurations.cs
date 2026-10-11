@@ -121,3 +121,27 @@ internal sealed class ItemPackConfiguration : IEntityTypeConfiguration<ItemPack>
         b.HasIndex(x => new { x.OrganizationId, x.Barcode }).IsUnique().HasFilter("[Barcode] IS NOT NULL").HasDatabaseName("ux_item_packs_org_barcode");
     }
 }
+
+internal sealed class ItemSupplierConfiguration : IEntityTypeConfiguration<ItemSupplier>
+{
+    public void Configure(EntityTypeBuilder<ItemSupplier> b)
+    {
+        b.ToTable("item_suppliers");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.SupplierArticle).HasMaxLength(ItemSupplier.ArticleMaxLength);
+        b.Property(x => x.SupplierItemName).HasMaxLength(ItemSupplier.NameMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_item_suppliers_item");
+        b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SupplierId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_item_suppliers_supplier");
+        b.HasIndex(x => new { x.ItemId, x.SupplierId }).IsUnique().HasDatabaseName("ux_item_suppliers_item_supplier");
+        // Основной поставщик у позиции — один.
+        b.HasIndex(x => x.ItemId).IsUnique().HasFilter("[IsMain] = 1").HasDatabaseName("ux_item_suppliers_main");
+        // Поиск позиции по артикулу поставщика (загрузка его счёта, подстановка в заказ).
+        b.HasIndex(x => new { x.OrganizationId, x.SupplierId, x.SupplierArticle }).HasDatabaseName("ix_item_suppliers_article");
+    }
+}

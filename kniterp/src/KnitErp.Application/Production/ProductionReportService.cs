@@ -16,7 +16,7 @@ public sealed record ProductionReportFilter(DateOnly From, DateOnly To);
 /// <summary>Заказ в работе: сделано по этапам (в порядке маршрута), годное, брак, выпущено, готово к выпуску, просрочка.</summary>
 public sealed record OrderInWorkRowDto(
     long Id, string Number, DateOnly OrderDate, DateOnly? DueDate, string ItemCode, string ItemName, string UnitSymbol, decimal Quantity,
-    IReadOnlyList<decimal> StageDone, decimal Defect, decimal Released, decimal ReadyForOutput, ProductionOrderStatus Status, bool Overdue)
+    IReadOnlyList<decimal?> StageDone, decimal Defect, decimal Released, decimal ReadyForOutput, ProductionOrderStatus Status, bool Overdue)
 {
     public string StatusName => ProductionOrder.StatusName(Status);
 }
@@ -68,8 +68,7 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
                         && (inWorkStatuses.Contains(o.Status) || (o.OrderDate >= filter.From && o.OrderDate <= filter.To)))
             .OrderBy(o => o.OrderDate).ThenBy(o => o.Id).Take(5000).ToListAsync(ct);
         var ids = orders.Select(o => o.Id).ToList();
-        var ops = await db.ProductionOperations.AsNoTracking()
-            .Where(o => o.OrganizationId == ctx.OrganizationId && ids.Contains(o.ProductionOrderId)).ToListAsync(ct);
+        var ops = await ProductionSteps.SummedAsync(db, ctx.OrganizationId, ids, ct);
         var moves = await (from link in db.ProductionOrderDocuments.AsNoTracking()
                            where link.OrganizationId == ctx.OrganizationId && ids.Contains(link.ProductionOrderId)
                            join d in db.StockDocuments.AsNoTracking() on link.StockDocumentId equals d.Id
@@ -84,14 +83,14 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
         decimal Released(ProductionOrder o) =>
             moves.Where(m => m.ProductionOrderId == o.Id && m.Purpose == ProductionDocumentPurpose.Output && m.ItemId == o.ItemId).Sum(m => m.Quantity);
         ProductionFlow Flow(ProductionOrder o) =>
-            new(o.Quantity, ops.Where(x => x.ProductionOrderId == o.Id).Select(x => x.Step), Released(o));
+            new(o.Quantity, ops[o.Id], Released(o), o.RouteValue);
 
         var inWork = orders.Where(o => inWorkStatuses.Contains(o.Status)).Select(o =>
         {
             var flow = Flow(o);
             var item = items[o.ItemId];
             return new OrderInWorkRowDto(o.Id, o.Number, o.OrderDate, o.DueDate, item.Code, item.Name, item.Symbol, o.Quantity,
-                ProductionFlow.Stages.Select(flow.Done).ToList(), flow.Defect, flow.Released, flow.ReadyForOutput, o.Status,
+                ProductionFlow.Stages.Select(s => flow.Route.Contains(s) ? flow.Done(s) : (decimal?)null).ToList(), flow.Defect, flow.Released, flow.ReadyForOutput, o.Status,
                 o.DueDate is { } due && due < today && o.Status != ProductionOrderStatus.Done);
         }).OrderByDescending(r => r.Overdue).ThenBy(r => r.DueDate ?? DateOnly.MaxValue).ThenBy(r => r.Number).ToList();
 
@@ -157,7 +156,7 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
         {
             new("Заказы в работе", ["Номер", "Дата", "Срок", "Код", "Изделие", "Количество", .. stages, "Брак", "Выпущено", "Готово к выпуску", "Статус", "Просрочен"],
                 r.InWork.Select(o => (IReadOnlyList<string>)[o.Number, o.OrderDate.ToString("dd.MM.yyyy"), o.DueDate?.ToString("dd.MM.yyyy") ?? "", o.ItemCode, o.ItemName,
-                    N(o.Quantity), .. o.StageDone.Select(N), N(o.Defect), N(o.Released), N(o.ReadyForOutput), o.StatusName, o.Overdue ? "да" : ""]).ToList(),
+                    N(o.Quantity), .. o.StageDone.Select(d => d is { } v ? N(v) : ""), N(o.Defect), N(o.Released), N(o.ReadyForOutput), o.StatusName, o.Overdue ? "да" : ""]).ToList(),
                 Numbers(5, 6 + stages.Count + 3)),
             new("Брак по причинам", ["Причина", "Код", "Изделие", "Количество", "Ед.", "Заказов"],
                 r.Defects.Select(d => (IReadOnlyList<string>)[d.Reason, d.ItemCode, d.ItemName, N(d.Quantity), d.UnitSymbol, d.Orders.ToString(CultureInfo.InvariantCulture)]).ToList(),

@@ -329,9 +329,29 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await page.GotoAsync("shop");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Терминал цеха" })).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByText("Исполнитель: Петрова А. С.")).ToBeVisibleAsync();
+        // Форма кода — обычный GET: работает и до подключения Blazor; неверный код — понятная ошибка.
+        await page.GotoAsync("shop?code=abc");
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("Код не распознан");
+        // Поле пустое: следующий скан не допишется к ошибочному коду.
+        await Assertions.Expect(page.GetByLabel("Код операции")).ToHaveValueAsync("");
+        await page.GotoAsync("shop");
 
-        await page.GetByLabel("Код операции").FillAsync($"оп-{order}-1");
-        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Открыть", Exact = true }), page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" }));
+        // Код, введённый до подключения Blazor, теряется: вводим заново, пока не откроется операция.
+        var stageHeading = page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" });
+        for (var attempt = 0; attempt < 15 && !await stageHeading.IsVisibleAsync(); attempt++)
+        {
+            await page.GetByLabel("Код операции").FillAsync($"оп-{order}-1");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Открыть", Exact = true }).ClickAsync();
+            try
+            {
+                await stageHeading.WaitForAsync(new() { Timeout = 1500 });
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        await Assertions.Expect(stageHeading).ToBeVisibleAsync();
         await page.WaitForURLAsync(new Regex($@"/shop/op/{order}/1$"));
         await Assertions.Expect(page.Locator(".shop-big div").First).ToContainTextAsync("10");
 
@@ -433,6 +453,9 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Баллы и показатели" })).ToBeVisibleAsync();
             await Assertions.Expect(page.Locator("thead th").Filter(new() { HasTextRegex = new Regex("^Баллы$") })).ToHaveCountAsync(1);
             await Assertions.Expect(page.GetByText("Баллы: выполненное задание")).ToBeVisibleAsync();
+            var download = await page.RunAndWaitForDownloadAsync(() => page.GetByRole(AriaRole.Link, new() { Name = "Выгрузить в Excel" }).ClickAsync());
+            Assert.StartsWith("pokazateli-", download.SuggestedFilename);
+            Assert.EndsWith(".xlsx", download.SuggestedFilename);
         }
 
         await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions
@@ -450,6 +473,36 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         }
     }
 
+    /// <summary>D407: контролёр на телефоне отмечает брак с виновником и отправляет на переделку.</summary>
+    [SqlFact]
+    public async Task Controller_marks_defect_and_rework_on_phone()
+    {
+        var order = await app.CreateOrderReadyForQualityAsync(6);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
+        });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page, AppFixture.WorkerEmail);
+        await page.GotoAsync($"shop/op/{order}/4");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Контроль качества" })).ToBeVisibleAsync();
+
+        await ClickUntilAsync(page.GetByLabel("Брак", new() { Exact = true }), page.GetByLabel("Причина брака"));
+        await page.GetByLabel("Количество").FillAsync("1");
+        await page.GetByLabel("Причина брака").FillAsync("спущенные петли (e2e)");
+        await page.GetByLabel("Виновник брака").SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С." });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отметить брак" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Брак отмечен: 1 шт.");
+
+        await page.GetByLabel("На переделку", new() { Exact = true }).CheckAsync();
+        await page.GetByLabel("Количество").FillAsync("1");
+        await page.GetByLabel("Вернуть на этап").SelectOptionAsync(new SelectOptionValue { Label = "Сборка" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отправить на переделку" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Отправлено на переделку: 1 шт.");
+        Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
+    }
+
     /// <summary>Маршрутный лист: QR-код и текстовый код на каждый этап.</summary>
     [SqlFact]
     public async Task Workshop_head_prints_route_sheet_with_qr_codes()
@@ -460,9 +513,11 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await LoginAsync(page);
         await page.GotoAsync($"production-orders/{order}");
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Маршрутный лист с QR-кодами" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("Вязание → Сборка → ВТО → Контроль качества → Упаковка", new() { Exact = true })).ToBeVisibleAsync();
         await page.GotoAsync($"print/production-orders/{order}/route");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("^Маршрутный лист к производственному заказу") })).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator("td.qr img")).ToHaveCountAsync(5);
+        await Assertions.Expect(page.GetByText("Маршрут: Вязание → Сборка → ВТО → Контроль качества → Упаковка.")).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByText($"ОП-{order}-4", new() { Exact = true })).ToBeVisibleAsync();
         Assert.StartsWith("data:image/png;base64,", await page.Locator("td.qr img").First.GetAttributeAsync("src"));
     }

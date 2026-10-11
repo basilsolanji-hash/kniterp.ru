@@ -593,7 +593,7 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             Assert.True(report.InWork.First().Overdue);
             var doneRow = report.InWork.Single(r => r.Id == done);
             Assert.Equal((false, 9m, 1m, 0m, ProductionOrderStatus.PartiallyDone), (doneRow.Overdue, doneRow.Released, doneRow.Defect, doneRow.ReadyForOutput, doneRow.Status));
-            Assert.Equal(new[] { 10m, 10m, 10m, 9m, 9m }, doneRow.StageDone);
+            Assert.Equal(new decimal?[] { 10m, 10m, 10m, 9m, 9m }, doneRow.StageDone);
             var defect = Assert.Single(report.Defects);
             Assert.Equal(("Дыры", 1m, 1), (defect.Reason, defect.Quantity, defect.Orders));
             var yarn = report.Deviations.Single(d => d.OrderId == done && d.MaterialCode == "ПР-1");
@@ -915,6 +915,17 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                 output.Select(o => (o.EmployeeId, o.Date, o.OperationId, o.OperationName, o.ItemId, o.Quantity, o.Unit)).ToArray());
             Assert.Empty(await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day.AddDays(1), Day.AddDays(5), CancellationToken.None));
         }
+
+        // Сдельная оплата по настоящей выработке (модуль «Сотрудники», D215): расценки на коды этапов, расчёт месяца.
+        await using (var hr = host.Hr(f.Org.OwnerUserId, f.Org.OrganizationId, new ProductionWorkOutputSource(host.NewDb())))
+        {
+            await hr.Payroll.AddRateAsync(new KnitErp.Application.Hr.PieceRateCommand(1, "Вязание", null, "шт", 50m, Day.AddDays(-30)));
+            await hr.Payroll.AddRateAsync(new KnitErp.Application.Hr.PieceRateCommand(2, "Сборка", null, "шт", 30m, Day.AddDays(-30)));
+            await hr.Payroll.CalculateAsync(Day.Year, Day.Month);
+            var piece = (await hr.Payroll.GetAsync(Day.Year, Day.Month)).Employees.Single(e => e.EmployeeId == employee).Piece;
+            // 12 × 50 (вязание) + 12 × 30 (сборка); отметка мастера без исполнителя в заработок не входит.
+            Assert.Equal(960m, piece);
+        }
     }
 
     [SqlFact]
@@ -1221,12 +1232,23 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                 Assert.Equal((0, 1, 0, (int?)0), (c.TasksDone, c.MissedWithReason, c.MissedNoReason, c.Points));
                 Assert.Equal("production.score.period", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Scores.BoardAsync(Day, Day.AddDays(100)))).Code);
 
+                // Выгрузка для кадров: лист показателей с баллами и лист сменных заданий.
+                var file = await s.Scores.ExportAsync(Day, Day.AddDays(2));
+                var sheet = SqlTestHost.Spreadsheet.ReadFirstSheet(new MemoryStream(file), 100);
+                Assert.Equal(["Сотрудник", "Табельный номер", "Выполнено заданий", "Не выполнено с причиной", "Без причины", "В работе", "Средний %", "Брак по вине", "Баллы"],
+                    sheet[0]);
+                var workerRow = sheet.Single(r => r[1] == "0101");
+                static decimal Num(string v) => decimal.Parse(v.TrimEnd('.'), System.Globalization.CultureInfo.InvariantCulture);
+                // Числа записаны числами (ячейки Excel), не текстом.
+                Assert.Equal(("Петрова А. С.", 1m, 1m, 2m, -3m), (workerRow[0], Num(workerRow[2]), Num(workerRow[4]), Num(workerRow[7]), Num(workerRow[8])));
+
                 await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, false, 2, 0, -3, -1), (await s.ProductionSettings.GetAsync()).RowVersion);
                 Assert.Null((await s.Scores.BoardAsync(Day, Day.AddDays(2))).Rows.Single(r => r.EmployeeId == employee).Points);
             }
 
             await using (var s = host.As(worker, f.Org.OrganizationId))
             {
+                await Assert.ThrowsAsync<AccessDeniedException>(() => s.Scores.ExportAsync(Day, Day.AddDays(2)));
                 var mine = await s.Scores.MineAsync();
                 Assert.Equal((employee, 1, 1, 2m, (int?)null), (mine!.EmployeeId, mine.TasksDone, mine.MissedNoReason, mine.DefectUnits, mine.Points));
             }
@@ -1380,6 +1402,128 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                       join st in db.SalesOrderStages.AsNoTracking() on o.StageId equals st.Id
                       where o.Id == salesOrder
                       select st.Name).SingleOrDefaultAsync();
+    }
+
+    [SqlFact]
+    public async Task Route_from_tech_card_skips_stages_and_is_fixed_on_release()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long card, draft, order;
+        var hatRoute = new[] { ProductionStage.Knitting, ProductionStage.Steaming, ProductionStage.QualityControl };
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Шапка: без сборки и без упаковки.
+            card = await s.TechCards.CreateAsync(f.Hat, 10, null);
+            await s.TechCards.SetLineAsync(card, f.Yarn, 1m, 0m, (await s.TechCards.GetAsync(card)).RowVersion);
+            Assert.Equal("production.route.invalid", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.TechCards.SetRouteAsync(card, [ProductionStage.Knitting, ProductionStage.Packing], (await s.TechCards.GetAsync(card)).RowVersion))).Code);
+            await s.TechCards.SetRouteAsync(card, hatRoute, (await s.TechCards.GetAsync(card)).RowVersion);
+            Assert.Equal(hatRoute, (await s.TechCards.GetAsync(card)).Route);
+            await s.TechCards.ActivateAsync(card, (await s.TechCards.GetAsync(card)).RowVersion);
+            await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.TechCards.SetRouteAsync(card, ProductionFlow.Stages.ToList(), (await s.TechCards.GetAsync(card)).RowVersion));
+
+            draft = await s.ProductionOrders.CreateAsync(Command(f, f.Hat, 2));
+            Assert.Equal(hatRoute, (await s.ProductionOrders.GetAsync(draft)).Route);
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Hat, 5));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            Assert.Equal(hatRoute, (await s.ProductionOrders.GetAsync(order)).Route);
+            Assert.Equal(hatRoute, (await s.Floor.ProgressAsync(order)).Stages.Select(x => x.Stage).ToArray());
+
+            Assert.Equal("production.stage.not_in_route", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.Assembly, 1)))).Code);
+            Assert.Equal("production.stage.not_in_route", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Assembly, 1, null)))).Code);
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Steaming, 5, null));
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            // На этапы вне маршрута QR-кода нет — терминал отвечает «не найдено».
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShopFloor.OperationAsync(order, ProductionStage.Assembly));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShopFloor.OperationAsync(order, ProductionStage.Packing));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(5, null, null));
+            // После вязания доступно ВТО (следующий этап маршрута), а не сборка.
+            Assert.Equal(5m, (await s.ShopFloor.OperationAsync(order, ProductionStage.Steaming)).Available);
+            Assert.DoesNotContain((await s.ShopFloor.MyDayAsync()).Tasks, t => t.OrderId == order && t.Stage == ProductionStage.Assembly);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.Steaming, 5));
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 5));
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 1m)));
+            // Последний этап — контроль качества: выпуск без упаковки.
+            await s.Materials.OutputAsync(order, new OutputCommand(5, Day, null, null));
+            Assert.Equal(ProductionOrderStatus.Done, (await s.ProductionOrders.GetAsync(order)).Status);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[production_orders] SET [Route] = 31 WHERE [Id] = {0}", order));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[tech_cards] SET [Route] = 1 WHERE [Id] = {0}", card));
+            // Черновик ещё можно менять: маршрут зафиксируется при запуске.
+            Assert.Equal(ProductionRoute.FullMask, await db.ProductionOrders.Where(o => o.Id == draft).Select(o => o.Route).SingleAsync());
+        }
+    }
+
+    [SqlFact]
+    public async Task Controller_marks_defect_with_culprit_and_rework_from_terminal()
+    {
+        var f = await SetUpAsync();
+        var (controller, controllerEmployee) = await AddWorkerAsync(f, grant: true);
+        var (_, knitter) = await AddWorkerAsync(f, grant: true, "0104", "Иванова");
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(order, Mark(stage, 10));
+            }
+        }
+
+        await using (var s = host.As(controller, f.Org.OrganizationId))
+        {
+            var op = await s.ShopFloor.OperationAsync(order, ProductionStage.QualityControl);
+            Assert.True(op.IsQualityControl);
+            Assert.Equal([ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming], op.ReworkStages);
+            Assert.Contains(op.Culprits!, e => e.Id == knitter);
+            Assert.Null((await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting)).Culprits);
+
+            await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShopFloor.MarkQualityAsync(order,
+                new ShopQualityCommand(ProductionOperationKind.Defect, 2, " ", knitter, null)));
+            Assert.Equal("production.stage.kind", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShopFloor.MarkQualityAsync(order,
+                new ShopQualityCommand(ProductionOperationKind.Done, 2, null, null, null)))).Code);
+            await s.ShopFloor.MarkQualityAsync(order, new ShopQualityCommand(ProductionOperationKind.Defect, 2, "спущенные петли", knitter, null));
+            await s.ShopFloor.MarkQualityAsync(order, new ShopQualityCommand(ProductionOperationKind.Rework, 1, "шов", null, ProductionStage.Assembly));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.QualityControl, new ShopMarkCommand(5, null, null));
+            Assert.Equal("production.stage.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShopFloor.MarkQualityAsync(order,
+                new ShopQualityCommand(ProductionOperationKind.Defect, 5, "ещё", null, null)))).Code);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var progress = await s.Floor.ProgressAsync(order);
+            Assert.Equal((5m, 2m, 1m), (progress.Good, progress.Defect, progress.Rework));
+            // Переделка вернула 1 на сборку: на сборке снова можно отметить 1.
+            Assert.Equal(1m, progress.Stages.Single(x => x.Stage == ProductionStage.Assembly).Available);
+            var defect = progress.History.Single(h => h.Kind == ProductionOperationKind.Defect);
+            Assert.Equal(("Иванова А. С.", "Петрова А. С."), (defect.Culprit, defect.Employee));
+            var score = (await s.Scores.BoardAsync(Day, Day)).Rows.Single(r => r.EmployeeId == knitter);
+            Assert.Equal(2m, score.DefectUnits);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            // Брак и переделка в выработку не входят: у контролёра выработка — только «годное».
+            var output = await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day, Day, CancellationToken.None);
+            Assert.Equal(5m, output.Where(o => o.EmployeeId == controllerEmployee).Sum(o => o.Quantity));
+        }
     }
 
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>

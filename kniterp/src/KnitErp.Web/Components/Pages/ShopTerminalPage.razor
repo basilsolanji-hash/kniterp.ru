@@ -25,10 +25,11 @@ else
         <h1>@L("Терминал цеха")</h1>
         <ShopHintMessage Hint="_day.Hint" EmployeeName="@_day.EmployeeName" />
 
-        <form class="shop-code" @onsubmit="Open">
+        @* Обычная форма браузера (GET), а не обработчик Blazor: код от сканера не теряется, даже если страница ещё подключается. *@
+        <form class="shop-code" method="get" action="shop">
             <label for="shop-code">@L("Код операции")</label>
             <div class="shop-row">
-                <input id="shop-code" @ref="_codeInput" @bind="_code" autocomplete="off" autocapitalize="characters" enterkeyhint="go"
+                <input id="shop-code" name="code" @ref="_codeInput" autocomplete="off" autocapitalize="characters" enterkeyhint="go"
                        placeholder="ОП-123-1" aria-describedby="shop-code-help" />
                 <button type="submit">@L("Открыть")</button>
             </div>
@@ -175,7 +176,6 @@ else
     private ShopDayDto? _day;
     private EmployeeScoreDto? _score;
     private string? _denied;
-    private string _code = string.Empty;
     private string? _codeError;
     private ElementReference _codeInput;
     private bool _focused;
@@ -284,8 +284,23 @@ else
         }
     }
 
+    /// <summary>Код операции из формы (GET): сканер штрихкода или ручной ввод.</summary>
+    [SupplyParameterFromQuery(Name = "code")]
+    public string? Code { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
+        if (!string.IsNullOrWhiteSpace(Code))
+        {
+            if (ShopFloorCode.TryParse(Code, out var order, out var stage))
+            {
+                Nav.NavigateTo(ShopFloorCode.Path(order, stage));
+                return;
+            }
+
+            _codeError = L("Код не распознан. Пример: ОП-123-1 (заказ 123, этап 1).");
+        }
+
         try
         {
             _day = await Shop.MyDayAsync();
@@ -312,16 +327,5 @@ else
                 // Поле ещё не отрисовано (предварительная отрисовка) — не страшно.
             }
         }
-    }
-
-    private void Open()
-    {
-        if (ShopFloorCode.TryParse(_code, out var order, out var stage))
-        {
-            Nav.NavigateTo(ShopFloorCode.Path(order, stage));
-            return;
-        }
-
-        _codeError = L("Код не распознан. Пример: ОП-123-1 (заказ 123, этап 1).");
     }
 }

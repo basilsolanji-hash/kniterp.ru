@@ -55,6 +55,11 @@ public sealed class TechCard
     /// </summary>
     public int Revision { get; private set; }
 
+    /// <summary>Маршрут изделия — этапы производства (D401), битовая маска <see cref="ProductionRoute"/>; по умолчанию все пять.</summary>
+    public byte Route { get; private set; } = ProductionRoute.FullMask;
+
+    public ProductionRoute RouteValue => ProductionRoute.From(Route);
+
     public IReadOnlyList<TechCardLine> Lines => _lines;
 
     public static TechCard Create(long organizationId, long itemId, int version, decimal outputQuantity, string? comment, long userId, DateTime nowUtc)
@@ -81,6 +86,7 @@ public sealed class TechCard
     public TechCard CopyAsVersion(int version, long userId, DateTime nowUtc)
     {
         var copy = Create(OrganizationId, ItemId, version, OutputQuantity, Comment, userId, nowUtc);
+        copy.Route = Route;
         foreach (var line in _lines)
         {
             copy._lines.Add(new TechCardLine(line.ItemId, line.Quantity, line.WastePercent));
@@ -100,6 +106,14 @@ public sealed class TechCard
         var text = DomainText.Optional(comment, CommentMaxLength, "Комментарий");
         OutputQuantity = outputQuantity;
         Comment = text;
+        Revision++;
+    }
+
+    /// <summary>Маршрут изделия — только в черновике; запущенные заказы хранят свой снимок маршрута.</summary>
+    public void SetRoute(ProductionRoute route)
+    {
+        EnsureDraft();
+        Route = ProductionRoute.From(route.Mask).Mask;
         Revision++;
     }
 

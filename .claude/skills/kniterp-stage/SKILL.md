@@ -5,6 +5,7 @@ description: Порядок сдачи одного этапа knitERP (ветк
 
 # Сдача этапа knitERP
 
+0. **Окружение**: `KNITERP_SA_PASSWORD=… bash .claude/skills/kniterp-stage/env-up.sh` — SDK, Docker, SQL Server, dotnet-ef (после перезапуска среды).
 1. **Миграция** (если менялась модель): `cd kniterp && dotnet tool restore && dotnet ef migrations add <Префикс><Имя> -p src/KnitErp.Infrastructure -o Persistence/Migrations`.
    - Префикс — свой у сессии (каталог — `Cat`). SQL вне модели (триггеры) — `migrationBuilder.Sql("EXEC(N'…')")`, в Down — `DROP … IF EXISTS`.
    - Триггер на таблице → `t.HasTrigger("имя")` в конфигурации, иначе EF падает на OUTPUT («target table has database triggers»).

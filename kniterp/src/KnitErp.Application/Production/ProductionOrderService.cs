@@ -40,7 +40,7 @@ public sealed record ProductionOrderDto(
     byte[] RowVersion, bool CanEdit, bool CanRelease, bool CanCancel,
     decimal Released = 0, decimal? ActualCost = null, string? ClosedBy = null, DateTime? ClosedAtUtc = null, string? CloseReason = null,
     bool CanClose = false, long? ParentOrderId = null, string? ParentOrderNumber = null, IReadOnlyList<ProductionChildDto>? Children = null,
-    bool CanCreateChild = false)
+    bool CanCreateChild = false, IReadOnlyList<ProductionStage>? Route = null)
 {
     public string StatusName => ProductionOrder.StatusName(Status);
     public string SourceName => ProductionOrder.SourceName(Source);
@@ -241,7 +241,9 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             released, actualCost, order.ClosedByUserId is { } cl ? users[cl] : null, order.ClosedAtUtc, order.CloseReason,
             canEdit && order.Status is ProductionOrderStatus.PartiallyDone or ProductionOrderStatus.Done,
             order.ParentOrderId, parentNumber, childOrders,
-            canEdit && order.Status is ProductionOrderStatus.Draft or ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone);
+            canEdit && order.Status is ProductionOrderStatus.Draft or ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone,
+            // Маршрут (D401): у запущенного — снимок, у черновика — маршрут техкарты, которая зафиксируется при запуске.
+            (draft && card is not null ? card.RouteValue : order.RouteValue).Stages);
     }
 
     /// <summary>Справочники формы: изделия с версией техкарты, действующие склады и подтверждённые заказы покупателей.</summary>
@@ -547,7 +549,7 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         var released = await ProductionLocks.ReleasedAsync(db, order, ct);
         var steps = await db.ProductionOperations.AsNoTracking()
             .Where(o => o.OrganizationId == ctx.OrganizationId && o.ProductionOrderId == id).ToListAsync(ct);
-        var flow = new ProductionFlow(order.Quantity, steps.Select(o => o.Step), released);
+        var flow = new ProductionFlow(order.Quantity, steps.Select(o => o.Step), released, order.RouteValue);
         var balance = MaterialBalance.Calculate(order.Materials, order.Quantity, await ProductionPosting.MovementsAsync(db, order, ct), released, flow.Defect);
         var before = ProductionOrder.StatusName(order.Status);
         order.Close(released, balance.Any(b => b.Remaining != 0), flow.ReadyForOutput, reason, ctx.UserId, clock.UtcNow);

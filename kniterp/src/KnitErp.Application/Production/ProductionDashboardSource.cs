@@ -10,7 +10,7 @@ namespace KnitErp.Application.Production;
 
 /// <summary>
 /// Производство на главном экране (контракт D111 базовой ветки, реализация — D405). Заказы в работе (запущен, выполнен частично) и с опозданием
-/// (срок прошёл); готовность — упаковано / количество заказа; текущая операция — первый этап, где сделано меньше количества заказа;
+/// (срок прошёл); готовность — сделано на последнем этапе маршрута / количество заказа; текущая операция — первый этап, где сделано меньше количества заказа;
 /// выпуск сегодня — проведённые документы выпуска с сегодняшней датой; «требует внимания» — опоздания, брак за 7 дней и вчерашние
 /// сменные задания, не выполненные без причины. Без права просмотра производственных заказов — null. Запросы идут по очереди
 /// в контексте главного экрана (без параллельных вызовов).
@@ -45,18 +45,16 @@ public sealed class ProductionDashboardSource : IProductionDashboardSource
         var orders = await (from o in open
                             join i in db.Items.AsNoTracking() on o.ItemId equals i.Id
                             orderby o.DueDate == null, o.DueDate, o.Id
-                            select new { o.Id, o.Number, o.Quantity, o.DueDate, i.Name }).Take(MaxScanned).ToListAsync(ct);
+                            select new { o.Id, o.Number, o.Quantity, o.DueDate, i.Name, o.Route }).Take(MaxScanned).ToListAsync(ct);
         var ids = orders.Select(o => o.Id).ToList();
-        var done = (await db.ProductionOperations.AsNoTracking()
-                .Where(op => op.OrganizationId == org && ids.Contains(op.ProductionOrderId))
-                .ToListAsync(ct))
-            .ToLookup(op => op.ProductionOrderId);
+        var done = await ProductionSteps.SummedAsync(db, org, ids, ct);
         var progress = orders.Select(o =>
             {
                 // Выпуск не нужен: готовность считаем по упакованному, а упакованное и выпущенное не убывают при выпуске.
-                var flow = new ProductionFlow(o.Quantity, done[o.Id].Select(x => x.Step), 0m);
-                var packed = flow.Done(ProductionStage.Packing);
-                var current = ProductionFlow.Stages.FirstOrDefault(s => flow.Done(s) < o.Quantity, ProductionStage.Packing);
+                var route = ProductionRoute.From(o.Route);
+                var flow = new ProductionFlow(o.Quantity, done[o.Id], 0m, route);
+                var packed = flow.Done(route.Last);
+                var current = route.Stages.Cast<ProductionStage?>().FirstOrDefault(s => flow.Done(s!.Value) < o.Quantity) ?? route.Last;
                 var percent = o.Quantity <= 0 ? 0m : Math.Min(100m, decimal.Round(packed / o.Quantity * 100m, 1));
                 var isLate = o.DueDate is { } due && due < today;
                 return new ProductionOrderProgressDto(o.Id, o.Number, o.Name, percent, o.DueDate, isLate, $"production-orders/{o.Id}",
