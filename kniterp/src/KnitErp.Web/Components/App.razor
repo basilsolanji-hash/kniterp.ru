@@ -395,8 +395,6 @@
                              box-shadow: 0 0 12px rgba(46,211,198,.6); }
         .kn-intro-brand { font-size: 13px; letter-spacing: 6px; text-transform: uppercase; color: #8A8A91; }
         .kn-intro-brand b { color: #2ED3C6; font-weight: 600; }
-        .kn-intro-skip { position: absolute; right: max(20px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom));
-                         background: transparent; border: 1px solid rgba(46,211,198,.6); color: #F2F2F3; }
         .kn-intro.kn-intro-out { opacity: 0; pointer-events: none; }
         @@media (prefers-reduced-motion: reduce) { .kn-intro { display: none !important; } }
         /* Логотип в меню — ссылка на главный экран. */
@@ -733,7 +731,6 @@
             <div class="kn-intro-bar"><span></span></div>
             <div class="kn-intro-brand">knit<b>ERP</b></div>
         </div>
-        <button type="button" class="kn-intro-skip">@L("Пропустить")</button>
     </div>
     <Routes @rendermode="PageRenderMode" />
     <script src="_framework/blazor.web.js"></script>

@@ -1,6 +1,6 @@
 // Заставка knitERP при открытии сайта: анимация логотипа и счётчик процентов под ней.
 // Показывается раз в день на устройстве, не на печатных формах и не при системной настройке «уменьшить движение».
-// Пропуск — кнопкой, щелчком по заставке или Escape. Если видео не запустилось за 1,5 с — сразу открывается сайт.
+// Без кнопки «Пропустить» (по просьбе владельца продукта); закрыть раньше — щелчком по заставке или Escape. Если видео не запустилось за 1,5 с — сразу открывается сайт.
 (() => {
   const box = document.getElementById('kn-intro');
   if (!box) return;
@@ -14,7 +14,6 @@
   const video = box.querySelector('video');
   const num = box.querySelector('.kn-intro-num');
   const bar = box.querySelector('.kn-intro-bar span');
-  const skip = box.querySelector('button');
   let closed = false;
   let frame = 0;
   let shown = 0;
@@ -54,7 +53,6 @@
     setTimeout(close, 250);
   }, { once: true });
   video.addEventListener('error', close, { once: true });
-  skip.addEventListener('click', (e) => { e.stopPropagation(); close(); });
   box.addEventListener('click', close);
   document.addEventListener('keydown', onKey);
   motion.addEventListener?.('change', (e) => { if (e.matches) close(); });
