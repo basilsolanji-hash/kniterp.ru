@@ -371,7 +371,7 @@ fun CompanyScreen(viewModel: QuoteViewModel, onBack: () -> Unit) {
     // Настройки разделами: на экране — только выбранный раздел.
     var section by rememberSaveable { mutableStateOf(0) }
     val sections = listOf(
-        R.string.settings_tab_connect, R.string.settings_tab_requisites, R.string.settings_tab_terms,
+        R.string.settings_tab_connect, R.string.settings_tab_phone, R.string.settings_tab_requisites, R.string.settings_tab_terms,
         R.string.settings_tab_legal, R.string.settings_tab_role,
     )
     FormScreen(stringResource(R.string.settings_title), onBack) {
@@ -440,6 +440,11 @@ fun CompanyScreen(viewModel: QuoteViewModel, onBack: () -> Unit) {
                     colors = SwitchDefaults.colors(checkedTrackColor = colors.equalsKey, checkedThumbColor = colors.equalsKeyText),
                 )
             }
+            message?.let { Text(it, color = colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
+            }
+            1 -> {
+            SectionTitle(R.string.settings_tab_phone)
+            Text(stringResource(R.string.settings_phone_hint), color = colors.textSecondary, fontSize = 14.sp)
             // Свой PIN-код приложения на этом телефоне.
             var pinOn by rememberSaveable { mutableStateOf(QuoteStore(context).pinSet) }
             var pinStage by remember { mutableStateOf<String?>(null) } // "new", "off"
@@ -528,9 +533,9 @@ fun CompanyScreen(viewModel: QuoteViewModel, onBack: () -> Unit) {
             }
             message?.let { Text(it, color = colors.textPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }
             }
-            1 -> {
+            2 -> {
             SectionTitle(R.string.company_section_requisites)
-            if (!editable) Text(stringResource(R.string.company_from_sheet), color = colors.textSecondary, fontSize = 14.sp)
+            ReadOnlyHint(config.enabled, editable)
             KnitField(s.brand, { v -> set { it.copy(brand = v) } }, R.string.company_brand, enabled = editable, text = true, maxLength = 100)
             KnitField(s.legalName, { v -> set { it.copy(legalName = v) } }, R.string.company_legal, enabled = editable, text = true, maxLength = 100)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -555,8 +560,9 @@ fun CompanyScreen(viewModel: QuoteViewModel, onBack: () -> Unit) {
                 KnitField(s.corrAccount, { v -> set { it.copy(corrAccount = v) } }, R.string.company_corr, enabled = editable, text = true, keyboardType = KeyboardType.Number, maxLength = 25, modifier = Modifier.weight(1f))
             }
             }
-            2 -> {
+            3 -> {
             SectionTitle(R.string.company_section_terms)
+            ReadOnlyHint(config.enabled, editable)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 KnitField(s.vatRate, { v -> set { it.copy(vatRate = v) } }, R.string.company_vat_rate, enabled = editable, modifier = Modifier.weight(1f))
                 KnitField(s.validityDays, { v -> set { it.copy(validityDays = v.filter(Char::isDigit).take(3)) } }, R.string.company_validity, enabled = editable, modifier = Modifier.weight(1f))
@@ -584,8 +590,9 @@ fun CompanyScreen(viewModel: QuoteViewModel, onBack: () -> Unit) {
             KnitField(s.signature, { v -> set { it.copy(signature = v) } }, R.string.company_signature, enabled = editable, text = true, maxLength = 120)
             KnitField(s.shopUrl, { v -> set { it.copy(shopUrl = v.trim()) } }, R.string.company_shop, enabled = editable, text = true, keyboardType = KeyboardType.Uri, maxLength = 200)
             }
-            3 -> {
+            4 -> {
             SectionTitle(R.string.company_section_legal)
+            ReadOnlyHint(config.enabled, editable)
             KnitField(s.termOffer, { v -> set { it.copy(termOffer = v) } }, R.string.company_term_offer, enabled = editable, text = true, singleLine = false, maxLength = 600)
             KnitField(s.termPayment, { v -> set { it.copy(termPayment = v) } }, R.string.company_term_payment, enabled = editable, text = true, singleLine = false, maxLength = 600)
             KnitField(s.termQuality, { v -> set { it.copy(termQuality = v) } }, R.string.company_term_quality, enabled = editable, text = true, singleLine = false, maxLength = 600)
@@ -599,6 +606,7 @@ fun CompanyScreen(viewModel: QuoteViewModel, onBack: () -> Unit) {
             DirectorSection(viewModel, s, director, editable)
 
             if (director) SectionTitle(R.string.company_section_economics)
+            if (director) ReadOnlyHint(config.enabled, editable)
             if (director) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 KnitField(s.fixedMonthly, { v -> set { it.copy(fixedMonthly = v) } }, R.string.company_fixed, enabled = editable, modifier = Modifier.weight(1f))
                 KnitField(s.planQuantity, { v -> set { it.copy(planQuantity = v) } }, R.string.company_plan, enabled = editable, modifier = Modifier.weight(1f))
@@ -622,7 +630,16 @@ fun CompanyScreen(viewModel: QuoteViewModel, onBack: () -> Unit) {
     }
 }
 
-/** Открывает ссылку (Google Таблицу) в браузере или приложении «Таблицы». */
+/** Почему поля только для чтения: значения из таблицы или правит только директор. */
+@Composable
+private fun ReadOnlyHint(sheet: Boolean, editable: Boolean) {
+    if (editable) return
+    Text(
+        stringResource(if (sheet) R.string.company_from_sheet else R.string.company_director_only),
+        color = LocalKnitColors.current.textSecondary, fontSize = 14.sp,
+    )
+}
+
 /** Режим директора: вход по PIN, выход; без таблицы PIN задаётся здесь. */
 @Composable
 private fun DirectorSection(viewModel: QuoteViewModel, s: CompanySettings, director: Boolean, editable: Boolean) {
@@ -650,6 +667,7 @@ private fun DirectorSection(viewModel: QuoteViewModel, s: CompanySettings, direc
     }
 }
 
+/** Открывает ссылку (Google Таблицу) в браузере или приложении «Таблицы». */
 fun openUrl(context: android.content.Context, url: String) {
     if (url.isBlank()) return
     try {
@@ -667,6 +685,17 @@ private fun PinDialog(turnOff: Boolean, onDone: (Boolean?) -> Unit) {
     val colors = LocalKnitColors.current
     var first by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Пауза после 5 ошибок действует и здесь: закрыть и открыть диалог заново её не снимает.
+    var attempts by remember { mutableStateOf(store.pinAttempts) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    val paused = turnOff && attempts.blocked(now)
+    androidx.compose.runtime.LaunchedEffect(attempts.blockedUntil) {
+        while (System.currentTimeMillis() < attempts.blockedUntil) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(500)
+        }
+        now = System.currentTimeMillis()
+    }
     val mismatch = stringResource(R.string.pin_mismatch)
     val wrong = stringResource(R.string.pin_wrong)
     androidx.compose.ui.window.Dialog(
@@ -683,15 +712,22 @@ private fun PinDialog(turnOff: Boolean, onDone: (Boolean?) -> Unit) {
                 first == null -> stringResource(R.string.pin_new)
                 else -> stringResource(R.string.pin_repeat)
             }
-            com.knit.calculator.ui.PinPad(title, error) { pin ->
+            com.knit.calculator.ui.PinPad(
+                title,
+                if (paused) stringResource(R.string.pin_paused, ((attempts.blockedUntil - now + 999) / 1000).toInt()) else error,
+                enabled = !paused,
+            ) { pin ->
                 when {
                     turnOff -> if (store.checkPin(pin)) {
+                        store.pinAttempts = com.knit.calculator.core.PinLock.Attempts()
                         store.setPin(null)
                         onDone(false)
                     } else {
                         val next = store.pinAttempts.failed(System.currentTimeMillis())
                         store.pinAttempts = next
-                        if (next.blocked(System.currentTimeMillis())) onDone(null) else error = wrong.format(next.left())
+                        attempts = next
+                        now = System.currentTimeMillis()
+                        error = if (next.blocked(now)) null else wrong.format(next.left())
                     }
                     first == null -> {
                         val problem = com.knit.calculator.core.PinLock.problem(pin)

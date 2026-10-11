@@ -49,6 +49,7 @@ class V16UiTest {
 
     @Test fun ownPinCode() {
         compose.onNodeWithContentDescription("Настройки").performClick()
+        compose.onNodeWithText("Этот телефон").performClick()
         compose.onNodeWithText("Свой PIN-код (4 цифры)").performScrollTo()
         compose.onNodeWithContentDescription("PIN-код приложения").performClick()
         compose.onNodeWithText("Новый PIN-код").assertExists()

@@ -137,7 +137,7 @@
     <string name="quote_delivery">Доставка: %1$s</string>
     <string name="kp_delivery">Доставка: %1$s.</string>
     <string name="company_free_delivery">Бесплатная доставка от, ₽ (0 — не указывать)</string>
-    <string name="company_from_sheet">Реквизиты и условия берутся из листа «Настройки» Google Таблицы.</string>
+    <string name="company_from_sheet">Данные берутся из листа «Настройки» Google Таблицы — меняйте их там, затем обновите таблицу в приложении.</string>
     <string name="catalog_from_sheet">Ассортимент, цены, параметры и коэффициенты берутся из Google Таблицы (листы «Изделия», «Параметры», «Объём»). Измените их в таблице и нажмите «Обновить» — данные обновятся на всех телефонах.</string>
     <string name="catalog_tiers">Коэффициентов объёма: %1$d</string>
 
@@ -602,6 +602,9 @@
     <string name="about_support">Вопросы и предложения: Sale@fabrika-ks.ru</string>
     <!-- v1.6.1 -->
     <string name="settings_tab_connect">Подключение</string>
+    <string name="settings_tab_phone">Этот телефон</string>
+    <string name="settings_phone_hint">Защита и вид приложения — только для этого телефона, на других телефонах не меняются.</string>
+    <string name="company_director_only">Менять эти данные может только директор (вкладка «Роль и экономика»).</string>
     <string name="settings_tab_requisites">Реквизиты</string>
     <string name="settings_tab_terms">Условия КП</string>
     <string name="settings_tab_legal">Юр. тексты</string>
@@ -611,7 +614,7 @@
     <string name="digest_title">Фабрика KS — сводка на сегодня</string>
     <string name="digest_ship">Отгрузка сегодня–завтра: %1$d заказ(ов)</string>
     <string name="digest_setting">Ежедневная сводка в 9:00</string>
-    <string name="digest_setting_hint">Долги, отгрузки, просроченные заказы и КП без ответа — уведомлением.</string>
+    <string name="digest_setting_hint">Долги, отгрузки, просроченные заказы и КП без ответа — уведомлением. Работает, когда подключена Google Таблица.</string>
     <string name="quote_step_client">1 · Клиент</string>
     <string name="quote_step_items">2 · Позиции</string>
     <string name="quote_step_total">3 · Итог</string>
@@ -635,13 +638,13 @@
     <string name="lock_subtitle">Подтвердите вход отпечатком или PIN-кодом телефона</string>
     <string name="lock_unlock">Войти</string>
     <string name="lock_setting">Вход по отпечатку / PIN телефона</string>
-    <string name="lock_setting_hint">При запуске и после 5 минут в фоне — защита данных, если телефон потерян.</string>
+    <string name="lock_setting_hint">Спрашивается при запуске и после 5 минут в фоне — данные защищены, если телефон потерян.</string>
     <string name="full_screen_setting">Полный экран</string>
     <string name="full_screen_hint">Строка состояния и кнопки навигации скрыты. Чтобы их показать — проведите от верхнего или нижнего края.</string>
     <string name="secure_setting">Запрет снимков экрана</string>
-    <string name="secure_setting_hint">На этом телефоне скриншоты и запись экрана приложения недоступны. У менеджеров запрет включён всегда.</string>
+    <string name="secure_setting_hint">Скриншоты и запись экрана приложения на этом телефоне недоступны. По умолчанию включено; переключатель виден только директору.</string>
     <string name="pin_setting">Свой PIN-код (4 цифры)</string>
-    <string name="pin_setting_hint">Код только для этого телефона: при запуске и после 5 минут в фоне. 5 ошибок — пауза 30 секунд.</string>
+    <string name="pin_setting_hint">Спрашивается при запуске и после 5 минут в фоне. После 5 ошибок — пауза 30 секунд.</string>
     <string name="pin_new">Новый PIN-код</string>
     <string name="pin_repeat">Повторите PIN-код</string>
     <string name="pin_mismatch">Коды не совпали — введите заново</string>
