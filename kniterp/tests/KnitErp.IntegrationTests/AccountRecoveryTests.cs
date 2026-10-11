@@ -226,8 +226,23 @@ public sealed class AccountRecoveryTests(SqlTestHost host) : IClassFixture<SqlTe
 
     private async Task<string> TokenFromMailAsync(string email)
     {
-        var mail = await host.Mail.WaitForAsync(email) ?? throw new InvalidOperationException("Письмо не пришло.");
-        var token = Regex.Match(mail.Text, @"token=([A-Za-z0-9_\-]+)").Groups[1].Value;
+        // D115: после смены пароля приходит ещё и уведомление — берём письмо со ссылкой.
+        (string To, string Subject, string Text) mail = default;
+        for (var i = 0; i < 50 && mail.To is null; i++)
+        {
+            mail = host.Mail.Sent.LastOrDefault(m => m.To == email && m.Text.Contains("token=", StringComparison.Ordinal));
+            if (mail.To is null)
+            {
+                await Task.Delay(100);
+            }
+        }
+
+        if (mail.To is null)
+        {
+            throw new InvalidOperationException("Письмо не пришло.");
+        }
+
+        var token = Regex.Match(mail.Text!, @"token=([A-Za-z0-9_\-]+)").Groups[1].Value;
         host.Mail.Sent.Clear();
         return token;
     }

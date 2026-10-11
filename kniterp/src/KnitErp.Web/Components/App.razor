@@ -551,6 +551,11 @@
         @@media (max-width: 899px) { .panel form.rights-add { grid-template-columns: 1fr; } .panel form.rights-add .segmented { justify-self: start; } }
         .rights-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
         .rights-list .tag { margin-left: 0; }
+        /* D115: «Пароль и сессии» — две формы рядом, на телефоне одна под другой. */
+        .security-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+        .security-forms .panel { margin: 0; }
+        .security-forms h3 { margin: 0 0 8px; }
+        .security-forms label.inline { flex-direction: row; align-items: flex-start; gap: 8px; }
         .rights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 18px; }
         .rights-group ul { margin: 4px 0 0; }
         .rights-group li { display: flex; gap: 8px; padding: 2px 0; }

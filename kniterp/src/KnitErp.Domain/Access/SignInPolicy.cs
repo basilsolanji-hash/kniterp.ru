@@ -52,6 +52,51 @@ public static class SignInPolicy
         {
             throw new BusinessRuleException("auth.password.too_simple", "Пароль слишком простой.");
         }
+
+        // D115 (NIST SP 800-63B, 5.1.1.2): запрещены пароли из списков утечек, клавиатурные и числовые ряды и пароль из имени почты.
+        var lower = password.Trim().ToLowerInvariant();
+        var local = email.Split('@')[0].Trim().ToLowerInvariant();
+        if (CommonPasswords.Contains(lower) || IsSequence(lower) || (local.Length >= 4 && lower.Contains(local, StringComparison.Ordinal)))
+        {
+            throw new BusinessRuleException("auth.password.common",
+                "Такой пароль легко подобрать: он есть в списках утёкших паролей, это ряд клавиш или он содержит имя почты. Придумайте другой — например, фразу из нескольких слов.");
+        }
+    }
+
+    /// <summary>Частые пароли длиной от 10 символов (из открытых списков утечек; короче не пропускает правило длины).</summary>
+    private static readonly HashSet<string> CommonPasswords = new(StringComparer.Ordinal)
+    {
+        "1234567890", "0987654321", "qwertyuiop", "asdfghjkl;", "1q2w3e4r5t", "1qaz2wsx3edc", "zaq12wsxcde3", "qwerty1234", "qwerty12345",
+        "qwerty123456", "password12", "password123", "password1!", "password1234", "passw0rd123", "iloveyou12", "123456789a", "a123456789",
+        "123456789q", "q123456789", "1234567890q", "abc1234567", "1234qwerasdf", "qwertyuiop1", "123qweasdzxc", "1q2w3e4r5t6y", "zxcvbnm123",
+        "йцукенгшщз", "йцукенгшщзх", "пароль1234", "пароль12345", "qazwsxedcr", "welcome123", "admin12345", "administrator", "letmein123",
+        "trustno1234", "monkey1234", "dragon1234", "football12", "baseball12", "sunshine12", "princess12", "superman12", "michael123",
+        "1111122222", "1122334455", "1234554321", "1234512345", "0123456789", "9876543210", "knitERP123".ToLowerInvariant(), "kniterp2026",
+    };
+
+    /// <summary>Ряд символов подряд по возрастанию или убыванию («abcdefghij», «9876543210»).</summary>
+    private static bool IsSequence(string value)
+    {
+        if (value.Length < 4)
+        {
+            return false;
+        }
+
+        var step = value[1] - value[0];
+        if (step is not (1 or -1))
+        {
+            return false;
+        }
+
+        for (var i = 2; i < value.Length; i++)
+        {
+            if (value[i] - value[i - 1] != step)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
 

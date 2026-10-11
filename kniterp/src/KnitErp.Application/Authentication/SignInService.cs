@@ -53,13 +53,16 @@ public sealed class SignInService(
     IKnitErpDbContext db,
     IPasswordHasher<UserAccount> hasher,
     ICurrentUser currentUser,
-    IClock clock)
+    IClock clock,
+    IEmailSender? email = null)
 {
     public const string Issuer = "knitERP";
 
     // Хеш-заглушка: для неизвестного email тратим столько же времени, сколько на проверку настоящего пароля.
-    private static readonly Lazy<string> DummyHash = new(() =>
-        new PasswordHasher<UserAccount>().HashPassword(null!, SetupTokens.Generate()));
+    // Считается тем же хешером, что и настоящие пароли (D115: те же параметры PBKDF2), — время ответа не выдаёт адрес.
+    private static string? _dummyHash;
+
+    private string DummyHash => _dummyHash ??= hasher.HashPassword(null!, SetupTokens.Generate());
 
     /// <param name="deviceToken">Токен доверенного устройства из cookie браузера (D81): действующий — код 2FA не спрашивается.</param>
     public async Task<SignInResult> PasswordSignInAsync(string? email, string? password, string? deviceToken = null, CancellationToken ct = default)
@@ -70,7 +73,7 @@ public sealed class SignInService(
 
         if (user is null || user.PasswordHash is null || user.Status != UserStatus.Active)
         {
-            hasher.VerifyHashedPassword(null!, DummyHash.Value, password ?? string.Empty);
+            hasher.VerifyHashedPassword(null!, DummyHash, password ?? string.Empty);
             if (user is not null)
             {
                 await AuditAsync(user, AuditActions.SignInFailed, user.PasswordHash is null ? "пароль не установлен" : "учётная запись не активна", ct);
@@ -85,7 +88,10 @@ public sealed class SignInService(
             return SignInResult.Of(SignInStatus.Failed);
         }
 
-        if (user.IsLockedOut(now))
+        // D115: блокировка после неудачных попыток не действует на доверенное устройство владельца (OWASP «device cookies»):
+        // подбирающий пароль с чужого адреса не может закрыть вход самому сотруднику. Пароль всё равно проверяется.
+        var trusted = user.TwoFactorEnabled ? await TrustedDeviceAsync(user, deviceToken, ct) : null;
+        if (user.IsLockedOut(now) && trusted is null)
         {
             await AuditAsync(user, AuditActions.SignInFailed, "вход заблокирован после неудачных попыток", ct);
             await db.SaveChangesAsync(ct);
@@ -113,7 +119,7 @@ public sealed class SignInService(
 
         if (user.TwoFactorEnabled)
         {
-            if (await TrustedDeviceAsync(user, deviceToken, ct) is { } device)
+            if (trusted is { } device)
             {
                 device.MarkUsed(now);
                 return await SucceedAsync(user, organizations[0], usedTwoFactor: true, ct, "пароль и доверенное устройство");
@@ -153,14 +159,17 @@ public sealed class SignInService(
         if (RecoveryCode.LooksLikeCode(code))
         {
             var hash = RecoveryCode.Hash(code);
-            var recovery = await db.RecoveryCodes.SingleOrDefaultAsync(r => r.UserId == user.Id && r.CodeHash == hash && r.UsedAtUtc == null, ct);
-            if (recovery is null)
+            var now = clock.UtcNow;
+
+            // D115: код гасится одним условным UPDATE — два одновременных входа с одним кодом не пройдут оба.
+            var used = await db.RecoveryCodes.Where(r => r.UserId == user.Id && r.CodeHash == hash && r.UsedAtUtc == null)
+                .ExecuteUpdateAsync(s => s.SetProperty(r => r.UsedAtUtc, now), ct);
+            if (used == 0)
             {
                 return await FailAsync(user, "неверный или использованный резервный код", ct);
             }
 
-            recovery.MarkUsed(clock.UtcNow);
-            recoveryLeft = await db.RecoveryCodes.CountAsync(r => r.UserId == user.Id && r.UsedAtUtc == null && r.Id != recovery.Id, ct);
+            recoveryLeft = await db.RecoveryCodes.CountAsync(r => r.UserId == user.Id && r.UsedAtUtc == null, ct);
             await AuditAsync(user, AuditActions.RecoveryCodeUsed, $"осталось кодов: {recoveryLeft}", ct);
         }
         else if (!user.VerifyTotp(code, clock.UtcNow))
@@ -245,6 +254,12 @@ public sealed class SignInService(
         }
 
         await AuditAsync(user, AuditActions.TwoFactorEnabled, "приложение-аутентификатор подключено", ct);
+        if (email is not null)
+        {
+            // D115: подключение 2FA — по паролю; если пароль украден, письмо предупредит владельца.
+            SecurityEvents.Notify(email, user, "Вход с кодом knitERP подключён",
+                "К вашей учётной записи подключено приложение-аутентификатор: теперь вход — по паролю и коду из него.");
+        }
         var organizations = await ActiveOrganizationIdsAsync(user.Id, ct);
         if (organizations.Count == 0)
         {
