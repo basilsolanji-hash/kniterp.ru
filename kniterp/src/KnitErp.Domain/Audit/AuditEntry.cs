@@ -216,6 +216,16 @@ public static class AuditActions
     public const string OrganizationCreated = "organization.created";
     public const string OrganizationRequisitesChanged = "organization.requisites.changed";
 
+    // Модуль «Разработка» (D700–D799).
+    public const string DevModelCreated = "dev.model.created";
+    public const string DevModelChanged = "dev.model.changed";
+    public const string DevBriefChanged = "dev.brief.changed";
+    public const string DevStageChanged = "dev.stage.changed";
+    public const string DevModelCancelled = "dev.model.cancelled";
+    public const string DevModelRestored = "dev.model.restored";
+    public const string DevFileAdded = "dev.file.added";
+    public const string DevFileViewed = "dev.file.viewed";
+    public const string DevSettingsChanged = "dev.settings.changed";
     // CRM (D600–D699). Телефоны и почты — только маской (D612).
     public const string CrmLeadCreated = "crm.lead.created";
     public const string CrmLeadChanged = "crm.lead.changed";

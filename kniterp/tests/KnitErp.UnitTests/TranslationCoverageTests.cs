@@ -118,6 +118,16 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(KnitErp.Domain.Hr.DismissalGrounds.All.Select(g => g.Title));
         keys.UnionWith(KnitErp.Domain.Hr.TimesheetCodes.All.Select(c => c.Name));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.PayrollLineKind>().Select(KnitErp.Domain.Hr.PayrollRules.KindName));
+
+        // Модуль «Разработка» (D700–D799): стадии, категории, аудитории, приоритеты, исполнители, виды файлов и справочников, объекты тегов.
+        keys.UnionWith(KnitErp.Domain.Development.DevStages.All.Select(KnitErp.Domain.Development.DevStages.Name));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevCategory>().Select(KnitErp.Domain.Development.DevModel.CategoryName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevAudience>().Select(KnitErp.Domain.Development.DevModel.AudienceName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevPriority>().Select(KnitErp.Domain.Development.DevModel.PriorityName));
+        keys.UnionWith(KnitErp.Domain.Development.DevModel.Roles.Select(KnitErp.Domain.Development.DevModel.RoleName));
+        keys.UnionWith(KnitErp.Domain.Development.DevFile.Kinds.Select(KnitErp.Domain.Development.DevFile.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevLookupKind>().Select(KnitErp.Domain.Development.DevLookup.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Tagging.TaggedEntity>().Select(KnitErp.Domain.Tagging.TagColors.EntityName));
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
 
         // CRM (D600–D699): статусы лидов, итоги сделок, виды справочников; готовая воронка и справочники выводятся как данные организации.

@@ -50,6 +50,14 @@ public static class Permissions
     /// <summary>D306 (сессия № 4): массовая переоценка. Через API не выдаётся.</summary>
     public const string PriceEdit = "catalog.price.edit";
 
+    // Модуль «Разработка» (D700, шестая сессия): модели, рисунки, образцы.
+    public const string DevView = "dev.view";
+    public const string DevEdit = "dev.edit";
+    public const string DevPattern = "dev.pattern";
+    public const string DevSample = "dev.sample";
+    public const string DevApprove = "dev.approve";
+    public const string DevCostView = "dev.cost.view";
+    public const string DevSettings = "dev.settings";
     /// <summary>D600 (CRM): свои лиды, сделки и контакты — где пользователь ответственный или наблюдатель.</summary>
     public const string CrmView = "crm.view";
 
@@ -109,6 +117,13 @@ public static class Permissions
         [ProductionDefectCulprit] = "Производство: указание виновника брака",
         [BundleEdit] = "Номенклатура: состав комплектов",
         [PriceEdit] = "Цены: переоценка",
+        [DevView] = "Разработка: просмотр моделей, рисунков и образцов",
+        [DevEdit] = "Разработка: модели, задания, замеры и файлы",
+        [DevPattern] = "Разработка: рисунки и библиотека рисунков",
+        [DevSample] = "Разработка: результат вязки образца",
+        [DevApprove] = "Разработка: утверждение и передача в производство",
+        [DevCostView] = "Разработка: себестоимость и цена",
+        [DevSettings] = "Разработка: справочники и стадии",
         [CrmView] = "CRM: свои лиды, сделки и контакты",
         [CrmEdit] = "CRM: создание и изменение своих лидов, сделок и контактов",
         [CrmAll] = "CRM: все лиды и сделки, переназначение ответственного",
@@ -125,7 +140,7 @@ public static class Permissions
 
     /// <summary>Группы прав для редактора ролей (D112), в порядке разделов меню.</summary>
     public static readonly IReadOnlyList<string> Groups =
-        ["Продажи", "Закупки", "CRM", "Склад", "Деньги и цены", "Справочники", "Производство", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
+        ["Продажи", "Закупки", "CRM", "Склад", "Деньги и цены", "Справочники", "Производство", "Разработка", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
 
     /// <summary>Группа права по его коду — так новые права модулей (производство, кадры) сами попадают в свой раздел.</summary>
     public static string GroupOf(string code) => code.Split('.')[0] switch
@@ -137,6 +152,7 @@ public static class Permissions
         "finance" or "money" => "Деньги и цены",
         "catalog" => "Справочники",
         "production" => "Производство",
+        "dev" => "Разработка",
         "organization" or "structure" or "hr" => "Организация и сотрудники",
         "access" => "Пользователи и доступ",
         "audit" => "Журнал и контроль",

@@ -123,6 +123,12 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines => Set<KnitErp.Domain.Hr.PayrollLine>();
     public DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings => Set<KnitErp.Domain.Hr.HrSettings>();
 
+    // Модуль «Разработка» (D700–D799).
+    public DbSet<KnitErp.Domain.Development.DevModel> DevModels => Set<KnitErp.Domain.Development.DevModel>();
+    public DbSet<KnitErp.Domain.Development.DevModelStageEntry> DevModelStages => Set<KnitErp.Domain.Development.DevModelStageEntry>();
+    public DbSet<KnitErp.Domain.Development.DevStageSetting> DevStageSettings => Set<KnitErp.Domain.Development.DevStageSetting>();
+    public DbSet<KnitErp.Domain.Development.DevFile> DevFiles => Set<KnitErp.Domain.Development.DevFile>();
+    public DbSet<KnitErp.Domain.Development.DevLookup> DevLookups => Set<KnitErp.Domain.Development.DevLookup>();
     // CRM (D600–D699).
     public DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines => Set<KnitErp.Domain.Crm.CrmPipeline>();
     public DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages => Set<KnitErp.Domain.Crm.CrmStage>();

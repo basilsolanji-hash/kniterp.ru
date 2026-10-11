@@ -58,6 +58,9 @@ public static class DependencyInjection
         // Производство на главном экране (контракт D111 базовой ветки).
         services.AddScoped<Workspace.IProductionDashboardSource, Production.ProductionDashboardSource>();
         services.AddScoped<Workspace.IShiftStaffingSource, Hr.ShiftStaffingSource>(); // D221: «смена сегодня» на главном
+        // Модуль «Разработка» (D700–D799).
+        services.AddScoped<Development.DevModelService>();
+        services.AddScoped<Development.DevSettingsService>();
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();

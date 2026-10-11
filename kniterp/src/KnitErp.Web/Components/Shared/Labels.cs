@@ -146,6 +146,15 @@ public static class AuditLabels
         [AuditActions.IntegrityChecked] = "Проверка целостности",
         [AuditActions.OrganizationCreated] = "Создана организация",
         [AuditActions.OrganizationRequisitesChanged] = "Изменены реквизиты",
+        [AuditActions.DevModelCreated] = "Создана модель",
+        [AuditActions.DevModelChanged] = "Изменена модель",
+        [AuditActions.DevBriefChanged] = "Изменено задание на разработку",
+        [AuditActions.DevStageChanged] = "Смена стадии модели",
+        [AuditActions.DevModelCancelled] = "Модель отменена",
+        [AuditActions.DevModelRestored] = "Модель возвращена в работу",
+        [AuditActions.DevFileAdded] = "Загружен файл модели",
+        [AuditActions.DevFileViewed] = "Скачан файл модели",
+        [AuditActions.DevSettingsChanged] = "Изменены настройки разработки",
     };
 
     public static string Action(string code) => Actions.TryGetValue(code, out var label) ? label : code;

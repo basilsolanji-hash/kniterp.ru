@@ -215,6 +215,13 @@
             new("shop", "Терминал цеха", a => a.Has(Permissions.ProductionStageMark)),
             new("reports/production", "Отчёт по производству", a => a.Has(Permissions.ProductionOrderView)),
         ]),
+        // Модуль «Разработка» (D700–D799).
+        new("dev", "Разработка",
+        [
+            new("dev/models", "Модели", a => a.Has(Permissions.DevView)),
+            new("dev/my", "Мои задачи разработки", a => a.Has(Permissions.DevView)),
+            new("dev/settings", "Настройки разработки", a => a.Has(Permissions.DevView)),
+        ]),
         // Модуль «Сотрудники» (D200–D299).
         new("hr", "Кадры",
         [

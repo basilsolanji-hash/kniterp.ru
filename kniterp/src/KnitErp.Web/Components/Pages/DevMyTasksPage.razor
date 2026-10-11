@@ -1,0 +1,63 @@
+@page "/dev/my"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevModelService Models
+
+<PageTitle>@L("Мои задачи разработки") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_tasks is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Мои задачи разработки")</h1>
+    <p class="muted">@L("Модели, где вы исполнитель. Сверху — те, что сейчас на вашей стадии; срок стадии — по нормативу из настроек разработки.")</p>
+    @if (_tasks.Count == 0)
+    {
+        <p class="muted">@L("На вас сейчас нет моделей в работе.")</p>
+    }
+    else
+    {
+        <ul class="dev-tasks">
+            @foreach (var t in _tasks)
+            {
+                <li class="@(t.ResponsibleNow ? "now" : null)">
+                    <a href="dev/models/@t.ModelId"><b>@t.Number</b> @t.Name</a>
+                    <div class="muted small">
+                        @L(t.StageName) · @string.Join(", ", t.MyRoles.Select(r => L(DevModel.RoleName(r))))
+                        @if (t.ResponsibleNow) { <span class="tag info">@L("ваша стадия")</span> }
+                        @if (t.Priority >= DevPriority.High) { <span class="tag warn">@L(DevModel.PriorityName(t.Priority))</span> }
+                    </div>
+                    <div class="small @(t.IsOverdue ? "late-text" : null)">
+                        @if (t.StageDue is { } due) { <span>@L("срок стадии {0}", due.ToString("dd.MM.yyyy"))</span> }
+                        @if (t.PlannedLaunch is { } launch) { <span> · @L("запуск {0}", launch.ToString("dd.MM.yyyy"))</span> }
+                        @if (t.IsOverdue) { <span> · @L("просрочено")</span> }
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    private IReadOnlyList<DevMyTaskDto>? _tasks;
+    private string? _denied;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _tasks = await Models.MyTasksAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+}
