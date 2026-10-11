@@ -4,6 +4,7 @@
 @using KnitErp.Web.Components.Shared
 @inject EmployeeService Employees
 @inject EmployeeExchangeService Exchange
+@inject KnitErp.Application.Hr.HrSettingsService HrSettings
 
 <PageTitle>@L("Сотрудники") — knitERP</PageTitle>
 
@@ -167,9 +168,12 @@ else
                                 {
                                     <div class="row-actions">
                                         <button type="button" class="secondary" @onclick="() => OpenEditAsync(e)" disabled="@(_busy || _mode != Mode.None)">@L("Изменить")</button>
-                                        <button type="button" class="secondary" @onclick="() => ToggleLeaveAsync(e)" disabled="@(_busy || _mode != Mode.None)">
-                                            @(e.Status == EmploymentStatus.OnLeave ? L("Вернуть из отпуска") : L("В отпуск"))
-                                        </button>
+                                        @if (!_leaveOnlyByOrder)
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => ToggleLeaveAsync(e)" disabled="@(_busy || _mode != Mode.None)">
+                                                @(e.Status == EmploymentStatus.OnLeave ? L("Вернуть из отпуска") : L("В отпуск"))
+                                            </button>
+                                        }
                                         <button type="button" class="secondary" @onclick="() => OpenDismiss(e)" disabled="@(_busy || _mode != Mode.None)">@L("Уволить")</button>
                                     </div>
                                 }
@@ -200,12 +204,17 @@ else
     private bool _flashIsError;
     private string _search = string.Empty;
     private bool _includeDismissed;
+    private bool _leaveOnlyByOrder;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
             _list = await Employees.ListAsync(new EmployeeFilter());
+            if (_list.CanEdit)
+            {
+                _leaveOnlyByOrder = (await HrSettings.GetAsync()).Rules.LeaveOnlyByOrder; // D216: отпуск только приказом
+            }
         }
         catch (AccessDeniedException ex)
         {

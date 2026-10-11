@@ -121,10 +121,11 @@ public static class PayrollRules
     public const decimal HolidayExtra = 1m;
 
     /// <summary>Оплата сверхурочных одного дня по часовой ставке.</summary>
-    public static decimal OvertimeDay(decimal hours, decimal hourRate) =>
-        Math.Min(hours, OvertimeFirstHours) * hourRate * OvertimeFirst + Math.Max(0, hours - OvertimeFirstHours) * hourRate * OvertimeNext;
+    public static decimal OvertimeDay(decimal hours, decimal hourRate, decimal first = OvertimeFirst, decimal next = OvertimeNext) =>
+        Math.Min(hours, OvertimeFirstHours) * hourRate * first + Math.Max(0, hours - OvertimeFirstHours) * hourRate * next;
 
     /// <summary>Оклад за отработанное время: оклад × отработано / норма (норма — по графику с учётом ставки).</summary>
+    /// <remarks>Работает и для дней: отработано дней / норма дней (база оклада задаётся в настройках, D216).</remarks>
     public static decimal SalaryPart(decimal salary, decimal workedHours, decimal normHours) =>
         normHours <= 0 ? 0 : Money.Round(salary * Math.Min(workedHours, normHours) / normHours);
 

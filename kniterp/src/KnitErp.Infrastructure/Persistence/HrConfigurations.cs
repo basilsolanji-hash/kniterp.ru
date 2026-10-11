@@ -361,3 +361,37 @@ internal sealed class PayrollLineConfiguration : IEntityTypeConfiguration<Payrol
         b.HasIndex(x => new { x.RunId, x.EmployeeId }).HasDatabaseName("ix_hr_payroll_lines_run_employee");
     }
 }
+
+internal sealed class HrSettingsConfiguration : IEntityTypeConfiguration<HrSettings>
+{
+    public void Configure(EntityTypeBuilder<HrSettings> b)
+    {
+        b.ToTable("hr_settings", t =>
+        {
+            // Минимум ТК РФ держит и база (D216): ночные ≥ 20 %, сверхурочные ≥ 1,5 и 2, праздничные ≥ 2.
+            t.HasCheckConstraint("ck_hr_settings_minimums",
+                "[NightPercent] >= 20 AND [OvertimeFirst] >= 1.5 AND [OvertimeNext] >= 2 AND [HolidayMultiplier] >= 2");
+            t.HasCheckConstraint("ck_hr_settings_salary_base", "[SalaryBase] IN (1, 2)");
+            t.HasCheckConstraint("ck_hr_settings_piece_rate", "[PieceHourlyRate] IS NULL OR [PieceHourlyRate] > 0");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.NightPercent).HasPrecision(5, 2);
+        b.Property(x => x.OvertimeFirst).HasPrecision(4, 2);
+        b.Property(x => x.OvertimeNext).HasPrecision(4, 2);
+        b.Property(x => x.HolidayMultiplier).HasPrecision(4, 2);
+        b.Property(x => x.SalaryBase).HasConversion<byte>();
+        b.Property(x => x.PieceHourlyRate).HasPrecision(19, 4);
+        b.Property(x => x.ZupVersion).HasMaxLength(HrSettings.CodeMaxLength);
+        b.Property(x => x.ZupPieceCode).HasMaxLength(HrSettings.CodeMaxLength);
+        b.Property(x => x.ZupSalaryCode).HasMaxLength(HrSettings.CodeMaxLength);
+        b.Property(x => x.ZupNightCode).HasMaxLength(HrSettings.CodeMaxLength);
+        b.Property(x => x.ZupOvertimeCode).HasMaxLength(HrSettings.CodeMaxLength);
+        b.Property(x => x.ZupHolidayCode).HasMaxLength(HrSettings.CodeMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Payroll);
+        b.Ignore(x => x.Rules);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_hr_settings_org");
+    }
+}

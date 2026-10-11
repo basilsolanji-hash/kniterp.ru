@@ -104,7 +104,7 @@ else
                     <button type="button" class="secondary" @onclick="CorrectAsync" disabled="@_busy">@L("Исправительный табель")</button>
                 }
                 <a class="button secondary" href="print/timesheet/@g.Id" target="_blank" rel="noopener">@L("Печать Т-13")</a>
-                <a class="button secondary" href="hr/timesheet.xlsx?department=@g.DepartmentId&year=@g.Year&month=@g.Month">@L("Excel")</a>
+                <a class="button secondary" href="hr/timesheet.xlsx?department=@g.DepartmentId&year=@g.Year&month=@g.Month" download data-enhance-nav="false">@L("Excel")</a>
             }
         </div>
 

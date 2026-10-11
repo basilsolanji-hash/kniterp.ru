@@ -48,8 +48,34 @@ public sealed record PayslipDto(
 /// Считает Бухгалтер или Владелец; сотрудник видит только свой листок; каждый просмотр чужого листка — в журнал.
 /// </summary>
 public sealed class PayrollService(
-    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, TimesheetService timesheets, IWorkOutputSource output)
+    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, TimesheetService timesheets, IWorkOutputSource output,
+    ISpreadsheetFormat spreadsheet)
 {
+    /// <summary>
+    /// Расчёт месяца в Excel для сверки с данными фабрики (приёмка, D216): строка на каждое начисление — табельный номер, ФИО, вид,
+    /// расчёт, количество, ставка, сумма. Суммы видны только с правом просмотра заработка; выгрузка — в журнал.
+    /// </summary>
+    public async Task<(string FileName, byte[] Content)> ExportAsync(int year, int month, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.PayrollView, ct);
+        var run = await db.PayrollRuns.AsNoTracking().SingleOrDefaultAsync(r => r.OrganizationId == ctx.OrganizationId && r.Year == year && r.Month == month, ct)
+                  ?? throw new NotFoundException("Расчёт");
+        var rows = await (from l in db.PayrollLines.AsNoTracking()
+                          join e in db.Employees.AsNoTracking() on l.EmployeeId equals e.Id
+                          where l.RunId == run.Id
+                          orderby e.LastName, e.FirstName, l.Kind, l.Id
+                          select new { e.PersonnelNumber, e.LastName, e.FirstName, e.MiddleName, l.Kind, l.Description, l.Quantity, l.Rate, l.Amount }).ToListAsync(ct);
+        static string Inv(decimal v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+        var content = spreadsheet.Write([new SheetData($"Заработок {month:00}.{year}",
+            ["Таб. №", "ФИО", "Вид начисления", "Расчёт", "Количество", "Ставка", "Сумма"],
+            rows.Select(r => (IReadOnlyList<string>)[r.PersonnelNumber, Name(r.LastName, r.FirstName, r.MiddleName), PayrollRules.KindName(r.Kind),
+                r.Description, Inv(r.Quantity), Inv(r.Rate), Inv(r.Amount)]).ToList(), new HashSet<int> { 4, 5, 6 })]);
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.PayrollExported, nameof(PayrollRun), run.Id.ToString(),
+            null, $"{month:00}.{year}: строк {rows.Count}", "Excel для сверки", currentUser.CorrelationId));
+        await db.SaveChangesAsync(ct);
+        return ($"payroll-{year}-{month:00}.xlsx", content);
+    }
+
     public async Task<IReadOnlyList<PieceRateDto>> RatesAsync(CancellationToken ct = default)
     {
         var ctx = await DemandViewAsync(ct);
@@ -159,7 +185,9 @@ public sealed class PayrollService(
                 .Where(h => h.OrganizationId == org && ids.Contains(h.EmployeeId) && h.EffectiveFrom <= to
                             && (h.Kind == PersonnelOrderKind.Hire || h.Kind == PersonnelOrderKind.Transfer)).ToListAsync(ct))
             .GroupBy(h => h.EmployeeId).ToDictionary(g => g.Key, g => g.OrderByDescending(h => h.EffectiveFrom).ThenByDescending(h => h.Id).First());
-        var norms = await timesheets.NormHoursAsync(org, ids, from, to, assignments.ToDictionary(a => a.Key, a => a.Value.Rate), ct);
+        var norms = await timesheets.NormAsync(org, ids, from, to, assignments.ToDictionary(a => a.Key, a => a.Value.Rate), ct);
+        var settings = (await HrSettingsService.ForOrganizationAsync(db, org, ct)).Payroll; // D216: доплаты и база оклада организации
+        var nightShare = settings.NightPercent / 100m;
         if (days.Count == 0)
         {
             warnings.Add($"За {month:00}.{year} нет табелей: оплата по окладу и доплаты не начислены.");
@@ -199,33 +227,46 @@ public sealed class PayrollService(
             }
 
             var salary = assignments.TryGetValue(e.Id, out var a) ? a.Salary ?? 0 : 0;
-            var norm = norms.GetValueOrDefault(e.Id);
+            var (norm, normDays) = norms.GetValueOrDefault(e.Id);
             if (salary > 0 && workedHours > 0)
             {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Salary, $"Оклад {salary:0.##} × {workedHours:0.##} ч / {norm:0.##} ч", workedHours,
-                    norm > 0 ? salary / norm : 0, PayrollRules.SalaryPart(salary, workedHours, norm)));
+                if (settings.SalaryBase == SalaryBase.Days)
+                {
+                    lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Salary, $"Оклад {salary:0.##} × {worked.Count} дн. / {normDays} дн.", worked.Count,
+                        normDays > 0 ? salary / normDays : 0, PayrollRules.SalaryPart(salary, worked.Count, normDays)));
+                }
+                else
+                {
+                    lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Salary, $"Оклад {salary:0.##} × {workedHours:0.##} ч / {norm:0.##} ч", workedHours,
+                        norm > 0 ? salary / norm : 0, PayrollRules.SalaryPart(salary, workedHours, norm)));
+                }
             }
 
-            var hourRate = salary > 0 && norm > 0 ? salary / norm : workedHours > 0 ? piece / workedHours : 0;
+            // Часовая ставка для доплат: оклад / норма; у сдельщика — тарифная ставка из настроек, иначе сдельный заработок / часы.
+            var hourRate = salary > 0 && norm > 0 ? salary / norm
+                : settings.PieceHourlyRate is { } tariff ? tariff
+                : workedHours > 0 ? piece / workedHours : 0;
             var night = worked.Sum(d => d.NightHours);
             if (night > 0 && hourRate > 0)
             {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Night, $"Ночные часы × 20 % часовой ставки", night,
-                    hourRate * PayrollRules.NightShare, night * hourRate * PayrollRules.NightShare));
+                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Night, $"Ночные часы × {settings.NightPercent:0.##} % часовой ставки", night,
+                    hourRate * nightShare, night * hourRate * nightShare));
             }
 
             var overtime = worked.Where(d => d.OvertimeHours > 0).ToList();
             if (overtime.Count > 0 && hourRate > 0)
             {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Overtime, "Первые 2 часа в день × 1,5, далее × 2",
-                    overtime.Sum(d => d.OvertimeHours), hourRate, overtime.Sum(d => PayrollRules.OvertimeDay(d.OvertimeHours, hourRate))));
+                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Overtime,
+                    $"Первые 2 часа в день × {settings.OvertimeFirst:0.##}, далее × {settings.OvertimeNext:0.##}", overtime.Sum(d => d.OvertimeHours), hourRate,
+                    overtime.Sum(d => PayrollRules.OvertimeDay(d.OvertimeHours, hourRate, settings.OvertimeFirst, settings.OvertimeNext))));
             }
 
             var holiday = worked.Where(d => d.Code == TimesheetCodes.Holiday).Sum(d => d.Hours);
             if (holiday > 0 && hourRate > 0)
             {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Holiday, "Доплата до двойного размера за часы в праздники и выходные",
-                    holiday, hourRate * PayrollRules.HolidayExtra, holiday * hourRate * PayrollRules.HolidayExtra));
+                var extra = settings.HolidayMultiplier - 1;
+                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Holiday, $"Доплата до {settings.HolidayMultiplier:0.##}-кратного размера за часы в праздники и выходные",
+                    holiday, hourRate * extra, holiday * hourRate * extra));
             }
 
             if (lines.Count > 0)

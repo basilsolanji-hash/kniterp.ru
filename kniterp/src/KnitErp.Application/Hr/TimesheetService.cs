@@ -383,7 +383,7 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
     /// <summary>
     /// Норма часов месяца по графику сотрудника (без учёта отпусков и дат приёма), умноженная на ставку, — знаменатель оплаты по окладу (D212).
     /// </summary>
-    internal async Task<Dictionary<long, decimal>> NormHoursAsync(long organizationId, IReadOnlyCollection<long> employeeIds, DateOnly from, DateOnly to,
+    internal async Task<Dictionary<long, (decimal Hours, int Days)>> NormAsync(long organizationId, IReadOnlyCollection<long> employeeIds, DateOnly from, DateOnly to,
         IReadOnlyDictionary<long, decimal> rates, CancellationToken ct)
     {
         var country = await db.Organizations.AsNoTracking().Where(o => o.Id == organizationId).Select(o => o.CountryCode).SingleAsync(ct);
@@ -392,18 +392,20 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
                                  join s in db.WorkSchedules.AsNoTracking() on a.ScheduleId equals s.Id
                                  where a.OrganizationId == organizationId && employeeIds.Contains(a.EmployeeId) && a.ValidFrom <= to
                                  select new { a.EmployeeId, a.ValidFrom, Schedule = s }).ToListAsync(ct);
-        var result = new Dictionary<long, decimal>();
+        var result = new Dictionary<long, (decimal Hours, int Days)>();
         foreach (var id in employeeIds)
         {
             var own = assignments.Where(a => a.EmployeeId == id).OrderBy(a => a.ValidFrom).ToList();
             decimal sum = 0;
+            var days = 0;
             for (var date = from; date <= to; date = date.AddDays(1))
             {
                 var plan = own.LastOrDefault(a => a.ValidFrom <= date)?.Schedule.PlanFor(date, holidays) ?? WorkSchedule.DefaultPlan(date, holidays);
                 sum += plan.Work ? plan.Hours : 0;
+                days += plan.Work ? 1 : 0;
             }
 
-            result[id] = decimal.Round(sum * rates.GetValueOrDefault(id, 1m), 2);
+            result[id] = (decimal.Round(sum * rates.GetValueOrDefault(id, 1m), 2), days);
         }
 
         return result;

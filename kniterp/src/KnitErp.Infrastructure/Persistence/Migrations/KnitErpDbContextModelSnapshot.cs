@@ -2111,6 +2111,98 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.HrSettings", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("BlockPersonalDataWithoutConsent")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("HolidayMultiplier")
+                        .HasPrecision(4, 2)
+                        .HasColumnType("decimal(4,2)");
+
+                    b.Property<bool>("HrOfficerClosesTimesheet")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("LeaveOnlyByOrder")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("NightPercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("OvertimeFirst")
+                        .HasPrecision(4, 2)
+                        .HasColumnType("decimal(4,2)");
+
+                    b.Property<decimal>("OvertimeNext")
+                        .HasPrecision(4, 2)
+                        .HasColumnType("decimal(4,2)");
+
+                    b.Property<decimal?>("PieceHourlyRate")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("SalaryBase")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("ZupHolidayCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ZupNightCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ZupOvertimeCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ZupPieceCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ZupSalaryCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ZupVersion")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_settings_org");
+
+                    b.ToTable("hr_settings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_hr_settings_minimums", "[NightPercent] >= 20 AND [OvertimeFirst] >= 1.5 AND [OvertimeNext] >= 2 AND [HolidayMultiplier] >= 2");
+
+                            t.HasCheckConstraint("ck_hr_settings_piece_rate", "[PieceHourlyRate] IS NULL OR [PieceHourlyRate] > 0");
+
+                            t.HasCheckConstraint("ck_hr_settings_salary_base", "[SalaryBase] IN (1, 2)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.PayrollLine", b =>
                 {
                     b.Property<long>("Id")
@@ -6375,6 +6467,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_hr_employment_history_order");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.HrSettings", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Hr.PayrollLine", b =>

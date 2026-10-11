@@ -363,6 +363,24 @@ app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, Kn
     }
 });
 
+// Расчёт заработка месяца в Excel для сверки (D216): право и журнал — в сервисе.
+app.MapGet("/hr/payroll.xlsx", async (int year, int month, KnitErp.Application.Hr.PayrollService payroll, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, content) = await payroll.ExportAsync(year, month, ct);
+        return Results.File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 // Утверждённые начисления месяца для 1С: ЗУП (D213): право — в сервисе.
 app.MapGet("/hr/payroll/{id:long}/zup.xml", async (long id, KnitErp.Application.Hr.PayrollEnterpriseDataExport export, CancellationToken ct) =>
 {

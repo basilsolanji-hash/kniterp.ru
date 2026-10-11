@@ -152,6 +152,7 @@ public static class AuditActions
     public const string PayrollApproved = "hr.payroll.approved";
     public const string PayslipViewed = "hr.payslip.viewed";
     public const string PayrollExported = "hr.payroll.exported";
+    public const string HrSettingsChanged = "hr.settings.changed";
     public const string CatalogCreated = "catalog.created";
     public const string CatalogChanged = "catalog.changed";
     public const string CatalogArchived = "catalog.archived";

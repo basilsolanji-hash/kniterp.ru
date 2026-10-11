@@ -22,6 +22,7 @@ public sealed class HrServices(
     public PayrollService Payroll { get; } = payroll;
     public PayrollEnterpriseDataExport PayrollExport { get; } = payrollExport;
     public LeaveStatusSync LeaveSync { get; } = leaveSync;
+    public required HrSettingsService Settings { get; init; }
 
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }
@@ -41,8 +42,11 @@ public static class HrTestKit
         var timesheets = new TimesheetService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet);
         return new HrServices(db, new PersonalDataService(db, guard, user, host.Clock), new StaffingService(db, guard, user, host.Clock),
             new PersonnelOrderService(db, guard, access, user, host.Clock), timesheets,
-            new PayrollService(db, guard, user, host.Clock, timesheets, output ?? new EmptyWorkOutputSource()),
-            new PayrollEnterpriseDataExport(db, guard, user, host.Clock), new LeaveStatusSync(db, host.Clock));
+            new PayrollService(db, guard, user, host.Clock, timesheets, output ?? new EmptyWorkOutputSource(), SqlTestHost.Spreadsheet),
+            new PayrollEnterpriseDataExport(db, guard, user, host.Clock), new LeaveStatusSync(db, host.Clock))
+        {
+            Settings = new HrSettingsService(db, guard, user, host.Clock),
+        };
     }
 
     public static async Task<CreatedOrganization> CreateOrganizationAsync(this SqlTestHost host)

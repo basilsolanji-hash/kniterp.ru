@@ -239,6 +239,7 @@
         [
             new("organization", "Организация", a => a.Has(Permissions.OrganizationView)),
             new("launch", "Готовность к запуску", a => a.Has(Permissions.OrganizationEdit)),
+            new("hr/settings", "Кадры и заработок", a => a.Has(Permissions.OrganizationEdit) || a.Has(Permissions.PayrollCalculate)),
             new("users", "Пользователи", a => a.Has(Permissions.UserView)),
             new("roles", "Роли и права", a => a.Has(Permissions.UserView)),
             new("period", "Закрытие периода", a => a.Has(Permissions.ClosedPeriodReopen) || a.Has(Permissions.WarehouseReportView)),

@@ -75,7 +75,7 @@ else
             }
             @if (d.Status == PayrollStatus.Approved && CurrentAccess.Has(Permissions.PayrollCalculate))
             {
-                <a class="button secondary" href="hr/payroll/@d.Id/zup.xml">@L("Выгрузить в 1С: ЗУП")</a>
+                <a class="button secondary" href="hr/payroll/@d.Id/zup.xml" download data-enhance-nav="false">@L("Выгрузить в 1С: ЗУП")</a>
             }
         </div>
 
