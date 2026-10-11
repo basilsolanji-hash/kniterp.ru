@@ -34,7 +34,7 @@ else
             @L("Тип")
             <select @bind="_type">
                 <option value="">@L("Все типы")</option>
-                @foreach (var t in ItemTypes.All)
+                @foreach (var t in ItemTypes.Stocked)
                 {
                     <option value="@((byte)t)">@L(ItemTypes.Name(t))</option>
                 }

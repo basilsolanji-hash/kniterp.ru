@@ -375,7 +375,19 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
     {
         b.ToTable("items", t =>
         {
-            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9)");
+            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9, 10, 11)");
+            // D302: комплект — без неснижаемого остатка и модификаций (остаток считается по компонентам).
+            t.HasCheckConstraint("ck_items_bundle", "[Type] <> 11 OR ([MinStock] IS NULL AND [ParentItemId] IS NULL)");
+            // D305: предмет расчёта (услуга — «услуга», остальное — товар или подакцизный), маркировка — с видом продукции.
+            t.HasCheckConstraint("ck_items_payment_subject", "([Type] = 10 AND [PaymentSubject] = 4) OR ([Type] <> 10 AND [PaymentSubject] IN (1, 2))");
+            t.HasCheckConstraint("ck_items_marking",
+                "([IsMarked] = 0 AND [TrackingType] = 0) OR ([IsMarked] = 1 AND [TrackingType] IN (1, 2, 3, 9) AND [Type] <> 10)");
+            t.HasCheckConstraint("ck_items_gtin", "[Gtin] IS NULL OR (LEN([Gtin]) = 14 AND [Gtin] NOT LIKE '%[^0-9]%')");
+            t.HasCheckConstraint("ck_items_min_price", "[MinPrice] IS NULL OR [MinPrice] >= 0");
+            // D300: услуга — со ставкой НДС, без веса, объёма, неснижаемого остатка и модификаций.
+            t.HasTrigger("tr_items_service_without_stock");
+            t.HasCheckConstraint("ck_items_service",
+                "[Type] <> 10 OR ([VatRateId] IS NOT NULL AND [WeightKg] IS NULL AND [VolumeM3] IS NULL AND [MinStock] IS NULL AND [ParentItemId] IS NULL)");
             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");
             t.HasCheckConstraint("ck_items_parent", "[ParentItemId] IS NULL OR [ParentItemId] <> [Id]");
             t.HasCheckConstraint("ck_items_variant",
@@ -422,6 +434,7 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
         b.HasIndex(x => new { x.OrganizationId, x.ParentItemId, x.VariantKey }).IsUnique().HasFilter("[ParentItemId] IS NOT NULL")
             .HasDatabaseName("ux_items_parent_variant");
         b.Ignore(x => x.Details);
+        ItemTradeConfiguration.Apply(b); // D305 (сессия 4): поля торговли — в CatalogConfigurations.cs
     }
 }
 
@@ -814,6 +827,7 @@ internal sealed class StockMovementConfiguration : IEntityTypeConfiguration<Stoc
         {
             t.HasTrigger("tr_stock_movements_immutable");
             t.HasTrigger("tr_stock_movements_closed_period");
+            t.HasTrigger("tr_stock_movements_stocked_items");
             t.HasCheckConstraint("ck_stock_movements_quantity", "[Quantity] <> 0");
             t.HasCheckConstraint("ck_stock_movements_source", "[Source] IN (1, 2, 3, 4)");
         });
@@ -1400,7 +1414,10 @@ internal sealed class StockBatchConfiguration : IEntityTypeConfiguration<StockBa
     public void Configure(EntityTypeBuilder<StockBatch> b)
     {
         b.ToTable("stock_batches", t =>
-            t.HasCheckConstraint("ck_stock_batches_package_weight", "[PackageWeightKg] IS NULL OR [PackageWeightKg] > 0"));
+        {
+            t.HasCheckConstraint("ck_stock_batches_package_weight", "[PackageWeightKg] IS NULL OR [PackageWeightKg] > 0");
+            t.HasTrigger("tr_stock_batches_stocked_items");
+        });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Number).HasMaxLength(StockBatch.NumberMaxLength).IsRequired();

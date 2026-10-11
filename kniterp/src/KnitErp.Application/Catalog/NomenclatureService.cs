@@ -29,6 +29,9 @@ public sealed record ItemCardDto(
     IReadOnlyList<CustomValueDto> CustomFields, decimal Stock, bool CanEdit, bool CanSeePrices, byte[] RowVersion)
 {
     public string TypeName => ItemTypes.Name(Type);
+
+    /// <summary>Хранится на складе: у услуги (D300) нет остатка, партий, веса, объёма и неснижаемого остатка.</summary>
+    public bool IsStocked => ItemTypes.IsStocked(Type);
 }
 
 public sealed record UserCatalogDto(long Id, string Name, bool IsArchived, int Entries, byte[] RowVersion);
@@ -174,6 +177,20 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
     public async Task SaveItemDetailsAsync(long id, ItemDetails details, IReadOnlyDictionary<long, string?> customFields, byte[] rowVersion,
         CancellationToken ct = default)
     {
+        try
+        {
+            await SaveItemDetailsCoreAsync(id, details, customFields, rowVersion, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // D304: отклонённая правка не остаётся в DbContext вкладки (сведения меняются до проверки доп. полей)
+            throw;
+        }
+    }
+
+    private async Task SaveItemDetailsCoreAsync(long id, ItemDetails details, IReadOnlyDictionary<long, string?> customFields, byte[] rowVersion,
+        CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         var item = await db.Items.SingleOrDefaultAsync(i => i.Id == id && i.OrganizationId == ctx.OrganizationId, ct)
                    ?? throw new NotFoundException("Номенклатура");
@@ -218,6 +235,13 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             throw new BusinessRuleException("catalog.archived", "Позиция в архиве.");
         }
 
+        var trimmedCode = (code ?? string.Empty).Trim().Replace(" ", string.Empty, StringComparison.Ordinal);
+        if (item.Type == ItemType.Service && (type ?? ItemBarcode.Detect(trimmedCode)) == BarcodeType.Gtin)
+        {
+            // D300: GTIN-14 — код для маркировки товара; у услуги его не бывает.
+            throw new BusinessRuleException("catalog.service.gtin", "У услуги нет кода маркировки GTIN — добавьте EAN-13 или Code 128.");
+        }
+
         if (await db.ItemBarcodes.CountAsync(b => b.ItemId == itemId, ct) >= ItemBarcode.MaxPerItem)
         {
             throw new BusinessRuleException("catalog.barcode.too_many", $"У позиции не больше {ItemBarcode.MaxPerItem} штрихкодов.");
@@ -227,7 +251,10 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         var barcode = ItemBarcode.Create(ctx.OrganizationId, itemId, type ?? ItemBarcode.Detect(trimmed.Replace(" ", string.Empty, StringComparison.Ordinal)),
             trimmed);
         var owner = await db.ItemBarcodes.AsNoTracking().Where(b => b.OrganizationId == ctx.OrganizationId && b.Code == barcode.Code)
-            .Join(db.Items.AsNoTracking(), b => b.ItemId, i => i.Id, (b, i) => i.Code + " " + i.Name).FirstOrDefaultAsync(ct);
+                        .Join(db.Items.AsNoTracking(), b => b.ItemId, i => i.Id, (b, i) => i.Code + " " + i.Name).FirstOrDefaultAsync(ct)
+                    // D307: штрихкод упаковки тоже занят — сканер должен находить одно.
+                    ?? await db.ItemPacks.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.Barcode == barcode.Code)
+                        .Join(db.Items.AsNoTracking(), p => p.ItemId, i => i.Id, (p, i) => i.Code + " " + i.Name).FirstOrDefaultAsync(ct);
         if (owner is not null)
         {
             throw new BusinessRuleException("catalog.barcode.duplicate", $"Штрихкод {barcode.Code} уже у позиции {owner}.");
@@ -262,6 +289,19 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
     /// <summary>Цены позиции по видам цен: значение — задать, null — убрать. Нужны права на номенклатуру и на цены.</summary>
     public async Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct = default)
     {
+        try
+        {
+            await SetPricesCoreAsync(itemId, prices, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // D304: цены меняются по одной — при отказе на середине ничего не остаётся в DbContext вкладки
+            throw;
+        }
+    }
+
+    private async Task SetPricesCoreAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         await guard.DemandAsync(Permissions.PriceView, ct);
         var item = await db.Items.AsNoTracking().SingleOrDefaultAsync(i => i.Id == itemId && i.OrganizationId == ctx.OrganizationId, ct)
@@ -272,7 +312,8 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         {
             var type = types.GetValueOrDefault(typeId) ?? throw new NotFoundException("Вид цены");
             var existing = current.GetValueOrDefault(typeId);
-            if (existing?.Price == price)
+            var before = existing?.Price; // до изменения: existing.Set меняет цену на месте
+            if (before == price)
             {
                 continue;
             }
@@ -298,7 +339,9 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
                 existing.Set(price.Value);
             }
 
-            Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, existing?.Price.ToString("0.00##"), price?.ToString("0.00##"),
+            db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, itemId, typeId, before, price, clock.UtcNow, ctx.UserId,
+                PriceChangeSource.Manual)); // D305: история цен
+            Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, before?.ToString("0.00##"), price?.ToString("0.00##"),
                 $"{item.Code}: {type.Name}");
         }
 

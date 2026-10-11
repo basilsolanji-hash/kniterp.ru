@@ -11,11 +11,52 @@ internal static class StockEntry
     public const int MaxImportRows = 5000;
     public static readonly IReadOnlyList<string> ImportColumns = ["Код", "Количество"];
 
-    /// <summary>Действующие позиции для ввода; фильтр и сортировка — до проекции, чтобы запрос переводился в SQL.</summary>
-    public static IQueryable<EntryItemDto> ActiveItems(IKnitErpDbContext db, long organizationId, long? itemId = null) =>
+    /// <summary>
+    /// Действующие позиции для ввода; фильтр и сортировка — до проекции, чтобы запрос переводился в SQL.
+    /// stockedOnly — только то, что хранится на складе (без услуг и комплектов, D300, D302): для выбора строк складских документов.
+    /// </summary>
+    public static IQueryable<EntryItemDto> ActiveItems(IKnitErpDbContext db, long organizationId, long? itemId = null, bool stockedOnly = false) =>
         db.Items.AsNoTracking().Where(i => i.OrganizationId == organizationId && !i.IsArchived && (itemId == null || i.Id == itemId))
+            .Where(i => !stockedOnly || !ItemTypes.NotStocked.Contains(i.Type))
             .OrderBy(i => i.Code)
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new EntryItemDto(i.Id, i.Code, i.Name, u.Symbol, u.Precision));
+
+    /// <summary>
+    /// D300 (сессия 4, точечная проверка): услуга не хранится на складе — её нельзя провести складским документом
+    /// (поступление, списание, перемещение, отгрузка, инвентаризация, начальные остатки, партии).
+    /// </summary>
+    public static async Task EnsureStockedAsync(IKnitErpDbContext db, long organizationId, IEnumerable<long> itemIds, CancellationToken ct)
+    {
+        var ids = itemIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var found = await db.Items.AsNoTracking()
+            .Where(i => i.OrganizationId == organizationId && ids.Contains(i.Id) && ItemTypes.NotStocked.Contains(i.Type))
+            .OrderBy(i => i.Code).Select(i => new { i.Code, i.Type }).ToListAsync(ct);
+        if (found.Any(i => i.Type == ItemType.Service))
+        {
+            throw ServiceRules.NotStocked(found.Where(i => i.Type == ItemType.Service).Select(i => i.Code));
+        }
+
+        if (found.Count > 0)
+        {
+            throw ServiceRules.BundleNotStocked(found.Select(i => i.Code)); // D302: комплект — компонентами
+        }
+    }
+
+    /// <summary>Позиции из списка, которые не хранятся на складе (услуги, D300).</summary>
+    public static async Task<HashSet<long>> NotStockedAsync(IKnitErpDbContext db, long organizationId, IEnumerable<long> itemIds, CancellationToken ct)
+    {
+        var ids = itemIds.Distinct().ToList();
+        return ids.Count == 0
+            ? []
+            : (await db.Items.AsNoTracking()
+                .Where(i => i.OrganizationId == organizationId && ids.Contains(i.Id) && ItemTypes.NotStocked.Contains(i.Type))
+                .Select(i => i.Id).ToListAsync(ct)).ToHashSet();
+    }
 
     public static void EnsurePrecision(EntryItemDto item, decimal quantity)
     {
@@ -54,6 +95,8 @@ internal static class StockEntry
         var items = await ActiveItems(db, organizationId).ToDictionaryAsync(i => i.Code, ct);
         var archived = await db.Items.AsNoTracking().Where(i => i.OrganizationId == organizationId && i.IsArchived)
             .Select(i => i.Code).ToListAsync(ct);
+        var notStocked = (await db.Items.AsNoTracking()
+            .Where(i => i.OrganizationId == organizationId && ItemTypes.NotStocked.Contains(i.Type)).Select(i => i.Code).ToListAsync(ct)).ToHashSet();
         var rows = new List<LineImportRow>();
         var lines = new List<(long ItemId, decimal Quantity)>();
         var seen = new Dictionary<string, int>();
@@ -80,6 +123,10 @@ internal static class StockEntry
             if (!items.TryGetValue(code, out var item))
             {
                 errors.Add(archived.Contains(code) ? $"Позиция {code} в архиве." : $"Позиции с кодом «{code}» нет в номенклатуре.");
+            }
+            else if (notStocked.Contains(code))
+            {
+                errors.Add($"Позиция {code} — услуга или комплект: на складе не хранится.");
             }
 
             if (!Quantities.TryParse(qtyText, out var qty) || qty < 0 || (qty == 0 && !allowZero))
@@ -110,7 +157,7 @@ internal static class StockEntry
     public static async Task<byte[]> LinesTemplateAsync(
         IKnitErpDbContext db, ISpreadsheetFormat spreadsheet, long organizationId, string sheetName, CancellationToken ct)
     {
-        var items = await ActiveItems(db, organizationId).ToListAsync(ct);
+        var items = await ActiveItems(db, organizationId, stockedOnly: true).ToListAsync(ct);
         return spreadsheet.Write(
         [
             new SheetData(sheetName, ImportColumns, [["ПР-0001", "12,5"]]),
