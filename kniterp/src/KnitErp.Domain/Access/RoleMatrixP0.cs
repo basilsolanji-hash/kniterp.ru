@@ -78,6 +78,10 @@ public static class RoleMatrixP0
         // кладовщики, Бухгалтер и Аудитор видят их. Плановая себестоимость видна только с правом «Цены и суммы».
         (Permissions.ProductionOrderView,     [Full, Full, Full, Full, Full, Full, Full, None]),
         (Permissions.ProductionOrderEdit,     [Full, Full, Full, None, None, None, None, None]),
+        // Допущение D92: этапы отмечает начальник цеха, мастерам и контролёрам ОТК (роль «Сотрудник») право выдаётся отдельно.
+        (Permissions.ProductionStageMark,     [Full, Full, Full, None, None, None, None, ByGrant]),
+        // Допущение D93: выдачу, возврат, отходы и выпуск проводят кладовщики своих складов — нужны ещё права складских документов.
+        (Permissions.ProductionMaterialMove,  [Full, None, None, Scoped, Scoped, None, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();

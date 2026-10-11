@@ -300,17 +300,19 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
     public async Task CancelAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct = default)
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
+        // Под блокировкой заказа: отметка этапа, начатая одновременно, не проскочит между проверкой и отменой.
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync($"kniterp.production.order.{id}", ct);
         var before = ProductionOrder.StatusName(order.Status);
         order.Cancel(await HasMovementsAsync(order, ct), reason, ctx.UserId, clock.UtcNow);
         Audit(ctx, AuditActions.ProductionOrderCancelled, order, before, "Отменён", order.CancelReason);
         await db.SaveOrConflictAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
-    /// <summary>
-    /// Есть ли по заказу движения, после которых отмена запрещена. Этапы, выдача материалов и выпуск появятся
-    /// в следующих шагах модуля (D92–D95) и будут проверяться здесь.
-    /// </summary>
-    private static Task<bool> HasMovementsAsync(ProductionOrder order, CancellationToken ct) => Task.FromResult(false);
+    /// <summary>Есть ли по заказу движения, после которых отмена запрещена: отметки этапов (D92).</summary>
+    private Task<bool> HasMovementsAsync(ProductionOrder order, CancellationToken ct) =>
+        db.ProductionOperations.AnyAsync(o => o.OrganizationId == order.OrganizationId && o.ProductionOrderId == order.Id, ct);
 
     /// <summary>Изделие, склады, заказ покупателя и техкарта — своей организации и действующие. Возвращает изделие и техкарту для запуска.</summary>
     private async Task<(ItemRow Product, TechCard Card)> ValidateAsync(AccessContext ctx, ProductionOrderCommand c, CancellationToken ct)

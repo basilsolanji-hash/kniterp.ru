@@ -174,6 +174,101 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D92: этапы по порядку и не больше предыдущего, контроль качества, отмена после отметок запрещена, права, гонка отметок.</summary>
+    [SqlFact]
+    public async Task Stages_follow_route_quality_control_and_block_cancel()
+    {
+        var f = await SetUpAsync();
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 30));
+            Assert.Equal("production.order.not_in_work", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.Knitting, 1)))).Code);
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+        }
+
+        // Две вкладки одновременно отмечают вязание по 20 из 30: под блокировкой заказа пройдёт только одна.
+        var results = await Task.WhenAll(Enumerable.Range(0, 2).Select(async _ =>
+        {
+            await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+            try
+            {
+                await s.Floor.RecordAsync(order, Mark(ProductionStage.Knitting, 20));
+                return true;
+            }
+            catch (BusinessRuleException ex) when (ex.Code == "production.stage.exceeds")
+            {
+                return false;
+            }
+        }));
+        Assert.Equal(1, results.Count(r => r));
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.Knitting, 10));
+            Assert.Equal("production.stage.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.Knitting, 1)))).Code);
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.Assembly, 30));
+            Assert.Equal("production.stage.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 1)))).Code);
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.Steaming, 30));
+
+            // Контроль качества: 24 годных, 2 брака, 4 на переделку в ВТО.
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 24));
+            await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 2) with { Kind = ProductionOperationKind.Defect }));
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 2) with { Kind = ProductionOperationKind.Defect, Reason = "Затяжка петель" });
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 4) with { Kind = ProductionOperationKind.Rework, ReturnTo = ProductionStage.Steaming });
+            // Ошибочно отмеченное вязание исправляется вниз только в пределах не ушедшего дальше: всё ушло — нельзя.
+            Assert.Equal("production.stage.correction_exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.Knitting, 1) with { Kind = ProductionOperationKind.Correction, Reason = "ошибка" }))).Code);
+
+            var progress = await s.Floor.ProgressAsync(order);
+            var stages = progress.Stages.ToDictionary(x => x.Stage);
+            Assert.Equal((30m, 26m, 24m, 2m, 4m), (stages[ProductionStage.Steaming].Done + 4, stages[ProductionStage.Steaming].Done,
+                progress.Good, progress.Defect, progress.Rework));
+            // Брак довязывается: вязать можно ещё 2; ВТО ждёт 4 из переделки; упаковать можно 24 годных.
+            Assert.Equal((2m, 4m, 24m), (stages[ProductionStage.Knitting].Available, stages[ProductionStage.Steaming].Available,
+                stages[ProductionStage.Packing].Available));
+            Assert.Equal(7, progress.History.Count);
+            Assert.True(progress.CanMark);
+
+            // После отметок заказ не отменить.
+            var dto = await s.ProductionOrders.GetAsync(order);
+            Assert.False(dto.CanCancel);
+            Assert.Equal("production.order.has_movements", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ProductionOrders.CancelAsync(order, "передумали", dto.RowVersion))).Code);
+        }
+
+        // Старший кладовщик видит ход работ, но этапы не отмечает.
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            Assert.False((await s.Floor.ProgressAsync(order)).CanMark);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Floor.RecordAsync(order, Mark(ProductionStage.Packing, 1)));
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Floor.ProgressAsync(order));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Floor.RecordAsync(order, Mark(ProductionStage.Packing, 1)));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.Equal(7, await db.AuditEntries.CountAsync(e => e.EntityType == "ProductionOrder" && e.EntityId == order.ToString()
+                                                                 && e.Action == "production.stage.marked"));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM [kniterp].[production_operations] WHERE [ProductionOrderId] = {0}", order));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[production_operations] SET [Quantity] = 1000 WHERE [ProductionOrderId] = {0}", order));
+        }
+    }
+
+    private static ProductionOperationCommand Mark(ProductionStage stage, decimal quantity) =>
+        new(stage, ProductionOperationKind.Done, quantity, null, null, Day);
+
     private static ProductionOrderCommand Command(Fixture f, long item, decimal quantity) =>
         new(item, quantity, Day, null, ProductionSource.Plan, null, f.Wip, f.Store, null);
 

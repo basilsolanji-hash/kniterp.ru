@@ -139,6 +139,11 @@ else
             </tbody>
         </table>
     </div>
+    @if (_order.Status is not (ProductionOrderStatus.Draft or ProductionOrderStatus.Cancelled))
+    {
+        <ProductionStagesPanel OrderId="_order.Id" Today="Today" OnChanged="LoadAsync" />
+    }
+
     @if (_order.PricesVisible && _order.Materials.Count > 0)
     {
         <p>
@@ -249,6 +254,8 @@ else
             }
         }
     }
+
+    private DateOnly Today => DateOnly.FromDateTime(TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId));
 
     private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
 }

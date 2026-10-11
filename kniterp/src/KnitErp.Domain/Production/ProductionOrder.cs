@@ -157,6 +157,16 @@ public sealed class ProductionOrder
         CancelledAtUtc = nowUtc;
     }
 
+    /// <summary>Этапы, выдача материалов и выпуск — только у запущенного и ещё не выполненного полностью заказа.</summary>
+    public void EnsureInWork()
+    {
+        if (Status is not (ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone))
+        {
+            throw new BusinessRuleException("production.order.not_in_work",
+                Status == ProductionOrderStatus.Draft ? "Заказ ещё не запущен — сначала нажмите «Запустить»." : $"Заказ в статусе «{StatusName(Status)}» — работы по нему не отмечаются.");
+        }
+    }
+
     /// <summary>Плановая себестоимость всего заказа по снимку норм: Σ потребность с отходом × плановая цена. null — цена хотя бы одного материала неизвестна.</summary>
     public decimal? PlannedCost()
     {

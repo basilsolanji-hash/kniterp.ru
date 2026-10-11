@@ -2259,6 +2259,72 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOperation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateOnly>("OccurredOn")
+                        .HasColumnType("date");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ProductionOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<byte?>("ReturnToStage")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("Stage")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "ProductionOrderId")
+                        .HasDatabaseName("ix_production_operations_org_order");
+
+                    b.ToTable("production_operations", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_production_operations_immutable");
+
+                            t.HasCheckConstraint("ck_production_operations_kind", "[Kind] IN (1, 2, 3, 4)");
+
+                            t.HasCheckConstraint("ck_production_operations_qc", "[Kind] IN (1, 2) OR [Stage] = 4");
+
+                            t.HasCheckConstraint("ck_production_operations_quantity", "([Kind] = 2 AND [Quantity] < 0) OR ([Kind] <> 2 AND [Quantity] > 0)");
+
+                            t.HasCheckConstraint("ck_production_operations_reason", "[Kind] NOT IN (2, 4) OR [Reason] IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_production_operations_return", "([Kind] = 3 AND [ReturnToStage] IN (1, 2, 3)) OR ([Kind] <> 3 AND [ReturnToStage] IS NULL)");
+
+                            t.HasCheckConstraint("ck_production_operations_stage", "[Stage] IN (1, 2, 3, 4, 5)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrder", b =>
                 {
                     b.Property<long>("Id")
@@ -5237,6 +5303,29 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_legal_entity_accounts_entity");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOperation", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Production.ProductionOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProductionOrderId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_operations_order");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrder", b =>

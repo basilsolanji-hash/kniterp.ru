@@ -1,0 +1,183 @@
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ProductionFloorService Floor
+
+@* Ход работ по заказу (D92): этапы, контроль качества и история отметок. *@
+@if (_progress is not null)
+{
+    <h2 style="margin-top: 24px">@L("Ход работ")</h2>
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Этап")</th><th class="num">@L("Сделано")</th><th class="num">@L("Можно отметить")</th></tr></thead>
+            <tbody>
+                @foreach (var s in _progress.Stages)
+                {
+                    <tr>
+                        <td>@L(s.Name)</td>
+                        <td class="num">@Quantities.Format(s.Done) @_progress.UnitSymbol</td>
+                        <td class="num">@Quantities.Format(s.Available)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <p class="muted">
+        @L("Годное: {0}, брак: {1}, на переделку отправлено: {2}, упаковано и не выпущено: {3}.",
+            Quantities.Format(_progress.Good), Quantities.Format(_progress.Defect), Quantities.Format(_progress.Rework), Quantities.Format(_progress.ReadyForOutput))
+    </p>
+
+    @if (_progress.CanMark)
+    {
+        <form class="inline-form" @onsubmit="RecordAsync">
+            <label>
+                @L("Этап")
+                <select @bind="_stage" aria-label="@L("Этап")">
+                    @foreach (var s in ProductionFlow.Stages)
+                    {
+                        <option value="@s">@L(ProductionFlow.StageName(s))</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Отметка")
+                <select @bind="_kind" aria-label="@L("Отметка")">
+                    @foreach (var k in KindsFor(_stage))
+                    {
+                        <option value="@k">@L(ProductionFlow.KindName(k))</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Количество") <input @bind="_quantityText" inputmode="decimal" size="8" aria-label="@L("Количество")" /></label>
+            @if (_kind == ProductionOperationKind.Rework)
+            {
+                <label>
+                    @L("Вернуть на этап")
+                    <select @bind="_returnTo" aria-label="@L("Вернуть на этап")">
+                        <option value="@ProductionStage.Knitting">@L(ProductionFlow.StageName(ProductionStage.Knitting))</option>
+                        <option value="@ProductionStage.Assembly">@L(ProductionFlow.StageName(ProductionStage.Assembly))</option>
+                        <option value="@ProductionStage.Steaming">@L(ProductionFlow.StageName(ProductionStage.Steaming))</option>
+                    </select>
+                </label>
+            }
+            <label>@(_kind is ProductionOperationKind.Correction or ProductionOperationKind.Defect ? L("Причина") : L("Комментарий"))
+                <input @bind="_reason" maxlength="@ProductionOperation.ReasonMaxLength" size="24" aria-label="@L("Причина или комментарий")" /></label>
+            <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата")" /></label>
+            <button type="submit" disabled="@_busy">@L("Отметить")</button>
+        </form>
+        <p class="muted">@L("Исправление уменьшает сделанное на этапе — укажите, на сколько. Переделка возвращает изделия на выбранный этап, брак списывается с причиной.")</p>
+    }
+
+    @if (_progress.History.Count > 0)
+    {
+        <details>
+            <summary>@L("История отметок ({0})", _progress.History.Count)</summary>
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>@L("Дата")</th><th>@L("Этап")</th><th>@L("Отметка")</th><th class="num">@L("Количество")</th><th>@L("Причина или комментарий")</th><th class="opt">@L("Кто")</th></tr></thead>
+                    <tbody>
+                        @foreach (var h in _progress.History)
+                        {
+                            <tr>
+                                <td>@h.OccurredOn.ToString("dd.MM.yyyy")</td>
+                                <td>@L(h.StageName)</td>
+                                <td>@L(h.KindName)@(h.ReturnToName is null ? "" : $" → {L(h.ReturnToName)}")</td>
+                                <td class="num">@Quantities.Format(h.Quantity)</td>
+                                <td>@h.Reason</td>
+                                <td>@h.CreatedBy</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long OrderId { get; set; }
+
+    [Parameter]
+    public DateOnly Today { get; set; }
+
+    /// <summary>После отметки карточка перечитывает заказ (можно ли отменить, сколько готово к выпуску).</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private ProductionProgressDto? _progress;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+    private ProductionStage _stage = ProductionStage.Knitting;
+    private ProductionOperationKind _kind = ProductionOperationKind.Done;
+    private ProductionStage _returnTo = ProductionStage.Knitting;
+    private string _quantityText = string.Empty;
+    private string? _reason;
+    private DateTime _date = DateTime.Today;
+
+    // Загрузка один раз: перерисовка карточки после отметки не должна запускать второй запрос параллельно (один DbContext у вкладки).
+    protected override async Task OnInitializedAsync()
+    {
+        _date = Today.ToDateTime(TimeOnly.MinValue);
+        await LoadAsync();
+    }
+
+    public async Task LoadAsync() => _progress = await Floor.ProgressAsync(OrderId);
+
+    private static IEnumerable<ProductionOperationKind> KindsFor(ProductionStage stage) =>
+        stage == ProductionStage.QualityControl
+            ? [ProductionOperationKind.Done, ProductionOperationKind.Rework, ProductionOperationKind.Defect, ProductionOperationKind.Correction]
+            : [ProductionOperationKind.Done, ProductionOperationKind.Correction];
+
+    private async Task RecordAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!KindsFor(_stage).Contains(_kind))
+            {
+                _kind = ProductionOperationKind.Done;
+            }
+
+            if (!Quantities.TryParse(_quantityText, out var quantity))
+            {
+                throw new BusinessRuleException("production.stage.quantity_invalid", L("Укажите количество числом, например 100."));
+            }
+
+            await Floor.RecordAsync(OrderId, new ProductionOperationCommand(_stage, _kind, quantity,
+                _kind == ProductionOperationKind.Rework ? _returnTo : null, _reason, DateOnly.FromDateTime(_date)));
+            _message = L("Отмечено.");
+            _quantityText = string.Empty;
+            _reason = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+                await OnChanged.InvokeAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

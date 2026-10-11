@@ -94,3 +94,38 @@ internal sealed class ProductionOrderMaterialConfiguration : IEntityTypeConfigur
         b.HasIndex(x => new { x.ProductionOrderId, x.ItemId }).IsUnique().HasDatabaseName("ux_production_order_materials_order_item");
     }
 }
+
+internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguration<ProductionOperation>
+{
+    public void Configure(EntityTypeBuilder<ProductionOperation> b)
+    {
+        b.ToTable("production_operations", t =>
+        {
+            t.HasCheckConstraint("ck_production_operations_stage", "[Stage] IN (1, 2, 3, 4, 5)");
+            t.HasCheckConstraint("ck_production_operations_kind", "[Kind] IN (1, 2, 3, 4)");
+            // Исправление — отрицательное, остальное — положительное; переделка и брак — только на контроле качества.
+            t.HasCheckConstraint("ck_production_operations_quantity", "([Kind] = 2 AND [Quantity] < 0) OR ([Kind] <> 2 AND [Quantity] > 0)");
+            t.HasCheckConstraint("ck_production_operations_qc", "[Kind] IN (1, 2) OR [Stage] = 4");
+            t.HasCheckConstraint("ck_production_operations_return",
+                "([Kind] = 3 AND [ReturnToStage] IN (1, 2, 3)) OR ([Kind] <> 3 AND [ReturnToStage] IS NULL)");
+            t.HasCheckConstraint("ck_production_operations_reason", "[Kind] NOT IN (2, 4) OR [Reason] IS NOT NULL");
+            // Только вставка — триггер в миграции AddProductionStages.
+            t.HasTrigger("tr_production_operations_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Stage).HasConversion<byte>();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.ReturnToStage).HasConversion<byte?>();
+        b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.Reason).HasMaxLength(ProductionOperation.ReasonMaxLength);
+        b.Ignore(x => x.Step);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        // Заказ — той же организации.
+        b.HasOne<ProductionOrder>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionOrderId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_operations_order");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.ProductionOrderId }).HasDatabaseName("ix_production_operations_org_order");
+    }
+}

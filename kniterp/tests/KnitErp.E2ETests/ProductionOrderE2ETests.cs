@@ -38,7 +38,6 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
         await page.GotoAsync("production-orders");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Производственные заказы" })).ToBeVisibleAsync();
-        await Assertions.Expect(page.GetByText("Производственных заказов пока нет.")).ToBeVisibleAsync();
 
         // Кнопки работают, когда страница стала интерактивной: повторяем нажатие, пока не откроется форма.
         await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Новый заказ" }),
@@ -72,6 +71,59 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
         await page.GotoAsync("production-orders?status=9");
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^ПЗ-") })).ToHaveCountAsync(1);
+    }
+
+    /// <summary>D92: начальник цеха отмечает этапы в карточке; больше пришедшего с предыдущего этапа отметить нельзя.</summary>
+    [SqlFact]
+    public async Task Workshop_head_marks_stages_and_sees_limit()
+    {
+        var order = await app.CreateReleasedOrderAsync(10);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page);
+        await page.GotoAsync($"production-orders/{order}");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Ход работ" })).ToBeVisibleAsync();
+
+        // Ввод повторяется вместе с нажатием: до подключения интерактивного режима значение поля может сброситься.
+        // Повтор — только если отметка не дошла до сервера (нет ответа или «укажите количество»), иначе можно отметить дважды.
+        for (var i = 0; i < 20 && !await page.GetByText("Отмечено.").IsVisibleAsync(); i++)
+        {
+            await page.GetByLabel("Количество", new() { Exact = true }).FillAsync("6");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Отметить" }).ClickAsync();
+            try
+            {
+                await page.Locator(".flash").First.WaitForAsync(new() { Timeout = 2000 });
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        await Assertions.Expect(page.GetByText("Отмечено.")).ToBeVisibleAsync();
+        var knitting = page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Вязание" });
+        await Assertions.Expect(knitting).ToContainTextAsync("6 шт");
+
+        await page.GetByLabel("Этап", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Сборка" });
+        await page.GetByLabel("Количество", new() { Exact = true }).FillAsync("7");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отметить" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("можно отметить не больше 6");
+
+        await page.GetByLabel("Количество", new() { Exact = true }).FillAsync("6");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отметить" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Сборка" })).ToContainTextAsync("6 шт");
+        // После отметок заказ не отменяется — кнопки нет.
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Отменить заказ" })).ToHaveCountAsync(0);
+        await page.GetByText("История отметок (2)").ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Cell, new() { Name = "Начальник цеха" })).ToHaveCountAsync(2);
+    }
+
+    private async Task LoginAsync(IPage page)
+    {
+        await page.GotoAsync("account/login");
+        await page.GetByLabel("Эл. почта").FillAsync(AppFixture.UserEmail);
+        await page.GetByLabel("Пароль").FillAsync(app.Password);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Войти" }).ClickAsync();
+        await page.WaitForURLAsync(url => !url.Contains("/account/"), new() { Timeout = 30_000 });
     }
 
     private static async Task ClickUntilAsync(ILocator button, ILocator appears)

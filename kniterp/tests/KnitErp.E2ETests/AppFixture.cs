@@ -25,6 +25,8 @@ public sealed class AppFixture : IAsyncLifetime
 
     private readonly SqlTestHost _host = new();
     private readonly List<string> _log = [];
+    private long _userId;
+    private long _organizationId;
     private Process? _app;
     private IPlaywright? _playwright;
 
@@ -93,13 +95,28 @@ public sealed class AppFixture : IAsyncLifetime
             var card = await s.TechCards.CreateAsync(Sweater, 10, null);
             await s.TechCards.SetLineAsync(card, yarn, 3.2m, 3m, (await s.TechCards.GetAsync(card)).RowVersion);
             await s.TechCards.ActivateAsync(card, (await s.TechCards.GetAsync(card)).RowVersion);
-            token = (await s.Access.InviteAsync(new InviteUserCommand(UserEmail, "Начальник цеха", SystemRoles.DepartmentHead, null))).SetupToken!;
+            var invitation = await s.Access.InviteAsync(new InviteUserCommand(UserEmail, "Начальник цеха", SystemRoles.DepartmentHead, null));
+            token = invitation.SetupToken!;
+            _userId = invitation.UserId;
+            _organizationId = org.OrganizationId;
         }
 
         await using (var s = _host.As(null, null))
         {
             await s.SignIn.AcceptInvitationAsync(token, Password, Password);
         }
+    }
+
+    /// <summary>Запущенный заказ на свитера от имени начальника цеха — для сценариев цеха.</summary>
+    public async Task<long> CreateReleasedOrderAsync(decimal quantity)
+    {
+        await using var s = _host.As(_userId, _organizationId);
+        var options = await s.ProductionOrders.OptionsAsync();
+        var output = options.Warehouses.Single(w => w.Name == "Склад готовой продукции").Id;
+        var id = await s.ProductionOrders.CreateAsync(new ProductionOrderCommand(Sweater, quantity, DateOnly.FromDateTime(DateTime.UtcNow), null,
+            KnitErp.Domain.Production.ProductionSource.Plan, null, options.DefaultWipWarehouseId!.Value, output, null));
+        await s.ProductionOrders.ReleaseAsync(id, (await s.ProductionOrders.GetAsync(id)).RowVersion);
+        return id;
     }
 
     private async Task StartAppAsync()
