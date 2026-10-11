@@ -915,6 +915,17 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                 output.Select(o => (o.EmployeeId, o.Date, o.OperationId, o.OperationName, o.ItemId, o.Quantity, o.Unit)).ToArray());
             Assert.Empty(await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day.AddDays(1), Day.AddDays(5), CancellationToken.None));
         }
+
+        // Сдельная оплата по настоящей выработке (модуль «Сотрудники», D215): расценки на коды этапов, расчёт месяца.
+        await using (var hr = host.Hr(f.Org.OwnerUserId, f.Org.OrganizationId, new ProductionWorkOutputSource(host.NewDb())))
+        {
+            await hr.Payroll.AddRateAsync(new KnitErp.Application.Hr.PieceRateCommand(1, "Вязание", null, "шт", 50m, Day.AddDays(-30)));
+            await hr.Payroll.AddRateAsync(new KnitErp.Application.Hr.PieceRateCommand(2, "Сборка", null, "шт", 30m, Day.AddDays(-30)));
+            await hr.Payroll.CalculateAsync(Day.Year, Day.Month);
+            var piece = (await hr.Payroll.GetAsync(Day.Year, Day.Month)).Employees.Single(e => e.EmployeeId == employee).Piece;
+            // 12 × 50 (вязание) + 12 × 30 (сборка); отметка мастера без исполнителя в заработок не входит.
+            Assert.Equal(960m, piece);
+        }
     }
 
     [SqlFact]
