@@ -226,6 +226,36 @@ internal static class ProductionPrices
 
             return (quantity, value);
         });
-        return UnitCosts.Calculate(purchases, cards, itemIds).ToDictionary(x => x.Key, x => x.Value.Cost);
+        var costs = UnitCosts.Calculate(purchases, cards, itemIds).ToDictionary(x => x.Key, x => x.Value);
+
+        // Полуфабрикат собственного производства (D90, дополнение): если его уже выпускали — фактическая себестоимость выпуска
+        // (выдано − возвращено по его заказам × цена материалов) / выпущено; закупка по-прежнему важнее, оценка по техкарте — запасной путь.
+        var produced = itemIds.Where(id => !costs.TryGetValue(id, out var c) || c.Source != CostSource.Purchases).ToList();
+        if (produced.Count > 0)
+        {
+            var moves = await (from o in db.ProductionOrders.AsNoTracking()
+                               where o.OrganizationId == organizationId && produced.Contains(o.ItemId)
+                               join link in db.ProductionOrderDocuments.AsNoTracking() on o.Id equals link.ProductionOrderId
+                               join d in db.StockDocuments.AsNoTracking() on link.StockDocumentId equals d.Id
+                               where d.Status == StockDocumentStatus.Posted
+                               from l in d.Lines
+                               select new { o.ItemId, link.Purpose, Line = l.ItemId, l.Quantity }).ToListAsync(ct);
+            var materialIds = moves.Where(m => m.Purpose != ProductionDocumentPurpose.Output).Select(m => m.Line).Distinct().ToList();
+            var materialCosts = materialIds.Count == 0 ? new Dictionary<long, (decimal Cost, CostSource Source)>()
+                : UnitCosts.Calculate(purchases, cards, materialIds).ToDictionary(x => x.Key, x => x.Value);
+            foreach (var group in moves.GroupBy(m => m.ItemId))
+            {
+                var released = group.Where(m => m.Purpose == ProductionDocumentPurpose.Output && m.Line == group.Key).Sum(m => m.Quantity);
+                var net = group.Where(m => m.Purpose is ProductionDocumentPurpose.Issue or ProductionDocumentPurpose.Return)
+                    .GroupBy(m => m.Line)
+                    .Select(g => (Item: g.Key, Qty: g.Sum(m => m.Purpose == ProductionDocumentPurpose.Issue ? m.Quantity : -m.Quantity))).ToList();
+                if (released > 0 && net.All(n => materialCosts.ContainsKey(n.Item)))
+                {
+                    costs[group.Key] = (net.Sum(n => n.Qty * materialCosts[n.Item].Cost) / released, CostSource.TechCard);
+                }
+            }
+        }
+
+        return costs.ToDictionary(x => x.Key, x => x.Value.Cost);
     }
 }

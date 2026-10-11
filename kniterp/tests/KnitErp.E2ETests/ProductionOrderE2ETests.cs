@@ -283,6 +283,22 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("Заказ покупателя ЗК-")).ToBeVisibleAsync();
     }
 
+    /// <summary>D90 (дополнение «сборка из полуфабрикатов»): из заказа на кофты — заказ на рукава кнопкой у материала.</summary>
+    [SqlFact]
+    public async Task Workshop_head_creates_semi_finished_order_from_material()
+    {
+        var order = await app.CreateOrderWithSemiFinishedAsync(5);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page);
+        await page.GotoAsync($"production-orders/{order}");
+        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Заказ на полуфабрикат: РУ-1" }),
+            page.GetByText("Полуфабрикат для заказа", new() { Exact = true }));
+        await Assertions.Expect(page.Locator("h1")).ToContainTextAsync("РУ-1 Рукав");
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^ПЗ-") }).First).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByText("10 шт")).ToBeVisibleAsync(); // 2 рукава × 5 кофт
+    }
+
     private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);
 
     private async Task LoginAsync(IPage page, string email)

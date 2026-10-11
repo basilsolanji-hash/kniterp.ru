@@ -22,7 +22,8 @@ public sealed record ProductionOrderRowDto(
 
 /// <summary>Материал заказа: потребность без отхода и с отходом; цена и сумма — только с правом «Цены и суммы».</summary>
 public sealed record ProductionMaterialDto(
-    long ItemId, string Code, string Name, string UnitSymbol, decimal Net, decimal Gross, decimal WastePercent, decimal? Price)
+    long ItemId, string Code, string Name, string UnitSymbol, decimal Net, decimal Gross, decimal WastePercent, decimal? Price,
+    bool CanProduce = false, decimal ChildPlanned = 0)
 {
     public decimal? Amount => Price is { } p ? Money.Round(p * Gross) : null;
 }
@@ -38,7 +39,8 @@ public sealed record ProductionOrderDto(
     IReadOnlyList<ProductionMaterialDto> Materials, bool MaterialsFixed, bool PricesVisible, decimal? PlannedCost,
     byte[] RowVersion, bool CanEdit, bool CanRelease, bool CanCancel,
     decimal Released = 0, decimal? ActualCost = null, string? ClosedBy = null, DateTime? ClosedAtUtc = null, string? CloseReason = null,
-    bool CanClose = false)
+    bool CanClose = false, long? ParentOrderId = null, string? ParentOrderNumber = null, IReadOnlyList<ProductionChildDto>? Children = null,
+    bool CanCreateChild = false)
 {
     public string StatusName => ProductionOrder.StatusName(Status);
     public string SourceName => ProductionOrder.SourceName(Source);
@@ -50,10 +52,16 @@ public sealed record ProductionOrderDto(
     public decimal? PlannedUnitCost => PlannedCost is { } c && Quantity > 0 ? decimal.Round(c / Quantity, 2, MidpointRounding.AwayFromZero) : null;
 }
 
+/// <summary>Заказ на полуфабрикат для этого заказа (D90, дополнение «сборка из полуфабрикатов»).</summary>
+public sealed record ProductionChildDto(long Id, string Number, string ItemCode, string ItemName, decimal Quantity, ProductionOrderStatus Status)
+{
+    public string StatusName => ProductionOrder.StatusName(Status);
+}
+
 /// <summary>Шапка и количество заказа из формы.</summary>
 public sealed record ProductionOrderCommand(
     long ItemId, decimal Quantity, DateOnly OrderDate, DateOnly? DueDate, ProductionSource Source, long? SalesOrderId,
-    long WipWarehouseId, long OutputWarehouseId, string? Comment);
+    long WipWarehouseId, long OutputWarehouseId, string? Comment, long? ParentOrderId = null);
 
 /// <summary>Изделие для заказа и версия техкарты, по которой его будут выпускать (null — действующей техкарты нет).</summary>
 public sealed record ProductionProductOptionDto(
@@ -185,9 +193,26 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             ? await db.SalesOrders.AsNoTracking().Where(s => s.Id == sid).Select(s => s.Number).SingleAsync(ct)
             : null;
 
+        // Сборка из полуфабрикатов: заказы на полуфабрикаты этого заказа и какие материалы можно произвести (есть действующая техкарта).
+        var childOrders = await (from ch in db.ProductionOrders.AsNoTracking()
+                                 where ch.OrganizationId == ctx.OrganizationId && ch.ParentOrderId == order.Id
+                                 join i in db.Items.AsNoTracking() on ch.ItemId equals i.Id
+                                 orderby ch.Id
+                                 select new ProductionChildDto(ch.Id, ch.Number, i.Code, i.Name, ch.Quantity, ch.Status)).ToListAsync(ct);
+        var materialIds = materials.Select(m => m.ItemId).ToList();
+        var producible = await db.TechCards.AsNoTracking()
+            .Where(t => t.OrganizationId == ctx.OrganizationId && t.Status == TechCardStatus.Active && materialIds.Contains(t.ItemId))
+            .Select(t => t.ItemId).ToListAsync(ct);
+        var childPlanned = (await db.ProductionOrders.AsNoTracking()
+                .Where(ch => ch.OrganizationId == ctx.OrganizationId && ch.ParentOrderId == order.Id && ch.Status != ProductionOrderStatus.Cancelled)
+                .Select(ch => new { ch.ItemId, ch.Quantity }).ToListAsync(ct))
+            .GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
         var lines = materials.Select(m => new ProductionMaterialDto(m.ItemId, items[m.ItemId].Code, items[m.ItemId].Name, items[m.ItemId].Symbol,
-                m.Net, m.Gross, m.Waste, pricesVisible ? m.Price : null))
+                m.Net, m.Gross, m.Waste, pricesVisible ? m.Price : null, producible.Contains(m.ItemId), childPlanned.GetValueOrDefault(m.ItemId)))
             .OrderBy(m => m.Code).ToList();
+        var parentNumber = order.ParentOrderId is { } pid
+            ? await db.ProductionOrders.AsNoTracking().Where(p => p.Id == pid).Select(p => p.Number).SingleAsync(ct)
+            : null;
         decimal? plannedCost = pricesVisible && materials.Count > 0 && materials.All(m => m.Price is not null)
             ? Money.Round(materials.Sum(m => m.Gross * m.Price!.Value))
             : null;
@@ -214,7 +239,9 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             lines, !draft, pricesVisible, plannedCost, order.RowVersion,
             canEdit && draft, canEdit && draft && card is not null, canEdit && cancellable,
             released, actualCost, order.ClosedByUserId is { } cl ? users[cl] : null, order.ClosedAtUtc, order.CloseReason,
-            canEdit && order.Status is ProductionOrderStatus.PartiallyDone or ProductionOrderStatus.Done);
+            canEdit && order.Status is ProductionOrderStatus.PartiallyDone or ProductionOrderStatus.Done,
+            order.ParentOrderId, parentNumber, childOrders,
+            canEdit && order.Status is ProductionOrderStatus.Draft or ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone);
     }
 
     /// <summary>Справочники формы: изделия с версией техкарты, действующие склады и подтверждённые заказы покупателей.</summary>
@@ -268,7 +295,8 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         var (product, card) = await ValidateAsync(ctx, command, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, ProductionOrder.NumberPrefix, ct);
-        var order = ProductionOrder.Create(ctx.OrganizationId, number, product.Id, command.Quantity, card.Id, Header(command), ctx.UserId, clock.UtcNow);
+        var order = ProductionOrder.Create(ctx.OrganizationId, number, product.Id, command.Quantity, card.Id, Header(command), ctx.UserId, clock.UtcNow,
+            command.ParentOrderId);
         db.ProductionOrders.Add(order);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.ProductionOrderCreated, order, null,
@@ -370,6 +398,57 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             db.DiscardChanges();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Заказ на полуфабрикат для этого заказа (D90, дополнение «сборка из полуфабрикатов»): черновик на ещё не обеспеченную потребность —
+    /// потребность с отходом по нормам заказа минус выданное в цех и минус уже запланированное в заказах на этот полуфабрикат.
+    /// Склады и срок — как у заказа на изделие; полуфабрикат приходит на склад готовой продукции и выдаётся в цех обычной выдачей.
+    /// </summary>
+    public async Task<long> CreateChildAsync(long parentId, long materialItemId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionOrderEdit, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        var exists = await db.ProductionOrders.AsNoTracking().AnyAsync(o => o.Id == parentId && o.OrganizationId == ctx.OrganizationId, ct);
+        if (!exists)
+        {
+            throw new NotFoundException("Производственный заказ");
+        }
+
+        await db.LockAsync($"kniterp.production.order.{parentId}", ct);
+        var dto = await GetAsync(parentId, ct);
+        if (!dto.CanCreateChild)
+        {
+            throw new BusinessRuleException("production.order.parent_status", $"Заказ {dto.Number} уже не в работе — полуфабрикат для него не нужен.");
+        }
+
+        var material = dto.Materials.SingleOrDefault(m => m.ItemId == materialItemId)
+                       ?? throw new BusinessRuleException("production.order.parent_item", "Этого материала нет в нормах заказа.");
+        if (!material.CanProduce)
+        {
+            throw new BusinessRuleException("production.order.no_techcard", $"У «{material.Name}» нет действующей техкарты — его не производят, а закупают.");
+        }
+
+        var parent = await db.ProductionOrders.AsNoTracking().SingleAsync(o => o.Id == parentId, ct);
+        var issued = (await ProductionPosting.MovementsAsync(db, parent, ct))
+            .Where(m => m.ItemId == materialItemId)
+            .Sum(m => m.Purpose switch { ProductionDocumentPurpose.Issue => m.Quantity, ProductionDocumentPurpose.Return => -m.Quantity, _ => 0m });
+        var precision = await db.Items.AsNoTracking().Where(i => i.Id == materialItemId)
+            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => (int)u.Precision).SingleAsync(ct);
+        var factor = (decimal)Math.Pow(10, precision);
+        var need = Math.Ceiling((material.Gross - issued - material.ChildPlanned) * factor) / factor;
+        if (need <= 0)
+        {
+            throw new BusinessRuleException("production.order.child_covered", $"Потребность в «{material.Name}» уже выдана или запланирована.");
+        }
+
+        var org = await db.Organizations.AsNoTracking().SingleAsync(o => o.Id == ctx.OrganizationId, ct);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(clock.UtcNow, DateTimeKind.Utc),
+            TimeZoneInfo.FindSystemTimeZoneById(org.TimeZoneId)));
+        var id = await CreateCoreAsync(new ProductionOrderCommand(materialItemId, need, today, parent.DueDate is { } d && d >= today ? d : null,
+            ProductionSource.Plan, null, parent.WipWarehouseId, parent.OutputWarehouseId, $"Полуфабрикат для заказа {parent.Number}", parentId), ct);
+        await tx.CommitAsync(ct);
+        return id;
     }
 
     /// <summary>Правка черновика: количество, сроки, источник, склады, комментарий. Изделие не меняется.</summary>
@@ -547,6 +626,23 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             }
         }
 
+        if (c.ParentOrderId is { } parentId)
+        {
+            var parent = await db.ProductionOrders.AsNoTracking()
+                             .SingleOrDefaultAsync(o => o.Id == parentId && o.OrganizationId == ctx.OrganizationId, ct)
+                         ?? throw new NotFoundException("Производственный заказ");
+            if (parent.Status is ProductionOrderStatus.Cancelled or ProductionOrderStatus.Closed or ProductionOrderStatus.Done)
+            {
+                throw new BusinessRuleException("production.order.parent_status", $"Заказ {parent.Number} уже не в работе — полуфабрикат для него не нужен.");
+            }
+
+            var inCard = await db.TechCards.AsNoTracking().Where(t => t.Id == parent.TechCardId).SelectMany(t => t.Lines).AnyAsync(l => l.ItemId == product.Id, ct);
+            if (!inCard)
+            {
+                throw new BusinessRuleException("production.order.parent_item", $"«{product.Name}» не входит в техкарту заказа {parent.Number}.");
+            }
+        }
+
         var card = await ActiveCardAsync(ctx, product.Id, product.ParentItemId, ct)
                    ?? throw new BusinessRuleException("production.order.no_techcard",
                        $"У изделия «{product.Name}» нет действующей техкарты" + (product.ParentItemId is null ? "." : " — ни у модификации, ни у основной модели."));
@@ -625,7 +721,7 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         new(c.OrderDate, c.DueDate, c.Source, c.Source == ProductionSource.SalesOrder ? c.SalesOrderId : null, c.WipWarehouseId, c.OutputWarehouseId, c.Comment);
 
     private static ProductionOrderCommand Command(ProductionOrder o) =>
-        new(o.ItemId, o.Quantity, o.OrderDate, o.DueDate, o.Source, o.SalesOrderId, o.WipWarehouseId, o.OutputWarehouseId, o.Comment);
+        new(o.ItemId, o.Quantity, o.OrderDate, o.DueDate, o.Source, o.SalesOrderId, o.WipWarehouseId, o.OutputWarehouseId, o.Comment, o.ParentOrderId);
 
     private static string Describe(ProductionOrder o, string unit) =>
         $"{Quantities.Format(o.Quantity)} {unit}, {o.OrderDate:dd.MM.yyyy}" + (o.DueDate is { } d ? $", срок {d:dd.MM.yyyy}" : "")

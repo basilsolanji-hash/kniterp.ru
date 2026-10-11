@@ -192,6 +192,34 @@ public sealed class AppFixture : IAsyncLifetime
         return order;
     }
 
+    /// <summary>Запущенный заказ на кофты, в техкарте которых — полуфабрикат «Рукав» со своей техкартой.</summary>
+    public async Task<long> CreateOrderWithSemiFinishedAsync(decimal quantity)
+    {
+        await using var s = _host.As(_ownerId, _organizationId);
+        var items = await s.Db.Items.Where(i => i.OrganizationId == _organizationId).ToDictionaryAsync(i => i.Code, i => i.Id);
+        if (!items.TryGetValue("КФ-1", out var jacket))
+        {
+            var units = await s.Catalog.ListUnitsAsync();
+            var pcs = units.Single(u => u.Symbol == "шт").Id;
+            var sleeve = await s.Catalog.CreateItemAsync(new ItemCommand("РУ-1", "Рукав", ItemType.SemiFinished, pcs, null));
+            jacket = await s.Catalog.CreateItemAsync(new ItemCommand("КФ-1", "Кофта", ItemType.Finished, pcs, null));
+            var sleeveCard = await s.TechCards.CreateAsync(sleeve, 1, null);
+            await s.TechCards.SetLineAsync(sleeveCard, items["ПР-1"], 0.2m, 0m, (await s.TechCards.GetAsync(sleeveCard)).RowVersion);
+            await s.TechCards.ActivateAsync(sleeveCard, (await s.TechCards.GetAsync(sleeveCard)).RowVersion);
+            var card = await s.TechCards.CreateAsync(jacket, 1, null);
+            await s.TechCards.SetLineAsync(card, items["ПР-1"], 0.3m, 0m, (await s.TechCards.GetAsync(card)).RowVersion);
+            await s.TechCards.SetLineAsync(card, sleeve, 2m, 0m, (await s.TechCards.GetAsync(card)).RowVersion);
+            await s.TechCards.ActivateAsync(card, (await s.TechCards.GetAsync(card)).RowVersion);
+        }
+
+        var options = await s.ProductionOrders.OptionsAsync();
+        var output = options.Warehouses.Single(w => w.Name == "Склад готовой продукции").Id;
+        var id = await s.ProductionOrders.CreateAsync(new ProductionOrderCommand(jacket, quantity, DateOnly.FromDateTime(DateTime.UtcNow), null,
+            KnitErp.Domain.Production.ProductionSource.Plan, null, options.DefaultWipWarehouseId!.Value, output, null));
+        await s.ProductionOrders.ReleaseAsync(id, (await s.ProductionOrders.GetAsync(id)).RowVersion);
+        return id;
+    }
+
     private async Task StartAppAsync()
     {
         int port;

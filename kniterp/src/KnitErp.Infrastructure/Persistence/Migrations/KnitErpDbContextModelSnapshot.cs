@@ -2472,6 +2472,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OutputWarehouseId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("ParentOrderId")
+                        .HasColumnType("bigint");
+
                     b.Property<decimal>("Quantity")
                         .HasColumnType("decimal(18,6)");
 
@@ -2523,6 +2526,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrganizationId", "OutputWarehouseId");
 
+                    b.HasIndex("OrganizationId", "ParentOrderId")
+                        .HasDatabaseName("ix_production_orders_org_parent");
+
                     b.HasIndex("OrganizationId", "SalesOrderId")
                         .HasDatabaseName("ix_production_orders_org_sales_order");
 
@@ -2542,6 +2548,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_production_orders_closed", "([Status] = 5 AND [ClosedByUserId] IS NOT NULL AND [ClosedAtUtc] IS NOT NULL) OR ([Status] <> 5 AND [ClosedByUserId] IS NULL)");
 
                             t.HasCheckConstraint("ck_production_orders_due", "[DueDate] IS NULL OR [DueDate] >= [OrderDate]");
+
+                            t.HasCheckConstraint("ck_production_orders_parent", "[ParentOrderId] IS NULL OR [ParentOrderId] <> [Id]");
 
                             t.HasCheckConstraint("ck_production_orders_quantity", "[Quantity] > 0");
 
@@ -5559,6 +5567,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_production_orders_output_warehouse");
+
+                    b.HasOne("KnitErp.Domain.Production.ProductionOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ParentOrderId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_production_orders_parent");
 
                     b.HasOne("KnitErp.Domain.Sales.SalesOrder", null)
                         .WithMany()

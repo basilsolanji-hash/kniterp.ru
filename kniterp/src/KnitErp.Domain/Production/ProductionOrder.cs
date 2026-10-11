@@ -54,6 +54,9 @@ public sealed class ProductionOrder
     /// <summary>Заказ покупателя — только у источника «Заказ покупателя».</summary>
     public long? SalesOrderId { get; private set; }
 
+    /// <summary>Заказ на изделие, для которого делается этот полуфабрикат (D90, дополнение «сборка из полуфабрикатов»).</summary>
+    public long? ParentOrderId { get; private set; }
+
     /// <summary>Склад цеха (незавершённое производство): сюда выдаётся пряжа и отсюда списывается расход.</summary>
     public long WipWarehouseId { get; private set; }
 
@@ -86,13 +89,15 @@ public sealed class ProductionOrder
     public IReadOnlyList<ProductionOrderMaterial> Materials => _materials;
 
     public static ProductionOrder Create(
-        long organizationId, string number, long itemId, decimal quantity, long techCardId, ProductionOrderHeader header, long userId, DateTime nowUtc)
+        long organizationId, string number, long itemId, decimal quantity, long techCardId, ProductionOrderHeader header, long userId, DateTime nowUtc,
+        long? parentOrderId = null)
     {
         var order = new ProductionOrder
         {
             OrganizationId = organizationId,
             Number = number,
             ItemId = itemId,
+            ParentOrderId = parentOrderId,
             Status = ProductionOrderStatus.Draft,
             CreatedByUserId = userId,
             CreatedAtUtc = nowUtc,

@@ -23,6 +23,7 @@ internal sealed class ProductionOrderConfiguration : IEntityTypeConfiguration<Pr
                 "([Source] = 1 AND [SalesOrderId] IS NULL) OR ([Source] = 2 AND [SalesOrderId] IS NOT NULL)");
             t.HasCheckConstraint("ck_production_orders_warehouses", "[WipWarehouseId] <> [OutputWarehouseId]");
             t.HasCheckConstraint("ck_production_orders_due", "[DueDate] IS NULL OR [DueDate] >= [OrderDate]");
+            t.HasCheckConstraint("ck_production_orders_parent", "[ParentOrderId] IS NULL OR [ParentOrderId] <> [Id]");
             // Запущен и дальше — с отметкой о запуске; черновик — без неё; отменённый — с причиной.
             t.HasCheckConstraint("ck_production_orders_released",
                 "([Status] = 1 AND [ReleasedByUserId] IS NULL) OR ([Status] IN (2, 3, 4, 5) AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL)"
@@ -65,6 +66,10 @@ internal sealed class ProductionOrderConfiguration : IEntityTypeConfiguration<Pr
         b.HasOne<SalesOrder>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SalesOrderId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_production_orders_sales_order");
+        b.HasOne<ProductionOrder>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ParentOrderId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_orders_parent");
+        b.HasIndex(x => new { x.OrganizationId, x.ParentOrderId }).HasDatabaseName("ix_production_orders_org_parent");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ReleasedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CancelledByUserId).OnDelete(DeleteBehavior.Restrict);

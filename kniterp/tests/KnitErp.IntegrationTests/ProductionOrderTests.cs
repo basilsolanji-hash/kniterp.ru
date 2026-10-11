@@ -729,6 +729,69 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D90 (дополнение «сборка из полуфабрикатов»): цикл запрещён, потребность по уровням, заказ на полуфабрикат, цена по факту выпуска.</summary>
+    [SqlFact]
+    public async Task Multi_level_production_with_semi_finished_items()
+    {
+        var f = await SetUpAsync();
+        long sleeve, jacket, jacketCard, order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var pcs = (await s.Catalog.ListUnitsAsync()).Single(u => u.Symbol == "шт").Id;
+            sleeve = await s.Catalog.CreateItemAsync(new ItemCommand("РУ-1", "Рукав", ItemType.SemiFinished, pcs, null));
+            jacket = await s.Catalog.CreateItemAsync(new ItemCommand("КФ-1", "Кофта", ItemType.Finished, pcs, null));
+            var sleeveCard = await s.TechCards.CreateAsync(sleeve, 1, null);
+            await s.TechCards.SetLineAsync(sleeveCard, f.Yarn, 0.2m, 0m, (await s.TechCards.GetAsync(sleeveCard)).RowVersion);
+            await s.TechCards.ActivateAsync(sleeveCard, (await s.TechCards.GetAsync(sleeveCard)).RowVersion);
+            jacketCard = await s.TechCards.CreateAsync(jacket, 1, null);
+            await s.TechCards.SetLineAsync(jacketCard, f.Yarn, 0.3m, 0m, (await s.TechCards.GetAsync(jacketCard)).RowVersion);
+            await s.TechCards.SetLineAsync(jacketCard, sleeve, 2m, 0m, (await s.TechCards.GetAsync(jacketCard)).RowVersion);
+            await s.TechCards.ActivateAsync(jacketCard, (await s.TechCards.GetAsync(jacketCard)).RowVersion);
+
+            // Кофта в составе рукава — замкнутый круг.
+            var draft = await s.TechCards.CopyAsync(sleeveCard);
+            Assert.Equal("techcard.cycle", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.TechCards.SetLineAsync(draft, jacket, 1m, 0m, (await s.TechCards.GetAsync(draft)).RowVersion))).Code);
+
+            // 10 кофт по уровням: пряжа 0,3 × 10 + рукава 20 × 0,2 = 7 кг; без раскрытия — 3 кг пряжи и 20 рукавов.
+            var flat = (await s.TechCards.RequirementAsync(jacketCard, 10)).ToDictionary(r => r.Code);
+            Assert.Equal((3m, 20m), (flat["ПР-1"].Gross, flat["РУ-1"].Gross));
+            var deep = Assert.Single(await s.TechCards.RequirementAsync(jacketCard, 10, explode: true));
+            Assert.Equal(("ПР-1", 7m), (deep.Code, deep.Gross));
+
+            order = await s.ProductionOrders.CreateAsync(Command(f, jacket, 10));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            var dto = await s.ProductionOrders.GetAsync(order);
+            Assert.True(dto.Materials.Single(m => m.ItemId == sleeve).CanProduce);
+            Assert.False(dto.Materials.Single(m => m.ItemId == f.Yarn).CanProduce);
+            Assert.Equal("production.order.no_techcard", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ProductionOrders.CreateChildAsync(order, f.Yarn))).Code);
+
+            var child = await s.ProductionOrders.CreateChildAsync(order, sleeve);
+            var childDto = await s.ProductionOrders.GetAsync(child);
+            Assert.Equal((sleeve, 20m, order, dto.Number, f.Store, ProductionOrderStatus.Draft),
+                (childDto.ItemId, childDto.Quantity, childDto.ParentOrderId!.Value, childDto.ParentOrderNumber, childDto.OutputWarehouseId, childDto.Status));
+            Assert.Equal("production.order.child_covered", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ProductionOrders.CreateChildAsync(order, sleeve))).Code);
+            dto = await s.ProductionOrders.GetAsync(order);
+            Assert.Equal((20m, child), (dto.Materials.Single(m => m.ItemId == sleeve).ChildPlanned, Assert.Single(dto.Children!).Id));
+
+            // Выпуск рукавов: выдали 5 кг пряжи на 20 рукавов — фактическая себестоимость рукава 5 × 1 000 / 20 = 250 ₽ (по техкарте было бы 200).
+            await s.ProductionOrders.ReleaseAsync(child, childDto.RowVersion);
+            await s.Materials.MoveAsync(child, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 5m)));
+            foreach (var stage in ProductionFlow.Stages)
+            {
+                await s.Floor.RecordAsync(child, Mark(stage, 20));
+            }
+
+            await s.Materials.OutputAsync(child, new OutputCommand(20, Day, [new(f.Yarn, 5m)], null));
+            var next = await s.ProductionOrders.CreateAsync(Command(f, jacket, 1));
+            Assert.Equal(250m, (await s.ProductionOrders.GetAsync(next)).Materials.Single(m => m.ItemId == sleeve).Price);
+
+            // Рукава лежат на складе готовой продукции и выдаются в цех кофты обычной выдачей.
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.Store, (sleeve, 20m)));
+            Assert.Equal(20m, (await s.Materials.MaterialsAsync(order)).Lines.Single(l => l.ItemId == sleeve).Remaining);
+        }
+    }
+
     private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
         new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 

@@ -2,6 +2,7 @@
 @using KnitErp.Application.Production
 @using KnitErp.Domain.Production
 @inject ProductionOrderService Orders
+@inject NavigationManager Navigation
 @inject ProductionFloorService Floor
 @inject ProductionMaterialService Materials
 
@@ -48,6 +49,10 @@ else
             <dt>@L("Дата заказа")</dt><dd>@_order.OrderDate.ToString("dd.MM.yyyy")</dd>
             <dt>@L("Срок выпуска")</dt><dd>@(_order.DueDate?.ToString("dd.MM.yyyy") ?? "—")</dd>
             <dt>@L("Источник")</dt><dd>@L(_order.SourceName)@(_order.SalesOrderNumber is null ? "" : $" {_order.SalesOrderNumber}")</dd>
+            @if (_order.ParentOrderId is { } parentId)
+            {
+                <dt>@L("Полуфабрикат для заказа")</dt><dd><a href="production-orders/@parentId">@_order.ParentOrderNumber</a></dd>
+            }
             <dt>@L("Склад цеха (НЗП)")</dt><dd>@_order.WipWarehouseName</dd>
             <dt>@L("Склад готовой продукции")</dt><dd>@_order.OutputWarehouseName</dd>
             <dt>@L("Техкарта")</dt>
@@ -134,6 +139,7 @@ else
                 <tr>
                     <th>@L("Код")</th><th>@L("Материал")</th><th class="opt num">@L("По норме")</th><th class="num">@L("Отход, %")</th><th class="num">@L("С отходом")</th><th>@L("Ед.")</th>
                     @if (_order.PricesVisible) { <th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th> }
+                    @if (HasProducible) { <th class="num">@L("Заказано полуфабриката")</th> }
                 </tr>
             </thead>
             <tbody>
@@ -155,11 +161,36 @@ else
                             <td class="num">@(m.Price?.ToString("N2") ?? "—")</td>
                             <td class="num">@(m.Amount?.ToString("N2") ?? "—")</td>
                         }
+                        @if (HasProducible)
+                        {
+                            <td class="num">
+                                @if (m.CanProduce)
+                                {
+                                    @Quantities.Format(m.ChildPlanned)
+                                    @if (_order.CanCreateChild)
+                                    {
+                                        <button type="button" class="secondary" @onclick="() => CreateChildAsync(m.ItemId)" disabled="@_busy"
+                                                aria-label="@L("Заказ на полуфабрикат: {0}", m.Code)">@L("Заказ на полуфабрикат")</button>
+                                    }
+                                }
+                            </td>
+                        }
                     </tr>
                 }
             </tbody>
         </table>
     </div>
+    @if (_order.Children is { Count: > 0 } children)
+    {
+        <h2 style="margin-top: 24px">@L("Заказы на полуфабрикаты")</h2>
+        <ul>
+            @foreach (var c in children)
+            {
+                <li><a href="production-orders/@c.Id">@c.Number</a> — @c.ItemCode @c.ItemName, @Quantities.Format(c.Quantity), @L(c.StatusName)</li>
+            }
+        </ul>
+    }
+
     @if (_order.Status is not (ProductionOrderStatus.Draft or ProductionOrderStatus.Cancelled))
     {
         <ProductionStagesPanel OrderId="_order.Id" Progress="_progress" Today="Today" OnChanged="LoadAsync" />
@@ -264,6 +295,18 @@ else
     }, L("Сохранено."));
 
     private Task ReleaseAsync() => RunAsync(() => Orders.ReleaseAsync(Id, _order!.RowVersion), L("Заказ запущен."));
+
+    private bool HasProducible => _order!.Materials.Any(m => m.CanProduce);
+
+    private async Task CreateChildAsync(long materialId)
+    {
+        long? created = null;
+        await RunAsync(async () => created = await Orders.CreateChildAsync(Id, materialId), L("Создан черновик заказа на полуфабрикат."));
+        if (created is { } id && !_messageIsError)
+        {
+            Navigation.NavigateTo($"production-orders/{id}");
+        }
+    }
 
     private Task CloseAsync() => RunAsync(async () =>
     {

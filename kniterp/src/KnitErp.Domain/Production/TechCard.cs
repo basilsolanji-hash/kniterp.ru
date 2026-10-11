@@ -267,3 +267,65 @@ public sealed class TechCardLine
         WastePercent = wastePercent;
     }
 }
+
+/// <summary>
+/// Многоуровневая спецификация (D90, дополнение «сборка из полуфабрикатов»): полуфабрикат с действующей техкартой раскрывается
+/// до материалов его карты — так видно, сколько пряжи нужно на изделие через все уровни. Циклы (изделие в своём же составе)
+/// не раскрываются — техкарты их не допускают, а здесь это защита от зацикливания.
+/// </summary>
+public static class BillOfMaterials
+{
+    public const int MaxDepth = 10;
+
+    /// <summary>
+    /// Потребность в материалах нижнего уровня на <paramref name="quantity"/> изделий: строки карты, для которых есть действующая
+    /// карта в <paramref name="cards"/>, заменяются их потребностью с отходом. Округление вверх — по точности единицы на каждом уровне.
+    /// </summary>
+    public static IReadOnlyDictionary<long, decimal> Explode(
+        TechCard card, decimal quantity, IReadOnlyDictionary<long, TechCard> cards, Func<long, int> precisionOf)
+    {
+        var result = new Dictionary<long, decimal>();
+        Walk(card, quantity, 0, [card.ItemId]);
+        return result;
+
+        void Walk(TechCard current, decimal qty, int depth, HashSet<long> path)
+        {
+            foreach (var (itemId, _, gross) in current.Requirement(qty, precisionOf))
+            {
+                if (depth < MaxDepth && cards.TryGetValue(itemId, out var sub) && !path.Contains(itemId))
+                {
+                    Walk(sub, gross, depth + 1, [.. path, itemId]);
+                }
+                else
+                {
+                    result[itemId] = result.GetValueOrDefault(itemId) + gross;
+                }
+            }
+        }
+    }
+
+    /// <summary>Входит ли <paramref name="productId"/> в состав <paramref name="materialId"/> на любом уровне (по картам <paramref name="linesOf"/>).</summary>
+    public static bool Contains(long materialId, long productId, Func<long, IReadOnlyCollection<long>> linesOf)
+    {
+        var seen = new HashSet<long>();
+        var queue = new Queue<long>([materialId]);
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (current == productId)
+            {
+                return true;
+            }
+
+            if (seen.Add(current))
+            {
+                foreach (var next in linesOf(current))
+                {
+                    queue.Enqueue(next);
+                }
+            }
+        }
+
+        return false;
+    }
+}
