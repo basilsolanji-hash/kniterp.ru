@@ -135,6 +135,22 @@ public sealed class TagTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         Assert.Empty(await s.Tags.MapAsync(TaggedEntity.Item, [item]));
     }
 
+    [SqlFact]
+    public async Task Document_lines_from_api_accept_only_own_items_with_valid_precision()
+    {
+        // Аудит 11.10.2026 (D109, INPUT-01): документ со строками (API, заказы) не принимает чужую номенклатуру.
+        var (org, yarn, _, item) = await SetUpAsync();
+        var (_, _, _, foreign) = await SetUpAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var supplier = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Нить»", null, null, true, false, null));
+        var reason = await s.Db.OperationReasons.Where(r => r.OrganizationId == org.OrganizationId && r.Kind == StockOperationKind.Receipt).Select(r => r.Id).FirstAsync();
+        var header = new StockDocumentHeader(yarn, null, supplier, reason, new DateOnly(2026, 10, 11), null);
+        await Assert.ThrowsAsync<NotFoundException>(() => s.Documents.CreateWithLinesAsync(StockOperationKind.Receipt, header, [(item, 1m), (foreign, 5m)]));
+        Assert.Equal("stock.quantity.precision",
+            (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Documents.CreateWithLinesAsync(StockOperationKind.Receipt, header, [(item, 1.1234567m)]))).Code);
+        Assert.True(await s.Documents.CreateWithLinesAsync(StockOperationKind.Receipt, header, [(item, 2.5m)]) > 0);
+    }
+
     private async Task<(CreatedOrganization Org, long Yarn, long Shop, long Item)> SetUpAsync()
     {
         var inn = NextValidInn();

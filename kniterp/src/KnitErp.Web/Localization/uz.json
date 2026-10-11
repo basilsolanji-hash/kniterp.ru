@@ -2458,5 +2458,6 @@
   "Упоминания меня": "Meni eslatishlar",
   "Упомянуть коллегу": "Hamkasbni eslatish",
   "Упомянуть можно не больше {0} коллег.": "{0} tadan ortiq hamkasbni eslatib bo'lmaydi.",
-  "Этот объект нельзя обсуждать.": "Bu obyektni muhokama qilib bo'lmaydi."
+  "Этот объект нельзя обсуждать.": "Bu obyektni muhokama qilib bo'lmaydi.",
+  "Пользователь работает и в другой организации: пароль и вход он восстанавливает сам — «Забыли пароль» или аварийная процедура.": "Foydalanuvchi boshqa tashkilotda ham ishlaydi: parol va kirishni o'zi tiklaydi — «Parolni unutdingizmi» yoki favqulodda tartib."
 }
