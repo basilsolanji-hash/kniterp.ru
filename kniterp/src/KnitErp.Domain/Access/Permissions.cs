@@ -64,6 +64,12 @@ public static class Permissions
     /// <summary>D600 (CRM): выгрузка в Excel (персональные данные контактов).</summary>
     public const string CrmExport = "crm.export";
 
+    /// <summary>D640 (CRM): приём заявок через API v1 (токен сайта или маркетплейса) и событий телефонии.</summary>
+    public const string CrmLeadsCreate = "crm.leads.create";
+
+    /// <summary>D615 (CRM): рассылки контактам с согласием на рекламу.</summary>
+    public const string CrmMailing = "crm.mailing";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -110,6 +116,8 @@ public static class Permissions
         [CrmAll] = "CRM: все лиды и сделки, переназначение ответственного",
         [CrmSettings] = "CRM: воронки, этапы, справочники и план",
         [CrmExport] = "CRM: выгрузка в Excel",
+        [CrmLeadsCreate] = "CRM: приём заявок и звонков через API",
+        [CrmMailing] = "CRM: рассылки клиентам",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;

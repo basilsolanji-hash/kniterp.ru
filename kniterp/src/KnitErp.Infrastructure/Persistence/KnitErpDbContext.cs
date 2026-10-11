@@ -124,6 +124,12 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Crm.CrmDeal> CrmDeals => Set<KnitErp.Domain.Crm.CrmDeal>();
     public DbSet<KnitErp.Domain.Crm.CrmDealStageHistory> CrmDealStageHistory => Set<KnitErp.Domain.Crm.CrmDealStageHistory>();
     public DbSet<KnitErp.Domain.Crm.CrmDealOrder> CrmDealOrders => Set<KnitErp.Domain.Crm.CrmDealOrder>();
+    public DbSet<KnitErp.Domain.Crm.CrmActivity> CrmActivities => Set<KnitErp.Domain.Crm.CrmActivity>();
+    public DbSet<KnitErp.Domain.Crm.CrmOffer> CrmOffers => Set<KnitErp.Domain.Crm.CrmOffer>();
+    public DbSet<KnitErp.Domain.Crm.CrmSettings> CrmSettings => Set<KnitErp.Domain.Crm.CrmSettings>();
+    public DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans => Set<KnitErp.Domain.Crm.CrmPlan>();
+    public DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings => Set<KnitErp.Domain.Crm.CrmMailing>();
+    public DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks => Set<KnitErp.Domain.Crm.CrmExternalLink>();
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней

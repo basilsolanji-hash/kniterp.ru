@@ -1,0 +1,47 @@
+@page "/account/crm-unsubscribe/{Token}"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout AccountLayout
+@inject IKnitErpDbContextFactory Factory
+@inject IClock Clock
+
+@*
+    D615: отписка от рассылок по ссылке из письма — без входа. Подтверждение кнопкой (POST), а не сразу по переходу: почтовые сканеры
+    открывают ссылки сами и не должны отписывать человека. Ответ одинаковый для любого ключа — по нему нельзя узнать, есть ли контакт.
+*@
+<PageTitle>@L("Отписка от рассылки") — knitERP</PageTitle>
+<h1>@L("Отписка от рассылки")</h1>
+@if (_done)
+{
+    <div class="flash" role="status">@L("Готово: письма с предложениями больше не придут. Деловая переписка по вашим заказам сохранится.")</div>
+}
+else
+{
+    <p class="muted">@L("Нажмите кнопку, чтобы больше не получать рекламные письма.")</p>
+    <form method="post" @formname="crm-unsubscribe" @onsubmit="UnsubscribeAsync">
+        <AntiforgeryToken />
+        <input type="hidden" name="Confirm" value="1" />
+        <button type="submit">@L("Отписаться")</button>
+    </form>
+}
+
+@code {
+    [Parameter]
+    public string Token { get; set; } = string.Empty;
+
+    [SupplyParameterFromForm]
+    public string? Confirm { get; set; }
+
+    private bool _done;
+
+    private async Task UnsubscribeAsync()
+    {
+        if (Guid.TryParseExact(Token, "N", out var token))
+        {
+            await using var db = Factory.Create();
+            await KnitErp.Application.Crm.CrmMailingService.UnsubscribeAsync(db, token, Clock.UtcNow);
+        }
+
+        _done = true;
+    }
+}

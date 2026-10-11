@@ -324,6 +324,10 @@ public static class WebhookEvents
         [Audit.AuditActions.PurchaseOrderCreated] = ("purchase_order.created", "Заказ поставщику создан"),
         [Audit.AuditActions.StockDocumentReversed] = ("stock_document.reversed", "Складской документ сторнирован"),
         [Audit.AuditActions.StockBatchCreated] = ("stock_batch.created", "Партия заведена"),
+        // D642 (сессия CRM): события CRM.
+        [Audit.AuditActions.CrmLeadCreated] = ("crm.lead.created", "Лид создан"),
+        [Audit.AuditActions.CrmDealWon] = ("crm.deal.won", "Сделка выиграна"),
+        [Audit.AuditActions.CrmDealLost] = ("crm.deal.lost", "Сделка проиграна"),
     };
 
     public static IReadOnlyList<(string Event, string Title)> All => ByAuditAction.Values.OrderBy(v => v.Event, StringComparer.Ordinal).ToList();

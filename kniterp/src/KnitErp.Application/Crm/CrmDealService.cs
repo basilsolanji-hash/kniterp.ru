@@ -60,6 +60,9 @@ public sealed record CrmDealDto(
     public decimal? Amount => CanSeeAmounts ? Values.Amount : null;
 }
 
+/// <summary>Предложение следующего шага после смены этапа (D622): задача с темой и сроком — пользователь подтверждает.</summary>
+public sealed record CrmNextStepDto(long DealId, string Subject, int Days, DateTime DueAtUtc);
+
 public sealed record CrmItemOptionDto(long Id, string Code, string Name, string UnitSymbol, decimal? Price);
 
 /// <summary>
@@ -193,6 +196,11 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await ValidateAsync(ctx, values, null, ct);
         var stage = await FirstStageAsync(ctx, pipelineId, ct);
         var currency = await CrmCommon.CurrencyAsync(db, ctx, ct);
+        if (values.ExpectedCloseDate is null)
+        {
+            values = values with { ExpectedCloseDate = await CrmEvents.DefaultCloseDateAsync(db, ctx.OrganizationId, clock.UtcNow, ct) };
+        }
+
         CrmDeal.Create(ctx.OrganizationId, "С-0", values, stage, currency, ctx.UserId, clock.UtcNow); // проверка полей до выдачи номера
         await using var tx = await db.BeginTransactionAsync(ct);
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, CrmDeal.NumberPrefix, ct);
@@ -228,7 +236,8 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
     }
 
     /// <summary>Смена этапа (канбан, кнопки «←/→», лента этапов). Проигрыш — с причиной. Запись в историю этапов и журнал.</summary>
-    public async Task MoveAsync(long id, long stageId, byte[] rowVersion, long? lossReasonId = null, string? lossComment = null, CancellationToken ct = default)
+    public async Task<CrmNextStepDto?> MoveAsync(long id, long stageId, byte[] rowVersion, long? lossReasonId = null, string? lossComment = null,
+        CancellationToken ct = default)
     {
         var (ctx, deal) = await LoadForEditAsync(id, rowVersion, ct);
         var stage = await db.CrmStages.AsNoTracking().SingleOrDefaultAsync(s => s.Id == stageId && s.OrganizationId == ctx.OrganizationId, ct)
@@ -248,7 +257,25 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
         db.CrmDealStageHistory.Add(entry);
         Audit(ctx, AuditActions.CrmDealStageChanged, id, from, stage.Name, deal.LossComment ?? deal.Number);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await CrmEvents.AfterStageChangedAsync(db, ctx, deal, stage, clock.UtcNow, currentUser.CorrelationId, ct);
         await db.SaveOrConflictAsync(ct);
+        await tx.CommitAsync(ct);
+        return await NextStepAsync(ctx, deal, stage, ct);
+    }
+
+    /// <summary>D622: правило следующего шага этапа, если оно есть, включено в настройках и у сделки нет открытой задачи с той же темой.</summary>
+    private async Task<CrmNextStepDto?> NextStepAsync(AccessContext ctx, CrmDeal deal, CrmStage stage, CancellationToken ct)
+    {
+        if (stage.NextStepDays is not { } days || stage.NextStepSubject is not { } subject || !(await CrmEvents.SettingsAsync(db, ctx.OrganizationId, ct)).NextStepSuggestions
+            || await db.CrmActivities.AnyAsync(a => a.OrganizationId == ctx.OrganizationId && a.Target == CrmTarget.Deal && a.TargetId == deal.Id && !a.IsDone
+                                                    && a.Subject == subject, ct))
+        {
+            return null;
+        }
+
+        var tz = await CrmEvents.TimeZoneAsync(db, ctx.OrganizationId, ct);
+        return new CrmNextStepDto(deal.Id, subject, days, CrmEvents.DueInDays(clock.UtcNow, tz, days));
     }
 
     public async Task SetProbabilityAsync(long id, int probability, byte[] rowVersion, CancellationToken ct = default)
@@ -397,6 +424,40 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var ctx = await guard.DemandAsync(Permissions.CrmEdit, ct);
         var deal = await CrmAccess.Deals(db, ctx).AsNoTracking().Include(d => d.Lines).SingleOrDefaultAsync(d => d.Id == id, ct)
                    ?? throw new NotFoundException("Сделка");
+        return await CreateOrderCoreAsync(ctx, deal, warehouseId, deal.Lines.Select(l => (l.ItemId, l.Quantity, l.Price)).ToList(), null, ct);
+    }
+
+    /// <summary>
+    /// «Заказ по КП» (D625): строки и цены — из принятого КП (снимок), а не из текущих позиций сделки. Дальше заказ подтверждается
+    /// и передаётся в производство из карточки сделки.
+    /// </summary>
+    public async Task<long> CreateOrderFromOfferAsync(long offerId, long warehouseId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.CrmEdit, ct);
+        var offer = await db.CrmOffers.AsNoTracking().Include(o => o.Lines).SingleOrDefaultAsync(o => o.Id == offerId && o.OrganizationId == ctx.OrganizationId, ct)
+                    ?? throw new NotFoundException("КП");
+        var deal = await CrmAccess.Deals(db, ctx).AsNoTracking().SingleOrDefaultAsync(d => d.Id == offer.DealId, ct) ?? throw new NotFoundException("КП");
+        return await CreateOrderCoreAsync(ctx, deal, warehouseId, offer.Lines.Select(l => (l.ItemId, l.Quantity, l.Price)).ToList(), offer.Number, ct);
+    }
+
+    /// <summary>Подтвердить заказ покупателя по сделке, не уходя из карточки (права — модуля продаж). Сделка станет «Выиграна» (D607).</summary>
+    public async Task ConfirmOrderAsync(long id, long salesOrderId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.CrmView, ct);
+        _ = await CrmAccess.Deals(db, ctx).AsNoTracking().SingleOrDefaultAsync(d => d.Id == id, ct) ?? throw new NotFoundException("Сделка");
+        if (!await db.CrmDealOrders.AnyAsync(l => l.OrganizationId == ctx.OrganizationId && l.DealId == id && l.SalesOrderId == salesOrderId, ct))
+        {
+            throw new NotFoundException("Заказ покупателя");
+        }
+
+        var order = await sales.GetOrderAsync(salesOrderId, ct);
+        await sales.ConfirmOrderAsync(salesOrderId, order.RowVersion, ct);
+    }
+
+    private async Task<long> CreateOrderCoreAsync(AccessContext ctx, CrmDeal deal, long warehouseId, IReadOnlyList<(long ItemId, decimal Quantity, decimal Price)> lines,
+        string? offerNumber, CancellationToken ct)
+    {
+        var id = deal.Id;
         if (deal.Outcome == CrmDealOutcome.Lost)
         {
             throw new BusinessRuleException("crm.deal.lost", "Сделка проиграна — заказ по ней не создаётся.");
@@ -407,18 +468,22 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, tz));
         await using var tx = await db.BeginTransactionAsync(ct);
         var orderId = await sales.CreateOrderAsync(new SalesOrderHeader(today, deal.CounterpartyId, warehouseId, deal.ExpectedCloseDate is { } d && d >= today ? d : null,
-            null, true, $"Из сделки {deal.Number}"), ct);
+            null, true, offerNumber is null ? $"Из сделки {deal.Number}" : $"Из сделки {deal.Number} по {offerNumber}"), ct);
         var order = await sales.GetOrderAsync(orderId, ct);
         await sales.SetOrderDetailsAsync(orderId, new SalesOrderDetails(null, deal.ProjectId, deal.ChannelId, null, deal.ResponsibleUserId),
             new Dictionary<long, string?>(), order.RowVersion, ct);
-        foreach (var line in deal.Lines)
+        foreach (var line in lines)
         {
             var vat = options.Items.FirstOrDefault(i => i.Id == line.ItemId)?.VatPercent;
             await sales.SetOrderLineAsync(orderId, line.ItemId, line.Quantity, line.Price, vat, (await sales.GetOrderAsync(orderId, ct)).RowVersion, ct);
         }
 
         db.CrmDealOrders.Add(CrmDealOrder.Create(ctx.OrganizationId, id, orderId, ctx.UserId, clock.UtcNow));
-        Audit(ctx, AuditActions.CrmDealOrderCreated, id, null, order.Number, deal.Number);
+        Audit(ctx, AuditActions.CrmDealOrderCreated, id, null, order.Number, offerNumber ?? deal.Number);
+        await db.SaveChangesAsync(ct);
+        // Б2 (D665): создан заказ — сделка «Согласование» (только вперёд).
+        var tracked = await db.CrmDeals.SingleAsync(d => d.Id == id, ct);
+        await CrmEvents.AdvanceToAsync(db, ctx, tracked, "Согласование", clock.UtcNow, currentUser.CorrelationId, $"создан заказ {order.Number}", ct);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return orderId;
@@ -450,6 +515,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var order = await db.SalesOrders.AsNoTracking().Where(o => o.Id == orderId).Select(o => o.Number).SingleAsync(ct);
         db.AuditEntries.Add(AuditEntry.Create(nowUtc, ctx.OrganizationId, ctx.UserId, AuditActions.CrmDealStageChanged, nameof(CrmDeal), id.ToString(),
             from, won.Name, $"заказ {order} подтверждён", correlationId));
+        await CrmEvents.AfterStageChangedAsync(db, ctx, deal, won, nowUtc, correlationId, ct);
     }
 
     /// <summary>Заказы по сделке из модуля продаж — только с правом «Продажи: просмотр»; суммы скрывает сам модуль продаж (D91).</summary>

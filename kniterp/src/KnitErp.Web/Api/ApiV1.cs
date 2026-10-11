@@ -357,6 +357,7 @@ public static class ApiV1
             .WithSummary("Типы событий для вебхуков");
 
         api.MapCatalogApi(); // D307 (сессия 4): каталог — отдельным файлом ApiCatalog.cs
+        api.MapCrmApi(); // D640 (сессия CRM): заявки, звонки, сделки — файл ApiCrm.cs
     }
 
     private static Page<T> Paged<T>(IReadOnlyList<T> all, int? offset, int? limit)
@@ -407,7 +408,7 @@ public static class ApiV1
     }
 
     /// <summary>Несколько шагов одного запроса — одной транзакцией; сервисы присоединяются к ней.</summary>
-    private static async ValueTask<object?> TransactionAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    internal static async ValueTask<object?> TransactionAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var db = context.HttpContext.RequestServices.GetRequiredService<IKnitErpDbContext>();
         await using var tx = await db.BeginTransactionAsync(context.HttpContext.RequestAborted);
@@ -425,7 +426,7 @@ public static class ApiV1
     /// ключом и тем же телом возвращает сохранённый ответ (заголовок Idempotent-Replayed), с другим телом — 422. Одновременные
     /// повторы идут по очереди (блокировка по ключу). Ошибки не сохраняются — запрос можно повторить.
     /// </summary>
-    private static async ValueTask<object?> IdempotencyAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    internal static async ValueTask<object?> IdempotencyAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var http = context.HttpContext;
         var key = http.Request.Headers["Idempotency-Key"].ToString().Trim();

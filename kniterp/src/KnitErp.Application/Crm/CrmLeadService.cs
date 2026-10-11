@@ -1,5 +1,6 @@
 using KnitErp.Application.Access;
 using KnitErp.Application.Common;
+using KnitErp.Application.Workspace;
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Audit;
 using KnitErp.Domain.Catalog;
@@ -46,7 +47,7 @@ public sealed record CrmQualifyResult(long DealId, long ContactId, long Counterp
 /// (crm.all) и квалификация — одна транзакция: контакт + контрагент + сделка, лид остаётся в истории со ссылками.
 /// Без crm.all видны только свои лиды; чужой — «не найдено».
 /// </summary>
-public sealed class CrmLeadService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)
+public sealed class CrmLeadService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IRequisitesLookup requisites)
 {
     public async Task<CrmOptionsDto> OptionsAsync(CancellationToken ct = default) =>
         await CrmCommon.OptionsAsync(db, await guard.DemandAsync(Permissions.CrmView, ct), ct);
@@ -358,7 +359,31 @@ public sealed class CrmLeadService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         var country = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.CountryCode).SingleAsync(ct);
-        var created = Counterparty.Create(ctx.OrganizationId, name, lead.Inn, null, false, true, $"Создан из лида {lead.Number}", country);
+        // А2 (D662): реквизиты нового покупателя — из ЕГРЮЛ/ЕГРИП по ИНН лида, если справочник подключён; недоступен — как ввёл менеджер.
+        string? kpp = null, address = null;
+        if (lead.Inn is { } leadInn && requisites.IsConfigured && country == KnitErp.Domain.Organizations.Countries.Russia
+            && (KnitErp.Domain.Organizations.RussianRequisites.IsValidLegalEntityInn(leadInn) || KnitErp.Domain.Organizations.RussianRequisites.IsValidPersonInn(leadInn)))
+        {
+            try
+            {
+                if (await requisites.FindByInnAsync(leadInn, ct) is { } r)
+                {
+                    name = r.ShortName.Length <= Counterparty.NameMaxLength ? r.ShortName : name;
+                    kpp = r.Kpp;
+                    address = r.Address;
+                }
+            }
+            catch (ExternalServiceUnavailableException)
+            {
+            }
+        }
+
+        var created = Counterparty.Create(ctx.OrganizationId, name, lead.Inn, kpp, false, true, $"Создан из лида {lead.Number}", country);
+        if (address is not null)
+        {
+            created.SetAddress(address);
+        }
+
         db.Counterparties.Add(created);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.CatalogCreated, created.Id, null, created.Inn is null ? created.Name : $"{created.Name}, ИНН {created.Inn}",

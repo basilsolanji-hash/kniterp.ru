@@ -207,6 +207,16 @@ public sealed class CrmLead
         ClosedAtUtc = nowUtc;
     }
 
+    /// <summary>Удаление ПДн по запросу (D613): контактные данные лида заменяются; история и суммы остаются.</summary>
+    public void ErasePersonalData()
+    {
+        ContactName = ContactName is null ? null : CrmContact.ErasedName;
+        Phone = null;
+        Email = null;
+        Messenger = null;
+        Need = Need is null ? null : CrmContact.ErasedName;
+    }
+
     public void EnsureOpen()
     {
         if (IsClosed)

@@ -344,6 +344,7 @@ app.MapGet("/employees.xlsx", (KnitErp.Application.Structure.EmployeeExchangeSer
     FileOrForbid(() => exchange.ExportAsync(ct), $"sotrudniki-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
 app.MapGet("/employees-template.xlsx", (KnitErp.Application.Structure.EmployeeExchangeService exchange, CancellationToken ct) =>
     FileOrForbid(() => exchange.TemplateAsync(ct), "shablon-sotrudnikov.xlsx"));
+KnitErp.Web.Crm.CrmEndpoints.MapCrm(app); // D614, D630, D645 (сессия CRM): выгрузки и шаблоны CRM
 
 // Табель подразделения за месяц в Excel (D209): право и область — в сервисе.
 app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, KnitErp.Application.Hr.TimesheetService timesheets, CancellationToken ct) =>

@@ -227,4 +227,19 @@ public static class AuditActions
     public const string CrmContactCreated = "crm.contact.created";
     public const string CrmContactChanged = "crm.contact.changed";
     public const string CrmSettingsChanged = "crm.settings.changed";
+    public const string CrmDealWon = "crm.deal.won";
+    public const string CrmDealLost = "crm.deal.lost";
+    public const string CrmContactConsent = "crm.contact.consent";
+    public const string CrmContactErased = "crm.contact.erased";
+    public const string CrmExported = "crm.exported";
+    public const string CrmActivityCreated = "crm.activity.created";
+    public const string CrmActivityChanged = "crm.activity.changed";
+    public const string CrmActivityDone = "crm.activity.done";
+    public const string CrmActivityReopened = "crm.activity.reopened";
+    public const string CrmOfferCreated = "crm.offer.created";
+    public const string CrmEmailSent = "crm.email.sent";
+    public const string CrmMailingSent = "crm.mailing.sent";
+    public const string CrmUnsubscribed = "crm.contact.unsubscribed";
+    public const string CrmImported = "crm.imported";
+    public const string CrmPlanChanged = "crm.plan.changed";
 }

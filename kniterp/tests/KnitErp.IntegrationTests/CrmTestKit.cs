@@ -13,6 +13,13 @@ namespace KnitErp.IntegrationTests;
 public sealed class CrmServices(KnitErpDbContext db, CrmSettingsService settings, CrmLeadService leads, CrmDealService deals, CrmContactService contacts,
     SalesService sales) : IAsyncDisposable
 {
+    public required CrmActivityService Activities { get; init; }
+    public required CrmOfferService Offers { get; init; }
+    public required CrmReportService Reports { get; init; }
+    public required CrmIntakeService Intake { get; init; }
+    public required CrmMailingService Mailings { get; init; }
+    public required CrmImportService Import { get; init; }
+
     public KnitErpDbContext Db { get; } = db;
     public CrmSettingsService Settings { get; } = settings;
     public CrmLeadService Leads { get; } = leads;
@@ -30,14 +37,26 @@ public static class CrmTestKit
     private static int _counterpartySeed = 961_000_000;
 
     public static CrmServices Crm(this SqlTestHost host, long userId, long organizationId,
+        params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) => host.Crm(userId, organizationId, null, interceptors);
+
+    /// <summary>Сервисы CRM от имени токена API: apiScope ограничивает права (D88).</summary>
+    public static CrmServices Crm(this SqlTestHost host, long userId, long organizationId, IReadOnlyCollection<string>? apiScope,
         params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
     {
         var db = interceptors.Length == 0 ? host.NewDb() : host.NewDb(interceptors);
-        var user = new TestUser { UserId = userId, OrganizationId = organizationId };
+        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ApiScope = apiScope };
         var guard = new AccessGuard(db, user, host.Clock);
         var sales = new SalesService(db, guard, user, host.Clock, new StockDocumentService(db, guard, SqlTestHost.Spreadsheet, user, host.Clock));
-        return new CrmServices(db, new CrmSettingsService(db, guard, user, host.Clock), new CrmLeadService(db, guard, user, host.Clock),
-            new CrmDealService(db, guard, user, host.Clock, sales), new CrmContactService(db, guard, user, host.Clock), sales);
+        return new CrmServices(db, new CrmSettingsService(db, guard, user, host.Clock), new CrmLeadService(db, guard, user, host.Clock, new FakeRequisitesLookup()),
+            new CrmDealService(db, guard, user, host.Clock, sales), new CrmContactService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet), sales)
+        {
+            Activities = new CrmActivityService(db, guard, user, host.Clock, host.Mail),
+            Offers = new CrmOfferService(db, guard, user, host.Clock, host.Mail),
+            Reports = new CrmReportService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet),
+            Intake = new CrmIntakeService(db, guard, user, host.Clock),
+            Mailings = new CrmMailingService(db, guard, user, host.Clock, host.Mail),
+            Import = new CrmImportService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet),
+        };
     }
 
     public static async Task<CreatedOrganization> CreateCrmOrganizationAsync(this SqlTestHost host)

@@ -43,6 +43,7 @@ internal sealed class CrmStageConfiguration : IEntityTypeConfiguration<CrmStage>
         b.Property(x => x.Name).HasMaxLength(CrmStage.NameMaxLength).IsRequired();
         b.Property(x => x.Color).HasColumnType("varchar(16)").IsRequired();
         b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.NextStepSubject).HasMaxLength(CrmActivity.SubjectMaxLength);
         b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.IsFinal);
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
@@ -144,7 +145,11 @@ internal sealed class CrmContactConfiguration : IEntityTypeConfiguration<CrmCont
 {
     public void Configure(EntityTypeBuilder<CrmContact> b)
     {
-        b.ToTable("crm_contacts");
+        b.ToTable("crm_contacts", t =>
+        {
+            t.HasCheckConstraint("ck_crm_contacts_basis", "[ProcessingBasis] IN (1, 2, 3)");
+            t.HasCheckConstraint("ck_crm_contacts_marketing", "[MarketingConsent] = 0 OR [MarketingConsentDate] IS NOT NULL");
+        });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.FullName).HasMaxLength(CrmContact.NameMaxLength).IsRequired();
@@ -154,9 +159,17 @@ internal sealed class CrmContactConfiguration : IEntityTypeConfiguration<CrmCont
         b.Property(x => x.Messenger).HasMaxLength(CrmText.MessengerMaxLength);
         b.Property(x => x.Comment).HasMaxLength(CrmContact.CommentMaxLength);
         b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ErasedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ProcessingBasis).HasConversion<byte>().HasDefaultValue(CrmProcessingBasis.Contract);
+        b.Property(x => x.BasisNote).HasMaxLength(CrmContact.BasisNoteMaxLength);
+        b.Property(x => x.UnsubscribeToken).HasDefaultValueSql("NEWID()");
         b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.IsErased);
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_crm_contacts_org_id");
+        b.HasIndex(x => x.UnsubscribeToken).IsUnique().HasDatabaseName("ux_crm_contacts_unsubscribe");
+        b.HasMany(x => x.Channels).WithOne().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Cascade);
+        b.Navigation(x => x.Channels).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_channels");
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CounterpartyId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_crm_contacts_counterparty");
@@ -314,5 +327,193 @@ internal sealed class CrmDealOrderConfiguration : IEntityTypeConfiguration<CrmDe
             .HasConstraintName("fk_crm_deal_orders_created_by");
         b.HasIndex(x => x.SalesOrderId).IsUnique().HasDatabaseName("ux_crm_deal_orders_sales_order");
         b.HasIndex(x => new { x.OrganizationId, x.DealId }).HasDatabaseName("ix_crm_deal_orders_deal");
+    }
+}
+
+internal sealed class CrmContactChannelConfiguration : IEntityTypeConfiguration<CrmContactChannel>
+{
+    public void Configure(EntityTypeBuilder<CrmContactChannel> b)
+    {
+        b.ToTable("crm_contact_channels", t => t.HasCheckConstraint("ck_crm_contact_channels_kind", "[Kind] IN (1, 2, 3)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.Value).HasMaxLength(CrmText.EmailMaxLength).IsRequired();
+        b.Property(x => x.Label).HasMaxLength(CrmContact.ChannelLabelMaxLength);
+        b.HasIndex(x => new { x.ContactId, x.Kind, x.Value }).IsUnique().HasDatabaseName("ux_crm_contact_channels_value");
+        b.HasIndex(x => new { x.Kind, x.Value }).HasDatabaseName("ix_crm_contact_channels_kind_value");
+    }
+}
+
+internal sealed class CrmActivityConfiguration : IEntityTypeConfiguration<CrmActivity>
+{
+    public void Configure(EntityTypeBuilder<CrmActivity> b)
+    {
+        b.ToTable("crm_activities", t =>
+        {
+            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 8 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 5");
+            t.HasCheckConstraint("ck_crm_activities_done",
+                "([IsDone] = 1 AND [DoneAtUtc] IS NOT NULL AND [DoneByUserId] IS NOT NULL) OR ([IsDone] = 0 AND [DoneAtUtc] IS NULL AND [DoneByUserId] IS NULL)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.Target).HasConversion<byte>();
+        b.Property(x => x.Source).HasConversion<byte>();
+        b.Property(x => x.Subject).HasMaxLength(CrmActivity.SubjectMaxLength).IsRequired();
+        b.Property(x => x.Text).HasMaxLength(CrmActivity.TextMaxLength);
+        b.Property(x => x.Result).HasMaxLength(CrmActivity.ResultMaxLength);
+        b.Property(x => x.ExternalRef).HasMaxLength(CrmActivity.ExternalRefMaxLength);
+        b.Property(x => x.DueAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.DoneAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.AssigneeUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_assignee");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_created_by");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DoneByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_done_by");
+        b.HasOne<CrmOffer>().WithMany().HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_offer");
+        b.HasIndex(x => new { x.OrganizationId, x.Target, x.TargetId, x.CreatedAtUtc }).HasDatabaseName("ix_crm_activities_target");
+        b.HasIndex(x => new { x.OrganizationId, x.AssigneeUserId, x.IsDone, x.DueAtUtc }).HasDatabaseName("ix_crm_activities_assignee_due");
+        b.HasIndex(x => new { x.OrganizationId, x.Source, x.ExternalRef }).HasFilter("[ExternalRef] IS NOT NULL").IsUnique()
+            .HasDatabaseName("ux_crm_activities_external");
+    }
+}
+
+internal sealed class CrmOfferConfiguration : IEntityTypeConfiguration<CrmOffer>
+{
+    public void Configure(EntityTypeBuilder<CrmOffer> b)
+    {
+        // КП не меняется после создания (D624): изменение и удаление запрещает триггер.
+        b.ToTable("crm_offers", t =>
+        {
+            t.HasTrigger("tr_crm_offers_immutable");
+            t.HasCheckConstraint("ck_crm_offers_dates", "[ValidUntil] >= [OfferDate] AND [Amount] >= 0");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Number).HasMaxLength(30).IsRequired();
+        b.Property(x => x.Terms).HasMaxLength(CrmOffer.TermsMaxLength);
+        b.Property(x => x.CurrencyCode).HasColumnType("char(3)").IsRequired();
+        b.Property(x => x.Amount).HasColumnType("decimal(19,4)");
+        b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_crm_offers_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.Number }).IsUnique().HasDatabaseName("ux_crm_offers_org_number");
+        b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DealId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offers_deal");
+        b.HasOne<PriceType>().WithMany().HasForeignKey(x => x.PriceTypeId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offers_price_type");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offers_created_by");
+        b.HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Restrict);
+        b.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_lines");
+    }
+}
+
+internal sealed class CrmOfferLineConfiguration : IEntityTypeConfiguration<CrmOfferLine>
+{
+    public void Configure(EntityTypeBuilder<CrmOfferLine> b)
+    {
+        b.ToTable("crm_offer_lines", t =>
+        {
+            t.HasTrigger("tr_crm_offer_lines_immutable");
+            t.HasCheckConstraint("ck_crm_offer_lines_values", "[Quantity] > 0 AND [Price] >= 0 AND [Amount] >= 0");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Code).HasMaxLength(Item.CodeMaxLength).IsRequired();
+        b.Property(x => x.Name).HasMaxLength(Item.NameMaxLength).IsRequired();
+        b.Property(x => x.UnitSymbol).HasMaxLength(20).IsRequired();
+        b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.Price).HasColumnType("decimal(19,4)");
+        b.Property(x => x.Amount).HasColumnType("decimal(19,4)");
+        b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offer_lines_item");
+        b.HasIndex(x => new { x.OfferId, x.LineNo }).IsUnique().HasDatabaseName("ux_crm_offer_lines_no");
+    }
+}
+
+internal sealed class CrmSettingsConfiguration : IEntityTypeConfiguration<CrmSettings>
+{
+    public void Configure(EntityTypeBuilder<CrmSettings> b)
+    {
+        b.ToTable("crm_settings", t => t.HasCheckConstraint("ck_crm_settings_values",
+            "[AssignMode] IN (1, 2) AND [PlanFact] IN (1, 2) AND [StaleLeadDays] BETWEEN 1 AND 90 AND [OfferValidDays] BETWEEN 1 AND 365"
+            + " AND ([RepeatSaleDays] IS NULL OR [RepeatSaleDays] BETWEEN 1 AND 730)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.AssignMode).HasConversion<byte>();
+        b.Property(x => x.PlanFact).HasConversion<byte>();
+        b.Property(x => x.OfferTerms).HasMaxLength(CrmSettings.OfferTermsMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Values);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DefaultResponsibleUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_settings_default_user");
+        b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_crm_settings_org");
+    }
+}
+
+internal sealed class CrmPlanConfiguration : IEntityTypeConfiguration<CrmPlan>
+{
+    public void Configure(EntityTypeBuilder<CrmPlan> b)
+    {
+        b.ToTable("crm_plans", t => t.HasCheckConstraint("ck_crm_plans_values", "[Month] BETWEEN 1 AND 12 AND [Year] BETWEEN 2000 AND 2100 AND [Amount] >= 0"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Amount).HasColumnType("decimal(19,4)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_plans_user");
+        b.HasOne<CrmPipeline>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PipelineId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_plans_pipeline");
+        b.HasIndex(x => new { x.OrganizationId, x.Year, x.Month, x.UserId, x.PipelineId }).IsUnique().HasDatabaseName("ux_crm_plans_period");
+    }
+}
+
+internal sealed class CrmMailingConfiguration : IEntityTypeConfiguration<CrmMailing>
+{
+    public void Configure(EntityTypeBuilder<CrmMailing> b)
+    {
+        b.ToTable("crm_mailings", t => t.HasCheckConstraint("ck_crm_mailings_status", "[Status] IN (1, 2)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Subject).HasMaxLength(CrmMailing.SubjectMaxLength).IsRequired();
+        b.Property(x => x.Text).HasMaxLength(CrmMailing.TextMaxLength).IsRequired();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.SentAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_created_by");
+        b.HasOne<KnitErp.Domain.Tagging.Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_tag");
+        b.HasMany(x => x.Recipients).WithOne().HasForeignKey(x => x.MailingId).OnDelete(DeleteBehavior.Cascade);
+        b.Navigation(x => x.Recipients).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_recipients");
+        b.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc }).HasDatabaseName("ix_crm_mailings_org");
+    }
+}
+
+internal sealed class CrmMailingRecipientConfiguration : IEntityTypeConfiguration<CrmMailingRecipient>
+{
+    public void Configure(EntityTypeBuilder<CrmMailingRecipient> b)
+    {
+        b.ToTable("crm_mailing_recipients");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Email).HasMaxLength(CrmText.EmailMaxLength).IsRequired();
+        b.HasOne<CrmContact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailing_recipients_contact");
+        b.HasIndex(x => new { x.MailingId, x.ContactId }).IsUnique().HasDatabaseName("ux_crm_mailing_recipients");
+    }
+}
+
+internal sealed class CrmExternalLinkConfiguration : IEntityTypeConfiguration<CrmExternalLink>
+{
+    public void Configure(EntityTypeBuilder<CrmExternalLink> b)
+    {
+        b.ToTable("crm_external_links", t => t.HasCheckConstraint("ck_crm_external_links_entity", "[Entity] IN (1, 2, 3)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.System).HasMaxLength(CrmExternalLink.SystemMaxLength).IsRequired();
+        b.Property(x => x.ExternalId).HasMaxLength(CrmExternalLink.ExternalIdMaxLength).IsRequired();
+        b.Property(x => x.Entity).HasConversion<byte>();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.System, x.Entity, x.ExternalId }).IsUnique().HasDatabaseName("ux_crm_external_links");
     }
 }

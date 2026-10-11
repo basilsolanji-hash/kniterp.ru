@@ -120,6 +120,8 @@ public static class RoleMatrixP0
         (Permissions.CrmAll,                  [Full, None, None, None, None, None, None, None]),
         (Permissions.CrmSettings,             [Full, Full, None, None, None, None, None, None]),
         (Permissions.CrmExport,               [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmLeadsCreate,          [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmMailing,              [Full, None, None, None, None, None, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();
@@ -225,6 +227,8 @@ public static class CrmRoleMatrix
         [Permissions.CrmAll] = Full,
         [Permissions.CrmSettings] = Full,
         [Permissions.CrmExport] = Full,
+        [Permissions.CrmLeadsCreate] = Full,
+        [Permissions.CrmMailing] = Full,
         [Permissions.SalesView] = Full,
         [Permissions.SalesEdit] = Full,
         [Permissions.PriceView] = Full,
