@@ -310,6 +310,79 @@ public sealed class StockBatchTests(SqlTestHost host) : IClassFixture<SqlTestHos
         await Assert.ThrowsAsync<NotFoundException>(() => o.Batches.LabelsAsync([], 1, receipt));
     }
 
+    [SqlFact]
+    public async Task Shipment_by_sales_order_keeps_one_dye_lot_and_warns_on_mixing()
+    {
+        var f = await SetUpAsync();
+        await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+        var a = await s.Batches.CreateAsync(f.Wool, new StockBatchData("К-1", "синий", "100", null, null, null));
+        var b = await s.Batches.CreateAsync(f.Wool, new StockBatchData("К-2", "синий", "200", null, null, null));
+        var c = await s.Batches.CreateAsync(f.Wool, new StockBatchData("К-3", "синий", "100", null, null, null));
+        var receipt = await DocAsync(s, f, StockOperationKind.Receipt, f.Yarn, null, (f.Wool, 21m));
+        await SetBatchAsync(s, receipt, f.Wool, a, 6m, null, null);
+        await SetBatchAsync(s, receipt, f.Wool, b, 10m, null, null);
+        await SetBatchAsync(s, receipt, f.Wool, c, 5m, null, null);
+        await PostAsync(s, receipt);
+
+        var customer = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Магазин»", null, null, false, true, null));
+        var so = await s.Sales.CreateOrderAsync(new KnitErp.Domain.Sales.SalesOrderHeader(Day, customer, f.Yarn, null, null, true, null));
+        await s.Sales.SetOrderLineAsync(so, f.Wool, 20m, 1000m, 20m, (await s.Sales.GetOrderAsync(so)).RowVersion);
+        await s.Sales.ConfirmOrderAsync(so, (await s.Sales.GetOrderAsync(so)).RowVersion);
+        var reason = await s.Db.OperationReasons.Where(r => r.OrganizationId == f.Org.OrganizationId && r.Kind == StockOperationKind.Shipment && !r.RequiresComment)
+            .Select(r => r.Id).FirstAsync();
+
+        async Task<long> ShipAsync(decimal qty, bool post = true)
+        {
+            var id = await s.Documents.CreateWithLinesAsync(StockOperationKind.Shipment,
+                new StockDocumentHeader(f.Yarn, null, customer, reason, Day, null, SalesOrderId: so), [(f.Wool, qty)]);
+            if (post)
+            {
+                await PostAsync(s, id);
+            }
+
+            return id;
+        }
+
+        async Task<decimal> BalanceAsync(long batch) =>
+            (await s.Batches.BalancesAsync(null, null)).Single().Batches.SingleOrDefault(x => x.BatchId == batch)?.Quantity ?? 0;
+
+        // 8 кг: крашение 100 (К-1 + К-3 = 11) — самое старое, которого хватает; FIFO по партиям внутри крашения.
+        await ShipAsync(8m);
+        Assert.Equal((0m, 10m, 3m), (await BalanceAsync(a), await BalanceAsync(b), await BalanceAsync(c)));
+        // 3 кг: то же крашение 100, что уже ушло покупателю.
+        await ShipAsync(3m);
+        Assert.Equal((10m, 0m), (await BalanceAsync(b), await BalanceAsync(c)));
+        Assert.Empty((await s.Batches.ForSalesOrderAsync(so)).Warnings);
+        // 5 кг: крашения 100 нет — берётся 200, заказ получает предупреждение о смешивании.
+        await ShipAsync(5m);
+        Assert.Equal(5m, await BalanceAsync(b));
+        var lots = await s.Batches.ForSalesOrderAsync(so);
+        Assert.Equal(16m, lots.Rows.Sum(r => r.Quantity));
+        Assert.Contains("разные крашения", Assert.Single(lots.Warnings));
+
+        // Черновик с двумя крашениями, одно из которых не уходило покупателю, — два предупреждения.
+        var d = await s.Batches.CreateAsync(f.Wool, new StockBatchData("К-4", "синий", "300", null, null, null));
+        var r2 = await DocAsync(s, f, StockOperationKind.Receipt, f.Yarn, null, (f.Wool, 2m));
+        await SetBatchAsync(s, r2, f.Wool, d, 2m, null, null);
+        await PostAsync(s, r2);
+        var draft = await ShipAsync(2m, post: false);
+        await SetBatchAsync(s, draft, f.Wool, b, 1m, null, null);
+        await SetBatchAsync(s, draft, f.Wool, d, 1m, null, null);
+        var warnings = (await s.Batches.ForDocumentAsync(draft)).Warnings!;
+        Assert.Equal(2, warnings.Count);
+        Assert.Contains(warnings, w => w.Contains("другое крашение"));
+    }
+
+    [Fact]
+    public void Single_lot_allocation_prefers_shipped_lot_then_oldest_that_covers()
+    {
+        var balances = new[] { (1L, 4m, "lot:A"), (2L, 9m, "lot:B"), (3L, 3m, "lot:A"), (4L, 2m, "batch:4") };
+        Assert.Equal([(2L, 8m)], BatchAllocation.SingleLotAllocate(8m, balances, null)!);
+        Assert.Equal([(1L, 4m), (3L, 2m)], BatchAllocation.SingleLotAllocate(6m, balances, null)!);
+        Assert.Equal([(2L, 5m)], BatchAllocation.SingleLotAllocate(5m, balances, new HashSet<string> { "lot:B" })!);
+        Assert.Null(BatchAllocation.SingleLotAllocate(10m, balances, null));
+    }
+
     private async Task<long> InviteActiveAsync(CreatedOrganization org, string roleCode, long? warehouseId)
     {
         long id;

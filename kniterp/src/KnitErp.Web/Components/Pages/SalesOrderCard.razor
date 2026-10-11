@@ -4,6 +4,7 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Domain.Common
 @inject SalesService Sales
+@inject KnitErp.Application.Warehousing.StockBatchService BatchService
 @inject KnitErp.Application.Finance.MoneyService Money
 @inject SalesStageService StageList
 @inject CustomerInvoiceService Invoices
@@ -443,6 +444,24 @@ else
         </table>
     }
 
+    @if (_lots is { Rows.Count: > 0 } lots)
+    {
+        @* D106: какие партии и крашения ушли покупателю. *@
+        <h2 style="margin-top: 20px">@L("Партии и крашения покупателю")</h2>
+        @foreach (var w in lots.Warnings)
+        {
+            <div class="flash error" role="alert">@w</div>
+        }
+        <table class="compact">
+            <tbody>
+                @foreach (var r in lots.Rows)
+                {
+                    <tr><td>@r.ItemCode</td><td>@r.BatchLabel</td><td class="num">@Quantities.Format(r.Quantity) @r.UnitSymbol</td></tr>
+                }
+            </tbody>
+        </table>
+    }
+
     @if (_order.CanSeePrices && _order.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Closed)
     {
         <h2 style="margin-top: 20px">@L("Счёт на оплату")</h2>
@@ -603,6 +622,8 @@ else
     private Task SetStageAsync(ChangeEventArgs e) => RunAsync(
         () => Sales.SetOrderStageAsync(Id, long.TryParse(e.Value?.ToString(), out var s) ? s : null, _order!.RowVersion), L("Этап заказа изменён."));
 
+    private KnitErp.Application.Warehousing.SalesOrderBatchesDto? _lots;
+
     private async Task LoadAsync()
     {
         if (_stages.Count == 0)
@@ -611,6 +632,7 @@ else
         }
 
         _order = await Sales.GetOrderAsync(Id);
+        _lots = _order.Documents.Count > 0 ? await BatchService.ForSalesOrderAsync(Id) : null;
         _invoiceId = _order.CanSeePrices ? await Invoices.FindForOrderAsync(Id) : null;
         _advances = _order.CanEdit && _order.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Closed ? await Sales.AvailableAdvancesAsync(Id) : 0;
     }
