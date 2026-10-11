@@ -199,8 +199,12 @@ internal sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Code).HasMaxLength(64).IsRequired();
-        b.Property(x => x.Name).HasMaxLength(150).IsRequired();
+        b.Property(x => x.Name).HasMaxLength(Role.NameMaxLength).IsRequired();
+        b.Property(x => x.Description).HasMaxLength(Role.DescriptionMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.IsAdministrative);
+        // D112: своя роль — с кодом «custom.…»; системные роли не архивируются.
+        b.ToTable(t => t.HasCheckConstraint("ck_roles_archive_custom", "[IsArchived] = 0 OR [IsSystem] = 0"));
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique().HasDatabaseName("ux_roles_org_code");
         b.HasMany(x => x.Permissions).WithOne().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);

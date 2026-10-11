@@ -267,6 +267,16 @@ public sealed class ProductionMaterialService(
 
             var before = ProductionOrder.StatusName(order.Status);
             order.ApplyOutput(released + command.Quantity);
+            if (order.SalesOrderId is { } salesOrder && order.Status == ProductionOrderStatus.Done
+                && !await db.ProductionOrders.AnyAsync(o => o.OrganizationId == ctx.OrganizationId && o.SalesOrderId == salesOrder && o.Id != order.Id
+                                                           && o.Status != ProductionOrderStatus.Cancelled && o.Status != ProductionOrderStatus.Done
+                                                           && o.Status != ProductionOrderStatus.Closed, ct))
+            {
+                // D110 базы: все производственные заказы по заказу покупателя выполнены — производство завершено.
+                await KnitErp.Application.Sales.StageAutomation.ApplyAsync(db, ctx, [salesOrder], clock.UtcNow, currentUser.CorrelationId, ct,
+                    KnitErp.Domain.Sales.StageTrigger.ProductionCompleted);
+            }
+
             db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ProductionOutputReleased, nameof(ProductionOrder),
                 order.Id.ToString(), before, $"{ProductionOrder.StatusName(order.Status)}: выпущено {Quantities.Format(command.Quantity)} {product.UnitSymbol}, "
                                              + $"всего {Quantities.Format(released + command.Quantity)} из {Quantities.Format(order.Quantity)}",

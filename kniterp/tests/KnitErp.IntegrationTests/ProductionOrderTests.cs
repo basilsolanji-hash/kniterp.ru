@@ -1323,6 +1323,65 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Release_and_full_output_move_sales_order_stage_without_sales_edit_right()
+    {
+        var f = await SetUpAsync();
+        long sales, head, first, second;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            sales = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, f.Customer, f.Store, Day.AddDays(14), null, false, null));
+            await s.Sales.SetOrderLineAsync(sales, f.Sweater, 10, 2500m, 22m, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+            await s.Sales.ConfirmOrderAsync(sales, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+            head = (await s.Access.InviteAsync(new InviteUserCommand($"head-{Guid.NewGuid():N}@test.local", "Начальник цеха", SystemRoles.DepartmentHead, null))).UserId;
+        }
+
+        await using (var db = host.NewDb())
+        {
+            (await db.Users.SingleAsync(u => u.Id == head)).Activate();
+            await db.SaveChangesAsync();
+        }
+
+        var before = await SalesStageAsync(sales);
+        await using (var s = host.As(head, f.Org.OrganizationId))
+        {
+            // У Руководителя подразделения нет права изменять продажи — этап меняется как следствие запуска производства.
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Sales.NotifyProductionAsync(sales, completed: false));
+            first = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 6) with { Source = ProductionSource.SalesOrder, SalesOrderId = sales });
+            second = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 4) with { Source = ProductionSource.SalesOrder, SalesOrderId = sales });
+            await s.ProductionOrders.ReleaseAsync(first, (await s.ProductionOrders.GetAsync(first)).RowVersion);
+            await s.ProductionOrders.ReleaseAsync(second, (await s.ProductionOrders.GetAsync(second)).RowVersion);
+        }
+
+        Assert.NotEqual(before, await SalesStageAsync(sales));
+        Assert.Equal("В работе", await SalesStageAsync(sales));
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            foreach (var (order, quantity) in new[] { (first, 6m), (second, 4m) })
+            {
+                await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 3m), (f.Buttons, 30m)));
+                foreach (var stage in ProductionFlow.Stages)
+                {
+                    await s.Floor.RecordAsync(order, Mark(stage, quantity));
+                }
+
+                await s.Materials.OutputAsync(order, new OutputCommand(quantity, Day, null, null));
+                // Первый выпущен, второй ещё в работе — «Собран» только после последнего заказа по заказу покупателя.
+                Assert.Equal(order == first ? "В работе" : "Собран", await SalesStageAsync(sales));
+            }
+        }
+    }
+
+    private async Task<string?> SalesStageAsync(long salesOrder)
+    {
+        await using var db = host.NewDb();
+        return await (from o in db.SalesOrders.AsNoTracking()
+                      join st in db.SalesOrderStages.AsNoTracking() on o.StageId equals st.Id
+                      where o.Id == salesOrder
+                      select st.Name).SingleOrDefaultAsync();
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
     private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {
