@@ -372,11 +372,25 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             await LoginAsync(page);
             await page.GotoAsync("production/shift-tasks");
             await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Сменные задания" })).ToBeVisibleAsync();
-            await page.GetByLabel("Сотрудник", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С. (0101)" });
-            await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync(order.ToString());
-            await page.GetByLabel("План на смену").FillAsync("8");
-            await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Назначить", Exact = true }), page.GetByRole(AriaRole.Status));
-            await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Задание назначено.");
+            // Поля, заполненные до того, как страница стала интерактивной, теряются при подключении Blazor: повторяем заполнение и отправку,
+            // пока сервер не подтвердит назначение.
+            var assigned = page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Задание назначено." });
+            for (var attempt = 0; attempt < 15 && !await assigned.IsVisibleAsync(); attempt++)
+            {
+                await page.GetByLabel("Сотрудник", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С. (0101)" });
+                await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync(order.ToString());
+                await page.GetByLabel("План на смену").FillAsync("8");
+                await page.GetByRole(AriaRole.Button, new() { Name = "Назначить", Exact = true }).ClickAsync();
+                try
+                {
+                    await assigned.WaitForAsync(new() { Timeout = 1500 });
+                }
+                catch (TimeoutException)
+                {
+                }
+            }
+
+            await Assertions.Expect(assigned).ToBeVisibleAsync();
             await Assertions.Expect(page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Петрова А. С." }).Last).ToContainTextAsync("0%");
         }
 

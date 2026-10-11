@@ -2809,5 +2809,8 @@
   "Смена сегодня": "Bugungi smena",
   "срок отгрузки прошёл: {0}": "jo'natish muddati o'tdi: {0}",
   "срочно": "shoshilinch",
-  "Этапы и автосмена": "Bosqichlar va avtoalmashtirish"
+  "Этапы и автосмена": "Bosqichlar va avtoalmashtirish",
+  "Производственные заказы с опозданием": "Kechikkan ishlab chiqarish buyurtmalari",
+  "Брак за 7 дней": "7 kundagi nuqson",
+  "Сменные задания вчера не выполнены без причины": "Kechagi smena topshiriqlari sababsiz bajarilmagan"
 }

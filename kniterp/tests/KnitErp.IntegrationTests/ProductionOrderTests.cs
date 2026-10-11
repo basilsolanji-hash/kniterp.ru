@@ -1244,6 +1244,85 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Dashboard_shows_production_orders_progress_late_defects_and_missed_shift_tasks()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long lateOrder, readyOrder;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            lateOrder = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10) with { DueDate = Day.AddDays(1) });
+            readyOrder = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 5) with { DueDate = Day.AddDays(5) });
+            foreach (var id in new[] { lateOrder, readyOrder })
+            {
+                await s.ProductionOrders.ReleaseAsync(id, (await s.ProductionOrders.GetAsync(id)).RowVersion);
+            }
+
+            await s.Floor.RecordAsync(lateOrder, new ProductionOperationCommand(ProductionStage.Knitting, ProductionOperationKind.Done, 10, null, null, Day));
+            await s.Floor.RecordAsync(lateOrder, new ProductionOperationCommand(ProductionStage.Assembly, ProductionOperationKind.Done, 4, null, null, Day));
+            // Готовый заказ: брак 1 на контроле качества довязан и прошёл маршрут заново — упаковано 5 из 5.
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(stage, ProductionOperationKind.Done, 5, null, null, Day));
+            }
+
+            await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Defect, 1, null, "дыра", Day));
+            await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Done, 4, null, null, Day));
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming, ProductionStage.QualityControl })
+            {
+                await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(stage, ProductionOperationKind.Done, 1, null, null, Day));
+            }
+
+            await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(ProductionStage.Packing, ProductionOperationKind.Done, 5, null, null, Day));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, lateOrder, ProductionStage.Assembly, 6, null));
+        }
+
+        // Через два дня: первый заказ просрочен, вчерашнее задание не выполнено и без причины.
+        host.Clock.UtcNow = host.Clock.UtcNow.AddDays(2);
+        try
+        {
+            await using var db = host.NewDb();
+            var owner = new TestUser { UserId = f.Org.OwnerUserId, OrganizationId = f.Org.OrganizationId };
+            var guard = new AccessGuard(db, owner, host.Clock);
+            var dashboard = new KnitErp.Application.Organizations.DashboardService(db, guard, host.Clock,
+                new KnitErp.Application.Organizations.LaunchReadinessService(db, guard, host.Clock),
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                [new ProductionDashboardSource()]);
+            // Задание было на Day: на главном экране «сегодня» = Day + 2, вчера = Day + 1 — задания нет; источник на Day + 1 его показывает.
+            var data = (await dashboard.GetAsync(refresh: true)).Production!.Production!;
+            Assert.Equal((2, 1), (data.OrdersInWork, data.OrdersLate));
+            var late = data.Orders.First();
+            Assert.Equal((lateOrder, true, 0m, "Сборка"), (late.Id, late.Late, late.Percent, late.Operation));
+            var ready = data.Orders.Single(o => o.Id == readyOrder);
+            Assert.Equal((100m, false, "Упаковка"), (ready.Percent, ready.Late, ready.Operation));
+            Assert.Contains(data.Alerts, a => a.Text == ProductionDashboardSource.LateText && a.Count == 1 && a.Critical);
+            Assert.Contains(data.Alerts, a => a.Text == ProductionDashboardSource.DefectText && a.Count == 1);
+            Assert.DoesNotContain(data.Alerts, a => a.Text == ProductionDashboardSource.MissedTasksText);
+            Assert.Null(data.OutputToday);
+
+            var ctx = await guard.CurrentAsync();
+            var yesterdayView = await new ProductionDashboardSource().GetAsync(db, ctx, Day.AddDays(1), CancellationToken.None);
+            Assert.Contains(yesterdayView!.Alerts, a => a.Text == ProductionDashboardSource.MissedTasksText && a.Count == 1);
+        }
+        finally
+        {
+            host.Clock.UtcNow = host.Clock.UtcNow.AddDays(-2);
+        }
+
+        // Рабочий без права просмотра заказов — данных производства нет; другая организация не видит чужие заказы.
+        await using (var db = host.NewDb())
+        {
+            var workerGuard = new AccessGuard(db, new TestUser { UserId = worker, OrganizationId = f.Org.OrganizationId }, host.Clock);
+            Assert.Null(await new ProductionDashboardSource().GetAsync(db, await workerGuard.CurrentAsync(), Day, CancellationToken.None));
+
+            var other = await SetUpAsync();
+            var guard = new AccessGuard(db, new TestUser { UserId = other.Org.OwnerUserId, OrganizationId = other.Org.OrganizationId }, host.Clock);
+            var foreign = await new ProductionDashboardSource().GetAsync(db, await guard.CurrentAsync(), Day, CancellationToken.None);
+            Assert.Equal((0, 0), (foreign!.OrdersInWork, foreign.Orders.Count));
+        }
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
     private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {
