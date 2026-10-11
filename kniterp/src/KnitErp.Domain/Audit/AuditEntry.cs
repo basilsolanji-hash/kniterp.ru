@@ -102,6 +102,9 @@ public static class AuditActions
     public const string ExpenseReportCancelled = "expense_report.cancelled";
     public const string StockBatchCreated = "stock.batch.created";
     public const string TagCreated = "tag.created";
+    public const string CommentAdded = "discussion.comment.added";
+    public const string CommentEdited = "discussion.comment.edited";
+    public const string CommentDeleted = "discussion.comment.deleted";
     public const string ExchangeExported = "exchange.exported";
     public const string TagChanged = "tag.changed";
     public const string TagArchived = "tag.archived";

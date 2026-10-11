@@ -1471,6 +1471,44 @@ internal sealed class InventoryBatchCountConfiguration : IEntityTypeConfiguratio
     }
 }
 
+internal sealed class DiscussionCommentConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Collaboration.DiscussionComment>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Collaboration.DiscussionComment> b)
+    {
+        b.ToTable("discussion_comments", t =>
+        {
+            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 10");
+            t.HasCheckConstraint("ck_discussion_comments_deleted",
+                "([DeletedAtUtc] IS NULL AND [DeletedByUserId] IS NULL AND LEN([Text]) > 0) OR ([DeletedAtUtc] IS NOT NULL AND [DeletedByUserId] IS NOT NULL AND [Text] = N'')");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Target).HasConversion<byte>();
+        b.Property(x => x.Text).HasMaxLength(KnitErp.Domain.Collaboration.DiscussionComment.TextMaxLength).IsRequired();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.IsDeleted);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.AuthorUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DeletedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.Target, x.TargetId, x.Id }).HasDatabaseName("ix_discussion_comments_target");
+        b.HasIndex(x => new { x.OrganizationId, x.Id }).HasDatabaseName("ix_discussion_comments_org_recent");
+    }
+}
+
+internal sealed class DiscussionMentionConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Collaboration.DiscussionMention>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Collaboration.DiscussionMention> b)
+    {
+        b.ToTable("discussion_mentions");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.HasOne<KnitErp.Domain.Collaboration.DiscussionComment>().WithMany().HasForeignKey(x => x.CommentId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.CommentId, x.UserId }).IsUnique().HasDatabaseName("ux_discussion_mentions_comment_user");
+        b.HasIndex(x => x.UserId).HasDatabaseName("ix_discussion_mentions_user");
+    }
+}
+
 internal sealed class TagConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Tagging.Tag>
 {
     public void Configure(EntityTypeBuilder<KnitErp.Domain.Tagging.Tag> b)
@@ -1492,7 +1530,7 @@ internal sealed class TagLinkConfiguration : IEntityTypeConfiguration<KnitErp.Do
 {
     public void Configure(EntityTypeBuilder<KnitErp.Domain.Tagging.TagLink> b)
     {
-        b.ToTable("tag_links", t => t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 7"));
+        b.ToTable("tag_links", t => t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 10"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Entity).HasConversion<byte>();

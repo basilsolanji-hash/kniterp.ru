@@ -106,6 +106,8 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<StockDocumentBatchLine> StockDocumentBatchLines { get; }
     DbSet<StockBatchMovement> StockBatchMovements { get; }
     DbSet<KnitErp.Domain.Tagging.Tag> Tags { get; }
+    DbSet<KnitErp.Domain.Collaboration.DiscussionComment> DiscussionComments { get; }
+    DbSet<KnitErp.Domain.Collaboration.DiscussionMention> DiscussionMentions { get; }
     DbSet<KnitErp.Domain.Tagging.TagLink> TagLinks { get; }
     DbSet<OpeningBalanceBatchLine> OpeningBalanceBatchLines { get; }
     DbSet<InventoryBatchCount> InventoryBatchCounts { get; }

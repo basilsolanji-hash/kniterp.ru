@@ -79,6 +79,10 @@ else
                     <button type="button" class="secondary" @onclick="Close" disabled="@_busy">@L("Отмена")</button>
                 </div>
             </EditForm>
+            @if (_mode == Mode.Edit && _target is not null)
+            {
+                <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.Counterparty" TargetId="_target.Id" />
+            }
         </div>
     }
 

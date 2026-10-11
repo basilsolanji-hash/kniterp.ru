@@ -1,0 +1,91 @@
+@page "/discussions"
+@using KnitErp.Application.Collaboration
+@using KnitErp.Domain.Tagging
+@inject DiscussionService Discussions
+
+<PageTitle>@L("Обсуждения") — knitERP</PageTitle>
+
+@* D107: общая лента обсуждений по документам и объектам, которые пользователь видит; отдельно — где меня упомянули. *@
+<h1>@L("Обсуждения")</h1>
+<p class="muted">@L("Комментарии коллег к заказам, складским документам, счетам, позициям и контрагентам. Написать комментарий — внизу карточки документа, в блоке «Обсуждение».")</p>
+
+<div class="tabs" role="tablist">
+    <button type="button" role="tab" class="@(!_mentions ? "tab active" : "tab secondary")" aria-selected="@(!_mentions ? "true" : "false")" @onclick="() => SwitchAsync(false)">@L("Все")</button>
+    <button type="button" role="tab" class="@(_mentions ? "tab active" : "tab secondary")" aria-selected="@(_mentions ? "true" : "false")" @onclick="() => SwitchAsync(true)">@L("Упоминания меня")</button>
+</div>
+
+@if (_error is not null)
+{
+    <div class="flash error" role="alert">@_error</div>
+}
+else if (_items is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else if (_items.Count == 0)
+{
+    <p class="muted">@(_mentions ? L("Вас пока не упоминали.") : L("Обсуждений пока нет."))</p>
+}
+else
+{
+    <ol class="comments feed">
+        @foreach (var i in _items)
+        {
+            <li class="comment @(i.Comment.IsMine ? "mine" : null)">
+                <span class="avatar" aria-hidden="true">@i.Comment.Initials</span>
+                <div class="comment-body">
+                    <div class="comment-head">
+                        <b>@i.Comment.Author</b>
+                        <span class="muted small">@TimeZones.ToLocal(i.Comment.CreatedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</span>
+                        <a href="@(i.Object.Href)#discussion">@L(TagColors.EntityName(i.Object.Entity)): @i.Object.Title</a>
+                        @if (i.MentionsMe)
+                        {
+                            <span class="mention">@@ @L("вас упомянули")</span>
+                        }
+                    </div>
+                    <div class="comment-text">@(i.Comment.IsDeleted ? L("Комментарий удалён.") : i.Comment.Text)</div>
+                </div>
+            </li>
+        }
+    </ol>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<DiscussionFeedItemDto>? _items;
+    private bool _mentions;
+    private string? _error;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task SwitchAsync(bool mentions)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _mentions = mentions;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            _items = await Discussions.FeedAsync(_mentions);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

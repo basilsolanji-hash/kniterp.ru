@@ -252,6 +252,13 @@ public sealed class NotificationService(IKnitErpDbContextFactory factory, Person
                     result.Add(new($"Новые обращения в поддержку: {fresh}", null, ToolCatalog.Support, NotificationLevel.Action, $"support:{fresh}"));
                 }
             }
+
+            // D107: упоминания в обсуждениях и новые ответы там, где пользователь писал.
+            foreach (var a in await KnitErp.Application.Collaboration.DiscussionService.AlertsAsync(db, ctx, clock.UtcNow, ct))
+            {
+                result.Add(new(a.Mention ? $"{a.Author} упомянул(а) вас: {a.ObjectTitle} — «{a.Excerpt}»" : $"Новый ответ в обсуждении: {a.ObjectTitle} — {a.Author}: «{a.Excerpt}»",
+                    a.Href + "#discussion", null, a.Mention ? NotificationLevel.Action : NotificationLevel.Info, $"comment:{a.CommentId}"));
+            }
         }
 
         return result;

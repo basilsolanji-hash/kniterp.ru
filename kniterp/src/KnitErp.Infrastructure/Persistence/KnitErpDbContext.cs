@@ -73,6 +73,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<StockDocumentBatchLine> StockDocumentBatchLines => Set<StockDocumentBatchLine>();
     public DbSet<StockBatchMovement> StockBatchMovements => Set<StockBatchMovement>();
     public DbSet<KnitErp.Domain.Tagging.Tag> Tags => Set<KnitErp.Domain.Tagging.Tag>();
+    public DbSet<KnitErp.Domain.Collaboration.DiscussionComment> DiscussionComments => Set<KnitErp.Domain.Collaboration.DiscussionComment>();
+    public DbSet<KnitErp.Domain.Collaboration.DiscussionMention> DiscussionMentions => Set<KnitErp.Domain.Collaboration.DiscussionMention>();
     public DbSet<KnitErp.Domain.Tagging.TagLink> TagLinks => Set<KnitErp.Domain.Tagging.TagLink>();
     public DbSet<OpeningBalanceBatchLine> OpeningBalanceBatchLines => Set<OpeningBalanceBatchLine>();
     public DbSet<InventoryBatchCount> InventoryBatchCounts => Set<InventoryBatchCount>();

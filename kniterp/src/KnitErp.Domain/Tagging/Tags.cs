@@ -15,7 +15,7 @@ public enum TagColor : byte
     Gray = 7,
 }
 
-/// <summary>Что можно отметить тегом (D103). Значение хранится в базе — не перенумеровывать.</summary>
+/// <summary>Объекты, которые можно отметить тегом (D103) и обсуждать (D107). Значение хранится в базе — не перенумеровывать.</summary>
 public enum TaggedEntity : byte
 {
     Item = 1,
@@ -25,6 +25,9 @@ public enum TaggedEntity : byte
     StockDocument = 5,
     StockBatch = 6,
     InventoryCount = 7,
+    OpeningBalance = 8,
+    CustomerInvoice = 9,
+    ExpenseReport = 10,
 }
 
 public static class TagColors
@@ -66,6 +69,9 @@ public static class TagColors
         TaggedEntity.StockDocument => "Складские документы",
         TaggedEntity.StockBatch => "Партии",
         TaggedEntity.InventoryCount => "Инвентаризации",
+        TaggedEntity.OpeningBalance => "Начальные остатки",
+        TaggedEntity.CustomerInvoice => "Счета покупателям",
+        TaggedEntity.ExpenseReport => "Авансовые отчёты",
         _ => entity.ToString(),
     };
 }
