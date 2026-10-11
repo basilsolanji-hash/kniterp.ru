@@ -806,7 +806,7 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 200));
 
             // Ожидается 300 пуговиц по подтверждённому заказу поставщику.
-            var supplier = (await s.Db.PurchaseOrders.FirstAsync()).SupplierId;
+            var supplier = (await s.Db.PurchaseOrders.FirstAsync(o => o.OrganizationId == f.Org.OrganizationId)).SupplierId;
             var po = await s.Purchases.CreateOrderAsync(new PurchaseOrderHeader(Day, supplier, f.YarnStore, null, null, false, null));
             await s.Purchases.SetOrderLineAsync(po, f.Buttons, 300, 5m, null, (await s.Purchases.GetOrderAsync(po)).RowVersion);
             await s.Purchases.ConfirmOrderAsync(po, (await s.Purchases.GetOrderAsync(po)).RowVersion);
