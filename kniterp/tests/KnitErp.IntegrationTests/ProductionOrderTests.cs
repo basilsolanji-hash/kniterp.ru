@@ -853,6 +853,44 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         new(item, quantity, Day, null, ProductionSource.Plan, null, f.Wip, f.Store, null);
 
     [SqlFact]
+    public async Task Rework_redo_is_not_paid_in_hr_output()
+    {
+        // D224 (сессия «Сотрудники», решение владельца): исправление брака не оплачивается — к оплате только годное (D407, ст. 156 ТК РФ).
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.ShopFloor.MarkAsync(order, stage, new ShopMarkCommand(10, null, null));
+            }
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 3) with { Kind = ProductionOperationKind.Rework, ReturnTo = ProductionStage.Knitting });
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(13, null, null)); // 3 — перевязка, 10 — новые
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Assembly, new ShopMarkCommand(3, null, null));  // пересборка
+        }
+
+        await using var db = host.NewDb();
+        var output = await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day, Day, CancellationToken.None);
+        Assert.Equal(new[] { (1L, 20m), (2L, 10m), (3L, 10m) },
+            output.Where(o => o.EmployeeId == employee).Select(o => (o.OperationId, o.Quantity)).ToArray());
+    }
+
+    [SqlFact]
     public async Task Worker_marks_operation_from_terminal_and_output_goes_to_hr()
     {
         var f = await SetUpAsync();
