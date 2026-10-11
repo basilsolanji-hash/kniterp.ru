@@ -24,6 +24,7 @@ public static class DependencyInjection
         services.AddScoped<AuditQueryService>();
         services.AddScoped<StructureService>();
         services.AddScoped<EmployeeService>();
+        services.AddScoped<KnitErp.Application.Hr.PersonalDataService>();
         services.AddScoped<CatalogService>();
         services.AddScoped<WarehouseService>();
         services.AddScoped<CounterpartyService>();

@@ -109,6 +109,12 @@ public sealed class Employee
             throw new BusinessRuleException("hr.employee.birth_date", "Дата рождения: возраст от 14 до 100 лет.");
         }
 
+        // D201: к дате приёма сотруднику не меньше 14 лет (ст. 63 ТК РФ).
+        if (birthDate is { } b && b > HiredOn.AddYears(-14))
+        {
+            throw new BusinessRuleException("hr.employee.too_young", "На дату приёма сотруднику меньше 14 лет (ст. 63 ТК РФ).");
+        }
+
         if (share && birthDate is null)
         {
             throw new BusinessRuleException("hr.employee.birthday_share", "Чтобы показывать день рождения, укажите дату рождения.");

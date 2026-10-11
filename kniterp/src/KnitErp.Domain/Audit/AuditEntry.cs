@@ -132,6 +132,12 @@ public static class AuditActions
     public const string EmployeeDismissed = "hr.employee.dismissed";
     public const string EmployeeLinkedToUser = "hr.employee.linked_user";
     public const string EmployeesImported = "hr.employee.imported";
+    public const string PersonalDataViewed = "hr.personal_data.viewed";
+    public const string PersonalDataChanged = "hr.personal_data.changed";
+    public const string PersonalDataPrinted = "hr.personal_data.printed";
+    public const string ConsentChanged = "hr.consent.changed";
+    public const string ConsentScanAdded = "hr.consent.scan_added";
+    public const string ConsentScanViewed = "hr.consent.scan_viewed";
     public const string CatalogCreated = "catalog.created";
     public const string CatalogChanged = "catalog.changed";
     public const string CatalogArchived = "catalog.archived";

@@ -117,6 +117,10 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Workspace.SupportTicket> SupportTickets { get; }
     DbSet<DocumentCounter> DocumentCounters { get; }
 
+    // Модуль «Сотрудники» (D200–D299).
+    DbSet<KnitErp.Domain.Hr.EmployeePersonalData> EmployeePersonalData { get; }
+    DbSet<KnitErp.Domain.Hr.ConsentScan> ConsentScans { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);

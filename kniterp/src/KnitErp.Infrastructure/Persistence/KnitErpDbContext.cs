@@ -87,6 +87,10 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<DocumentCounter> DocumentCounters => Set<DocumentCounter>();
 
+    // Модуль «Сотрудники» (D200–D299).
+    public DbSet<KnitErp.Domain.Hr.EmployeePersonalData> EmployeePersonalData => Set<KnitErp.Domain.Hr.EmployeePersonalData>();
+    public DbSet<KnitErp.Domain.Hr.ConsentScan> ConsentScans => Set<KnitErp.Domain.Hr.ConsentScan>();
+
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней
     /// транзакции: фиксирует и откатывает её только внешний сценарий.

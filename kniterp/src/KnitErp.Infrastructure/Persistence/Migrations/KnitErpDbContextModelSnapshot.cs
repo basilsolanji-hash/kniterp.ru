@@ -1254,7 +1254,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_discussion_comments_deleted", "([DeletedAtUtc] IS NULL AND [DeletedByUserId] IS NULL AND LEN([Text]) > 0) OR ([DeletedAtUtc] IS NOT NULL AND [DeletedByUserId] IS NOT NULL AND [Text] = N'')");
 
-                            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 10");
+                            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 10 OR [Target] BETWEEN 20 AND 29");
                         });
                 });
 
@@ -1845,6 +1845,165 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_supplier_payment_allocations_amount", "[Amount] > 0");
 
                             t.HasCheckConstraint("ck_supplier_payment_allocations_removed", "([RemovedAtUtc] IS NULL AND [RemovedByUserId] IS NULL) OR ([RemovedAtUtc] IS NOT NULL AND [RemovedByUserId] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.ConsentScan", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UploadedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("UploadedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("OrganizationId", "EmployeeId")
+                        .HasDatabaseName("ix_hr_consent_scans_employee");
+
+                    b.ToTable("hr_consent_scans", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_hr_consent_scans_size", "[SizeBytes] BETWEEN 1 AND 3145728");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ActualAddress")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("BirthPlace")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("Citizenship")
+                        .HasMaxLength(344)
+                        .HasColumnType("nvarchar(344)");
+
+                    b.Property<DateOnly?>("ConsentGivenOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ConsentRevokedOn")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ConsentValidUntil")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Education")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FamilyMembers")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<byte>("Gender")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Inn")
+                        .HasMaxLength(109)
+                        .HasColumnType("nvarchar(109)");
+
+                    b.Property<string>("MaritalStatus")
+                        .HasMaxLength(344)
+                        .HasColumnType("nvarchar(344)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PassportDivisionCode")
+                        .HasMaxLength(96)
+                        .HasColumnType("nvarchar(96)");
+
+                    b.Property<string>("PassportIssuedOn")
+                        .HasMaxLength(104)
+                        .HasColumnType("nvarchar(104)");
+
+                    b.Property<string>("PassportIssuer")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("PassportNumber")
+                        .HasMaxLength(130)
+                        .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(130)
+                        .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("Profession")
+                        .HasMaxLength(344)
+                        .HasColumnType("nvarchar(344)");
+
+                    b.Property<string>("RegistrationAddress")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Snils")
+                        .HasMaxLength(106)
+                        .HasColumnType("nvarchar(106)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "EmployeeId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_personal_data_employee");
+
+                    b.ToTable("hr_personal_data", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_hr_personal_data_consent", "([ConsentGivenOn] IS NOT NULL OR ([ConsentValidUntil] IS NULL AND [ConsentRevokedOn] IS NULL)) AND ([ConsentValidUntil] IS NULL OR [ConsentValidUntil] >= [ConsentGivenOn]) AND ([ConsentRevokedOn] IS NULL OR [ConsentRevokedOn] >= [ConsentGivenOn])");
+
+                            t.HasCheckConstraint("ck_hr_personal_data_gender", "[Gender] IN (0, 1, 2)");
                         });
                 });
 
@@ -3547,7 +3706,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("tag_links", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 10");
+                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 10 OR [Entity] BETWEEN 20 AND 29");
                         });
                 });
 
@@ -5107,6 +5266,46 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_supplier_payment_allocations_payment");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.ConsentScan", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UploadedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_consent_scans_employee");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_personal_data_employee");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Integrations.ApiIdempotencyRecord", b =>

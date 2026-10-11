@@ -339,6 +339,25 @@ app.MapGet("/employees.xlsx", (KnitErp.Application.Structure.EmployeeExchangeSer
 app.MapGet("/employees-template.xlsx", (KnitErp.Application.Structure.EmployeeExchangeService exchange, CancellationToken ct) =>
     FileOrForbid(() => exchange.TemplateAsync(ct), "shablon-sotrudnikov.xlsx"));
 
+// Скан согласия на обработку ПДн (D200): право и журнал просмотра — в сервисе.
+app.MapGet("/employees/consent-scans/{id:long}", async (long id, KnitErp.Application.Hr.PersonalDataService personalData, HttpContext http, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, contentType, content) = await personalData.GetConsentScanAsync(id, ct);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(content, contentType, fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 app.MapGet("/opening-balances/template.xlsx", (OpeningBalanceService balances, CancellationToken ct) =>
     FileOrForbid(() => balances.LinesTemplateAsync(ct), "shablon-nachalnyh-ostatkov.xlsx"));
 app.MapGet("/stock-documents/template.xlsx", (StockDocumentService documents, CancellationToken ct) =>

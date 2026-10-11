@@ -50,6 +50,8 @@ public static class RoleMatrixP0
         (Permissions.EmployeeView,            [Full, Full, Scoped, ReadOnly, ReadOnly, ReadOnly, ReadOnly, OwnOnly]),
         (Permissions.EmployeeEdit,            [Full, Full, None, None, None, None, None, None]),
         (Permissions.PersonalDataView,        [Full, ByGrant, None, None, None, None, ByGrant, OwnOnly]),
+        // Допущение D200: изменяет ПДн Владелец; Администратору — только индивидуальной выдачей, как и чтение.
+        (Permissions.PersonalDataEdit,        [Full, ByGrant, None, None, None, None, None, None]),
         (Permissions.UserView,                [Full, Full, None, None, None, None, ReadOnly, None]),
         (Permissions.UserManage,              [Full, Full, None, None, None, None, None, None]),
         (Permissions.AdminGrant,              [Full, None, None, None, None, None, None, None]),

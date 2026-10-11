@@ -86,6 +86,31 @@ public sealed class EmployeeService(
         return new EmployeeListDto(rows, ctx.Permissions.Has(Permissions.EmployeeEdit), ownOnly, visible is not null);
     }
 
+    /// <summary>Карточка сотрудника: в области просмотра пользователя или своя; иначе «не найдено».</summary>
+    public async Task<EmployeeRowDto> GetAsync(long id, CancellationToken ct = default)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        var query = db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && e.Id == id);
+        if (ctx.Permissions.Has(Permissions.EmployeeView))
+        {
+            var visible = await StructureScope.VisibleDepartmentsAsync(db, ctx, Permissions.EmployeeView, ct);
+            if (visible is not null)
+            {
+                query = query.Where(e => visible.Contains(e.DepartmentId));
+            }
+        }
+        else if (ctx.Permissions.HasOwnOnly(Permissions.EmployeeView))
+        {
+            query = query.Where(e => e.UserId == ctx.UserId);
+        }
+        else
+        {
+            await guard.DenyAsync(ctx, Permissions.EmployeeView, ct);
+        }
+
+        return await Project(query).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Сотрудник");
+    }
+
     /// <summary>Действующие подразделения и должности для формы сотрудника.</summary>
     public async Task<EmployeeOptionsDto> GetOptionsAsync(CancellationToken ct = default)
     {

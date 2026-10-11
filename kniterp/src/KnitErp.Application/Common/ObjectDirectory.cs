@@ -98,6 +98,21 @@ public static class ObjectDirectory
                         .Select(r => new { r.Id, r.Number, r.ReportDate }).ToListAsync(ct))
                     .Select(r => new TaggedObjectDto(entity, r.Id, $"Авансовый отчёт {r.Number}", r.ReportDate.ToString("dd.MM.yyyy"), $"expense-reports/{r.Id}"))
                     .ToList();
+            case TaggedEntity.Employee when has(Permissions.EmployeeView) || ctx.Permissions.HasOwnOnly(Permissions.EmployeeView):
+            {
+                // D202: в обсуждениях и тегах — только ФИО и должность; паспорт, СНИЛС, ИНН, адрес и оклад сюда не попадают.
+                var ownOnly = !has(Permissions.EmployeeView);
+                var visible = ownOnly ? null : await Structure.StructureScope.VisibleDepartmentsAsync(db, ctx, Permissions.EmployeeView, ct);
+                return (await (from e in db.Employees.AsNoTracking()
+                               join p in db.Positions.AsNoTracking() on e.PositionId equals p.Id
+                               where e.OrganizationId == org && ids.Contains(e.Id)
+                                     && (!ownOnly || e.UserId == ctx.UserId)
+                                     && (visible == null || visible.Contains(e.DepartmentId))
+                               select new { e.Id, e.LastName, e.FirstName, e.MiddleName, Position = p.Name }).ToListAsync(ct))
+                    .Select(e => new TaggedObjectDto(entity, e.Id, e.MiddleName is null ? $"{e.LastName} {e.FirstName}" : $"{e.LastName} {e.FirstName} {e.MiddleName}",
+                        e.Position, $"employees/{e.Id}")).ToList();
+            }
+
             default:
                 return [];
         }

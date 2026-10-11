@@ -149,7 +149,7 @@ else
                 {
                     <tr class="@(e.Status == EmploymentStatus.Dismissed ? "archived" : null)">
                         <td>@e.PersonnelNumber</td>
-                        <td>@e.FullName<div class="muted">@L("с {0}", e.HiredOn.ToString("dd.MM.yyyy"))</div></td>
+                        <td><a href="employees/@e.Id">@e.FullName</a><div class="muted">@L("с {0}", e.HiredOn.ToString("dd.MM.yyyy"))</div></td>
                         <td>@e.DepartmentName</td>
                         <td>@e.PositionName</td>
                         <td>

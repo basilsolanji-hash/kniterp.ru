@@ -1,0 +1,125 @@
+@page "/print/employee-t2/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@inject PersonalDataService PersonalData
+
+@*
+    Личная карточка работника — унифицированная форма № Т-2 (ОКУД 0301002), постановление Госкомстата России
+    от 05.01.2004 № 1. Российская форма — печатается по-русски (D68). Печать пишется в журнал аудита (D200).
+    Разделы, которых в системе пока нет (воинский учёт, отпуска, аттестация), печатаются пустыми для заполнения от руки.
+*@
+<PageTitle>@(_doc is null ? "Личная карточка Т-2" : $"Т-2 {_doc.LastName} {_doc.FirstName}") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 10mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="employees/@Id">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_doc is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var d = _doc;
+    var v = d.Values;
+    <div class="sheet portrait">
+        <div class="small" style="text-align: right">
+            Унифицированная форма № Т-2<br />
+            Утверждена постановлением Госкомстата России от 05.01.2004 № 1
+        </div>
+        <table class="plain">
+            <tr><td></td><td style="width: 120px; text-align: right">Форма по ОКУД</td><td class="code">0301002</td></tr>
+            <tr><td><b>@d.Organization</b><div class="small">наименование организации</div></td><td style="text-align: right">по ОКПО</td><td class="code">@d.Okpo</td></tr>
+        </table>
+
+        <table style="margin: 10px 0">
+            <tr><th>Дата составления</th><th>Табельный номер</th><th>ИНН</th><th>СНИЛС</th><th>Алфавит</th><th>Характер работы</th><th>Вид работы</th><th>Пол</th></tr>
+            <tr>
+                <td>@d.PrintedOn.ToString("dd.MM.yyyy")</td><td>@d.PersonnelNumber</td><td>@v.Inn</td>
+                <td>@(v.Snils is null ? "" : PersonIds.FormatSnils(v.Snils))</td><td>@d.LastName[..1]</td><td>постоянно</td><td>основная</td>
+                <td>@(v.Gender switch { Gender.Male => "М", Gender.Female => "Ж", _ => "" })</td>
+            </tr>
+        </table>
+
+        <h1 style="text-align: center">ЛИЧНАЯ КАРТОЧКА РАБОТНИКА</h1>
+        <h2>I. ОБЩИЕ СВЕДЕНИЯ</h2>
+        <table class="plain fields">
+            <tr><td style="width: 260px">1. Фамилия, имя, отчество</td><td class="fill">@d.LastName @d.FirstName @d.MiddleName</td></tr>
+            <tr><td>2. Дата рождения</td><td class="fill">@d.BirthDate?.ToString("dd.MM.yyyy")</td></tr>
+            <tr><td>3. Место рождения</td><td class="fill">@v.BirthPlace</td></tr>
+            <tr><td>4. Гражданство</td><td class="fill">@v.Citizenship</td></tr>
+            <tr><td>5. Знание иностранного языка</td><td class="fill"></td></tr>
+            <tr><td>6. Образование</td><td class="fill">@v.Education</td></tr>
+            <tr><td>7. Профессия</td><td class="fill">@v.Profession</td></tr>
+            <tr><td>8. Стаж работы</td><td class="fill"></td></tr>
+            <tr><td>9. Состояние в браке</td><td class="fill">@v.MaritalStatus</td></tr>
+            <tr><td>10. Состав семьи</td><td class="fill">@v.FamilyMembers</td></tr>
+            <tr>
+                <td>11. Паспорт</td>
+                <td class="fill">№ @v.PassportNumber@(v.PassportIssuedOn is { } issued ? $", дата выдачи {issued:dd.MM.yyyy}" : ""), выдан @v.PassportIssuer@(v.PassportDivisionCode is null ? "" : $", код подразделения {v.PassportDivisionCode}")</td>
+            </tr>
+            <tr><td>12. Адрес места жительства: по паспорту</td><td class="fill">@v.RegistrationAddress</td></tr>
+            <tr><td>фактический</td><td class="fill">@v.ActualAddress</td></tr>
+            <tr><td>Номер телефона</td><td class="fill">@v.Phone</td></tr>
+        </table>
+
+        <h2>II. СВЕДЕНИЯ О ВОИНСКОМ УЧЁТЕ</h2>
+        <table class="plain fields">
+            <tr><td style="width: 260px">Категория запаса, воинское звание</td><td class="fill"></td></tr>
+            <tr><td>Состав (профиль), ВУС, категория годности</td><td class="fill"></td></tr>
+            <tr><td>Военный комиссариат</td><td class="fill"></td></tr>
+        </table>
+
+        <h2>III. ПРИЁМ НА РАБОТУ И ПЕРЕВОДЫ НА ДРУГУЮ РАБОТУ</h2>
+        <table>
+            <tr><th>Дата</th><th>Структурное подразделение</th><th>Должность (специальность, профессия), разряд, класс (категория) квалификации</th><th>Тарифная ставка (оклад), надбавка, руб.</th><th>Основание</th><th>Личная подпись владельца трудовой книжки</th></tr>
+            <tr><td>@d.HiredOn.ToString("dd.MM.yyyy")</td><td>@d.Department</td><td>@d.Position</td><td></td><td></td><td></td></tr>
+            <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
+            <tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
+        </table>
+
+        <h2>IV–IX. АТТЕСТАЦИЯ, ПОВЫШЕНИЕ КВАЛИФИКАЦИИ, ПЕРЕПОДГОТОВКА, НАГРАДЫ, ОТПУСК, СОЦИАЛЬНЫЕ ЛЬГОТЫ</h2>
+        <table>
+            <tr><th>Раздел</th><th>Дата</th><th>Содержание</th><th>Основание</th></tr>
+            <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
+            <tr><td>&nbsp;</td><td></td><td></td><td></td></tr>
+        </table>
+
+        <h2>XI. ОСНОВАНИЯ ПРЕКРАЩЕНИЯ ТРУДОВОГО ДОГОВОРА (УВОЛЬНЕНИЯ)</h2>
+        <table class="plain fields">
+            <tr><td style="width: 260px">Дата увольнения</td><td class="fill">@d.DismissedOn?.ToString("dd.MM.yyyy")</td></tr>
+            <tr><td>Приказ (распоряжение) № , дата</td><td class="fill"></td></tr>
+        </table>
+        <div class="sign">
+            <div>Работник кадровой службы <span class="line"></span> <span class="line"></span></div>
+            <div>Работник <span class="line"></span></div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private PersonalCardT2Dto? _doc;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await PersonalData.CardT2Async(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

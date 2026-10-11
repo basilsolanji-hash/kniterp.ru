@@ -1,0 +1,332 @@
+@page "/employees/{Id:long}"
+@using KnitErp.Application.Hr
+@using KnitErp.Application.Structure
+@using KnitErp.Domain.Hr
+@using KnitErp.Domain.Structure
+@using KnitErp.Web.Components.Shared
+@inject EmployeeService Employees
+@inject PersonalDataService PersonalData
+
+<PageTitle>@(_employee?.FullName ?? L("Сотрудник")) — knitERP</PageTitle>
+
+@* D200–D202: карточка сотрудника; персональные данные — отдельное право, открываются по кнопке, каждое открытие — в журнале. *@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <p>@L("Сотрудник не найден.") <a href="employees">@L("К списку сотрудников")</a></p>
+}
+else if (_employee is null || _summary is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var e = _employee;
+    <div class="page-head">
+        <h1>@e.FullName <span class="tag @(e.Status == EmploymentStatus.Working ? "ok" : e.Status == EmploymentStatus.OnLeave ? "warn" : "bad")">@L(e.StatusName)</span></h1>
+        <div class="row-actions">
+            @if (_summary.CanViewPersonalData)
+            {
+                <a class="button secondary" href="print/employee-t2/@e.Id" target="_blank" rel="noopener">@L("Личная карточка Т-2")</a>
+            }
+            <a class="button secondary" href="employees">@L("← К сотрудникам")</a>
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <dl class="facts">
+        <dt>@L("Табельный номер")</dt><dd>@e.PersonnelNumber</dd>
+        <dt>@L("Подразделение")</dt><dd>@e.DepartmentName</dd>
+        <dt>@L("Должность")</dt><dd>@e.PositionName</dd>
+        <dt>@L("Дата приёма")</dt><dd>@e.HiredOn.ToString("dd.MM.yyyy")</dd>
+        @if (e.DismissedOn is { } dismissed)
+        {
+            <dt>@L("Дата увольнения")</dt><dd>@dismissed.ToString("dd.MM.yyyy")</dd>
+        }
+        <dt>@L("Учётная запись")</dt><dd>@(e.UserEmail ?? "—")</dd>
+        <dt>@L("Согласие на обработку ПДн")</dt>
+        <dd>
+            <span class="tag @(_summary.State == ConsentState.Valid ? "ok" : "warn")">@ConsentText(_summary.State)</span>
+            @if (_summary.ValidUntil is { } until && _summary.State == ConsentState.Valid)
+            {
+                <span class="muted">@L("до {0}", until.ToString("dd.MM.yyyy"))</span>
+            }
+        </dd>
+    </dl>
+
+    @if (_summary.State != ConsentState.Valid)
+    {
+        <div class="flash error" role="alert">@L("Нет действующего согласия на обработку персональных данных (ст. 9 152-ФЗ). Получите подписанное согласие и отметьте его в карточке.")</div>
+    }
+
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.Employee" EntityId="e.Id" />
+
+    @if (_summary.CanViewPersonalData)
+    {
+        <h2>@L("Персональные данные")</h2>
+        @if (_pd is null)
+        {
+            <p class="muted">@L("Персональные данные скрыты. Каждое открытие записывается в журнал аудита: кто и когда смотрел.")</p>
+            <button type="button" class="secondary" @onclick="ShowPersonalDataAsync" disabled="@_busy">@L("Показать персональные данные")</button>
+        }
+        else
+        {
+            var canEdit = _pd.CanEdit && e.Status != EmploymentStatus.Dismissed;
+            <EditForm Model="_form" OnValidSubmit="SavePersonalDataAsync" FormName="personal-data">
+                <fieldset disabled="@(!canEdit || _busy)" style="border: 0; padding: 0; margin: 0; min-width: 0">
+                    <div class="grid">
+                        <label>
+                            @L("Пол")
+                            <InputSelect @bind-Value="_form.Gender">
+                                <option value="@Gender.NotSet">@L("не указан")</option>
+                                <option value="@Gender.Female">@L("женский")</option>
+                                <option value="@Gender.Male">@L("мужской")</option>
+                            </InputSelect>
+                        </label>
+                        <label>@L("Место рождения") <InputText @bind-Value="_form.BirthPlace" maxlength="500" /></label>
+                        <label>@L("Гражданство") <InputText @bind-Value="_form.Citizenship" maxlength="100" /></label>
+                        <label>@L("Паспорт: серия и номер") <InputText @bind-Value="_form.PassportNumber" maxlength="20" /></label>
+                        <label>@L("Кем выдан") <InputText @bind-Value="_form.PassportIssuer" maxlength="500" /></label>
+                        <label>@L("Дата выдачи") <InputDate @bind-Value="_form.PassportIssuedOn" /></label>
+                        <label>@L("Код подразделения") <InputText @bind-Value="_form.PassportDivisionCode" maxlength="7" placeholder="000-000" /></label>
+                        <label>@L("СНИЛС") <InputText @bind-Value="_form.Snils" maxlength="14" placeholder="000-000-000 00" /></label>
+                        <label>@L("ИНН") <InputText @bind-Value="_form.Inn" maxlength="12" inputmode="numeric" /></label>
+                        <label>@L("Адрес регистрации") <InputText @bind-Value="_form.RegistrationAddress" maxlength="500" /></label>
+                        <label>@L("Фактический адрес") <InputText @bind-Value="_form.ActualAddress" maxlength="500" /></label>
+                        <label>@L("Телефон") <InputText @bind-Value="_form.Phone" maxlength="20" inputmode="tel" /></label>
+                        <label>@L("Образование") <InputText @bind-Value="_form.Education" maxlength="500" /></label>
+                        <label>@L("Профессия") <InputText @bind-Value="_form.Profession" maxlength="100" /></label>
+                        <label>@L("Семейное положение") <InputText @bind-Value="_form.MaritalStatus" maxlength="100" /></label>
+                        <label>@L("Состав семьи") <InputText @bind-Value="_form.FamilyMembers" maxlength="500" /></label>
+                    </div>
+                </fieldset>
+                @if (_formError is not null)
+                {
+                    <div class="error" role="alert">@_formError</div>
+                }
+                <div class="actions">
+                    @if (canEdit)
+                    {
+                        <button type="submit" disabled="@_busy">@L("Сохранить персональные данные")</button>
+                    }
+                    <button type="button" class="secondary" @onclick="HidePersonalData" disabled="@_busy">@L("Скрыть")</button>
+                </div>
+            </EditForm>
+
+            <h2>@L("Согласие на обработку персональных данных")</h2>
+            <p class="muted">@L("Статья 9 Федерального закона № 152-ФЗ: письменное согласие с датой; срок можно не указывать — тогда до отзыва.")</p>
+            @if (canEdit)
+            {
+                <div class="inline-form">
+                    <label>@L("Дата согласия") <InputDate @bind-Value="_consentGiven" /></label>
+                    <label>@L("Действует до (необязательно)") <InputDate @bind-Value="_consentUntil" /></label>
+                    <button type="button" @onclick="GiveConsentAsync" disabled="@_busy">@L("Отметить согласие")</button>
+                    @if (_pd.Consent == ConsentState.Valid)
+                    {
+                        <button type="button" class="secondary" @onclick="RevokeConsentAsync" disabled="@_busy">@L("Отзыв согласия")</button>
+                    }
+                </div>
+                <label>
+                    @L("Скан подписанного согласия (PDF, JPEG или PNG, до 3 МБ)")
+                    <InputFile OnChange="UploadScanAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@_busy" />
+                </label>
+            }
+            @if (_pd.Scans.Count > 0)
+            {
+                <ul>
+                    @foreach (var s in _pd.Scans)
+                    {
+                        <li><a href="employees/consent-scans/@s.Id" target="_blank" rel="noopener">@s.FileName</a> <span class="muted">@TimeZones.ToLocal(s.UploadedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</span></li>
+                    }
+                </ul>
+            }
+        }
+    }
+
+    <p class="muted">@L("В обсуждении видны только ФИО и должность. Не пишите сюда паспортные данные, СНИЛС, ИНН, адрес и зарплату.")</p>
+    <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.Employee" TargetId="Id" />
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private EmployeeRowDto? _employee;
+    private ConsentSummaryDto? _summary;
+    private PersonalDataDto? _pd;
+    private PersonalDataForm _form = new();
+    private DateOnly? _consentGiven;
+    private DateOnly? _consentUntil;
+    private bool _busy;
+    private bool _notFound;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private string? _formError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _employee = await Employees.GetAsync(Id);
+            _summary = await PersonalData.SummaryAsync(Id);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private Task ShowPersonalDataAsync() => RunAsync(async () =>
+    {
+        _pd = await PersonalData.GetAsync(Id);
+        _form = PersonalDataForm.From(_pd.Values);
+        _consentGiven = _pd.ConsentGivenOn ?? Today();
+        _consentUntil = _pd.ConsentValidUntil;
+    });
+
+    private void HidePersonalData()
+    {
+        _pd = null;
+        _form = new PersonalDataForm();
+        _formError = null;
+    }
+
+    private Task SavePersonalDataAsync() => RunAsync(async () =>
+    {
+        await PersonalData.SaveAsync(Id, _form.ToValues(), _pd!.RowVersion);
+        _message = L("Персональные данные сохранены.");
+        await ReloadPersonalDataAsync();
+    });
+
+    private Task GiveConsentAsync() => RunAsync(async () =>
+    {
+        await PersonalData.GiveConsentAsync(Id, _consentGiven ?? Today(), _consentUntil, _pd!.RowVersion);
+        _message = L("Согласие отмечено.");
+        await ReloadPersonalDataAsync();
+    });
+
+    private Task RevokeConsentAsync() => RunAsync(async () =>
+    {
+        await PersonalData.RevokeConsentAsync(Id, Today(), _pd!.RowVersion);
+        _message = L("Отзыв согласия отмечен.");
+        await ReloadPersonalDataAsync();
+    });
+
+    private Task UploadScanAsync(InputFileChangeEventArgs args) => RunAsync(async () =>
+    {
+        var file = args.File;
+        if (file.Size > ConsentScan.MaxBytes)
+        {
+            throw new KnitErp.Domain.Common.BusinessRuleException("hr.consent.scan_size", "Скан согласия: файл до 3 МБ.");
+        }
+
+        using var buffer = new MemoryStream();
+        await using (var stream = file.OpenReadStream(ConsentScan.MaxBytes))
+        {
+            await stream.CopyToAsync(buffer);
+        }
+
+        await PersonalData.AddConsentScanAsync(Id, file.Name, file.ContentType, buffer.ToArray());
+        _message = L("Скан согласия загружен.");
+        await ReloadPersonalDataAsync();
+    });
+
+    private async Task ReloadPersonalDataAsync()
+    {
+        _pd = await PersonalData.GetAsync(Id);
+        _form = PersonalDataForm.From(_pd.Values);
+        _summary = await PersonalData.SummaryAsync(Id);
+    }
+
+    /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _formError = null;
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            // Ошибка формы ПДн — у формы, остальные — сообщением вверху.
+            if (_pd is not null)
+            {
+                _formError = UiErrors.Message(ex);
+            }
+            else
+            {
+                _message = UiErrors.Message(ex);
+                _isError = true;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string ConsentText(ConsentState state) => state switch
+    {
+        ConsentState.Valid => L("Согласие действует"),
+        ConsentState.Expired => L("Срок согласия истёк"),
+        ConsentState.Revoked => L("Согласие отозвано"),
+        _ => L("Согласия нет"),
+    };
+
+    private DateOnly Today() => DateOnly.FromDateTime(TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId));
+
+    private sealed class PersonalDataForm
+    {
+        public Gender Gender { get; set; }
+        public string? BirthPlace { get; set; }
+        public string? Citizenship { get; set; }
+        public string? PassportNumber { get; set; }
+        public string? PassportIssuer { get; set; }
+        public DateOnly? PassportIssuedOn { get; set; }
+        public string? PassportDivisionCode { get; set; }
+        public string? Snils { get; set; }
+        public string? Inn { get; set; }
+        public string? RegistrationAddress { get; set; }
+        public string? ActualAddress { get; set; }
+        public string? Phone { get; set; }
+        public string? Education { get; set; }
+        public string? Profession { get; set; }
+        public string? MaritalStatus { get; set; }
+        public string? FamilyMembers { get; set; }
+
+        public static PersonalDataForm From(PersonalDataValues v) => new()
+        {
+            Gender = v.Gender, BirthPlace = v.BirthPlace, Citizenship = v.Citizenship, PassportNumber = v.PassportNumber,
+            PassportIssuer = v.PassportIssuer, PassportIssuedOn = v.PassportIssuedOn, PassportDivisionCode = v.PassportDivisionCode,
+            Snils = v.Snils is null ? null : PersonIds.FormatSnils(v.Snils), Inn = v.Inn, RegistrationAddress = v.RegistrationAddress,
+            ActualAddress = v.ActualAddress, Phone = v.Phone, Education = v.Education, Profession = v.Profession,
+            MaritalStatus = v.MaritalStatus, FamilyMembers = v.FamilyMembers,
+        };
+
+        public PersonalDataValues ToValues() => new(Gender, BirthPlace, Citizenship, PassportNumber, PassportIssuer, PassportIssuedOn,
+            PassportDivisionCode, Snils, Inn, RegistrationAddress, ActualAddress, Phone, Education, Profession, MaritalStatus, FamilyMembers);
+    }
+}

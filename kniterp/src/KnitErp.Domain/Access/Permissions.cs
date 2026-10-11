@@ -12,6 +12,7 @@ public static class Permissions
     public const string EmployeeView = "hr.employee.view";
     public const string EmployeeEdit = "hr.employee.edit";
     public const string PersonalDataView = "hr.personal_data.view";
+    public const string PersonalDataEdit = "hr.personal_data.edit";
     public const string UserView = "access.user.view";
     public const string UserManage = "access.user.manage";
     public const string AdminGrant = "access.admin.grant";
@@ -41,6 +42,7 @@ public static class Permissions
         [EmployeeView] = "Сотрудники: просмотр",
         [EmployeeEdit] = "Сотрудники: изменение",
         [PersonalDataView] = "Персональные данные сотрудников",
+        [PersonalDataEdit] = "Персональные данные сотрудников: изменение",
         [UserView] = "Пользователи и роли: просмотр",
         [UserManage] = "Пользователи и роли: изменение",
         [AdminGrant] = "Выдача административных прав",
