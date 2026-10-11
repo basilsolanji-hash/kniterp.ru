@@ -61,6 +61,7 @@ public static class DependencyInjection
         // Модуль «Разработка» (D700–D799).
         services.AddScoped<Development.DevModelService>();
         services.AddScoped<Development.DevSettingsService>();
+        services.AddScoped<Development.DevExchangeService>();
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();

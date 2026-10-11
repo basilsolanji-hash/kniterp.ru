@@ -153,6 +153,8 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Development.DevStageSetting> DevStageSettings { get; }
     DbSet<KnitErp.Domain.Development.DevFile> DevFiles { get; }
     DbSet<KnitErp.Domain.Development.DevLookup> DevLookups { get; }
+    DbSet<KnitErp.Domain.Development.DevSettings> DevSettings { get; }
+    DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

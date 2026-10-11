@@ -461,6 +461,12 @@ app.MapGet("/dev/files/{id:long}", async (long id, KnitErp.Application.Developme
     }
 });
 
+// Excel моделей разработки (D794): выгрузка списка в работе и шаблон загрузки; права — в сервисе.
+app.MapGet("/dev/models.xlsx", (KnitErp.Application.Development.DevExchangeService exchange, CancellationToken ct) =>
+    FileOrForbid(() => exchange.ExportAsync(new KnitErp.Application.Development.DevModelFilter(IncludeFinal: true), ct), $"modeli-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
+app.MapGet("/dev/models-template.xlsx", (KnitErp.Application.Development.DevExchangeService exchange, CancellationToken ct) =>
+    FileOrForbid(() => exchange.TemplateAsync(ct), "shablon-modelei.xlsx"));
+
 app.MapGet("/opening-balances/template.xlsx", (OpeningBalanceService balances, CancellationToken ct) =>
     FileOrForbid(() => balances.LinesTemplateAsync(ct), "shablon-nachalnyh-ostatkov.xlsx"));
 app.MapGet("/stock-documents/template.xlsx", (StockDocumentService documents, CancellationToken ct) =>

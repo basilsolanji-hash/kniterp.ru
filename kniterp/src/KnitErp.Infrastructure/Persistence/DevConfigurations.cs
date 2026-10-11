@@ -137,3 +137,40 @@ internal sealed class DevLookupConfiguration : IEntityTypeConfiguration<DevLooku
         b.HasIndex(x => new { x.OrganizationId, x.Kind, x.Name }).IsUnique().HasDatabaseName("ux_dev_lookups_name");
     }
 }
+
+/// <summary>Настройки автоматизации разработки (D791): одна запись на организацию.</summary>
+internal sealed class DevSettingsConfiguration : IEntityTypeConfiguration<DevSettings>
+{
+    public void Configure(EntityTypeBuilder<DevSettings> b)
+    {
+        b.ToTable("dev_settings");
+        b.HasKey(x => x.OrganizationId);
+        b.Property(x => x.OrganizationId).ValueGeneratedNever();
+        b.Property(x => x.AutoLaunchDate).HasDefaultValue(true).HasSentinel(true);
+        b.Property(x => x.AutoAdvance).HasDefaultValue(true).HasSentinel(true);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DefaultDesignerUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_settings_designer");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DefaultDessinatorUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_settings_dessinator");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DefaultConstructorUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_settings_constructor");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DefaultTechnologistUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_settings_technologist");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DefaultProgrammerUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_settings_programmer");
+    }
+}
+
+/// <summary>Шаблоны задания по категориям (D790).</summary>
+internal sealed class DevCategoryTemplateConfiguration : IEntityTypeConfiguration<DevCategoryTemplate>
+{
+    public void Configure(EntityTypeBuilder<DevCategoryTemplate> b)
+    {
+        b.ToTable("dev_category_templates", t => t.HasCheckConstraint("ck_dev_category_templates_category", "[Category] BETWEEN 1 AND 10 OR [Category] = 99"));
+        b.HasKey(x => new { x.OrganizationId, x.Category });
+        b.Property(x => x.SizeRange).HasMaxLength(DevModel.ShortTextMaxLength);
+        b.Property(x => x.ColorRange).HasMaxLength(DevModel.ShortTextMaxLength);
+        b.Property(x => x.Composition).HasMaxLength(DevModel.ShortTextMaxLength);
+        b.Property(x => x.Labeling).HasMaxLength(DevModel.ShortTextMaxLength);
+        b.Property(x => x.Care).HasMaxLength(DevModel.ShortTextMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+    }
+}

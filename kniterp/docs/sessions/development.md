@@ -5,6 +5,8 @@
 
 ## Что сделано
 - Этап 1 (D700–D709): модели, стадии и история, задание, исполнители, файлы, доска и таблица, «Мои задачи», настройки. Миграция `DevModels`.
+- Автоматизация (D790–D798, `docs/tz/development-automation.md`): шаблоны задания, исполнители по умолчанию, дата запуска и название по
+  умолчанию, «Создать похожую», Excel моделей, автопереход по файлу, колокольчик и поиск, камера, подсказка «Что дальше». Миграция `DevAutomation`.
 
 ## Что изменено в общих файлах (точечно, с пометкой D700)
 - `Permissions.cs` — права `dev.*`, группа «Разработка» в `Groups` и `GroupOf`.
@@ -13,6 +15,8 @@
 - `ObjectDirectory.cs` — ветка `DevModel`; `AuditEntry.cs`/`Labels.cs` — действия `dev.*`; `Abstractions.cs`/`KnitErpDbContext.cs` — наборы `Dev*` в конце.
 - `MainLayout.razor` — раздел меню «Разработка»; `App.razor` — цвет раздела `--sec-dev`; `Program.cs` — выдача `/dev/files/{id}`.
 - `TranslationCoverageTests` — регистрация названий домена разработки и всех `TaggedEntity`.
+- `WorkspaceServices.cs` — `NotificationService` вызывает `DevNotifications.ComputeAsync`, `QuickSearchService` ищет модели (D796).
+- `tests/KnitErp.E2ETests/DevScreenshotTests.cs` — снимки экранов модуля по переменной `KNITERP_SCREENSHOTS` (без неё тест пустой).
 
 ## Вопросы к базе
 1. **Сжатие фото до 2000 px (ТЗ §13).** Нужна библиотека обработки изображений (например, SkiaSharp или ImageSharp — у второй коммерческая лицензия).

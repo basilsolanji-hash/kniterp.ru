@@ -5,7 +5,8 @@
 <form @onsubmit="SubmitAsync">
     <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
         <div class="grid">
-            <label class="wide">@L("Название") <input @bind="_name" maxlength="@DevModel.NameMaxLength" required placeholder="@L("Свитер с оленями")" /></label>
+            <label class="wide">@L("Название") <input @bind="_name" maxlength="@DevModel.NameMaxLength" required="@(Initial is not null)"
+                                                       placeholder="@(Initial is null ? L("Пусто — по категории, коллекции и заказчику") : L("Свитер с оленями"))" /></label>
             <label>
                 @L("Категория")
                 <select @bind="_category">
@@ -43,7 +44,12 @@
                     }
                 </select>
             </label>
-            <label>@L("Плановый запуск") <input type="date" @bind="_launch" /></label>
+            <label>@L("Плановый запуск") <input type="date" @bind="_launch" title="@(Initial is null && Options.AutoLaunchDate ? L("Пусто — рассчитается по нормативам стадий") : null)" />
+                @if (Initial is null && Options.AutoLaunchDate)
+                {
+                    <span class="muted small">@L("пусто — по нормативам стадий")</span>
+                }
+            </label>
             <label>
                 @L("Заказчик")
                 <select @bind="_customer">
@@ -116,8 +122,20 @@
 
     protected override void OnParametersSet()
     {
-        if (_initialized || Initial is not { } h)
+        if (_initialized)
         {
+            return;
+        }
+
+        if (Initial is not { } h)
+        {
+            // D791: новая модель сразу с исполнителями по умолчанию из настроек разработки.
+            _initialized = true;
+            foreach (var (role, user) in Options.DefaultAssignees ?? new Dictionary<DevRole, long?>())
+            {
+                _assignees[role] = user;
+            }
+
             return;
         }
 
