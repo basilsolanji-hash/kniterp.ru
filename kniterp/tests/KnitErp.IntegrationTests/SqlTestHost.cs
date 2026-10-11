@@ -204,7 +204,7 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Production.ShopFloorService(db, guard, Clock, new KnitErp.Application.Production.ProductionFloorService(db, guard, user, Clock)),
             new KnitErp.Application.Production.ShiftTaskService(db, guard, user, Clock),
             new KnitErp.Application.Production.ProductionSettingsService(db, guard, user, Clock),
-            new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock, Spreadsheet),
+            new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock, user, Spreadsheet),
             new RoleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.ItemTradeService(db, guard, user, Clock),

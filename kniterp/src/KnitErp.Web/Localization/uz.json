@@ -3546,5 +3546,11 @@
   "Такой пароль легко подобрать: он есть в списках утёкших паролей, это ряд клавиш или он содержит имя почты. Придумайте другой — например, фразу из нескольких слов.": "Bunday parolni topish oson: u sizib chiqqan parollar ro‘yxatida bor, tugmalar qatori yoki pochta nomini o‘z ichiga oladi. Boshqasini o‘ylab toping — masalan, bir necha so‘zdan iborat ibora.",
   "Текущий пароль": "Joriy parol",
   "Неверный текущий пароль или код из приложения.": "Joriy parol yoki ilovadagi kod noto‘g‘ri.",
-  "Неверный текущий пароль.": "Joriy parol noto‘g‘ri."
+  "Неверный текущий пароль.": "Joriy parol noto‘g‘ri.",
+  "Повторная работа после переделки — не входит в выработку для оплаты": "Qayta ishlashdan keyingi takroriy ish — toʻlov uchun ishlab chiqarishga kirmaydi",
+  "повторно {0}": "takroran {0}",
+  "в т. ч. повторно после переделки {0} — не входит в выработку": "shu jumladan qayta ishlashdan keyin takroran {0} — ishlab chiqarishga kirmaydi",
+  "Производство: указание виновника брака": "Ishlab chiqarish: brak aybdorini koʻrsatish",
+  "Выгружены баллы и показатели": "Ballar va koʻrsatkichlar yuklab olindi",
+  "Повторная работа указана неверно.": "Takroriy ish notoʻgʻri koʻrsatilgan."
 }

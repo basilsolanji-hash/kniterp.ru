@@ -64,15 +64,31 @@ public sealed class ProductionOperation
     /// <summary>Виновник брака (контроль качества) — для показателей качества сотрудника; у других отметок нет.</summary>
     public long? CulpritEmployeeId { get; private set; }
 
+    /// <summary>
+    /// Часть количества — повторная работа после возврата на переделку (D410): у «Сделано» от 0 до количества, у исправления —
+    /// от количества (отрицательного) до 0. В выработку для оплаты идёт только остальная часть.
+    /// </summary>
+    public decimal RepeatQuantity { get; private set; }
+
+    /// <summary>Количество для выработки исполнителя: без повторной работы.</summary>
+    public decimal PaidQuantity => Quantity - RepeatQuantity;
+
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 
     /// <summary>Новая запись; что её можно применить к заказу, проверяет <see cref="ProductionFlow.EnsureCanApply"/>.</summary>
     public static ProductionOperation Create(
         long organizationId, long orderId, ProductionStep step, string? reason, DateOnly occurredOn, long userId, DateTime nowUtc,
-        long? employeeId = null, long? correctsOperationId = null, long? culpritEmployeeId = null) => new()
+        long? employeeId = null, long? correctsOperationId = null, long? culpritEmployeeId = null, decimal repeatQuantity = 0) => new()
     {
         EmployeeId = employeeId,
+        RepeatQuantity = step.Kind switch
+        {
+            ProductionOperationKind.Done when repeatQuantity >= 0 && repeatQuantity <= step.Quantity => repeatQuantity,
+            ProductionOperationKind.Correction when repeatQuantity <= 0 && repeatQuantity >= step.Quantity => repeatQuantity,
+            _ when repeatQuantity == 0 => 0,
+            _ => throw new BusinessRuleException("production.stage.repeat_invalid", "Повторная работа указана неверно."),
+        },
         CulpritEmployeeId = step.Kind == ProductionOperationKind.Defect
             ? culpritEmployeeId
             : culpritEmployeeId is null ? null
@@ -96,6 +112,45 @@ public sealed class ProductionOperation
     };
 
     public ProductionStep Step => new(Stage, Kind, Quantity, ReturnToStage);
+}
+
+/// <summary>
+/// Повторная работа после переделки (D410). Возврат на этап X с контроля качества уменьшает сделанное на X и всех этапах до контроля:
+/// изделия проходят их заново. Эти отметки — не новая выработка, поэтому их часть помечается повторной и не оплачивается
+/// (переделка — следствие брака, за который уже заплачено). Ожидает повтора на этапе = возвращено на этот или более ранний этап
+/// минус уже отмеченное повторно; новая отметка «Сделано» сначала закрывает ожидающий повтор. Исправление отметки рабочего
+/// сначала уменьшает её оплачиваемую часть, затем повторную; исправление мастера без ссылки на отметку повторную часть не меняет.
+/// </summary>
+public static class ProductionRepeat
+{
+    public static decimal Pending(ProductionStage stage, IEnumerable<ProductionOperation> ops)
+    {
+        if (stage >= ProductionStage.QualityControl)
+        {
+            return 0;
+        }
+
+        var list = ops as IReadOnlyCollection<ProductionOperation> ?? ops.ToList();
+        var returned = list.Where(o => o.Kind == ProductionOperationKind.Rework && o.ReturnToStage <= stage).Sum(o => o.Quantity);
+        var repeated = list.Where(o => o.Stage == stage).Sum(o => o.RepeatQuantity);
+        return Math.Max(0, returned - repeated);
+    }
+
+    /// <summary>Повторная часть новой записи: для «Сделано» — неотрицательная, для исправления — неположительная, иначе 0.</summary>
+    public static decimal Part(ProductionStep step, IEnumerable<ProductionOperation> ops, ProductionOperation? corrected = null)
+    {
+        var list = ops as IReadOnlyCollection<ProductionOperation> ?? ops.ToList();
+        switch (step.Kind)
+        {
+            case ProductionOperationKind.Done:
+                return Math.Min(step.Quantity, Pending(step.Stage, list));
+            case ProductionOperationKind.Correction when corrected is not null:
+                var paidLeft = corrected.PaidQuantity + list.Where(o => o.CorrectsOperationId == corrected.Id).Sum(o => o.PaidQuantity);
+                return -Math.Max(0, -step.Quantity - Math.Max(0, paidLeft));
+            default:
+                return 0;
+        }
+    }
 }
 
 /// <summary>Работа на этапе без привязки к хранению — для расчёта потока.</summary>

@@ -1,5 +1,6 @@
 @page "/production/scores"
 @using KnitErp.Application.Production
+@using KnitErp.Domain.Access
 @inject ProductionScoreService Scores
 
 @* Баллы и показатели качества и дисциплины по сотрудникам (правила — в настройках производства). *@
@@ -19,7 +20,10 @@ else
     <form class="inline-form" @onsubmit="LoadAsync">
         <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" aria-label="@L("Месяц")" /></label>
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
-        <a class="button secondary" href="production/scores.xlsx?from=@_board.From.ToString("yyyy-MM-dd")&to=@_board.To.ToString("yyyy-MM-dd")" download>@L("Выгрузить в Excel")</a>
+        @if (CurrentAccess.Has(Permissions.EmployeeView))
+        {
+            <a class="button secondary" href="production/scores.xlsx?from=@_board.From.ToString("yyyy-MM-dd")&to=@_board.To.ToString("yyyy-MM-dd")" download>@L("Выгрузить в Excel")</a>
+        }
     </form>
     @if (_message is not null)
     {
@@ -71,6 +75,9 @@ else
 }
 
 @code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
     private ScoreBoardDto? _board;
     private string? _denied;
     private string? _message;

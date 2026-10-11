@@ -3807,6 +3807,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<decimal>("RepeatQuantity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(18,6)")
+                        .HasDefaultValue(0m);
+
                     b.Property<byte?>("ReturnToStage")
                         .HasColumnType("tinyint");
 
@@ -3847,6 +3852,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_production_operations_quantity", "([Kind] = 2 AND [Quantity] < 0) OR ([Kind] <> 2 AND [Quantity] > 0)");
 
                             t.HasCheckConstraint("ck_production_operations_reason", "[Kind] NOT IN (2, 4) OR [Reason] IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_production_operations_repeat", "([Kind] = 1 AND [RepeatQuantity] >= 0 AND [RepeatQuantity] <= [Quantity]) OR ([Kind] = 2 AND [RepeatQuantity] <= 0 AND [RepeatQuantity] >= [Quantity]) OR [RepeatQuantity] = 0");
 
                             t.HasCheckConstraint("ck_production_operations_return", "([Kind] = 3 AND [ReturnToStage] IN (1, 2, 3)) OR ([Kind] <> 3 AND [ReturnToStage] IS NULL)");
 

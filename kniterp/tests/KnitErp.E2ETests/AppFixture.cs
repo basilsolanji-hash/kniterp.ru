@@ -150,6 +150,9 @@ public sealed class AppFixture : IAsyncLifetime
             var workerUser = await db.Users.Where(u => u.Email == WorkerEmail).Select(u => u.Id).SingleAsync();
             db.RoleAssignments.Add(KnitErp.Domain.Access.RoleAssignment.ForPermission(org.OrganizationId, workerUser, Permissions.ProductionStageMark, false,
                 org.OwnerUserId, DateTime.UtcNow, "e2e"));
+            // Она же — контролёр ОТК в сценарии D407: виновника брака указывает с отдельным правом (D412).
+            db.RoleAssignments.Add(KnitErp.Domain.Access.RoleAssignment.ForPermission(org.OrganizationId, workerUser, Permissions.ProductionDefectCulprit, false,
+                org.OwnerUserId, DateTime.UtcNow, "e2e"));
 
             await db.SaveChangesAsync();
         }

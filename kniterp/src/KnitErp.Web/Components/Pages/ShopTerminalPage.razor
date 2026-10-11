@@ -132,6 +132,10 @@ else
                     <li>
                         <a href="@ShopFloorCode.Path(e.OrderId, e.Stage)">@e.OrderNumber · @L(e.StageName)</a>
                         <span>@e.ItemName — @Quantities.Format(e.Quantity) @e.UnitSymbol, @e.LocalTime.ToString("HH:mm")</span>
+                        @if (e.Repeat != 0)
+                        {
+                            <span class="muted">@L("в т. ч. повторно после переделки {0} — не входит в выработку", Quantities.Format(e.Repeat))</span>
+                        }
                         @if (e.Reason is not null)
                         {
                             <span class="muted">@e.Reason</span>

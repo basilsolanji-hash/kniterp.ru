@@ -100,7 +100,10 @@
                                 <td>@h.OccurredOn.ToString("dd.MM.yyyy")</td>
                                 <td>@L(h.StageName)</td>
                                 <td>@L(h.KindName)@(h.ReturnToName is null ? "" : $" → {L(h.ReturnToName)}")@(h.Culprit is null ? "" : $" ({L("виновник")} {h.Culprit})")</td>
-                                <td class="num">@Quantities.Format(h.Quantity)</td>
+                                <td class="num">@Quantities.Format(h.Quantity)@if (h.Repeat != 0)
+                                    {
+                                        <br /><span class="muted" title="@L("Повторная работа после переделки — не входит в выработку для оплаты")">@L("повторно {0}", Quantities.Format(h.Repeat))</span>
+                                    }</td>
                                 <td>@h.Reason</td>
                                 <td>
                                     @h.CreatedBy@(h.Employee is null ? "" : $" ({L("исполнитель")} {h.Employee})")

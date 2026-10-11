@@ -99,6 +99,9 @@ public static class RoleMatrixP0
         (Permissions.ProductionOrderEdit,     [Full, Full, Full, None, None, None, None, None]),
         // Допущение D92: этапы отмечает начальник цеха, мастерам и контролёрам ОТК (роль «Сотрудник») право выдаётся отдельно.
         (Permissions.ProductionStageMark,     [Full, Full, Full, None, None, None, None, ByGrant]),
+        // Допущение D412: виновника брака указывает тот, кто ведёт качество, — начальник цеха; контролёру ОТК право выдаётся отдельно
+        // (виновник влияет на баллы и премии, поэтому право уже, чем отметка этапов).
+        (Permissions.ProductionDefectCulprit, [Full, Full, Full, None, None, None, None, ByGrant]),
         // Допущение D93: выдачу, возврат, отходы и выпуск проводят кладовщики своих складов — нужны ещё права складских документов.
         (Permissions.ProductionMaterialMove,  [Full, None, None, Scoped, Scoped, None, None, None]),
         // Допущение D302 (каталог): состав комплектов меняют те, кто меняет справочники организации целиком.

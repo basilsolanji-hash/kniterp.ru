@@ -39,7 +39,8 @@ public sealed record ShopMarkCommand(decimal Quantity, string? ShortfallReason, 
 
 public sealed record ShopEntryDto(
     long Id, DateTime CreatedAtUtc, long OrderId, string OrderNumber, string ItemName, ProductionStage Stage, ProductionOperationKind Kind,
-    decimal Quantity, string UnitSymbol, string? Reason, TimeOnly LocalTime = default, decimal? Remaining = null, bool CanCorrect = false)
+    decimal Quantity, string UnitSymbol, string? Reason, TimeOnly LocalTime = default, decimal? Remaining = null, bool CanCorrect = false,
+    decimal Repeat = 0)
 {
     public string StageName => ProductionFlow.StageName(Stage);
     public string KindName => ProductionFlow.KindName(Kind);
@@ -105,6 +106,10 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         if (stage == ProductionStage.QualityControl && hint == ShopHint.None)
         {
             rework = flow.Route.Stages.Where(s => s < ProductionStage.QualityControl).ToList();
+        }
+
+        if (rework is not null && ctx.Permissions.Has(Permissions.ProductionDefectCulprit))
+        {
             culprits = (await db.Employees.AsNoTracking()
                     .Where(e => e.OrganizationId == ctx.OrganizationId && e.Status == EmploymentStatus.Working)
                     .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
@@ -197,7 +202,7 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
                                 orderby o.Id descending
                                 select new
                                 {
-                                    Entry = new ShopEntryDto(o.Id, o.CreatedAtUtc, p.Id, p.Number, i.Name, o.Stage, o.Kind, o.Quantity, u.Symbol, o.Reason),
+                                    Entry = new ShopEntryDto(o.Id, o.CreatedAtUtc, p.Id, p.Number, i.Name, o.Stage, o.Kind, o.Quantity, u.Symbol, o.Reason, default, null, false, o.RepeatQuantity),
                                     InWork = p.Status == ProductionOrderStatus.Released || p.Status == ProductionOrderStatus.PartiallyDone,
                                 })
                 .ToListAsync(ct);
