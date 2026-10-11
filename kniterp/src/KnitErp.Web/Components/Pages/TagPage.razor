@@ -1,0 +1,89 @@
+@page "/tags/{Id:long}"
+@using KnitErp.Application.Tagging
+@using KnitErp.Domain.Tagging
+@inject TagService Tags
+
+<PageTitle>@(_tag?.Name ?? L("Тег")) — knitERP</PageTitle>
+
+@* D103: всё, что отмечено тегом, — с учётом прав пользователя и области его складов. *@
+@if (_notFound)
+{
+    <h1>@L("Тег не найден")</h1>
+    <p><a href="tags">@L("Ко всем тегам")</a></p>
+}
+else if (_tag is null || _objects is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <p><a href="tags">@L("← Все теги")</a></p>
+    <h1 style="display: flex; align-items: center; gap: 10px">
+        <span class="tag-dot big @(_tag.Color == TagColor.None ? "hollow" : null)" style="background: @_tag.Css; cursor: default"></span>
+        @_tag.Name
+        @if (_tag.IsArchived)
+        {
+            <span class="tag">@L("в архиве")</span>
+        }
+    </h1>
+    <form class="inline-form" @onsubmit:preventDefault>
+        <label>@L("Поиск") <input @bind="_filter" @bind:event="oninput" placeholder="@L("Название, номер")" /></label>
+        <label>
+            @L("Что")
+            <select @bind="_entity">
+                <option value="">@L("Всё ({0})", _objects.Count)</option>
+                @foreach (var g in _objects.GroupBy(o => o.Entity))
+                {
+                    <option value="@((byte)g.Key)">@L(TagColors.EntityName(g.Key)) (@g.Count())</option>
+                }
+            </select>
+        </label>
+    </form>
+    var shown = _objects.Where(o => (_entity is null || (byte)o.Entity == _entity)
+                                    && (string.IsNullOrWhiteSpace(_filter) || o.Title.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase)
+                                        || (o.Subtitle?.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))).ToList();
+    @if (shown.Count == 0)
+    {
+        <p class="muted">@(_objects.Count == 0 ? L("Тегом пока ничего не отмечено — поставьте его на карточке объекта кнопкой «+ Тег».") : L("Ничего не найдено."))</p>
+    }
+    @foreach (var g in shown.GroupBy(o => o.Entity))
+    {
+        <h2 style="margin-top: 16px">@L(TagColors.EntityName(g.Key)) <span class="muted">@g.Count()</span></h2>
+        <ul class="plain link-list">
+            @foreach (var o in g)
+            {
+                <li><a href="@o.Href">@o.Title</a> @if (o.Subtitle is not null) { <span class="muted">@o.Subtitle</span> }</li>
+            }
+        </ul>
+    }
+    @if (_tag.Count > _objects.Count)
+    {
+        <p class="muted small">@L("Ещё {0} отмеченных объектов вам не видны по правам доступа.", _tag.Count - _objects.Count)</p>
+    }
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private TagDto? _tag;
+    private IReadOnlyList<TaggedObjectDto>? _objects;
+    private bool _notFound;
+    private string? _filter;
+    private byte? _entity;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _tag = null;
+        _objects = null;
+        _notFound = false;
+        try
+        {
+            (_tag, _objects) = await Tags.ObjectsAsync(Id);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+}

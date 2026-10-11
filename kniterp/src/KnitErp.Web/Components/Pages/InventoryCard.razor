@@ -26,6 +26,7 @@ else
     <div class="page-head">
         <h1>@L("Инвентаризация") @_doc.Number <span class="tag @InventoryPage.StatusClass(_doc.Status)">@L(_doc.StatusName)</span></h1>
     </div>
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.InventoryCount" EntityId="Id" />
 
     @if (_message is not null)
     {

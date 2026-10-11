@@ -34,6 +34,10 @@ else
     {
         <div class="panel">
             <h2>@(_mode == Mode.Create ? L("Новый контрагент") : _target!.Name)</h2>
+            @if (_mode == Mode.Edit && _target is not null)
+            {
+                <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.Counterparty" EntityId="_target.Id" />
+            }
             <EditForm Model="_form" OnValidSubmit="SaveAsync" FormName="counterparty">
                 <div class="grid">
                     <label>@L("Наименование") <InputText @bind-Value="_form.Name" maxlength="300" required placeholder="@L("ООО «Пряжа»")" /></label>

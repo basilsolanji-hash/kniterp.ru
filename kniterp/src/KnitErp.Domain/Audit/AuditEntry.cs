@@ -101,6 +101,11 @@ public static class AuditActions
     public const string ExpenseReportApproved = "expense_report.approved";
     public const string ExpenseReportCancelled = "expense_report.cancelled";
     public const string StockBatchCreated = "stock.batch.created";
+    public const string TagCreated = "tag.created";
+    public const string TagChanged = "tag.changed";
+    public const string TagArchived = "tag.archived";
+    public const string TagAssigned = "tag.assigned";
+    public const string TagRemoved = "tag.removed";
     public const string StockBatchChanged = "stock.batch.changed";
     public const string StockBatchArchived = "stock.batch.archived";
     public const string ApiTokenIssued = "api.token.issued";

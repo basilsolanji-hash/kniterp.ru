@@ -1,0 +1,175 @@
+@page "/tags"
+@using KnitErp.Application.Tagging
+@using KnitErp.Domain.Tagging
+@inject TagService Tags
+
+<PageTitle>@L("Теги") — knitERP</PageTitle>
+
+@*
+    D103: теги организации как метки Finder: название, цвет, «в меню» (избранное). Поставить тег — на карточке объекта кнопкой
+    «+ Тег»; найти всё отмеченное — в меню слева, здесь или в быстром поиске по «#».
+*@
+<h1>@L("Теги")</h1>
+<p class="muted">@L("Цветные метки, как в Finder на Mac: отмечайте позиции, контрагентов, заказы, складские документы и партии, а потом находите всё отмеченное одним нажатием. Тег ставится на карточке объекта кнопкой «+ Тег»; в быстром поиске (Ctrl+K) наберите «#» и название.")</p>
+
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+
+<form class="panel" @onsubmit="SaveAsync">
+    <h2>@(_editId is null ? L("Новый тег") : L("Изменить тег"))</h2>
+    <div class="grid">
+        <label>@L("Название") <input @bind="_name" maxlength="@Tag.NameMaxLength" placeholder="@L("Срочно")" required /></label>
+        <div>
+            <span class="label-text">@L("Цвет")</span>
+            <div class="tag-colors" role="radiogroup" aria-label="@L("Цвет")">
+                @foreach (var c in TagColors.All)
+                {
+                    var color = c;
+                    <button type="button" class="tag-dot big @(c == TagColor.None ? "hollow" : null) @(_color == c ? "selected" : null)" style="background: @TagColors.Css(c)"
+                            role="radio" aria-checked="@(_color == c ? "true" : "false")" title="@L(TagColors.Name(c))" aria-label="@L(TagColors.Name(c))" @onclick="() => _color = color"></button>
+                }
+            </div>
+        </div>
+        <label class="check"><input type="checkbox" @bind="_favorite" /> @L("Показывать в меню")</label>
+    </div>
+    <div class="actions">
+        <button type="submit" disabled="@_busy">@(_editId is null ? L("Создать") : L("Сохранить"))</button>
+        @if (_editId is not null)
+        {
+            <button type="button" class="secondary" @onclick="Reset">@L("Отмена")</button>
+        }
+    </div>
+</form>
+
+<label class="check"><input type="checkbox" @bind="_archived" @bind:after="LoadAsync" /> @L("Показать архив")</label>
+@if (_tags is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Тег")</th><th class="num">@L("Отмечено")</th><th>@L("В меню")</th><th></th></tr></thead>
+            <tbody>
+                @if (_tags.Count == 0)
+                {
+                    <tr><td colspan="4" class="muted">@L("Тегов пока нет — создайте первый или поставьте тег на карточке объекта.")</td></tr>
+                }
+                @foreach (var t in _tags)
+                {
+                    <tr class="@(t.IsArchived ? "archived" : null)">
+                        <td><span class="tag-chip"><span class="tag-dot @(t.Color == TagColor.None ? "hollow" : null)" style="background: @t.Css"></span><a href="tags/@t.Id">@t.Name</a></span></td>
+                        <td class="num">@t.Count</td>
+                        <td>@(t.IsFavorite ? "✓" : "")</td>
+                        <td>
+                            <div class="row-actions">
+                                @if (!t.IsArchived)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => Edit(t)" disabled="@_busy">@L("Изменить")</button>
+                                }
+                                <button type="button" class="secondary" @onclick="() => ArchiveAsync(t)" disabled="@_busy">@(t.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<TagDto>? _tags;
+    private long? _editId;
+    private byte[] _rowVersion = [];
+    private string? _name;
+    private TagColor _color = TagColor.Blue;
+    private bool _favorite = true;
+    private bool _archived;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _tags = await Tags.ListAsync(_archived);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+    }
+
+    private void Edit(TagDto t)
+    {
+        _editId = t.Id;
+        _rowVersion = t.RowVersion;
+        _name = t.Name;
+        _color = t.Color;
+        _favorite = t.IsFavorite;
+    }
+
+    private void Reset()
+    {
+        _editId = null;
+        _name = null;
+        _color = TagColor.Blue;
+        _favorite = true;
+    }
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        if (_editId is { } id)
+        {
+            await Tags.UpdateAsync(id, _name, _color, _favorite, _rowVersion);
+        }
+        else
+        {
+            var newId = await Tags.CreateAsync(_name, _color);
+            if (!_favorite)
+            {
+                var created = (await Tags.ListAsync()).Single(t => t.Id == newId);
+                await Tags.UpdateAsync(newId, created.Name, created.Color, false, created.RowVersion);
+            }
+        }
+
+        Reset();
+    }, L("Тег сохранён."));
+
+    private Task ArchiveAsync(TagDto t) => RunAsync(() => Tags.ArchiveAsync(t.Id, !t.IsArchived, t.RowVersion),
+        t.IsArchived ? L("Тег возвращён.") : L("Тег в архиве — он скрыт с объектов и из меню."));
+
+    private async Task RunAsync(Func<Task> action, string success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            await LoadAsync();
+            _busy = false;
+        }
+    }
+}

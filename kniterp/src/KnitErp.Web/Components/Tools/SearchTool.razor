@@ -5,7 +5,7 @@
     <label>
         @L("Что найти")
         <input id="quick-search-input" @bind="_query" @bind:event="oninput" @bind:after="Schedule" autocomplete="off"
-               placeholder="@L("Раздел, код позиции, номер документа")" aria-describedby="search-hint" />
+               placeholder="@L("Раздел, код позиции, номер документа, #тег")" aria-describedby="search-hint" />
     </label>
 </form>
 <p class="muted" id="search-hint">@L("Ctrl+K — открыть поиск с любого экрана, Enter — перейти к первому результату.")</p>
@@ -137,6 +137,7 @@
         SearchHitKind.Item => L("Номенклатура"),
         SearchHitKind.Document => L("Документы"),
         SearchHitKind.Help => L("Справка"),
+        SearchHitKind.Tag => L("Теги"),
         _ => L("Разделы"),
     };
 

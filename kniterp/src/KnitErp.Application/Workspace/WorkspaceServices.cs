@@ -264,6 +264,7 @@ public enum SearchHitKind
     Item,
     Document,
     Help,
+    Tag,
 }
 
 public sealed record SearchHitDto(SearchHitKind Kind, string Title, string? Subtitle, string? Href, string? HelpId);
@@ -289,6 +290,23 @@ public sealed class QuickSearchService(IKnitErpDbContextFactory factory, ICurren
         {
             var ctx = await new AccessGuard(db, currentUser, clock).CurrentAsync(ct);
             var org = ctx.OrganizationId;
+
+            // D103: теги — «#сроч» ищет только теги, просто текст находит и теги с таким названием.
+            var tagText = KnitErp.Domain.Tagging.Tag.Normalize(text);
+            if (tagText.Length > 0)
+            {
+                var tags = await db.Tags.AsNoTracking()
+                    .Where(t => t.OrganizationId == org && !t.IsArchived && t.Name.Contains(tagText))
+                    .OrderBy(t => t.Name).Take(MaxPerKind)
+                    .Select(t => new { t.Id, t.Name, Count = db.TagLinks.Count(l => l.TagId == t.Id) }).ToListAsync(ct);
+                hits.AddRange(tags.Select(t => new SearchHitDto(SearchHitKind.Tag, "#" + t.Name, ui.Translate("Тег") + " · " + t.Count,
+                    $"tags/{t.Id}", null)));
+            }
+
+            if (text.StartsWith('#'))
+            {
+                return hits;
+            }
 
             if (ctx.Permissions.Has(Permissions.CatalogView))
             {

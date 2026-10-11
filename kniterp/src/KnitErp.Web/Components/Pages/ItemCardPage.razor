@@ -28,6 +28,7 @@ else
     <div class="page-head">
         <h1>@_item.Name <span class="tag">@L(_item.TypeName)</span> @if (_item.IsArchived) { <span class="tag">@L("архив")</span> }</h1>
     </div>
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.Item" EntityId="Id" />
 
     @if (_message is not null)
     {

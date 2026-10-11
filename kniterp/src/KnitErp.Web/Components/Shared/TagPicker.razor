@@ -1,0 +1,146 @@
+@using KnitErp.Application.Tagging
+@using KnitErp.Domain.Tagging
+@inject TagService Tags
+
+@*
+    D103: теги объекта как метки Finder — цветные точки с названием, «+ Тег» ищет существующий или создаёт новый с цветом.
+    Сервис тегов работает со своим контекстом базы, поэтому виджет не мешает операциям карточки.
+*@
+<div class="tag-picker" aria-label="@L("Теги")">
+    @foreach (var t in _tags)
+    {
+        <span class="tag-chip">
+            <span class="tag-dot @(t.Color == TagColor.None ? "hollow" : null)" style="background: @t.Css"></span>
+            <a href="tags/@t.Id">@t.Name</a>
+            @if (!ReadOnly)
+            {
+                <button type="button" class="tag-x" @onclick="() => RemoveAsync(t)" disabled="@_busy" aria-label="@L("Снять тег {0}", t.Name)">×</button>
+            }
+        </span>
+    }
+    @if (!ReadOnly)
+    {
+        <button type="button" class="tag-add" @onclick="ToggleAsync" disabled="@_busy" aria-expanded="@(_open ? "true" : "false")">+ @L("Тег")</button>
+    }
+    @if (_open)
+    {
+        var text = Tag.Normalize(_text);
+        var matches = _all.Where(t => _tags.All(x => x.Id != t.Id) && (text.Length == 0 || t.Name.Contains(text, StringComparison.OrdinalIgnoreCase))).Take(12).ToList();
+        var exact = _all.Any(t => string.Equals(t.Name, text, StringComparison.OrdinalIgnoreCase));
+        <div class="tag-pop" role="dialog" aria-label="@L("Поставить тег")">
+            <input @bind="_text" @bind:event="oninput" placeholder="@L("Найти или создать тег")" maxlength="@Tag.NameMaxLength" aria-label="@L("Название тега")" />
+            @foreach (var t in matches)
+            {
+                <button type="button" class="tag-option" @onclick="() => AssignAsync(t.Id)" disabled="@_busy">
+                    <span class="tag-dot @(t.Color == TagColor.None ? "hollow" : null)" style="background: @t.Css"></span> @t.Name
+                </button>
+            }
+            @if (text.Length > 0 && !exact)
+            {
+                <div class="tag-colors" role="radiogroup" aria-label="@L("Цвет")">
+                    @foreach (var c in TagColors.All)
+                    {
+                        var color = c;
+                        <button type="button" class="tag-dot big @(c == TagColor.None ? "hollow" : null) @(_color == c ? "selected" : null)" style="background: @TagColors.Css(c)"
+                                role="radio" aria-checked="@(_color == c ? "true" : "false")" title="@L(TagColors.Name(c))" aria-label="@L(TagColors.Name(c))" @onclick="() => _color = color"></button>
+                    }
+                </div>
+                <button type="button" @onclick="CreateAsync" disabled="@_busy">@L("Создать тег «{0}»", text)</button>
+            }
+            else if (matches.Count == 0)
+            {
+                <p class="muted small">@L("Введите название нового тега.")</p>
+            }
+        </div>
+    }
+    @if (_error is not null)
+    {
+        <span class="error small" role="alert">@_error</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public TaggedEntity Entity { get; set; }
+
+    [Parameter, EditorRequired]
+    public long EntityId { get; set; }
+
+    [Parameter]
+    public bool ReadOnly { get; set; }
+
+    private IReadOnlyList<TagDto> _tags = [];
+    private IReadOnlyList<TagDto> _all = [];
+    private bool _open;
+    private bool _busy;
+    private string? _text;
+    private TagColor _color = TagColor.Blue;
+    private string? _error;
+    private (TaggedEntity, long) _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != (Entity, EntityId))
+        {
+            _loaded = (Entity, EntityId);
+            await RunAsync(async () => _tags = await Tags.ForEntityAsync(Entity, EntityId));
+        }
+    }
+
+    private Task ToggleAsync() => RunAsync(async () =>
+    {
+        _open = !_open;
+        if (_open)
+        {
+            _all = await Tags.ListAsync();
+        }
+    });
+
+    private Task AssignAsync(long tagId) => RunAsync(async () =>
+    {
+        await Tags.AssignAsync(Entity, EntityId, tagId);
+        await ReloadAsync();
+    });
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        await Tags.AssignAsync(Entity, EntityId, null, _text, _color);
+        await ReloadAsync();
+    });
+
+    private Task RemoveAsync(TagDto t) => RunAsync(async () =>
+    {
+        await Tags.RemoveAsync(Entity, EntityId, t.Id);
+        _tags = await Tags.ForEntityAsync(Entity, EntityId);
+    });
+
+    private async Task ReloadAsync()
+    {
+        _tags = await Tags.ForEntityAsync(Entity, EntityId);
+        _open = false;
+        _text = null;
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

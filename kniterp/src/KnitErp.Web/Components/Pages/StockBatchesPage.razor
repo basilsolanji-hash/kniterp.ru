@@ -60,6 +60,10 @@ else
         {
             <form class="panel" @onsubmit="SaveAsync">
                 <h2>@(_form.Id is null ? L("Новая партия") : L("Партия {0}", _form.Number ?? ""))</h2>
+                @if (_form.Id is { } batchId)
+                {
+                    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.StockBatch" EntityId="batchId" />
+                }
                 <div class="grid">
                     @if (_form.Id is null)
                     {

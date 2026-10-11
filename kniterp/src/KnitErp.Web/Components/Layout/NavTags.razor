@@ -1,0 +1,62 @@
+@using KnitErp.Application.Tagging
+@using KnitErp.Domain.Tagging
+@inject TagService Tags
+
+@*
+    D103: избранные теги в боковом меню — как раздел «Теги» в Finder. Свой контекст базы на каждый запрос (TagService),
+    поэтому меню не мешает странице. Обновляется при переходе между страницами.
+*@
+<div class="nav-group open" style="--sec: var(--sec-home)">
+    <a class="nav-group-head" href="tags" title="@L("Теги")" style="text-decoration: none">
+        <span aria-hidden="true" style="width: 16px; text-align: center">#</span><span class="nav-text">@L("Теги")</span>
+    </a>
+    <ul class="nav-tags">
+        @foreach (var t in _tags.Where(t => t.IsFavorite).Take(12))
+        {
+            <li>
+                <a href="tags/@t.Id" class="@(Route == $"tags/{t.Id}" ? "active" : null)" title="@t.Name">
+                    <span class="tag-dot @(t.Color == TagColor.None ? "hollow" : null)" style="background: @t.Css"></span>
+                    @if (!Narrow)
+                    {
+                        <span class="nav-text">@t.Name</span>
+                    }
+                </a>
+            </li>
+        }
+        @if (!Narrow)
+        {
+            <li><a href="tags" class="@(Route == "tags" ? "active" : null)">@L("Все теги…")</a></li>
+        }
+    </ul>
+</div>
+
+@code {
+    [Parameter]
+    public string Route { get; set; } = "";
+
+    [Parameter]
+    public bool Narrow { get; set; }
+
+    private IReadOnlyList<TagDto> _tags = [];
+    private string? _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Перечитываем при переходе: тег могли создать или переименовать на другой странице.
+        var key = Route.Split('?')[0];
+        if (_loadedFor == key)
+        {
+            return;
+        }
+
+        _loadedFor = key;
+        try
+        {
+            _tags = await Tags.ListAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _tags = [];
+        }
+    }
+}

@@ -30,6 +30,7 @@ else
         <h1>@L("Заказ поставщику") @_order.Number <span class="tag @PurchaseOrdersPage.StatusClass(_order.Status)">@L(_order.StatusName)</span>
             <span class="muted" style="font-size: 13px; font-weight: 400">@PurchaseOrdersPage.ReceivedName(_order.Received)</span></h1>
     </div>
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.PurchaseOrder" EntityId="Id" />
 
     @if (_message is not null)
     {

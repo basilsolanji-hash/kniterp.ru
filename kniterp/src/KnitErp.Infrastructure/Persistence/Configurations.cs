@@ -1471,6 +1471,39 @@ internal sealed class InventoryBatchCountConfiguration : IEntityTypeConfiguratio
     }
 }
 
+internal sealed class TagConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Tagging.Tag>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Tagging.Tag> b)
+    {
+        b.ToTable("tags", t => t.HasCheckConstraint("ck_tags_color", "[Color] BETWEEN 0 AND 7"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(KnitErp.Domain.Tagging.Tag.NameMaxLength).IsRequired();
+        b.Property(x => x.Color).HasConversion<byte>();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_tags_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique().HasDatabaseName("ux_tags_org_name");
+    }
+}
+
+internal sealed class TagLinkConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Tagging.TagLink>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Tagging.TagLink> b)
+    {
+        b.ToTable("tag_links", t => t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 7"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Entity).HasConversion<byte>();
+        b.HasOne<KnitErp.Domain.Tagging.Tag>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.TagId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_tag_links_tag");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.TagId, x.Entity, x.EntityId }).IsUnique().HasDatabaseName("ux_tag_links_tag_entity");
+        b.HasIndex(x => new { x.OrganizationId, x.Entity, x.EntityId }).HasDatabaseName("ix_tag_links_org_entity");
+    }
+}
+
 internal sealed class StockBatchMovementConfiguration : IEntityTypeConfiguration<StockBatchMovement>
 {
     public void Configure(EntityTypeBuilder<StockBatchMovement> b)
