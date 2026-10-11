@@ -122,6 +122,8 @@ public static class AuditActions
     public const string DeviceRevoked = "auth.device.revoked";
     public const string PasswordResetRequested = "auth.password_reset.requested";
     public const string PasswordReset = "auth.password.reset";
+    public const string PasswordChanged = "auth.password.changed";
+    public const string SessionsRevoked = "auth.sessions.revoked";
     public const string PasswordResetIssued = "access.password_reset.issued";
     public const string EmergencyAccess = "access.emergency";
     public const string DepartmentCreated = "structure.department.created";
@@ -155,6 +157,9 @@ public static class AuditActions
     public const string PayrollApproved = "hr.payroll.approved";
     public const string PayslipViewed = "hr.payslip.viewed";
     public const string PayrollExported = "hr.payroll.exported";
+
+    /// <summary>Выгрузка баллов и показателей сотрудников в Excel (D223, сессия «Сотрудники»: массовая выгрузка ФИО и брака по вине — в журнал).</summary>
+    public const string ProductionScoresExported = "production.scores.exported";
     public const string HrSettingsChanged = "hr.settings.changed";
     public const string CatalogCreated = "catalog.created";
     public const string CatalogChanged = "catalog.changed";
@@ -187,7 +192,6 @@ public static class AuditActions
     public const string ProductionShiftTaskCancelled = "production.shift.cancelled";
     public const string ProductionShiftShortfall = "production.shift.shortfall";
     public const string ProductionSettingsChanged = "production.settings.changed";
-    public const string ProductionScoresExported = "production.scores.exported";
     public const string PurchaseOrderCreated = "purchase.order.created";
     public const string PurchaseOrderChanged = "purchase.order.changed";
     public const string PurchaseOrderConfirmed = "purchase.order.confirmed";

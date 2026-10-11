@@ -200,6 +200,12 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             details = details with { PurchasePrice = item.PurchasePrice };
         }
 
+        // D312: обязательная группа — её нельзя убрать у позиции (модификация берёт группу основной позиции).
+        if (item.ParentItemId is null)
+        {
+            (await db.CatalogSettings.AsNoTracking().SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct))?.EnsureGroup(details.GroupId);
+        }
+
         if (details.GroupId is { } gid && gid != item.GroupId)
         {
             var group = await db.ItemGroups.AsNoTracking().SingleOrDefaultAsync(g => g.Id == gid && g.OrganizationId == ctx.OrganizationId, ct)

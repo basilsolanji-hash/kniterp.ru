@@ -33,7 +33,7 @@ public sealed class DiscussionComment
 
     public static DiscussionComment Create(long organizationId, TaggedEntity target, long targetId, long authorUserId, string? text, DateTime nowUtc)
     {
-        if (!Enum.IsDefined(target))
+        if (!Enum.IsDefined(target) && !TagLink.IsModule(target))
         {
             throw new BusinessRuleException("discussion.target", "Этот объект нельзя обсуждать.");
         }

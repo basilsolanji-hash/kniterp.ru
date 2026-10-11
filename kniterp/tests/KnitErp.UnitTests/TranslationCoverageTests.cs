@@ -56,6 +56,12 @@ public sealed partial class TranslationCoverageTests
             {
                 keys.Add(Regex.Unescape(m.Groups[1].Value));
             }
+
+            // D117: названия вкладок и блоков модулей — ModuleUi.Text("…").
+            foreach (Match m in ModuleText().Matches(text))
+            {
+                keys.Add(Regex.Unescape(m.Groups[1].Value));
+            }
         }
 
         // Названия разделов меню и групп — строки в MainLayout, переводятся при выводе.
@@ -251,6 +257,9 @@ public sealed partial class TranslationCoverageTests
 
     [GeneratedRegex("""(?<![\w.])(?:Text\.)?(?:L|CssText)\("((?:[^"\\]|\\.)*)"[,)]""")]
     private static partial Regex Call();
+
+    [GeneratedRegex("""ModuleUi\.Text\("((?:[^"\\]|\\.)*)"\)""")]
+    private static partial Regex ModuleText();
 
     [GeneratedRegex("""\("[\w/?=&-]*", "([^"]+)", (?:a =>|Docs\))""")]
     private static partial Regex MenuItem();

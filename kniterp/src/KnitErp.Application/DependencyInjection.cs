@@ -74,6 +74,9 @@ public static class DependencyInjection
         services.AddScoped<Catalog.PackService>(); // D307 (сессия 4)
         services.AddScoped<Catalog.CatalogQueryService>(); // D307 (сессия 4)
         services.AddScoped<Catalog.ItemSupplierService>(); // D309 (сессия 4)
+        services.AddScoped<Exchange.MoySklad.MoySkladImportService>(); // D310 (сессия 4)
+        services.AddScoped<Catalog.CatalogSettingsService>(); // D312 (сессия 4)
+        services.AddScoped<Catalog.CatalogFeedService>(); // D314 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
         services.AddScoped<Finance.SettlementStatementService>();
@@ -89,6 +92,7 @@ public static class DependencyInjection
         services.AddScoped<RecoveryCodeService>();
         services.AddScoped<PasswordResetService>();
         services.AddScoped<TrustedDeviceService>();
+        services.AddScoped<AccountSecurityService>();
         services.AddScoped<Structure.EmployeeExchangeService>();
         services.AddScoped<Organizations.LaunchReadinessService>();
         // Кэш главного экрана (DashboardService): общий на процесс, ключ — организация, пользователь и его права.
@@ -114,6 +118,8 @@ public static class DependencyInjection
         services.AddScoped<ReconciliationService>();
         services.AddScoped<StockService>();
         services.TryAddScoped<Workspace.IUiText, Workspace.RussianUiText>();
+        // D115: PBKDF2-HMAC-SHA512, 210 000 итераций (рекомендация OWASP); прежние хеши (100 000) пересчитываются при входе.
+        services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210_000);
         services.TryAddSingleton<IPasswordHasher<UserAccount>, PasswordHasher<UserAccount>>();
         services.AddScoped<SignInService>();
         return services;

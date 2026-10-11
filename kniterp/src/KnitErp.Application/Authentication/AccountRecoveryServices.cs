@@ -10,7 +10,8 @@ namespace KnitErp.Application.Authentication;
 /// <summary>
 /// «Забыли пароль» (D81). По email — ссылка на 1 час на почту (если на сервере настроена почта); ответ всегда одинаковый,
 /// чтобы по нему нельзя было узнать, есть ли такой пользователь. Ссылка меняет только пароль: 2FA остаётся, все сессии
-/// и доверенные устройства закрываются. Без почты пароль меняет администратор — ссылкой из «Пользователей».
+/// и доверенные устройства закрываются, токены API пользователя отзываются (D115). Без почты пароль меняет администратор —
+/// ссылкой из «Пользователей».
 /// </summary>
 public sealed class PasswordResetService(
     IKnitErpDbContext db, IPasswordHasher<UserAccount> hasher, IEmailSender email, ICurrentUser currentUser, IClock clock)
@@ -89,8 +90,16 @@ public sealed class PasswordResetService(
             device.Revoke(clock.UtcNow);
         }
 
-        await AuditAsync(user, AuditActions.PasswordReset, "пароль сменён по ссылке; сессии и доверенные устройства закрыты", ct);
+        // D115: сброс пароля — признак, что пароль мог попасть к чужому. Токены API, выпущенные этим пользователем, отзываются:
+        // иначе выпущенный злоумышленником токен пережил бы смену пароля. Интеграции перевыпускают токен в «Интеграциях».
+        var tokens = await SecurityEvents.RevokeApiTokensAsync(db, user.Id, clock.UtcNow, ct);
+        await AuditAsync(user, AuditActions.PasswordReset, tokens > 0
+            ? $"пароль сменён по ссылке; сессии и доверенные устройства закрыты, отозвано токенов API: {tokens}"
+            : "пароль сменён по ссылке; сессии и доверенные устройства закрыты", ct);
         await db.SaveChangesAsync(ct);
+        SecurityEvents.Notify(email, user, "Пароль knitERP изменён",
+            "Пароль вашей учётной записи изменён по ссылке восстановления. Все сессии закрыты"
+            + (tokens > 0 ? $", отозвано токенов API: {tokens} — выпустите новые в «Интеграциях»." : "."));
     }
 
     internal static string Letter(string name, string address, string link) =>

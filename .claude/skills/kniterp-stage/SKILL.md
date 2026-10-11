@@ -17,8 +17,10 @@ description: Порядок сдачи одного этапа knitERP (ветк
 3. **Тесты**: `export KNITERP_TEST_SQL="Server=localhost,1433;User Id=sa;Password=<пароль>;TrustServerCertificate=true;Encrypt=false"`;
    `dotnet test kniterp/tests/KnitErp.UnitTests` и `dotnet test kniterp/tests/KnitErp.IntegrationTests` (полный прогон ~3–5 мин, запускать в фоне).
    Интеграционные классы — `IClassFixture<SqlTestHost>`, свой диапазон `_innSeed`. Права: начальные остатки создаёт Старший кладовщик, не Владелец.
+   Сквозные тесты — единый .NET-набор `dotnet test kniterp/tests/KnitErp.E2ETests` (D218; Владелец с 2FA — фикстура `HrAppFixture`).
+   Тесты падают с «A network-related … error» (среда простаивала) — `bash .claude/skills/kniterp-tests/ensure-sql.sh` (печатает строку для `KNITERP_TEST_SQL`).
 4. **Переводы** — skill `kniterp-translations` (MISSING 0, STALE 0).
-5. **E2E** — skill `kniterp-e2e`: 1440 и 390 px, 0 ошибок JS.
+5. **E2E** — набор `tests/KnitErp.E2ETests` (шаг 3) и ручной осмотр экранов skill `kniterp-e2e`: 1440 и 390 px, 0 ошибок JS.
 6. **Журнал решений** `kniterp/docs/decisions.md`: только свой диапазон номеров; правки чужих сервисов — пометка `// Dxxx (сессия N)` в коде и в коммите;
    то, что больше точечной правки, — запрос владельцу в `kniterp/docs/tz/*-requests.md`.
 7. **Коммит и пуш** в ветку сессии: `git push -u origin <ветка>` (повтор при сетевой ошибке 2/4/8/16 с). Чужие ветки не сливать, PR не создавать.

@@ -9,7 +9,7 @@
    **Не сужайте ограничение** своей миграцией: миграция, выполненная позже, затрёт чужие значения (так чуть не сломались теги производства).
 2. **Слияние.** Скилл `kniterp-tests` и скрипт `.claude/skills/kniterp-tests/resolve-merge.py` разрешают типовые конфликты: значения
    TaggedEntity, ветки ObjectDirectory, строки DbSet, права, метки аудита, меню, снапшот модели и словари переводов (трёхстороннее
-   слияние ключей JSON). После — `has-pending-model-changes`. Переводы: `.claude/skills/kniterp-tests/translations.py add|remove`.
+   слияние ключей JSON). После — `has-pending-model-changes`. Переводы: skill `kniterp-translations` (`missing.sh`, `merge.py`).
 3. **Окружение облачной сессии** готовит `.claude/hooks/session-start.sh` (.NET 10, SQL Server в Docker, `KNITERP_TEST_SQL`, Playwright).
    Без `KNITERP_TEST_SQL` интеграционные тесты молча пропускаются — проверяйте, что Skipped = 0.
 4. **Персональные данные.** В тексте, уходящем в журнал аудита или уведомления, используйте выдержку `DiscussionService.Excerpt`

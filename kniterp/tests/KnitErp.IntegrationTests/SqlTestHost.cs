@@ -211,10 +211,14 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Catalog.RevaluationService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.PackService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)),
-            new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock));
+            new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogSettingsService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock),
+
+            new AccountSecurityService(db, Hasher, Mail, user, Clock));
     }
 
-    private static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
+    public static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
 
     public static readonly ISpreadsheetFormat Spreadsheet = new KnitErp.Infrastructure.Spreadsheets.ClosedXmlSpreadsheet();
 
@@ -317,7 +321,11 @@ public sealed record Services(
     KnitErp.Application.Catalog.RevaluationService Revaluations,
     KnitErp.Application.Catalog.PackService Packs,
     KnitErp.Application.Catalog.CatalogQueryService CatalogQuery,
-    KnitErp.Application.Catalog.ItemSupplierService Suppliers) : IAsyncDisposable
+    KnitErp.Application.Catalog.ItemSupplierService Suppliers,
+    KnitErp.Application.Catalog.CatalogSettingsService CatalogSettings,
+    KnitErp.Application.Catalog.CatalogFeedService Feeds,
+
+    AccountSecurityService Account) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

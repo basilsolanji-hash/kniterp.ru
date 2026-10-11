@@ -17,7 +17,7 @@ public sealed class DiscussionRulesTests
         Assert.Equal("discussion.text_required", Assert.Throws<BusinessRuleException>(() => DiscussionComment.Create(1, TaggedEntity.Item, 5, 10, "   ", Now)).Code);
         Assert.Equal("discussion.text_too_long", Assert.Throws<BusinessRuleException>(
             () => DiscussionComment.Create(1, TaggedEntity.Item, 5, 10, new string('я', DiscussionComment.TextMaxLength + 1), Now)).Code);
-        Assert.Equal("discussion.target", Assert.Throws<BusinessRuleException>(() => DiscussionComment.Create(1, (TaggedEntity)99, 5, 10, "Текст", Now)).Code);
+        Assert.Equal("discussion.target", Assert.Throws<BusinessRuleException>(() => DiscussionComment.Create(1, (TaggedEntity)100, 5, 10, "Текст", Now)).Code);
         Assert.Equal(DiscussionComment.TextMaxLength, DiscussionComment.Create(1, TaggedEntity.Item, 5, 10, new string('я', DiscussionComment.TextMaxLength), Now).Text.Length);
     }
 

@@ -199,6 +199,37 @@ public sealed class UserSignInRulesTests
             Assert.Equal(code is SystemRoles.Owner or SystemRoles.Administrator, SignInPolicy.RequiresTwoFactor(code)));
     }
 
+    [Theory]
+    [InlineData("qwertyuiop")]
+    [InlineData("Password123")]
+    [InlineData("1q2w3e4r5t")]
+    [InlineData("abcdefghijk")]
+    [InlineData("9876543210")]
+    [InlineData("ivan.petrov2026!")]
+    public void D115_common_sequential_and_email_based_passwords_are_rejected(string password)
+    {
+        var ex = Assert.Throws<BusinessRuleException>(() => SignInPolicy.EnsurePasswordAcceptable(password, "ivan.petrov@test.local"));
+        Assert.Equal("auth.password.common", ex.Code);
+    }
+
+    [Theory]
+    [InlineData("вязальная машина у окна")]
+    [InlineData("Kx7#mPq2vL9z")]
+    public void D115_long_unusual_passwords_are_accepted(string password) =>
+        SignInPolicy.EnsurePasswordAcceptable(password, "ivan.petrov@test.local");
+
+    [Fact]
+    public void D115_changing_password_resets_failures_and_closes_sessions()
+    {
+        var user = ActiveUser();
+        user.RegisterFailedSignIn(Now);
+        var stamp = user.SecurityStamp;
+        user.ChangePassword("new-hash");
+        Assert.Equal("new-hash", user.PasswordHash);
+        Assert.Equal(0, user.FailedSignInCount);
+        Assert.NotEqual(stamp, user.SecurityStamp);
+    }
+
     private static UserAccount ActiveUser()
     {
         var user = UserAccount.Invite("user@test.local", "Пользователь", Now);

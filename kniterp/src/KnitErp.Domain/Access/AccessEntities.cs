@@ -201,6 +201,16 @@ public sealed class UserAccount
         PasswordHash = passwordHash;
     }
 
+    /// <summary>D115: смена пароля самим пользователем (текущий пароль проверен). Все сессии закрываются.</summary>
+    public void ChangePassword(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+        PasswordHash = passwordHash;
+        FailedSignInCount = 0;
+        LockoutEndUtc = null;
+        RotateSecurityStamp();
+    }
+
     public bool IsLockedOut(DateTime nowUtc) => LockoutEndUtc is { } end && end > nowUtc;
 
     /// <summary>Неудачная попытка входа (пароль или код 2FA). Возвращает true, если учётная запись только что заблокирована.</summary>

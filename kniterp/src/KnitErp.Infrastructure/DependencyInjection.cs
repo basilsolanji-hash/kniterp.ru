@@ -29,6 +29,9 @@ public static class DependencyInjection
         // Заполнение реквизитов по ИНН (D78): DaData по ключу из секретов сервера; без ключа — не подключено.
         services.AddSingleton(new RequisitesLookupOptions(requisitesApiKey));
         services.AddHttpClient<IRequisitesLookup, DaDataRequisitesLookup>(c => c.Timeout = TimeSpan.FromSeconds(6));
+        // D310 (сессия 4): МойСклад — фиксированный адрес, без перенаправлений, gzip; лимиты и повторы — в самом клиенте.
+        services.AddHttpClient<KnitErp.Application.Exchange.MoySklad.IMoySkladClient, Exchange.MoySkladHttpClient>(Exchange.MoySkladHttpClient.Configure)
+            .ConfigurePrimaryHttpMessageHandler(Exchange.MoySkladHttpClient.Handler);
         services.AddSingleton<KnitErp.Application.Security.IIntegrityVerifier, Security.IntegrityVerifier>();
         // Служебная почта (D81): «Забыли пароль». Без настроек — недоступна, вход по ссылке от администратора.
         services.AddSingleton(email ?? new EmailOptions(null, null, null, null, null));

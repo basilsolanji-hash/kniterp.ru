@@ -24,7 +24,7 @@ public sealed class TagRulesTests
         tag.Archive();
         Assert.False(tag.IsFavorite);
         Assert.Throws<BusinessRuleException>(() => tag.Update("Горит", TagColor.Orange, true));
-        Assert.Throws<BusinessRuleException>(() => TagLink.Create(1, 1, (TaggedEntity)99, 1, 1, Now));
+        Assert.Throws<BusinessRuleException>(() => TagLink.Create(1, 1, (TaggedEntity)100, 1, 1, Now));
     }
 
     [Fact]

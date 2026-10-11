@@ -122,8 +122,36 @@ public static class ObjectDirectory
             }
 
             default:
-                return [];
+                return Modules.TryGetValue(entity, out var describe) ? await describe(db, ctx, ids, ct) : [];
         }
     }
 
+    /// <summary>Описание объектов модуля: только объекты своей организации, которые пользователь вправе видеть; права проверяет модуль.</summary>
+    public delegate Task<IReadOnlyList<TaggedObjectDto>> Describer(IKnitErpDbContext db, AccessContext ctx, IReadOnlyList<long> ids, CancellationToken ct);
+
+    /// <summary>Первое значение <see cref="TaggedEntity"/> для модулей, подключаемых через <see cref="Register"/> (D117): CRM — 30–39, «Разработка» — 40–49.</summary>
+    public const int ModuleRangeStart = 30;
+
+    /// <summary>Наибольшее значение, которое пропускают CHECK тегов и обсуждений в базе (D117).</summary>
+    public const int ModuleRangeEnd = 99;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<TaggedEntity, Describer> Modules = new();
+
+    /// <summary>
+    /// D117: модуль (CRM, «Разработка» и следующие) подключает свои объекты к тегам и обсуждениям без правки этого класса —
+    /// вызовом в регистрации своих сервисов. Значение — из диапазона модуля; встроенные объекты переопределить нельзя.
+    /// </summary>
+    public static void Register(TaggedEntity entity, Describer describer)
+    {
+        ArgumentNullException.ThrowIfNull(describer);
+        if ((int)entity is < ModuleRangeStart or > ModuleRangeEnd)
+        {
+            throw new ArgumentOutOfRangeException(nameof(entity), $"Объекты модулей — значения {ModuleRangeStart}–{ModuleRangeEnd}.");
+        }
+
+        if (!Modules.TryAdd(entity, describer) && Modules[entity] != describer)
+        {
+            throw new InvalidOperationException($"Объект {entity} уже подключён другим модулем.");
+        }
+    }
 }

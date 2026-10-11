@@ -410,10 +410,11 @@ public sealed class HrRiskTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     [SqlFact]
     public async Task Tag_and_discussion_constraints_reserve_ranges_for_all_modules()
     {
-        // D202: 1–10 — общие объекты, 11–19 — производство, 20–29 — «Сотрудники»; модули не переписывают ограничение друг друга.
+        // D202, D117: 1–10 — общие объекты, 11–19 — производство, 20–29 — «Сотрудники», 30–39 — CRM, 40–49 — «Разработка», до 99 — модули;
+        // модули не переписывают ограничение друг друга.
         var org = await host.CreateOrganizationAsync();
         await using var db = host.NewDb();
-        foreach (var target in new[] { 11, 19, 25 })
+        foreach (var target in new[] { 11, 19, 25, 31, 42 })
         {
             await db.Database.ExecuteSqlRawAsync(
                 "INSERT INTO [kniterp].[discussion_comments] ([OrganizationId], [Target], [TargetId], [AuthorUserId], [Text], [CreatedAtUtc]) VALUES ({0}, {1}, 1, {2}, N'т', SYSUTCDATETIME())",
@@ -421,7 +422,7 @@ public sealed class HrRiskTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         }
 
         var ex = await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
-            "INSERT INTO [kniterp].[discussion_comments] ([OrganizationId], [Target], [TargetId], [AuthorUserId], [Text], [CreatedAtUtc]) VALUES ({0}, 30, 1, {1}, N'т', SYSUTCDATETIME())",
+            "INSERT INTO [kniterp].[discussion_comments] ([OrganizationId], [Target], [TargetId], [AuthorUserId], [Text], [CreatedAtUtc]) VALUES ({0}, 100, 1, {1}, N'т', SYSUTCDATETIME())",
             org.OrganizationId, org.OwnerUserId));
         Assert.Contains("ck_discussion_comments_target", ex.Message + ex.InnerException?.Message);
     }
