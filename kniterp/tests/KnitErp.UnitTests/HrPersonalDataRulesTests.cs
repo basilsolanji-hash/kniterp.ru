@@ -84,6 +84,8 @@ public sealed class HrPersonalDataRulesTests
     {
         Assert.Equal("hr.consent.scan_size", Assert.Throws<BusinessRuleException>(() =>
             ConsentScan.Create(1, 2, "a.pdf", "application/pdf", new byte[ConsentScan.MaxBytes + 1], Now, 3)).Code);
-        Assert.Equal("c.pdf", ConsentScan.Create(1, 2, "../../c.pdf", "application/pdf", [1], Now, 3).FileName);
+        Assert.Equal("c.pdf", ConsentScan.Create(1, 2, "../../c.pdf", "application/pdf", "%PDF-1.4"u8.ToArray(), Now, 3).FileName);
+        Assert.Equal("hr.consent.scan_type", Assert.Throws<BusinessRuleException>(() =>
+            ConsentScan.Create(1, 2, "x.pdf", "application/pdf", "<html><script>"u8.ToArray(), Now, 3)).Code);
     }
 }

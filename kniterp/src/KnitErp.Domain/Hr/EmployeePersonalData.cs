@@ -264,7 +264,8 @@ public sealed class ConsentScan
             throw new BusinessRuleException("hr.consent.scan_size", "Скан согласия: файл до 3 МБ.");
         }
 
-        if (!AllowedTypes.Contains(contentType))
+        // Тип — по сигнатуре файла, а не по заголовку браузера: иначе под видом PDF можно загрузить HTML со скриптом.
+        if (!AllowedTypes.Contains(contentType) || !SignatureMatches(contentType, content))
         {
             throw new BusinessRuleException("hr.consent.scan_type", "Скан согласия: PDF, JPEG или PNG.");
         }
@@ -282,4 +283,12 @@ public sealed class ConsentScan
             UploadedByUserId = userId,
         };
     }
+
+    private static bool SignatureMatches(string contentType, byte[] c) => contentType.ToLowerInvariant() switch
+    {
+        "application/pdf" => c.Length >= 5 && c[0] == 0x25 && c[1] == 0x50 && c[2] == 0x44 && c[3] == 0x46 && c[4] == 0x2D,
+        "image/jpeg" => c.Length >= 3 && c[0] == 0xFF && c[1] == 0xD8 && c[2] == 0xFF,
+        "image/png" => c.Length >= 8 && c[0] == 0x89 && c[1] == 0x50 && c[2] == 0x4E && c[3] == 0x47,
+        _ => false,
+    };
 }
