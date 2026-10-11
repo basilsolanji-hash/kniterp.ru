@@ -2215,6 +2215,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrecision(19, 4)
                         .HasColumnType("decimal(19,4)");
 
+                    b.Property<DateOnly?>("CorrectsPeriod")
+                        .HasColumnType("date");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -2242,6 +2245,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OrganizationId", "CorrectsPeriod")
+                        .HasDatabaseName("ix_hr_payroll_lines_corrects")
+                        .HasFilter("[CorrectsPeriod] IS NOT NULL");
+
                     b.HasIndex("OrganizationId", "EmployeeId");
 
                     b.HasIndex("OrganizationId", "RunId");
@@ -2253,7 +2260,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasTrigger("tr_hr_payroll_lines_approved_immutable");
 
-                            t.HasCheckConstraint("ck_hr_payroll_lines_kind", "[Kind] BETWEEN 1 AND 5");
+                            t.HasCheckConstraint("ck_hr_payroll_lines_correction", "([Kind] = 6 AND [CorrectsPeriod] IS NOT NULL AND DAY([CorrectsPeriod]) = 1 AND [Amount] > 0) OR ([Kind] <> 6 AND [CorrectsPeriod] IS NULL)");
+
+                            t.HasCheckConstraint("ck_hr_payroll_lines_kind", "[Kind] BETWEEN 1 AND 6");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);

@@ -3077,7 +3077,10 @@
   "Часовая тарифная ставка сдельщиков — больше нуля или пусто.": "Ishbay ishchilarning soatlik tarif stavkasi — noldan katta yoki boʻsh.",
   "Часовая тарифная ставка сдельщиков, руб. (для доплат; пусто — сдельный заработок / часы)": "Ishbay ishchilarning soatlik tarif stavkasi, rubl (qoʻshimcha toʻlovlar uchun; boʻsh — ishbay ish haqi / soatlar)",
   "Расчётов заработка пока нет — Excel для сверки появится после первого расчёта.": "Ish haqi hisob-kitoblari hali yoʻq — solishtirish uchun Excel birinchi hisobdan keyin paydo boʻladi.",
-  "Выработка месяца изменилась после утверждения: утверждённые суммы не меняются — разницу учтите перерасчётом в следующем месяце.": "Oylik ishlab chiqarish tasdiqlangandan keyin oʻzgardi: tasdiqlangan summalar oʻzgarmaydi — farqni keyingi oyda qayta hisoblash bilan hisobga oling.",
   "Выработка месяца изменилась после расчёта: пересчитайте перед утверждением.": "Oylik ishlab chiqarish hisobdan keyin oʻzgardi: tasdiqlashdan oldin qayta hisoblang.",
-  "Выработка месяца изменилась после расчёта: пересчитайте и утвердите снова.": "Oylik ishlab chiqarish hisobdan keyin oʻzgardi: qayta hisoblang va yana tasdiqlang."
+  "Выработка месяца изменилась после расчёта: пересчитайте и утвердите снова.": "Oylik ishlab chiqarish hisobdan keyin oʻzgardi: qayta hisoblang va yana tasdiqlang.",
+  "Выработка месяца изменилась после утверждения: утверждённые суммы не меняются — недоплата начислится перерасчётом в следующем расчёте, о переплате расчёт предупредит.": "Oylik ishlab chiqarish tasdiqlangandan keyin oʻzgardi: tasdiqlangan summalar oʻzgarmaydi — kam toʻlov keyingi hisobda qayta hisoblash bilan hisoblanadi, ortiqcha toʻlov haqida hisob ogohlantiradi.",
+  "Перерасчёт — положительная доплата за прошлый месяц.": "Qayta hisoblash — oʻtgan oy uchun ijobiy qoʻshimcha toʻlov.",
+  "Перерасчёт сдельной оплаты за прошлый месяц": "Oʻtgan oy uchun ishbay toʻlovni qayta hisoblash",
+  "После расчёта утверждён другой месяц с перерасчётом: пересчитайте и утвердите снова.": "Hisobdan keyin qayta hisoblangan boshqa oy tasdiqlandi: qayta hisoblang va yana tasdiqlang."
 }

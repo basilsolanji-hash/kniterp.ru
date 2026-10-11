@@ -269,6 +269,96 @@ public sealed class HrRiskTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         Assert.NotEmpty((await hr.PayrollExport.ExportAsync(dto.Id!.Value)).Content);
     }
 
+    [SqlFact]
+    public async Task Output_increase_after_approval_is_paid_once_in_next_month_and_decrease_only_warns()
+    {
+        // D219: исправленная выработка утверждённого ноября — доплата в декабре один раз; уменьшение — предупреждение, не удержание.
+        var org = await host.CreateOrganizationAsync();
+        var (dep, _, emp) = await host.HireAsync(org, hiredOn: new DateOnly(2026, 10, 1));
+        var rows = new List<WorkOutputDto> { new(emp, new DateOnly(2026, 11, 3), 1, "Вязание", null, 10, "шт") };
+        await using var hr = host.Hr(org.OwnerUserId, org.OrganizationId, new ListWorkOutputSource(rows));
+        await hr.Payroll.AddRateAsync(new PieceRateCommand(1, "Вязание", null, "шт", 50m, new DateOnly(2026, 11, 1)));
+        foreach (var month in new[] { 11, 12 })
+        {
+            var ts = await hr.Timesheets.CreateAsync(dep, 2026, month);
+            await hr.Timesheets.CloseAsync(ts, (await hr.Timesheets.GetAsync(dep, 2026, month)).RowVersion!);
+        }
+
+        await hr.Payroll.CalculateAsync(2026, 11);
+        var nov = await hr.Payroll.GetAsync(2026, 11);
+        await hr.Payroll.ApproveAsync(nov.Id!.Value, nov.RowVersion!);
+
+        rows.Add(new WorkOutputDto(emp, new DateOnly(2026, 11, 20), 1, "Вязание", null, 4, "шт")); // производство дописало ноябрь
+        var dec = await hr.Payroll.CalculateAsync(2026, 12);
+        Assert.Equal(200m, dec.Total);
+        var slip = await hr.Payroll.PayslipAsync(2026, 12, emp);
+        var line = Assert.Single(slip.Lines);
+        Assert.Equal((PayrollLineKind.PieceCorrection, 200m), (line.Kind, line.Amount));
+        Assert.Contains("11.2026", line.Description);
+        Assert.Contains("СдельнаяОплата", System.Text.Encoding.UTF8.GetString((await hr.PayrollExport.ExportAsync(nov.Id!.Value)).Content));
+
+        Assert.Equal(200m, (await hr.Payroll.CalculateAsync(2027, 1)).Total); // январский черновик тоже видит недоплату за ноябрь
+        var decDto = await hr.Payroll.GetAsync(2026, 12);
+        Assert.Equal(200m, decDto.Employees.Single().Piece);
+        await hr.Payroll.ApproveAsync(decDto.Id!.Value, decDto.RowVersion!);
+        var janDraft = await hr.Payroll.GetAsync(2027, 1);
+        Assert.Equal("hr.payroll.stale_corrections", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            hr.Payroll.ApproveAsync(janDraft.Id!.Value, janDraft.RowVersion!))).Code); // иначе доплата за ноябрь удвоится
+
+        // Январь: ноябрь уже доплачен в декабре — повторно не начисляется; затем выработку ноября уменьшили — только предупреждение.
+        var jan = await hr.Payroll.CalculateAsync(2027, 1);
+        Assert.Equal(0m, jan.Total);
+        rows.RemoveAt(1);
+        rows[0] = rows[0] with { Quantity = 8 };
+        jan = await hr.Payroll.CalculateAsync(2027, 1);
+        Assert.Equal(0m, jan.Total);
+        Assert.Contains(jan.Warnings, w => w.Contains("переплата 300.00") || w.Contains("переплата 300,00"));
+    }
+
+    [SqlFact]
+    public async Task Correction_ignores_employees_not_employed_then_and_rates_added_after_calculation()
+    {
+        // D219 (ревью): перерасчёт как исходный расчёт — только работавшие в месяце и расценки, известные к его расчёту.
+        var org = await host.CreateOrganizationAsync();
+        var (dep, pos, emp) = await host.HireAsync(org, hiredOn: new DateOnly(2026, 10, 1));
+        long late;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            late = await s.Employees.HireAsync(new Application.Structure.EmployeeCommand("0099", "Поздняя", "Ольга", null, dep, pos, new DateOnly(2026, 12, 1)));
+        }
+
+        var rows = new List<WorkOutputDto>
+        {
+            new(emp, new DateOnly(2026, 11, 3), 1, "Вязание", null, 10, "шт"),
+            new(late, new DateOnly(2026, 11, 4), 1, "Вязание", null, 50, "шт"), // ошибочная отметка: принята только в декабре
+        };
+        var saved = host.Clock.UtcNow;
+        try
+        {
+            await using var hr = host.Hr(org.OwnerUserId, org.OrganizationId, new ListWorkOutputSource(rows));
+            await hr.Payroll.AddRateAsync(new PieceRateCommand(1, "Вязание", null, "шт", 50m, new DateOnly(2026, 11, 1)));
+            var ts = await hr.Timesheets.CreateAsync(dep, 2026, 11);
+            await hr.Timesheets.CloseAsync(ts, (await hr.Timesheets.GetAsync(dep, 2026, 11)).RowVersion!);
+            await hr.Payroll.CalculateAsync(2026, 11);
+            var nov = await hr.Payroll.GetAsync(2026, 11);
+            Assert.Equal(500m, nov.Total);
+            await hr.Payroll.ApproveAsync(nov.Id!.Value, nov.RowVersion!);
+
+            host.Clock.UtcNow = saved.AddDays(1);
+            await hr.Payroll.AddRateAsync(new PieceRateCommand(1, "Вязание", null, "шт", 80m, new DateOnly(2026, 11, 2))); // задним числом
+            rows.Add(new WorkOutputDto(emp, new DateOnly(2026, 11, 25), 1, "Вязание", null, 2, "шт"));
+            var dec = await hr.Payroll.CalculateAsync(2026, 12);
+            var slip = await hr.Payroll.PayslipAsync(2026, 12, emp);
+            Assert.Equal(100m, Assert.Single(slip.Lines, l => l.Kind == PayrollLineKind.PieceCorrection).Amount); // 2 × 50, не × 80 и без «поздней»
+            Assert.DoesNotContain(dec.Warnings, w => w.Contains("Поздняя") && w.Contains("переплата"));
+            Assert.DoesNotContain((await hr.Payroll.PayslipAsync(2026, 12, late)).Lines, l => l.Kind == PayrollLineKind.PieceCorrection);
+        }
+        finally
+        {
+            host.Clock.UtcNow = saved;
+        }
+    }
+
     /// <summary>Источник выработки, который тест меняет между вызовами — как производство, исправившее отметки.</summary>
     private sealed class ListWorkOutputSource(List<WorkOutputDto> rows) : IWorkOutputSource
     {

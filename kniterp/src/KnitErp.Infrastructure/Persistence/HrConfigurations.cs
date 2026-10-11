@@ -345,7 +345,9 @@ internal sealed class PayrollLineConfiguration : IEntityTypeConfiguration<Payrol
     {
         b.ToTable("hr_payroll_lines", t =>
         {
-            t.HasCheckConstraint("ck_hr_payroll_lines_kind", "[Kind] BETWEEN 1 AND 5");
+            t.HasCheckConstraint("ck_hr_payroll_lines_kind", "[Kind] BETWEEN 1 AND 6");
+            t.HasCheckConstraint("ck_hr_payroll_lines_correction",
+                "([Kind] = 6 AND [CorrectsPeriod] IS NOT NULL AND DAY([CorrectsPeriod]) = 1 AND [Amount] > 0) OR ([Kind] <> 6 AND [CorrectsPeriod] IS NULL)");
             t.HasTrigger("tr_hr_payroll_lines_approved_immutable");
         });
         b.HasKey(x => x.Id);
@@ -360,6 +362,7 @@ internal sealed class PayrollLineConfiguration : IEntityTypeConfiguration<Payrol
         b.HasOne<Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_payroll_lines_employee");
         b.HasIndex(x => new { x.RunId, x.EmployeeId }).HasDatabaseName("ix_hr_payroll_lines_run_employee");
+        b.HasIndex(x => new { x.OrganizationId, x.CorrectsPeriod }).HasFilter("[CorrectsPeriod] IS NOT NULL").HasDatabaseName("ix_hr_payroll_lines_corrects");
     }
 }
 

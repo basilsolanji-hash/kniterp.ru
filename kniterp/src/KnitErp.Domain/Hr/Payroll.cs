@@ -99,6 +99,9 @@ public enum PayrollLineKind : byte
 
     /// <summary>Доплата за работу в выходные и праздники (ст. 153 ТК РФ).</summary>
     Holiday = 5,
+
+    /// <summary>Перерасчёт сдельной оплаты за утверждённый месяц, выработку которого исправили (D219).</summary>
+    PieceCorrection = 6,
 }
 
 public enum PayrollStatus : byte
@@ -136,6 +139,7 @@ public static class PayrollRules
         PayrollLineKind.Night => "Доплата за работу в ночное время (ст. 154 ТК РФ)",
         PayrollLineKind.Overtime => "Оплата сверхурочной работы (ст. 152 ТК РФ)",
         PayrollLineKind.Holiday => "Оплата работы в выходные и праздники (ст. 153 ТК РФ)",
+        PayrollLineKind.PieceCorrection => "Перерасчёт сдельной оплаты за прошлый месяц",
         _ => kind.ToString(),
     };
 }
@@ -237,6 +241,23 @@ public sealed class PayrollLine
     public decimal Quantity { get; private set; }
     public decimal Rate { get; private set; }
     public decimal Amount { get; private set; }
+
+    /// <summary>Месяц, за который сделан перерасчёт (только у <see cref="PayrollLineKind.PieceCorrection"/>): первое число месяца.</summary>
+    public DateOnly? CorrectsPeriod { get; private set; }
+
+    /// <summary>Доплата по перерасчёту сдельной оплаты за утверждённый месяц <paramref name="period"/> (D219). Только положительная.</summary>
+    public static PayrollLine Correction(long organizationId, long runId, long employeeId, DateOnly period, decimal amount)
+    {
+        if (amount <= 0 || period.Day != 1)
+        {
+            throw new BusinessRuleException("hr.payroll.correction", "Перерасчёт — положительная доплата за прошлый месяц.");
+        }
+
+        var line = Create(organizationId, runId, employeeId, PayrollLineKind.PieceCorrection,
+            $"Перерасчёт сдельной оплаты за {period:MM.yyyy}: исправлена выработка", 1, amount, amount);
+        line.CorrectsPeriod = period;
+        return line;
+    }
 
     public static PayrollLine Create(long organizationId, long runId, long employeeId, PayrollLineKind kind, string description, decimal quantity,
         decimal rate, decimal amount)

@@ -123,7 +123,7 @@ public sealed class HrSettings
     /// <summary>Код вида начисления для ЗУП: из настроек или стандартный.</summary>
     public static string ZupCode(PayrollSettingsValues s, PayrollLineKind kind) => kind switch
     {
-        PayrollLineKind.Piece => s.ZupPieceCode ?? "СдельнаяОплата",
+        PayrollLineKind.Piece or PayrollLineKind.PieceCorrection => s.ZupPieceCode ?? "СдельнаяОплата",
         PayrollLineKind.Salary => s.ZupSalaryCode ?? "ОплатаПоОкладу",
         PayrollLineKind.Night => s.ZupNightCode ?? "ДоплатаЗаРаботуВНочноеВремя",
         PayrollLineKind.Overtime => s.ZupOvertimeCode ?? "ОплатаСверхурочныхЧасов",

@@ -12,6 +12,9 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
 {
     private static readonly string Stamp = DateTime.UtcNow.Ticks.ToString()[^6..];
 
+    /// <summary>Сегодня в часовом поясе организации (Europe/Moscow): с 00:00 до 03:00 МСК первого числа UTC ещё в прошлом месяце.</summary>
+    private static DateTime Today => TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "Europe/Moscow").Date;
+
     [SqlFact]
     public Task Officer_hires_fills_personal_data_and_consent_prints_T2_and_audit_has_no_snils() => RunAsync("hr-personal-data", false, async page =>
     {
@@ -110,8 +113,7 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         var (department, position) = await StructureAsync(page, "Цех табеля", "Оверлочница");
         await StaffAsync(page, department, position);
         var lastName = $"Табелева{Stamp}";
-        var today = DateTime.UtcNow;
-        var monthStart = $"{today:yyyy-MM}-01";
+        var monthStart = $"{Today:yyyy-MM}-01";
         await HireOrderAsync(page, $"T{Stamp}", lastName, "Вера", department, position, hiredOn: monthStart);
         await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Приказ проведён");
 
@@ -376,7 +378,7 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByRole(AriaRole.Button, new() { Name = "Новый приказ" }).ClickAsync();
         if (hiredOn is not null)
         {
-            if (hiredOn.EndsWith("-01") && DateTime.Parse(hiredOn) <= DateTime.UtcNow)
+            if (hiredOn.EndsWith("-01") && DateTime.Parse(hiredOn) <= Today)
             {
                 await page.GetByLabel("Дата приказа").FillAsync(hiredOn);
             }
