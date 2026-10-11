@@ -46,6 +46,9 @@ description: Модуль «Производство» knitERP — произв�
   Запуск: `dotnet build` всего решения, затем `dotnet test tests/KnitErp.E2ETests --no-build` (нужен `KNITERP_TEST_SQL`).
 
 ## Частые ошибки
+- «Server not found / Login failed» в тестах — контейнер пересоздан: порт — `docker port kniterp-sql`, пароль — из `docker inspect` контейнера;
+  строку держать в файле окружения в scratchpad (права 600), не в репозитории.
+- Баллы зависят от табеля кадров (D409): тест баллов с отсутствием — `Organization_settings_drive_tolerance_and_quality_discipline_points`.
 - Коммит — только после зелёной проверки: связывать `dotnet test … && git commit`, а не через `;` (иначе уходит коммит с красным тестом).
 - В e2e локаторы кнопок — с `Exact = true`: общие элементы (кнопка помощника «Открыть: Ника», D116) совпадают по началу имени.
 - В LINQ-запросе с синтаксисом запросов параметр `from` пишется как `@from` — иначе «Invalid expression term '&&'».

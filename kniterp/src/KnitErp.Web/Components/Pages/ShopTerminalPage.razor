@@ -46,6 +46,10 @@ else
             <ul class="shop-totals">
                 <li><span>@L("Выполнено заданий")</span> <b>@sc.TasksDone</b></li>
                 <li><span>@L("Не выполнено (с причиной / без)")</span> <b>@sc.MissedWithReason / @sc.MissedNoReason</b></li>
+                @if (sc.MissedAbsent > 0)
+                {
+                    <li><span>@L("Не учтено: отсутствие по табелю")</span> <b>@sc.MissedAbsent</b></li>
+                }
                 <li><span>@L("Средний процент выполнения")</span> <b>@sc.AveragePercent%</b></li>
                 <li><span>@L("Брак по моей вине")</span> <b>@Quantities.Format(sc.DefectUnits)</b></li>
                 @if (sc.Points is { } points)

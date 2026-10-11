@@ -1235,12 +1235,38 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                 // Выгрузка для кадров: лист показателей с баллами и лист сменных заданий.
                 var file = await s.Scores.ExportAsync(Day, Day.AddDays(2));
                 var sheet = SqlTestHost.Spreadsheet.ReadFirstSheet(new MemoryStream(file), 100);
-                Assert.Equal(["Сотрудник", "Табельный номер", "Выполнено заданий", "Не выполнено с причиной", "Без причины", "В работе", "Средний %", "Брак по вине", "Баллы"],
-                    sheet[0]);
+                Assert.Equal(["Сотрудник", "Табельный номер", "Выполнено заданий", "Не выполнено с причиной", "Без причины", "Отсутствие по табелю", "В работе",
+                    "Средний %", "Брак по вине", "Баллы"], sheet[0]);
                 var workerRow = sheet.Single(r => r[1] == "0101");
                 static decimal Num(string v) => decimal.Parse(v.TrimEnd('.'), System.Globalization.CultureInfo.InvariantCulture);
                 // Числа записаны числами (ячейки Excel), не текстом.
-                Assert.Equal(("Петрова А. С.", 1m, 1m, 2m, -3m), (workerRow[0], Num(workerRow[2]), Num(workerRow[4]), Num(workerRow[7]), Num(workerRow[8])));
+                Assert.Equal(("Петрова А. С.", 1m, 1m, 2m, -3m), (workerRow[0], Num(workerRow[2]), Num(workerRow[4]), Num(workerRow[8]), Num(workerRow[9])));
+            }
+
+            // D409: невыполненное задание в день болезни по табелю кадров не штрафуется; прогул — штрафуется.
+            long department;
+            await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                department = (await s.Structure.GetAsync()).Departments.First().Id;
+            }
+
+            await using (var hr = host.Hr(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                var ts = await hr.Timesheets.CreateAsync(department, Day.Year, Day.Month);
+                await hr.Timesheets.SetDayAsync(ts, employee, Day.AddDays(1), "Б", 0, 0, 0);
+                await hr.Timesheets.SetDayAsync(ts, colleagueEmployee, Day, "ПР", 0, 0, 0);
+            }
+
+            Assert.True(ProductionScoreService.Excuses("ОТ") && ProductionScoreService.Excuses("В"));
+            Assert.False(ProductionScoreService.Excuses("ПР") || ProductionScoreService.Excuses("НН") || ProductionScoreService.Excuses("Я"));
+            await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                var board = await s.Scores.BoardAsync(Day, Day.AddDays(2));
+                var w = board.Rows.Single(r => r.EmployeeId == employee);
+                // 1 выполнено × 2 + 2 единицы брака × (−1) = 0; день болезни не входит ни в штраф, ни в средний процент.
+                Assert.Equal((1, 0, 0, 1, 100, (int?)0), (w.TasksDone, w.MissedWithReason, w.MissedNoReason, w.MissedAbsent, w.AveragePercent, w.Points));
+                var c = board.Rows.Single(r => r.EmployeeId == colleagueEmployee);
+                Assert.Equal((1, 0), (c.MissedWithReason, c.MissedAbsent));
 
                 await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, false, 2, 0, -3, -1), (await s.ProductionSettings.GetAsync()).RowVersion);
                 Assert.Null((await s.Scores.BoardAsync(Day, Day.AddDays(2))).Rows.Single(r => r.EmployeeId == employee).Points);
@@ -1250,7 +1276,7 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             {
                 await Assert.ThrowsAsync<AccessDeniedException>(() => s.Scores.ExportAsync(Day, Day.AddDays(2)));
                 var mine = await s.Scores.MineAsync();
-                Assert.Equal((employee, 1, 1, 2m, (int?)null), (mine!.EmployeeId, mine.TasksDone, mine.MissedNoReason, mine.DefectUnits, mine.Points));
+                Assert.Equal((employee, 1, 0, 1, 2m, (int?)null), (mine!.EmployeeId, mine.TasksDone, mine.MissedNoReason, mine.MissedAbsent, mine.DefectUnits, mine.Points));
             }
         }
         finally

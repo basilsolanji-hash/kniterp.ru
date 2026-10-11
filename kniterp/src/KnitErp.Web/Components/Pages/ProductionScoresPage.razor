@@ -41,14 +41,14 @@ else
         <table>
             <thead>
                 <tr><th>@L("Сотрудник")</th><th class="num">@L("Выполнено заданий")</th><th class="num">@L("Не выполнено с причиной")</th>
-                    <th class="num">@L("Без причины")</th><th class="num">@L("В работе")</th><th class="num">@L("Средний %")</th><th class="num">@L("Брак по вине")</th>
+                    <th class="num">@L("Без причины")</th><th class="num" title="@L("Дни отпуска, болезни и другие неявки по табелю кадров, кроме прогула, — баллов не меняют")">@L("Отсутствие по табелю")</th><th class="num">@L("В работе")</th><th class="num">@L("Средний %")</th><th class="num">@L("Брак по вине")</th>
                     @if (_board.PointsEnabled) { <th class="num">@L("Баллы")</th> }
                 </tr>
             </thead>
             <tbody>
                 @if (_board.Rows.Count == 0)
                 {
-                    <tr><td colspan="8" class="muted">@L("За этот период нет сменных заданий и брака с виновником.")</td></tr>
+                    <tr><td colspan="9" class="muted">@L("За этот период нет сменных заданий и брака с виновником.")</td></tr>
                 }
                 @foreach (var r in _board.Rows)
                 {
@@ -57,6 +57,7 @@ else
                         <td class="num" data-label="@L("Выполнено заданий")">@r.TasksDone</td>
                         <td class="num" data-label="@L("Не выполнено с причиной")">@r.MissedWithReason</td>
                         <td class="num" data-label="@L("Без причины")">@r.MissedNoReason</td>
+                        <td class="num" data-label="@L("Отсутствие по табелю")">@r.MissedAbsent</td>
                         <td class="num" data-label="@L("В работе")">@r.InProgress</td>
                         <td class="num" data-label="@L("Средний %")">@r.AveragePercent%</td>
                         <td class="num" data-label="@L("Брак по вине")">@Quantities.Format(r.DefectUnits)</td>

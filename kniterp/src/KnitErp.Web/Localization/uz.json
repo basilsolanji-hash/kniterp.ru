@@ -3520,5 +3520,8 @@
   "Повторить задания прошлого дня": "O‘tgan kun topshiriqlarini takrorlash",
   "Скопировать действующие задания {0} на {1}?": "{0} dagi amaldagi topshiriqlarni {1} ga nusxalaysizmi?",
   "Скопировано заданий: {0}.": "Nusxalangan topshiriqlar: {0}.",
-  "Скопировано заданий: {0}; пропущено: {1} (сотрудник не работает, заказ не в работе или задание уже есть).": "Nusxalangan topshiriqlar: {0}; o‘tkazib yuborildi: {1} (xodim ishlamaydi, buyurtma ishda emas yoki topshiriq allaqachon bor)."
+  "Скопировано заданий: {0}; пропущено: {1} (сотрудник не работает, заказ не в работе или задание уже есть).": "Nusxalangan topshiriqlar: {0}; o‘tkazib yuborildi: {1} (xodim ishlamaydi, buyurtma ishda emas yoki topshiriq allaqachon bor).",
+  "Отсутствие по табелю": "Tabel boʻyicha yoʻqlik",
+  "Дни отпуска, болезни и другие неявки по табелю кадров, кроме прогула, — баллов не меняют": "Kadrlar tabeli boʻyicha taʼtil, kasallik va boshqa kelmaslik kunlari, proguldan tashqari, — ballarni oʻzgartirmaydi",
+  "Не учтено: отсутствие по табелю": "Hisobga olinmadi: tabel boʻyicha yoʻqlik"
 }
