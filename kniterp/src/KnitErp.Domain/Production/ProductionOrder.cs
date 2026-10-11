@@ -188,6 +188,15 @@ public sealed class ProductionOrder
         Status = releasedTotal >= Quantity ? ProductionOrderStatus.Done : ProductionOrderStatus.PartiallyDone;
     }
 
+    /// <summary>Сторно выпуска (D97): статус по выпущенному после сторно — запущен, выполнен частично или выполнен.</summary>
+    public void RecalculateAfterReversal(decimal releasedTotal)
+    {
+        EnsureMaterialsOpen();
+        Status = releasedTotal <= 0 ? ProductionOrderStatus.Released
+            : releasedTotal >= Quantity ? ProductionOrderStatus.Done
+            : ProductionOrderStatus.PartiallyDone;
+    }
+
     /// <summary>
     /// Закрытие (D95): после выпуска, когда в цехе не осталось материалов заказа и всё упакованное выпущено.
     /// Не полностью выполненный заказ закрывается с причиной. После закрытия по заказу ничего не движется.

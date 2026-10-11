@@ -84,6 +84,7 @@ public static class AuditLabels
         [AuditActions.ProductionMaterialMoved] = "Движение материалов производства",
         [AuditActions.ProductionOutputReleased] = "Выпуск продукции",
         [AuditActions.ProductionOrderClosed] = "Производственный заказ закрыт",
+        [AuditActions.ProductionDocumentReversed] = "Сторно документа производства",
         [AuditActions.PurchaseOrderCreated] = "Создан заказ поставщику",
         [AuditActions.PurchaseOrderChanged] = "Изменён заказ поставщику",
         [AuditActions.PurchaseOrderConfirmed] = "Заказ поставщику подтверждён",

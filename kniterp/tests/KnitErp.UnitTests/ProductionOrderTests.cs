@@ -114,4 +114,19 @@ public sealed class ProductionOrderTests
         Assert.Equal((ProductionOrderStatus.Closed, (string?)null), (order.Status, order.CloseReason));
         Assert.Throws<BusinessRuleException>(() => order.EnsureMaterialsOpen());
     }
+
+    [Fact]
+    public void Output_reversal_recalculates_status()
+    {
+        var order = Draft(20);
+        order.Release(ActiveCard(), _ => 3, _ => 1, 6, Now);
+        order.ApplyOutput(20);
+        order.RecalculateAfterReversal(15);
+        Assert.Equal(ProductionOrderStatus.PartiallyDone, order.Status);
+        order.RecalculateAfterReversal(0);
+        Assert.Equal(ProductionOrderStatus.Released, order.Status);
+        order.ApplyOutput(20);
+        order.Close(20, false, 0, null, 5, Now);
+        Assert.Throws<BusinessRuleException>(() => order.RecalculateAfterReversal(10));
+    }
 }

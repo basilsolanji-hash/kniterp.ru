@@ -481,6 +481,74 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D97: документы заказа сторнируются только из заказа; сторно выпуска пересчитывает статус, выдачу — после расхода не сторнировать.</summary>
+    [SqlFact]
+    public async Task Reversal_goes_through_order_and_recalculates_status()
+    {
+        var f = await SetUpAsync();
+        long order, issue;
+        OutputResultDto result;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            issue = await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 3.3m), (f.Buttons, 50m)));
+            foreach (var stage in ProductionFlow.Stages)
+            {
+                await s.Floor.RecordAsync(order, Mark(stage, 10));
+            }
+
+            result = await s.Materials.OutputAsync(order, new OutputCommand(10, Day, null, null));
+            Assert.Equal(ProductionOrderStatus.Done, (await s.ProductionOrders.GetAsync(order)).Status);
+
+            // В складском разделе документ заказа не сторнируется.
+            var output = await s.Documents.GetAsync(result.OutputDocumentId);
+            Assert.False(output.CanReverse);
+            Assert.Equal("stock.document.production_linked", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Documents.ReverseAsync(result.OutputDocumentId, "ошибка", output.RowVersion))).Code);
+            Assert.True((await s.Documents.GetAsync(issue)).Status == StockDocumentStatus.Posted);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Выдачу не сторнировать, пока пряжа израсходована.
+            Assert.Equal("production.reverse.issue_used", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.ReverseDocumentAsync(order, issue, "ошибка"))).Code);
+            await Assert.ThrowsAsync<BusinessRuleException>(() => s.Materials.ReverseDocumentAsync(order, result.OutputDocumentId, " "));
+
+            await s.Materials.ReverseDocumentAsync(order, result.OutputDocumentId, "Выпуск не тем числом");
+            var dto = await s.ProductionOrders.GetAsync(order);
+            Assert.Equal((ProductionOrderStatus.Released, 0m), (dto.Status, dto.Released));
+            Assert.Equal(10m, (await s.Floor.ProgressAsync(order)).ReadyForOutput);
+            Assert.Equal(0m, await s.Db.StockMovements.Where(x => x.WarehouseId == f.Store && x.ItemId == f.Sweater).SumAsync(x => x.Quantity));
+
+            await s.Materials.ReverseDocumentAsync(order, result.ConsumptionDocumentId!.Value, "Расход по ошибочному выпуску");
+            await s.Materials.ReverseDocumentAsync(order, issue, "Выдали не ту партию");
+            var yarn = (await s.Materials.MaterialsAsync(order)).Lines.Single(l => l.ItemId == f.Yarn);
+            Assert.Equal((0m, 0m, 0m), (yarn.Issued, yarn.Consumed, yarn.Remaining));
+            Assert.Equal("stock.document.status", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.ReverseDocumentAsync(order, issue, "ещё раз"))).Code);
+            Assert.Equal(StockDocumentStatus.Reversed, (await s.Documents.GetAsync(issue)).Status);
+
+            // Снова выпуск после сторно — работает как обычно.
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 3.3m), (f.Buttons, 50m)));
+            await s.Materials.OutputAsync(order, new OutputCommand(4, Day, null, null));
+            Assert.Equal(ProductionOrderStatus.PartiallyDone, (await s.ProductionOrders.GetAsync(order)).Status);
+        }
+
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            // Кладовщик склада пряжи не сторнирует выпуск на складе готовой продукции.
+            var outputs = (await s.Materials.MaterialsAsync(order)).Documents.Where(d => d.Purpose == ProductionDocumentPurpose.Output && d.Status == StockDocumentStatus.Posted);
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Materials.ReverseDocumentAsync(order, outputs.Single().Id, "нет"));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.Equal(3, await db.AuditEntries.CountAsync(e => e.EntityId == order.ToString() && e.Action == "production.document.reversed"));
+        }
+    }
+
     private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
         new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 

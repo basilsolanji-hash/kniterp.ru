@@ -156,6 +156,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await page.GetByRole(AriaRole.Button, new() { Name = "Провести" }).ClickAsync();
         await Assertions.Expect(page.Locator("td[data-label='Возвращено']")).ToHaveTextAsync("1");
         await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("5,592");
+
+        // D97: возврат оформили по ошибке — сторно из карточки заказа (последний документ — первым в списке).
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Сторно ПМ-") }).First.ClickAsync();
+        await page.GetByLabel("Причина сторно", new() { Exact = true }).FillAsync("Вернули по ошибке");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сторнировать" }).ClickAsync();
+        await Assertions.Expect(page.GetByText("Документ сторнирован.")).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator("td[data-label='Возвращено']")).ToHaveTextAsync("0");
+        await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("6,592");
     }
 
     /// <summary>D95: кладовщик выпускает продукцию с расходом по норме и возвращает остаток пряжи; начальник цеха закрывает заказ.</summary>

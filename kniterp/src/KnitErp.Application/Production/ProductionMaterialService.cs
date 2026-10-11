@@ -305,6 +305,66 @@ public sealed class ProductionMaterialService(
         }).ToList();
     }
 
+    /// <summary>
+    /// Сторно документа заказа (D97) с причиной. Выдачу нельзя сторнировать, если материал уже израсходован, списан или возвращён
+    /// (остаток заказа в цехе ушёл бы в минус); сторно выпуска уменьшает выпущенное и пересчитывает статус. Закрытый заказ не трогается.
+    /// Остатки складов, партии и закрытый период проверяет складской сервис.
+    /// </summary>
+    public async Task ReverseDocumentAsync(long orderId, long stockDocumentId, string? reason, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionMaterialMove, ct);
+        try
+        {
+            await using var tx = await db.BeginTransactionAsync(ct);
+            var order = await ProductionLocks.LockOrderAsync(db, ctx, orderId, ct);
+            order.EnsureMaterialsOpen();
+            var link = await db.ProductionOrderDocuments.AsNoTracking()
+                           .SingleOrDefaultAsync(l => l.StockDocumentId == stockDocumentId && l.ProductionOrderId == orderId && l.OrganizationId == ctx.OrganizationId, ct)
+                       ?? throw new NotFoundException("Документ");
+            var doc = await db.StockDocuments.AsNoTracking().Include(d => d.Lines).SingleAsync(d => d.Id == stockDocumentId, ct);
+            if (doc.Status != StockDocumentStatus.Posted)
+            {
+                throw new BusinessRuleException("stock.document.status", "Сторнировать можно только проведённый документ.");
+            }
+
+            if (!WarehouseScope.Covers(ctx, Permissions.ProductionMaterialMove, doc.WarehouseId))
+            {
+                throw new NotFoundException("Склад");
+            }
+
+            if (link.Purpose == ProductionDocumentPurpose.Issue)
+            {
+                var codes = await CodesAsync(doc.Lines.Select(l => l.ItemId), ct);
+                var balance = await BalanceAsync(order, ct);
+                var over = doc.Lines.Where(l => (balance.FirstOrDefault(b => b.ItemId == l.ItemId)?.Remaining ?? 0) < l.Quantity).ToList();
+                if (over.Count > 0)
+                {
+                    throw new BusinessRuleException("production.reverse.issue_used",
+                        "Выданное уже израсходовано, списано или возвращено — сначала сторнируйте те документы: "
+                        + string.Join("; ", over.Select(l => $"{codes[l.ItemId]}: выдано {Quantities.Format(l.Quantity)}, в цехе {Quantities.Format(Math.Max(0, balance.First(b => b.ItemId == l.ItemId).Remaining))}")) + ".");
+                }
+            }
+
+            await documents.ReverseForProductionAsync(stockDocumentId, reason, doc.RowVersion, ct);
+            var before = ProductionOrder.StatusName(order.Status);
+            if (link.Purpose == ProductionDocumentPurpose.Output)
+            {
+                order.RecalculateAfterReversal(await ProductionLocks.ReleasedAsync(db, order, ct));
+            }
+
+            db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ProductionDocumentReversed, nameof(ProductionOrder),
+                order.Id.ToString(), before, $"{ProductionOrder.StatusName(order.Status)}: сторно {ProductionOrderDocument.PurposeName(link.Purpose).ToLowerInvariant()} {doc.Number}",
+                $"{order.Number}: {reason?.Trim()}", currentUser.CorrelationId));
+            await db.SaveOrConflictAsync(ct);
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
     /// <summary>Баланс материалов заказа по проведённым документам.</summary>
     internal async Task<IReadOnlyList<MaterialBalanceLine>> BalanceAsync(ProductionOrder order, CancellationToken ct)
     {

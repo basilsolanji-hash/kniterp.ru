@@ -117,12 +117,25 @@
                                 {
                                     <a href="print/production/@d.Id?order=@OrderId" target="_blank" aria-label="@L("Печать {0}", d.Number)">@L("Печать")</a>
                                 }
+                                @if (_data.CanMove && d.Status == KnitErp.Domain.Warehousing.StockDocumentStatus.Posted && _reversing != d.Id)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => _reversing = d.Id" disabled="@_busy" aria-label="@L("Сторно {0}", d.Number)">@L("Сторно")</button>
+                                }
                             </td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
+        @if (_reversing is { } reversingId)
+        {
+            <form class="inline-form" @onsubmit="ReverseAsync">
+                <label>@L("Причина сторно {0}", _data.Documents.FirstOrDefault(x => x.Id == reversingId)?.Number ?? "")
+                    <input @bind="_reverseReason" size="40" aria-label="@L("Причина сторно")" /></label>
+                <button type="submit" disabled="@_busy">@L("Сторнировать")</button>
+                <button type="button" class="secondary" @onclick="() => _reversing = null">@L("Отмена")</button>
+            </form>
+        }
     }
 }
 
@@ -142,6 +155,8 @@
 
     private ProductionMaterialsDto? _data;
     private bool _keepInput;
+    private long? _reversing;
+    private string? _reverseReason;
     private readonly Dictionary<long, string> _quantities = [];
     private ProductionDocumentPurpose _purpose = ProductionDocumentPurpose.Issue;
     private string _warehouse = string.Empty;
@@ -184,6 +199,41 @@
             _quantities[l.ItemId] = _purpose == ProductionDocumentPurpose.Issue && l.Planned > l.Issued - l.Returned
                 ? Quantities.Format(l.Planned - (l.Issued - l.Returned))
                 : string.Empty;
+        }
+    }
+
+    private async Task ReverseAsync()
+    {
+        if (_busy || _reversing is not { } id)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            await Materials.ReverseDocumentAsync(OrderId, id, _reverseReason);
+            _message = L("Документ сторнирован.");
+            _reversing = null;
+            _reverseReason = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                await OnChanged.InvokeAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
         }
     }
 
