@@ -1477,7 +1477,9 @@ internal sealed class DiscussionCommentConfiguration : IEntityTypeConfiguration<
     {
         b.ToTable("discussion_comments", t =>
         {
-            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 10 OR [Target] BETWEEN 20 AND 29");
+            // Диапазоны (D202): 1–10 — общие объекты, 11–19 — производство, 20–29 — модуль «Сотрудники». Новое значение внутри своего
+            // диапазона не требует миграции — модули не переписывают ограничение друг друга.
+            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 29");
             t.HasCheckConstraint("ck_discussion_comments_deleted",
                 "([DeletedAtUtc] IS NULL AND [DeletedByUserId] IS NULL AND LEN([Text]) > 0) OR ([DeletedAtUtc] IS NOT NULL AND [DeletedByUserId] IS NOT NULL AND [Text] = N'')");
         });
@@ -1530,7 +1532,7 @@ internal sealed class TagLinkConfiguration : IEntityTypeConfiguration<KnitErp.Do
 {
     public void Configure(EntityTypeBuilder<KnitErp.Domain.Tagging.TagLink> b)
     {
-        b.ToTable("tag_links", t => t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 10 OR [Entity] BETWEEN 20 AND 29"));
+        b.ToTable("tag_links", t => t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 29"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Entity).HasConversion<byte>();

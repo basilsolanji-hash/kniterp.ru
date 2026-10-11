@@ -120,13 +120,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 name: "ck_tag_links_entity",
                 schema: "kniterp",
                 table: "tag_links",
-                sql: "[Entity] BETWEEN 1 AND 10 OR [Entity] BETWEEN 20 AND 29");
+                sql: "[Entity] BETWEEN 1 AND 29");
 
             migrationBuilder.AddCheckConstraint(
                 name: "ck_discussion_comments_target",
                 schema: "kniterp",
                 table: "discussion_comments",
-                sql: "[Target] BETWEEN 1 AND 10 OR [Target] BETWEEN 20 AND 29");
+                sql: "[Target] BETWEEN 1 AND 29");
 
             migrationBuilder.CreateIndex(
                 name: "ix_hr_consent_scans_employee",
