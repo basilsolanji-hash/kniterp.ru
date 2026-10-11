@@ -8,7 +8,10 @@ root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)/kniterp"
 db="${1:-kniterp_e2e_$(date +%s)}"
 E2E_DIR="${E2E_DIR:-/tmp/kniterp-e2e}"
 mkdir -p "$E2E_DIR"
-pkill -f "KnitErp.Web" 2>/dev/null || true
+# [K] — чтобы шаблон не совпал с командной строкой вызывающей оболочки (иначе pkill убивает и её).
+pkill -f "[K]nitErp\.Web" 2>/dev/null || true
+# Ждём выхода прежнего экземпляра, иначе новый не займёт порт 5443.
+for i in $(seq 1 30); do pgrep -f "[K]nitErp\.Web" >/dev/null || break; sleep 0.5; done
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__KnitErp="Server=localhost,1433;Database=$db;User Id=sa;Password=${KNITERP_SA_PASSWORD:?задайте KNITERP_SA_PASSWORD};TrustServerCertificate=true;Encrypt=false"
 dotnet build "$root/src/KnitErp.Web" -v q -nologo >/dev/null

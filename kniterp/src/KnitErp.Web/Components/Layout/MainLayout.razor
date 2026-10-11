@@ -237,6 +237,7 @@
             new("catalog/settings?tab=Characteristics", "Характеристики", a => a.Has(Permissions.CatalogView)),
             new("catalog/settings?tab=Fields", "Доп. поля номенклатуры", a => a.Has(Permissions.CatalogView)),
             new("catalog/settings?tab=Catalogs", "Свои справочники", a => a.Has(Permissions.CatalogView)),
+            new("catalog/settings?tab=General", "Настройки каталога", a => a.Has(Permissions.CatalogView)),
             new("sales-settings?section=projects", "Проекты", a => a.Has(Permissions.SalesView)),
             new("sales-settings?section=channels", "Каналы продаж", a => a.Has(Permissions.SalesView)),
             new("sales-settings?section=fields", "Доп. поля заказов", a => a.Has(Permissions.SalesView)),
@@ -255,6 +256,8 @@
             new("period", "Закрытие периода", a => a.Has(Permissions.ClosedPeriodReopen) || a.Has(Permissions.WarehouseReportView)),
             new("integrity", "Проверка целостности", a => a.Has(Permissions.AuditLogView)),
             new("integrations", "Интеграции (API)", a => a.Has(Permissions.OrganizationEdit)),
+            new("exchange/moysklad", "Загрузка из МойСклад", a => a.Has(Permissions.MoySkladManage)),
+            new("exchange/feeds", "Фиды для площадок", a => a.Has(Permissions.OrganizationEdit) && a.Has(Permissions.PriceView)),
             new("exchange/1c", "Обмен с 1С", a => a.Has(Permissions.CatalogView) && a.Has(Permissions.WarehouseReportView) && a.Has(Permissions.PriceView)),
         ]),
     ];

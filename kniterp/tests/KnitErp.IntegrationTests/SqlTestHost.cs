@@ -212,6 +212,9 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Catalog.PackService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)),
             new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogSettingsService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock),
+
             new AccountSecurityService(db, Hasher, Mail, user, Clock));
     }
 
@@ -319,6 +322,9 @@ public sealed record Services(
     KnitErp.Application.Catalog.PackService Packs,
     KnitErp.Application.Catalog.CatalogQueryService CatalogQuery,
     KnitErp.Application.Catalog.ItemSupplierService Suppliers,
+    KnitErp.Application.Catalog.CatalogSettingsService CatalogSettings,
+    KnitErp.Application.Catalog.CatalogFeedService Feeds,
+
     AccountSecurityService Account) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();

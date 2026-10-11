@@ -10,6 +10,7 @@
 @inject PackService PackList
 @inject ItemSupplierService Suppliers
 @inject CatalogService Catalog
+@inject CatalogSettingsService CatalogSettings
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -82,7 +83,7 @@ else
         <form @onsubmit="SaveDetailsAsync">
             <div class="grid">
                 <label>
-                    @L("Группа")
+                    @(_settings.RequireGroup && _variants?.Parent is null ? L("Группа (обязательна)") : L("Группа"))
                     <select @bind="_form.Group" disabled="@(!editable)">
                         <option value="">@L("без группы")</option>
                         @foreach (var g in _groups)
@@ -161,7 +162,7 @@ else
         </form>
     </div>
 
-    @if (_trade is { } trade)
+    @if (_trade is { } trade && _settings.Shows(CardBlocks.Trade))
     {
         var tradeEditable = trade.CanEdit;
         <h2 style="margin-top: 20px">@L("Торговля и маркировка")</h2>
@@ -362,7 +363,7 @@ else
         </form>
     }
 
-    @if (_item.IsStocked)
+    @if (_item.IsStocked && _settings.Shows(CardBlocks.Packs))
     {
         <h2 style="margin-top: 20px">@L("Упаковки")</h2>
         <p class="muted">@L("Например, коробка = 12 шт или мешок = 25 кг. Свой штрихкод упаковки: скан даёт позицию и количество в основных единицах.")</p>
@@ -411,7 +412,7 @@ else
         }
     }
 
-    @if (_item.Type != ItemType.Bundle)
+    @if (_item.Type != ItemType.Bundle && _settings.Shows(CardBlocks.Suppliers))
     {
         <h2 style="margin-top: 20px">@L("Поставщики")</h2>
         <div class="scroll">
@@ -477,38 +478,41 @@ else
         }
     }
 
-    <h2 style="margin-top: 20px">@L("Фото")</h2>
-    <p class="muted">@L("JPEG, PNG или WebP до 2 МБ, не больше {0}. Первое — основное: оно видно в списке номенклатуры.", ItemPhoto.MaxPerItem)</p>
-    @if (_photos.Count > 0)
+    @if (_settings.Shows(CardBlocks.Photos))
     {
-        <div class="photo-strip">
-            @foreach (var ph in _photos)
-            {
-                var photo = ph;
-                <figure>
-                    <a href="catalog/photos/@photo.Id" target="_blank" rel="noopener"><img src="catalog/photos/@photo.Id" alt="@L("Фото позиции")" loading="lazy" /></a>
-                    <figcaption>
-                        @if (photo == _photos[0])
-                        {
-                            <span class="tag ok">@L("основное")</span>
-                        }
-                        else if (editable)
-                        {
-                            <button type="button" class="secondary" @onclick='() => RunAsync(() => Modifications.MakeMainPhotoAsync(photo.Id), L("Основное фото изменено."))' disabled="@_busy">@L("Основное")</button>
-                        }
-                        @if (editable)
-                        {
-                            <button type="button" class="secondary" @onclick='() => RunAsync(() => Modifications.RemovePhotoAsync(photo.Id), L("Фото удалено."))' disabled="@_busy"
-                                    aria-label="@L("Удалить фото")">✕</button>
-                        }
-                    </figcaption>
-                </figure>
-            }
-        </div>
-    }
-    @if (editable && _photos.Count < ItemPhoto.MaxPerItem)
-    {
-        <label class="file-pick">@L("Добавить фото") <InputFile OnChange="UploadAsync" accept="image/jpeg,image/png,image/webp" multiple disabled="@_busy" /></label>
+        <h2 style="margin-top: 20px">@L("Фото")</h2>
+        <p class="muted">@L("JPEG, PNG или WebP до 2 МБ, не больше {0}. Первое — основное: оно видно в списке номенклатуры.", ItemPhoto.MaxPerItem)</p>
+        @if (_photos.Count > 0)
+        {
+            <div class="photo-strip">
+                @foreach (var ph in _photos)
+                {
+                    var photo = ph;
+                    <figure>
+                        <a href="catalog/photos/@photo.Id" target="_blank" rel="noopener"><img src="catalog/photos/@photo.Id" alt="@L("Фото позиции")" loading="lazy" /></a>
+                        <figcaption>
+                            @if (photo == _photos[0])
+                            {
+                                <span class="tag ok">@L("основное")</span>
+                            }
+                            else if (editable)
+                            {
+                                <button type="button" class="secondary" @onclick='() => RunAsync(() => Modifications.MakeMainPhotoAsync(photo.Id), L("Основное фото изменено."))' disabled="@_busy">@L("Основное")</button>
+                            }
+                            @if (editable)
+                            {
+                                <button type="button" class="secondary" @onclick='() => RunAsync(() => Modifications.RemovePhotoAsync(photo.Id), L("Фото удалено."))' disabled="@_busy"
+                                        aria-label="@L("Удалить фото")">✕</button>
+                            }
+                        </figcaption>
+                    </figure>
+                }
+            </div>
+        }
+        @if (editable && _photos.Count < ItemPhoto.MaxPerItem)
+        {
+            <label class="file-pick">@L("Добавить фото") <InputFile OnChange="UploadAsync" accept="image/jpeg,image/png,image/webp" multiple disabled="@_busy" /></label>
+        }
     }
 
     @if (_item.CanSeePrices)
@@ -579,7 +583,7 @@ else
         }
     }
 
-    @if (_variants is { Parent: null } variants && _item.IsStocked)
+    @if (_variants is { Parent: null } variants && _item.IsStocked && _settings.Shows(CardBlocks.Modifications))
     {
         <h2 style="margin-top: 20px">@L("Модификации")</h2>
         <p class="muted">@L("Цвет, размер и другие характеристики. Каждая модификация — отдельная позиция со своим кодом, остатком, штрихкодом и ценой: в документах и отчётах она выбирается как обычная позиция.")</p>
@@ -779,9 +783,13 @@ else
         }
     }
 
+    // D312: блоки, скрытые настройками каталога организации (только отображение).
+    private CatalogSettingsDto _settings = new(true, true, null, 5, 1, ItemType.Finished, null, false, []);
+
     private async Task LoadAsync()
     {
         _item = await Nomenclature.GetItemAsync(Id);
+        _settings = await CatalogSettings.GetAsync();
         _groups = await Nomenclature.GroupsAsync();
         _entries = await Nomenclature.EntriesByCatalogAsync();
         var d = _item.Details;

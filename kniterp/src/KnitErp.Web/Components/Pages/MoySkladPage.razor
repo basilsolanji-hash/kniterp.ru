@@ -1,0 +1,383 @@
+@page "/exchange/moysklad"
+@using KnitErp.Application.Exchange.MoySklad
+@using KnitErp.Domain.Catalog
+@implements IDisposable
+@inject MoySkladImportService Import
+
+<PageTitle>@L("Загрузка из МойСклад") — knitERP</PageTitle>
+
+@*
+    D310 (сессия 4): загрузка справочников из МойСклад — группы, товары, услуги, модификации, комплекты, виды цен, упаковки, штрихкоды.
+    Токен виден только последними символами и хранится зашифрованным. Загрузка идёт в фоне; страница обновляет ход раз в 3 секунды,
+    пока есть активная загрузка. Вызовы сервиса — по одному (один DbContext вкладки), таймер пропускает шаг, пока идёт действие.
+*@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_status is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Загрузка из МойСклад")</h1>
+    <p class="muted">@L("Переносит в knitERP группы, товары, услуги, модификации, комплекты, виды цен, цены, штрихкоды и упаковки. Повторная загрузка не создаёт дублей: обновляет изменённое в МойСклад и не затирает то, что вы поправили в knitERP (если не отмечено «перезаписать»). Остатки и документы не загружаются.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <h2>@L("Подключение")</h2>
+    @if (_status.Connected)
+    {
+        <div class="panel">
+            <p>
+                @L("Подключено: {0}, токен {1}", _status.Account ?? "—", _status.TokenHint ?? "")
+                @if (_status.ConnectedAtUtc is { } at)
+                {
+                    <span class="muted small"> · @Local(at)</span>
+                }
+            </p>
+            <details>
+                <summary>@L("Заменить токен")</summary>
+                <form @onsubmit="ConnectAsync">
+                    <label>@L("Новый токен") <input type="password" autocomplete="off" @bind="_token" maxlength="@ExternalConnection.TokenMaxLength" style="width: 100%" /></label>
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Проверить и сохранить")</button></div>
+                </form>
+            </details>
+            <div class="actions">
+                <ConfirmButton Class="secondary" Disabled="@(_busy || Active is not null)" Question="@L("Отключить МойСклад? Токен будет удалён из knitERP; загруженные позиции и их связи останутся.")"
+                               OnConfirm="DisconnectAsync">@L("Отключить")</ConfirmButton>
+            </div>
+        </div>
+    }
+    else
+    {
+        <form class="panel" @onsubmit="ConnectAsync">
+            <p class="muted small">@L("В МойСклад: Настройки → Токены → Создать токен. Нужен доступ на чтение товаров и справочников. Токен хранится зашифрованным, на экране — только последние 4 символа.")</p>
+            <label>@L("Токен МойСклад") <input type="password" autocomplete="off" @bind="_token" maxlength="@ExternalConnection.TokenMaxLength" required style="width: 100%" /></label>
+            <div class="actions"><button type="submit" disabled="@_busy">@L("Проверить и подключить")</button></div>
+        </form>
+    }
+
+    @if (_status.Connected)
+    {
+        <h2>@L("Новая загрузка")</h2>
+        <div class="panel">
+            <div class="grid">
+                <label>
+                    @L("Тип новых товаров")
+                    <select @bind="_defaultType" disabled="@_busy">
+                        @foreach (var t in ItemTypes.Stocked)
+                        {
+                            <option value="@t">@L(ItemTypes.Name(t))</option>
+                        }
+                    </select>
+                </label>
+                <label class="check"><input type="checkbox" @bind="_overwrite" disabled="@_busy" /> @L("Перезаписать изменённое в knitERP значениями из МойСклад")</label>
+            </div>
+            <p class="muted small">@L("У товара в МойСклад нет типа knitERP: новые товары получат выбранный тип, его можно сменить в карточке. Услуги и комплекты распознаются сами.")</p>
+            <div class="actions">
+                @if (_previewCts is not null)
+                {
+                    <button type="button" class="secondary" @onclick="() => _previewCts.Cancel()">@L("Прервать предпросмотр")</button>
+                    <span class="muted small" role="status">@L("Считаем, что изменится… На больших каталогах это до минуты.")</span>
+                }
+                else
+                {
+                    <button type="button" class="secondary" @onclick="PreviewAsync" disabled="@(_busy || Active is not null)">@L("Предпросмотр")</button>
+                }
+                <button type="button" @onclick="StartAsync" disabled="@(_busy || Active is not null)">@L("Загрузить")</button>
+            </div>
+        </div>
+
+        @if (_preview is not null)
+        {
+            <h3>@L("Что изменится")</h3>
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Вид")</th><th class="num">@L("Всего")</th><th class="num">@L("Создать")</th><th class="num">@L("Обновить")</th><th class="num">@L("Без изменений")</th><th class="num">@L("Пропустить")</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _preview.Lines)
+                        {
+                            <tr><td>@Title(l.Entity)</td><td class="num">@l.Total</td><td class="num">@l.ToCreate</td><td class="num">@l.ToUpdate</td><td class="num">@l.Unchanged</td><td class="num">@l.Skipped</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (_preview.Truncated)
+            {
+                <p class="muted small">@L("Предпросмотр посчитан по первым 10 000 строкам каждого вида; загрузка обработает все.")</p>
+            }
+
+            @if (_preview.Conflicts.Count > 0)
+            {
+                <details open>
+                    <summary>@L("Изменено в knitERP — без «перезаписать» останется как есть ({0})", _preview.Conflicts.Count)</summary>
+                    <ul class="small">
+                        @foreach (var c in _preview.Conflicts)
+                        {
+                            <li>@c</li>
+                        }
+                    </ul>
+                </details>
+            }
+        }
+    }
+
+    <h2>@L("Загрузки")</h2>
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("№")</th><th>@L("Состояние")</th><th class="num">@L("Создано")</th><th class="num">@L("Обновлено")</th><th class="num opt">@L("Пропущено")</th><th class="num">@L("Ошибок")</th><th></th></tr></thead>
+            <tbody>
+                @if (_status.Runs.Count == 0)
+                {
+                    <tr><td colspan="7" class="muted">@L("Загрузок ещё не было.")</td></tr>
+                }
+                @foreach (var r in _status.Runs)
+                {
+                    <tr>
+                        <td>@r.Id<div class="muted small">@r.RequestedBy, @Local(r.RequestedAtUtc)</div></td>
+                        <td>
+                            @StatusText(r)
+                            @if (r.Message is not null)
+                            {
+                                <div class="small @(r.Status == ImportRunStatus.Failed ? "neg" : "muted")">@(r.Message == ExternalImportRun.CancelledMessage ? L("Остановлена по запросу пользователя — её можно продолжить.") : r.Message)</div>
+                            }
+                        </td>
+                        <td class="num">@r.Created</td>
+                        <td class="num">@r.Updated</td>
+                        <td class="num">@r.Skipped</td>
+                        <td class="num @(r.Errors > 0 ? "neg" : null)">@r.Errors</td>
+                        <td>
+                            <div class="row-actions">
+                                @if (r.Status is ImportRunStatus.Queued or ImportRunStatus.Running && !r.CancelRequested)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => CancelRunAsync(r)" disabled="@_busy">@L("Остановить")</button>
+                                }
+                                @if (r.Status == ImportRunStatus.Failed)
+                                {
+                                    <button type="button" @onclick="() => ResumeAsync(r)" disabled="@(_busy || Active is not null || !_status.Connected)">@L("Продолжить")</button>
+                                }
+                                <button type="button" class="secondary" @onclick="() => IssuesAsync(r)" disabled="@_busy">@L("Замечания")</button>
+                                <a class="button secondary" href="exchange/moysklad/runs/@r.Id/report.xlsx" download data-enhance-nav="false">@L("Отчёт .xlsx")</a>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_issues is not null)
+    {
+        <h3>@L("Замечания загрузки № {0}", _issuesRun)</h3>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Вид")</th><th>@L("Код")</th><th class="opt">@L("Наименование")</th><th>@L("Что произошло")</th></tr></thead>
+                <tbody>
+                    @if (_issues.Count == 0)
+                    {
+                        <tr><td colspan="4" class="muted">@L("Замечаний нет.")</td></tr>
+                    }
+                    @foreach (var i in _issues)
+                    {
+                        <tr>
+                            <td>@i.Entity</td>
+                            <td>@i.Code</td>
+                            <td>@i.Name</td>
+                            <td class="@(i.IsError ? "neg" : null)">@i.Text</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_issues.Count >= IssuesShown)
+        {
+            <p class="muted small">@L("Показаны первые {0} замечаний — все есть в отчёте .xlsx.", IssuesShown)</p>
+        }
+    }
+}
+
+@code {
+    private const int IssuesShown = 500;
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private MoySkladStatusDto? _status;
+    private MoySkladPreviewDto? _preview;
+    private IReadOnlyList<ImportIssueDto>? _issues;
+    private long _issuesRun;
+    private string? _token;
+    private ItemType _defaultType = ItemType.Finished;
+    private bool _overwrite;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private Timer? _timer;
+
+    private ImportRunDto? Active => _status?.Runs.FirstOrDefault(r => r.Status is ImportRunStatus.Queued or ImportRunStatus.Running);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _status = await Import.StatusAsync();
+            _timer = new Timer(_ => InvokeAsync(PollAsync), null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    /// <summary>Обновление хода, только пока есть активная загрузка и не идёт другое действие.</summary>
+    private async Task PollAsync()
+    {
+        if (_busy || Active is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _status = await Import.StatusAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        StateHasChanged();
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+
+    private string StatusText(ImportRunDto r) => r.Status switch
+    {
+        ImportRunStatus.Queued => L("в очереди"),
+        ImportRunStatus.Running when r.CancelRequested => L("останавливается после текущей страницы…"),
+        ImportRunStatus.Running => L("идёт: {0}", Title(MoySkladImportService.StageName(r.Stage))),
+        ImportRunStatus.Completed => L("завершена"),
+        _ => L("прервана на этапе «{0}»", Title(MoySkladImportService.StageName(r.Stage))),
+    };
+
+    /// <summary>Название этапа или вида объектов на языке интерфейса (литералы — для проверки покрытия переводов).</summary>
+    private string Title(string name) => name switch
+    {
+        "Виды цен" => L("Виды цен"),
+        "Группы" => L("Группы"),
+        "Товары" => L("Товары"),
+        "Услуги" => L("Услуги"),
+        "Модификации" => L("Модификации"),
+        "Комплекты" => L("Комплекты"),
+        _ => name,
+    };
+
+    private Task ConnectAsync() => RunAsync(async () =>
+    {
+        try
+        {
+            await Import.ConnectAsync(_token);
+        }
+        finally
+        {
+            // Токен не держим в памяти страницы дольше нужного — ни при успехе, ни при ошибке.
+            _token = null;
+        }
+    }, L("МойСклад подключён."));
+
+    private Task DisconnectAsync() => RunAsync(async () =>
+    {
+        await Import.DisconnectAsync();
+        _preview = null;
+    }, L("МойСклад отключён, токен удалён."));
+
+    private CancellationTokenSource? _previewCts;
+
+    /// <summary>Предпросмотр читает МойСклад страницами — его можно прервать (кнопка или уход со страницы).</summary>
+    private Task PreviewAsync() => RunAsync(async () =>
+    {
+        _previewCts = new CancellationTokenSource();
+        try
+        {
+            _preview = await Import.PreviewAsync(_defaultType, _overwrite, _previewCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _preview = null;
+            _message = L("Предпросмотр прерван.");
+        }
+        finally
+        {
+            _previewCts.Dispose();
+            _previewCts = null;
+        }
+    }, null);
+
+    private Task CancelRunAsync(ImportRunDto r) =>
+        RunAsync(() => Import.CancelAsync(r.Id), L("Загрузка остановится после текущей страницы; потом её можно продолжить."));
+
+    private Task StartAsync() => RunAsync(async () =>
+    {
+        await Import.StartAsync(_defaultType, _overwrite);
+        _preview = null;
+    }, L("Загрузка поставлена в очередь — ход виден в таблице ниже, страницу можно закрыть."));
+
+    private Task ResumeAsync(ImportRunDto r) => RunAsync(() => Import.ResumeAsync(r.Id), L("Загрузка продолжится с последней записанной страницы."));
+
+    private Task IssuesAsync(ImportRunDto r) => RunAsync(async () =>
+    {
+        _issues = await Import.IssuesAsync(r.Id, IssuesShown);
+        _issuesRun = r.Id;
+    }, null);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success ?? _message;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _status = await Import.StatusAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _previewCts?.Cancel();
+    }
+}

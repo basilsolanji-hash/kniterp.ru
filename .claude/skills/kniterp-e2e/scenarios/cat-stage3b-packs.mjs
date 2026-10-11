@@ -19,7 +19,7 @@ await form.locator('label:has-text("Наименование") input').fill('Н�
 await form.locator('label:has-text("Тип") select').selectOption('Finished');
 await form.getByRole('button', { name: 'Сохранить' }).click();
 await page.waitForSelector('text=Позиция сохранена.');
-await page.getByRole('link', { name: 'Носки ' + sfx }).click();
+await page.locator('.flash').getByRole('link', { name: 'Носки ' + sfx }).click(); // ссылка на новую позицию — в сообщении (список листается страницами)
 await page.waitForSelector('h2:has-text("Упаковки")'); await ready(page);
 
 const packForm = page.locator('form:has(button:has-text("Сохранить упаковку"))');
