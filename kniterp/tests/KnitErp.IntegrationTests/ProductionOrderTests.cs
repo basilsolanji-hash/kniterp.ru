@@ -1232,12 +1232,23 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                 Assert.Equal((0, 1, 0, (int?)0), (c.TasksDone, c.MissedWithReason, c.MissedNoReason, c.Points));
                 Assert.Equal("production.score.period", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Scores.BoardAsync(Day, Day.AddDays(100)))).Code);
 
+                // Выгрузка для кадров: лист показателей с баллами и лист сменных заданий.
+                var file = await s.Scores.ExportAsync(Day, Day.AddDays(2));
+                var sheet = SqlTestHost.Spreadsheet.ReadFirstSheet(new MemoryStream(file), 100);
+                Assert.Equal(["Сотрудник", "Табельный номер", "Выполнено заданий", "Не выполнено с причиной", "Без причины", "В работе", "Средний %", "Брак по вине", "Баллы"],
+                    sheet[0]);
+                var workerRow = sheet.Single(r => r[1] == "0101");
+                static decimal Num(string v) => decimal.Parse(v.TrimEnd('.'), System.Globalization.CultureInfo.InvariantCulture);
+                // Числа записаны числами (ячейки Excel), не текстом.
+                Assert.Equal(("Петрова А. С.", 1m, 1m, 2m, -3m), (workerRow[0], Num(workerRow[2]), Num(workerRow[4]), Num(workerRow[7]), Num(workerRow[8])));
+
                 await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, false, 2, 0, -3, -1), (await s.ProductionSettings.GetAsync()).RowVersion);
                 Assert.Null((await s.Scores.BoardAsync(Day, Day.AddDays(2))).Rows.Single(r => r.EmployeeId == employee).Points);
             }
 
             await using (var s = host.As(worker, f.Org.OrganizationId))
             {
+                await Assert.ThrowsAsync<AccessDeniedException>(() => s.Scores.ExportAsync(Day, Day.AddDays(2)));
                 var mine = await s.Scores.MineAsync();
                 Assert.Equal((employee, 1, 1, 2m, (int?)null), (mine!.EmployeeId, mine.TasksDone, mine.MissedNoReason, mine.DefectUnits, mine.Points));
             }

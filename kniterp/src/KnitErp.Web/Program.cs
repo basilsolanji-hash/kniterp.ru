@@ -430,6 +430,8 @@ app.MapGet("/stock-documents/template.xlsx", (StockDocumentService documents, Ca
 // Отчёты и журналы в Excel — те же фильтры, что на экране; права и область складов проверяют сервисы.
 app.MapGet("/reports/production.xlsx", (DateOnly from, DateOnly to, KnitErp.Application.Production.ProductionReportService reports, CancellationToken ct) =>
     FileOrForbid(() => reports.ExportAsync(new KnitErp.Application.Production.ProductionReportFilter(from, to), ct), $"proizvodstvo-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.xlsx"));
+app.MapGet("/production/scores.xlsx", (DateOnly from, DateOnly to, KnitErp.Application.Production.ProductionScoreService scores, CancellationToken ct) =>
+    FileOrForbid(() => scores.ExportAsync(from, to, ct), $"pokazateli-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.xlsx"));
 app.MapGet("/reports/stock.xlsx", (long? warehouse, byte? type, string? search, KnitErp.Web.Exports.ReportExports export, CancellationToken ct) =>
     FileOrForbid(() => export.StockAsync(new StockFilter(warehouse, (KnitErp.Domain.Catalog.ItemType?)type, search), ct),
         $"ostatki-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));

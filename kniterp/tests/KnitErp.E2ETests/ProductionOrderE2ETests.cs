@@ -453,6 +453,9 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Баллы и показатели" })).ToBeVisibleAsync();
             await Assertions.Expect(page.Locator("thead th").Filter(new() { HasTextRegex = new Regex("^Баллы$") })).ToHaveCountAsync(1);
             await Assertions.Expect(page.GetByText("Баллы: выполненное задание")).ToBeVisibleAsync();
+            var download = await page.RunAndWaitForDownloadAsync(() => page.GetByRole(AriaRole.Link, new() { Name = "Выгрузить в Excel" }).ClickAsync());
+            Assert.StartsWith("pokazateli-", download.SuggestedFilename);
+            Assert.EndsWith(".xlsx", download.SuggestedFilename);
         }
 
         await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions
