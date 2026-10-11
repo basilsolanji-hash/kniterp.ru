@@ -25,6 +25,9 @@ public sealed class FakeMoySkladClient : IMoySkladClient
 
     /// <summary>Сбой не из МойСклад (ошибка разбора, ошибка кода): загрузка не должна остаться «идёт».</summary>
     public string? CrashOnEntity { get; set; }
+
+    /// <summary>Вызывается при чтении страницы сущности — например, «пользователь нажал Остановить» из другой вкладки.</summary>
+    public Func<string, Task>? OnList { get; set; }
     public int Calls { get; private set; }
 
     public static FakeMoySkladClient FromSamples()
@@ -42,7 +45,17 @@ public sealed class FakeMoySkladClient : IMoySkladClient
     public Task<string?> CheckAsync(string token, CancellationToken ct = default) =>
         token == Token ? Task.FromResult<string?>("ООО «Тестовый аккаунт»") : throw new MoySkladException("доступ запрещён", 401);
 
-    public Task<MsPage<MsRow>> ListAsync(string token, string entity, int offset, int limit, string? expand = null, CancellationToken ct = default)
+    public async Task<MsPage<MsRow>> ListAsync(string token, string entity, int offset, int limit, string? expand = null, CancellationToken ct = default)
+    {
+        if (OnList is { } hook)
+        {
+            await hook(entity);
+        }
+
+        return await ListCoreAsync(token, entity, offset, limit);
+    }
+
+    private Task<MsPage<MsRow>> ListCoreAsync(string token, string entity, int offset, int limit)
     {
         Calls++;
         Assert.Equal(Token, token);
@@ -351,6 +364,57 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
             await ms.ResumeAsync(run.Id);
             Assert.True(await ms.ProcessNextAsync());
             Assert.Equal(ImportRunStatus.Completed, (await ms.StatusAsync()).Runs.Single().Status);
+        }
+    }
+
+    [SqlFact]
+    public async Task Cancel_queued_immediately_running_at_checkpoint_then_resume()
+    {
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        long runId;
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+
+            // В очереди — останавливается сразу, фоновому процессу нечего брать.
+            runId = await ms.StartAsync();
+            await ms.CancelAsync(runId);
+            var queued = (await ms.StatusAsync()).Runs.Single();
+            Assert.Equal((ImportRunStatus.Failed, ExternalImportRun.CancelledMessage), (queued.Status, queued.Message));
+            Assert.False(await ms.ProcessNextAsync());
+            Assert.Equal("exchange.run.not_active", (await Assert.ThrowsAsync<BusinessRuleException>(() => ms.CancelAsync(runId))).Code);
+            await ms.ResumeAsync(runId);
+        }
+
+        // Идущая: «Остановить» нажато из другой вкладки, пока читаются услуги; движок останавливается на контрольной точке.
+        fake.OnList = async entity =>
+        {
+            if (entity == MoySkladEntities.Service)
+            {
+                fake.OnList = null;
+                await using var other = host.As(_user, _org);
+                await Service(other, fake).CancelAsync(runId);
+            }
+        };
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            Assert.True(await ms.ProcessNextAsync());
+            var stopped = (await ms.StatusAsync()).Runs.Single();
+            Assert.Equal((ImportRunStatus.Failed, ExternalImportRun.CancelledMessage, false), (stopped.Status, stopped.Message, stopped.CancelRequested));
+            Assert.Equal("product", stopped.Stage);
+        }
+
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.ResumeAsync(runId);
+            Assert.True(await ms.ProcessNextAsync());
+            Assert.Equal(ImportRunStatus.Completed, (await ms.StatusAsync()).Runs.Single().Status);
+            Assert.Single((await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ДОСТ"))).Items);
         }
     }
 

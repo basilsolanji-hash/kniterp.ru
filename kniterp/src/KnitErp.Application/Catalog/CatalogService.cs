@@ -215,6 +215,8 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         // D312: выключенный вид не создаётся; пустой код — следующий номер автокода (если он включён).
         var settings = await db.CatalogSettings.SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct);
         settings?.EnsureEnabled(cmd.Type);
+        settings?.EnsureGroup(cmd.GroupId);
+        settings?.EnsureVat(cmd.VatRateId);
         var code = cmd.Code;
         if (string.IsNullOrWhiteSpace(code) && settings is { AutoCode: true })
         {
@@ -256,9 +258,11 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var oldUnit = item.UnitId;
         var oldVat = item.VatRateId;
         ServiceRules.EnsureVat(cmd.Type, cmd.VatRateId);
+        var settings = await db.CatalogSettings.AsNoTracking().SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct);
+        settings?.EnsureVat(cmd.VatRateId); // D312: обязательная ставка НДС — и при изменении позиции
         if (cmd.Type != item.Type)
         {
-            (await db.CatalogSettings.AsNoTracking().SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct))?.EnsureEnabled(cmd.Type);
+            settings?.EnsureEnabled(cmd.Type);
             await EnsureTypeChangeAsync(ctx, item, cmd.Type, ct);
         }
 

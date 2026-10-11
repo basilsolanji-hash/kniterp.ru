@@ -244,6 +244,7 @@ internal sealed class CatalogSettingsConfiguration : IEntityTypeConfiguration<Ca
         {
             t.HasCheckConstraint("ck_catalog_settings_digits", "[AutoCodeDigits] BETWEEN 3 AND 8");
             t.HasCheckConstraint("ck_catalog_settings_next", "[NextNumber] >= 1");
+            t.HasCheckConstraint("ck_catalog_settings_blocks", "[HiddenBlocks] BETWEEN 0 AND 31");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
@@ -252,7 +253,30 @@ internal sealed class CatalogSettingsConfiguration : IEntityTypeConfiguration<Ca
         b.Property(x => x.UpdatedAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.AutoCode);
+        b.Property(x => x.HiddenBlocks).HasConversion<int>();
         b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_catalog_settings_org");
+    }
+}
+
+/// <summary>D314: фиды каталога YML — ключ хранится только отпечатком SHA-256.</summary>
+internal sealed class CatalogFeedConfiguration : IEntityTypeConfiguration<CatalogFeed>
+{
+    public void Configure(EntityTypeBuilder<CatalogFeed> b)
+    {
+        b.ToTable("catalog_feeds");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(CatalogFeed.NameMaxLength).IsRequired();
+        b.Property(x => x.Prefix).HasColumnType("varchar(9)").IsRequired();
+        b.Property(x => x.KeyHash).HasColumnType("binary(32)").IsRequired();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasIndex(x => x.KeyHash).IsUnique().HasDatabaseName("ux_catalog_feeds_key");
+        b.HasIndex(x => x.OrganizationId).HasDatabaseName("ix_catalog_feeds_org");
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<PriceType>().WithMany().HasForeignKey(x => x.PriceTypeId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_catalog_feeds_price_type");
+        b.HasOne<KnitErp.Domain.Warehousing.Warehouse>().WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_catalog_feeds_warehouse");
+        b.HasOne<ItemGroup>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_catalog_feeds_group");
     }
 }

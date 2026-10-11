@@ -1,0 +1,189 @@
+@page "/exchange/feeds"
+@using KnitErp.Application.Catalog
+@using KnitErp.Domain.Catalog
+@inject CatalogFeedService Feeds
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Фиды для площадок") — knitERP</PageTitle>
+
+@*
+    D314 (сессия 4): фид каталога YML по секретной ссылке — для сайта, Яндекс Маркета и других площадок, которые забирают YML сами.
+    Ссылка показывается один раз (в базе — только отпечаток ключа). Управляет Владелец или Администратор с правом видеть цены.
+*@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_feeds is null || _options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Фиды для площадок")</h1>
+    <p class="muted">@L("Файл YML с группами, ценами, штрихкодами и наличием: его по ссылке забирают сайт, Яндекс Маркет и другие площадки. В фид попадают товары, модификации и комплекты с ценой выбранного вида; услуги — нет. Файл обновляется не реже раза в 5 минут.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_issuedUrl is not null)
+    {
+        <div class="panel secret-once" role="alert">
+            <h2>@L("Сохраните ссылку сейчас")</h2>
+            <p>@L("Она показывается один раз: в knitERP хранится только отпечаток ключа. Кто знает ссылку — видит цены и наличие. Потеряли или ссылка попала не туда — выключите фид и создайте новый.")</p>
+            <input readonly value="@_issuedUrl" aria-label="@L("Ссылка на фид")" style="width: 100%; font-family: monospace" />
+            <div class="actions"><button type="button" @onclick="() => _issuedUrl = null">@L("Я сохранил, скрыть")</button></div>
+        </div>
+    }
+
+    <h2>@L("Новый фид")</h2>
+    <form class="panel" @onsubmit="CreateAsync">
+        <div class="grid">
+            <label>@L("Название") <input @bind="_name" maxlength="@CatalogFeed.NameMaxLength" placeholder="@L("Яндекс Маркет")" required /></label>
+            <label>
+                @L("Вид цены")
+                <select @bind="_priceTypeId">
+                    @foreach (var t in _options.PriceTypes)
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Склад для наличия")
+                <select @bind="_warehouseId">
+                    <option value="">@L("все склады")</option>
+                    @foreach (var w in _options.Warehouses)
+                    {
+                        <option value="@w.Id">@w.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Группа")
+                <select @bind="_groupId">
+                    <option value="">@L("весь каталог")</option>
+                    @foreach (var g in _options.Groups)
+                    {
+                        <option value="@g.Id">@g.Name</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <label class="check"><input type="checkbox" @bind="_onlyAvailable" /> @L("Только позиции в наличии")</label>
+        <div class="actions"><button type="submit" disabled="@(_busy || _options.PriceTypes.Count == 0)">@L("Создать фид")</button></div>
+    </form>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Название")</th><th>@L("Начало ключа")</th><th class="opt">@L("Отбор")</th><th class="opt">@L("Последний запрос")</th><th>@L("Состояние")</th><th></th></tr></thead>
+            <tbody>
+                @if (_feeds.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Фидов пока нет.")</td></tr>
+                }
+                @foreach (var f in _feeds)
+                {
+                    <tr class="@(f.IsActive ? null : "archived")">
+                        <td>@f.Name<div class="muted small">@f.CreatedBy, @Local(f.CreatedAtUtc)</div></td>
+                        <td><code>@(f.Prefix)…</code></td>
+                        <td class="small">@f.PriceType; @(f.Warehouse ?? L("все склады")); @(f.Group ?? L("весь каталог"))@(f.OnlyAvailable ? "; " + L("только в наличии") : "")</td>
+                        <td>@(f.LastRequestedAtUtc is { } r ? Local(r) : "—")</td>
+                        <td>@(f.IsActive ? L("включён") : L("выключен"))</td>
+                        <td>
+                            @if (f.IsActive)
+                            {
+                                <ConfirmButton Class="secondary" Disabled="_busy" Question="@L("Выключить фид? Ссылка перестанет отвечать в течение 5 минут.")"
+                                               OnConfirm="() => SetActiveAsync(f, false)">@L("Выключить")</ConfirmButton>
+                            }
+                            else
+                            {
+                                <button type="button" class="secondary" @onclick="() => SetActiveAsync(f, true)" disabled="@_busy">@L("Включить")</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<CatalogFeedDto>? _feeds;
+    private CatalogFeedOptionsDto? _options;
+    private string? _name;
+    private long _priceTypeId;
+    private string _warehouseId = string.Empty;
+    private string _groupId = string.Empty;
+    private bool _onlyAvailable = true;
+    private string? _issuedUrl;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _options = await Feeds.OptionsAsync();
+            _priceTypeId = _options.PriceTypes.FirstOrDefault()?.Id ?? 0;
+            _feeds = await Feeds.ListAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        var issued = await Feeds.CreateAsync(new CatalogFeedCommand(_name, _priceTypeId, long.TryParse(_warehouseId, out var w) ? w : null,
+            long.TryParse(_groupId, out var g) ? g : null, _onlyAvailable));
+        _issuedUrl = $"{Navigation.BaseUri}feeds/{issued.Key}.yml";
+        _name = null;
+    }, L("Фид создан — передайте ссылку площадке."));
+
+    private Task SetActiveAsync(CatalogFeedDto f, bool active) =>
+        RunAsync(() => Feeds.SetActiveAsync(f.Id, active, f.RowVersion), active ? L("Фид включён.") : L("Фид выключен."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _feeds = await Feeds.ListAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

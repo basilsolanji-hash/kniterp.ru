@@ -13,7 +13,7 @@ namespace KnitErp.Application.Exchange.MoySklad;
 
 public sealed record ImportRunDto(
     long Id, ImportRunStatus Status, bool Overwrite, ItemType DefaultItemType, DateTime RequestedAtUtc, DateTime? StartedAtUtc, DateTime? FinishedAtUtc,
-    string? Stage, int Created, int Updated, int Skipped, int Errors, string? Message, string RequestedBy);
+    string? Stage, int Created, int Updated, int Skipped, int Errors, string? Message, string RequestedBy, bool CancelRequested = false);
 
 public sealed record MoySkladStatusDto(bool Connected, string? Account, string? TokenHint, DateTime? ConnectedAtUtc, IReadOnlyList<ImportRunDto> Runs);
 
@@ -64,7 +64,7 @@ public sealed class MoySkladImportService(
                           where r.OrganizationId == ctx.OrganizationId && r.System == Sys
                           orderby r.Id descending
                           select new ImportRunDto(r.Id, r.Status, r.Overwrite, r.DefaultItemType, r.RequestedAtUtc, r.StartedAtUtc, r.FinishedAtUtc, r.Stage,
-                              r.Created, r.Updated, r.Skipped, r.Errors, r.Message, u.DisplayName)).Take(20).ToListAsync(ct);
+                              r.Created, r.Updated, r.Skipped, r.Errors, r.Message, u.DisplayName, r.CancelRequested)).Take(20).ToListAsync(ct);
         return new MoySkladStatusDto(connection is not null, connection?.AccountName, connection?.TokenHint, connection?.ConnectedAtUtc, runs);
     }
 
@@ -154,6 +154,17 @@ public sealed class MoySkladImportService(
         return run.Id;
     }
 
+    /// <summary>Остановить загрузку (в очереди — сразу, идущую — после текущей страницы); её можно продолжить.</summary>
+    public async Task CancelAsync(long runId, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        var run = await db.ExternalImportRuns.SingleOrDefaultAsync(r => r.Id == runId && r.OrganizationId == ctx.OrganizationId, ct)
+                  ?? throw new NotFoundException("Загрузка");
+        run.RequestCancel(clock.UtcNow);
+        Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id}: запрошена остановка");
+        await db.SaveOrConflictAsync(ct);
+    }
+
     /// <summary>Продолжить прерванную загрузку с последней записанной страницы.</summary>
     public async Task ResumeAsync(long runId, CancellationToken ct = default)
     {
@@ -232,7 +243,7 @@ public sealed class MoySkladImportService(
             // Текст неизвестных исключений пользователю не показывается — он может содержать внутренние подробности.
             db.DiscardChanges();
             var failed = await db.ExternalImportRuns.SingleAsync(r => r.Id == run.Id, ct);
-            failed.Fail(ex switch
+            failed.Fail(ex is ImportCancelledException || failed.CancelRequested ? ExternalImportRun.CancelledMessage : ex switch
             {
                 MoySkladException or BusinessRuleException => ex.Message,
                 DbUpdateException => "Ошибка записи в базу — загрузку можно продолжить.",
@@ -353,6 +364,7 @@ public sealed class MoySkladImportService(
         public async Task RunAsync(CancellationToken ct)
         {
             await LoadAsync(ct);
+            await CheckpointAsync(run.Stage ?? Stages[0], run.StageOffset, ct); // остановка, запрошенная до начала
             var startIndex = run.Stage is { } s ? Math.Max(0, Stages.ToList().IndexOf(s)) : 0;
             for (var i = startIndex; i < Stages.Count; i++)
             {
@@ -377,6 +389,12 @@ public sealed class MoySkladImportService(
 
         private async Task CheckpointAsync(string stage, int nextOffset, CancellationToken ct)
         {
+            // Флаг остановки читается из базы без отслеживания: его ставит страница из своего контекста.
+            if (await db.ExternalImportRuns.AsNoTracking().Where(r => r.Id == run.Id).Select(r => r.CancelRequested).SingleAsync(ct))
+            {
+                throw new ImportCancelledException();
+            }
+
             // Запись загрузки — из базы: после отказа строки (DiscardChanges) прежний объект не отслеживается.
             var tracked = await db.ExternalImportRuns.SingleAsync(r => r.Id == run.Id, ct);
             tracked.Checkpoint(stage, nextOffset, _created, _updated, _skipped, _errors);
@@ -1093,3 +1111,6 @@ public sealed class MoySkladImportService(
         };
     }
 }
+
+/// <summary>Пользователь остановил загрузку (D310): прерывает движок на контрольной точке.</summary>
+public sealed class ImportCancelledException() : Exception(ExternalImportRun.CancelledMessage);

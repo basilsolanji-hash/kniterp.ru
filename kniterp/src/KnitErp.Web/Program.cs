@@ -167,6 +167,10 @@ builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http =>
+        // D314 (сессия 4): фид каталога без входа — не больше 30 запросов в минуту с адреса (файл к тому же кэшируется на 5 минут).
+        http.Request.Path.StartsWithSegments("/feeds")
+            ? RateLimitPartition.GetFixedWindowLimiter("feeds:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
         // D88: API — 100 запросов за 5 секунд на токен (ключ — отпечаток заголовка Authorization, без самого секрета).
         http.Request.Path.StartsWithSegments("/api")
             ? RateLimitPartition.GetFixedWindowLimiter("api:" + KnitErp.Web.Api.ApiErrors.RateKey(http),
@@ -188,9 +192,18 @@ builder.Services.AddRateLimiter(o =>
         }
 
         context.HttpContext.Response.ContentType = "text/plain; charset=utf-8";
+        if (context.HttpContext.Request.Path.StartsWithSegments("/feeds"))
+        {
+            context.HttpContext.Response.Headers.RetryAfter = "60";
+            await context.HttpContext.Response.WriteAsync("Too many feed requests, retry in a minute.", ct);
+            return;
+        }
+
         await context.HttpContext.Response.WriteAsync("Слишком много попыток входа с этого адреса. Подождите минуту и попробуйте снова.", ct);
     };
 });
+
+builder.Services.AddSingleton<KnitErp.Web.Exchange.FeedCache>(); // D314: кэш файлов фида каталога (свой, с лимитом объёма)
 
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);
@@ -417,6 +430,34 @@ app.MapGet("/inventory/{id:long}/sheet.xlsx", (long id, InventoryService invento
 // D310 (сессия 4): отчёт загрузки из МойСклад — итоги и замечания по строкам.
 app.MapGet("/exchange/moysklad/runs/{id:long}/report.xlsx", (long id, KnitErp.Application.Exchange.MoySklad.MoySkladImportService import, CancellationToken ct) =>
     FileOrForbid(() => import.ReportAsync(id, ct), $"moysklad-zagruzka-{id}.xlsx"));
+
+// D314 (сессия 4): фид каталога YML по секретной ссылке — без входа (площадка забирает файл сама). Неизвестный или выключенный ключ — 404.
+// Готовый файл кэшируется на 5 минут по отпечатку ключа: частый опрос не нагружает базу.
+app.MapGet("/feeds/{key}.yml", async (string key, KnitErp.Application.Catalog.CatalogFeedService feeds, KnitErp.Web.Exchange.FeedCache cache,
+    HttpContext http, CancellationToken ct) =>
+{
+    if (!KnitErp.Domain.Catalog.CatalogFeed.LooksLikeKey(key))
+    {
+        return Results.NotFound();
+    }
+
+    var cacheKey = "feed:" + Convert.ToHexString(KnitErp.Domain.Catalog.CatalogFeed.Hash(key));
+    if (!cache.TryGet(cacheKey, out var xml))
+    {
+        var file = await feeds.BuildAsync(key, $"{http.Request.Scheme}://{http.Request.Host}/", ct);
+        if (file is null)
+        {
+            return Results.NotFound();
+        }
+
+        xml = file.Xml;
+        cache.Set(cacheKey, xml);
+    }
+
+    http.Response.Headers.CacheControl = "public, max-age=300";
+    http.Response.Headers["X-Robots-Tag"] = "noindex";
+    return Results.File(xml!, "application/xml; charset=utf-8");
+}).AllowAnonymous();
 
 // Встраивать страницы knitERP в чужие сайты запрещено (как и в общей CSP).
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode(o => o.ContentSecurityFrameAncestorsPolicy = "'none'");

@@ -401,6 +401,20 @@ else
                         }
                     </fieldset>
                     <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Обязательные поля")</legend>
+                        <label class="check"><input type="checkbox" @bind="_requireGroup" /> @L("Группа — у новой позиции и при сохранении сведений")</label>
+                        <label class="check"><input type="checkbox" @bind="_requireVat" /> @L("Ставка НДС — у новой и изменяемой позиции")</label>
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Блоки карточки позиции")</legend>
+                        <p class="muted small">@L("Снимите флажок, чтобы не показывать блок. Данные не удаляются, блок можно вернуть в любой момент.")</p>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Trade)" @onchange="e => ToggleBlock(CardBlocks.Trade, e)" /> @L("Торговля и маркировка")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Packs)" @onchange="e => ToggleBlock(CardBlocks.Packs, e)" /> @L("Упаковки")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Suppliers)" @onchange="e => ToggleBlock(CardBlocks.Suppliers, e)" /> @L("Поставщики")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Photos)" @onchange="e => ToggleBlock(CardBlocks.Photos, e)" /> @L("Фото")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Modifications)" @onchange="e => ToggleBlock(CardBlocks.Modifications, e)" /> @L("Модификации")</label>
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
                         <legend>@L("Новая позиция")</legend>
                         <label>
                             @L("Тип по умолчанию")
@@ -526,9 +540,16 @@ else
     private byte _digits = 5;
     private int _nextNumber = 1;
     private ItemType _defaultType = ItemType.Finished;
+    private bool _requireGroup;
+    private bool _requireVat;
+    private CardBlocks _hidden;
+
+    private bool ShowsBlock(CardBlocks block) => (_hidden & block) == 0;
+
+    private void ToggleBlock(CardBlocks block, ChangeEventArgs e) => _hidden = e.Value is true ? _hidden & ~block : _hidden | block;
 
     private Task SaveSettingsAsync() => Run(() => Settings.SaveAsync(
-        new CatalogSettingsCommand(_servicesOn, _bundlesOn, _prefix, _digits, _nextNumber, _defaultType), _settings!.RowVersion), L("Настройки каталога сохранены."));
+        new CatalogSettingsCommand(_servicesOn, _bundlesOn, _prefix, _digits, _nextNumber, _defaultType, _requireGroup, _requireVat, _hidden), _settings!.RowVersion), L("Настройки каталога сохранены."));
 
     /// <summary>Каждый справочник — свой пункт меню (?tab=…): переход между ними не пересоздаёт страницу.</summary>
     protected override void OnParametersSet()
@@ -570,6 +591,7 @@ else
 
         (_servicesOn, _bundlesOn, _prefix, _digits, _nextNumber, _defaultType) =
             (_settings.ServicesEnabled, _settings.BundlesEnabled, _settings.AutoCodePrefix, _settings.AutoCodeDigits, _settings.NextNumber, _settings.DefaultItemType);
+        (_requireGroup, _requireVat, _hidden) = (_settings.RequireGroup, _settings.RequireVat, _settings.HiddenBlocks);
     }
 
     private string TypeName(CustomFieldType type) => type switch

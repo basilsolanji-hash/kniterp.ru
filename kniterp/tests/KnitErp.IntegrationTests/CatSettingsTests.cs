@@ -129,6 +129,40 @@ public sealed class CatSettingsTests(SqlTestHost host) : IClassFixture<SqlTestHo
         }
     }
 
+    [SqlFact]
+    public async Task Required_group_and_vat_are_checked_on_server_and_hidden_blocks_are_saved()
+    {
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+        var vat = (await s.VatRates.ActiveAsync()).First(r => r.Kind == VatRateKind.Standard).Id;
+        var group = await s.Nomenclature.CreateGroupAsync(null, "Шапки");
+        var old = await s.Catalog.CreateItemAsync(new ItemCommand("СТАР-1", "Позиция до настройки", ItemType.Finished, piece, null));
+
+        await s.CatalogSettings.SaveAsync(new CatalogSettingsCommand(true, true, null, 5, 1, ItemType.Finished, true, true,
+            CardBlocks.Packs | CardBlocks.Suppliers), (await s.CatalogSettings.GetAsync()).RowVersion);
+        var view = await s.CatalogSettings.GetAsync();
+        Assert.Equal((true, true, false, false, true), (view.RequireGroup, view.RequireVat, view.Shows(CardBlocks.Packs), view.Shows(CardBlocks.Suppliers),
+            view.Shows(CardBlocks.Trade)));
+
+        Assert.Equal("catalog.required.group", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            s.Catalog.CreateItemAsync(new ItemCommand("НОВ-1", "Без группы", ItemType.Finished, piece, null, vat)))).Code);
+        Assert.Equal("catalog.required.vat", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            s.Catalog.CreateItemAsync(new ItemCommand("НОВ-1", "Без НДС", ItemType.Finished, piece, null, null, group)))).Code);
+        await s.Catalog.CreateItemAsync(new ItemCommand("НОВ-1", "Полная", ItemType.Finished, piece, null, vat, group));
+
+        // Старая позиция без НДС: изменить можно, только указав ставку; группу у позиции не убрать.
+        var row = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "СТАР-1"))).Items.Single();
+        Assert.Equal("catalog.required.vat", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            s.Catalog.UpdateItemAsync(old, new ItemCommand(row.Code, "Новое имя", row.Type, row.UnitId, null), row.RowVersion))).Code);
+        await s.Catalog.UpdateItemAsync(old, new ItemCommand(row.Code, "Новое имя", row.Type, row.UnitId, null, vat), row.RowVersion);
+        var card = await s.Nomenclature.GetItemAsync(old);
+        Assert.Equal("catalog.required.group", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            s.Nomenclature.SaveItemDetailsAsync(old, card.Details with { Article = "A-1" }, new Dictionary<long, string?>(), card.RowVersion))).Code);
+        await s.Nomenclature.SaveItemDetailsAsync(old, card.Details with { GroupId = group }, new Dictionary<long, string?>(), card.RowVersion);
+        Assert.Equal(group, (await s.Nomenclature.GetItemAsync(old)).Details.GroupId);
+    }
+
     private async Task<CreatedOrganization> CreateOrgAsync()
     {
         int[] w = [2, 4, 10, 3, 5, 9, 4, 6, 8];

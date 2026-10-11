@@ -80,7 +80,15 @@ else
             </div>
             <p class="muted small">@L("У товара в МойСклад нет типа knitERP: новые товары получат выбранный тип, его можно сменить в карточке. Услуги и комплекты распознаются сами.")</p>
             <div class="actions">
-                <button type="button" class="secondary" @onclick="PreviewAsync" disabled="@(_busy || Active is not null)">@L("Предпросмотр")</button>
+                @if (_previewCts is not null)
+                {
+                    <button type="button" class="secondary" @onclick="() => _previewCts.Cancel()">@L("Прервать предпросмотр")</button>
+                    <span class="muted small" role="status">@L("Считаем, что изменится… На больших каталогах это до минуты.")</span>
+                }
+                else
+                {
+                    <button type="button" class="secondary" @onclick="PreviewAsync" disabled="@(_busy || Active is not null)">@L("Предпросмотр")</button>
+                }
                 <button type="button" @onclick="StartAsync" disabled="@(_busy || Active is not null)">@L("Загрузить")</button>
             </div>
         </div>
@@ -136,7 +144,7 @@ else
                             @StatusText(r)
                             @if (r.Message is not null)
                             {
-                                <div class="small @(r.Status == ImportRunStatus.Failed ? "neg" : "muted")">@r.Message</div>
+                                <div class="small @(r.Status == ImportRunStatus.Failed ? "neg" : "muted")">@(r.Message == ExternalImportRun.CancelledMessage ? L("Остановлена по запросу пользователя — её можно продолжить.") : r.Message)</div>
                             }
                         </td>
                         <td class="num">@r.Created</td>
@@ -145,6 +153,10 @@ else
                         <td class="num @(r.Errors > 0 ? "neg" : null)">@r.Errors</td>
                         <td>
                             <div class="row-actions">
+                                @if (r.Status is ImportRunStatus.Queued or ImportRunStatus.Running && !r.CancelRequested)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => CancelRunAsync(r)" disabled="@_busy">@L("Остановить")</button>
+                                }
                                 @if (r.Status == ImportRunStatus.Failed)
                                 {
                                     <button type="button" @onclick="() => ResumeAsync(r)" disabled="@(_busy || Active is not null || !_status.Connected)">@L("Продолжить")</button>
@@ -254,6 +266,7 @@ else
     private string StatusText(ImportRunDto r) => r.Status switch
     {
         ImportRunStatus.Queued => L("в очереди"),
+        ImportRunStatus.Running when r.CancelRequested => L("останавливается после текущей страницы…"),
         ImportRunStatus.Running => L("идёт: {0}", Title(MoySkladImportService.StageName(r.Stage))),
         ImportRunStatus.Completed => L("завершена"),
         _ => L("прервана на этапе «{0}»", Title(MoySkladImportService.StageName(r.Stage))),
@@ -290,7 +303,30 @@ else
         _preview = null;
     }, L("МойСклад отключён, токен удалён."));
 
-    private Task PreviewAsync() => RunAsync(async () => _preview = await Import.PreviewAsync(_defaultType, _overwrite), null);
+    private CancellationTokenSource? _previewCts;
+
+    /// <summary>Предпросмотр читает МойСклад страницами — его можно прервать (кнопка или уход со страницы).</summary>
+    private Task PreviewAsync() => RunAsync(async () =>
+    {
+        _previewCts = new CancellationTokenSource();
+        try
+        {
+            _preview = await Import.PreviewAsync(_defaultType, _overwrite, _previewCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _preview = null;
+            _message = L("Предпросмотр прерван.");
+        }
+        finally
+        {
+            _previewCts.Dispose();
+            _previewCts = null;
+        }
+    }, null);
+
+    private Task CancelRunAsync(ImportRunDto r) =>
+        RunAsync(() => Import.CancelAsync(r.Id), L("Загрузка остановится после текущей страницы; потом её можно продолжить."));
 
     private Task StartAsync() => RunAsync(async () =>
     {
@@ -319,7 +355,7 @@ else
         try
         {
             await action();
-            _message = success;
+            _message = success ?? _message;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {
@@ -339,5 +375,9 @@ else
         }
     }
 
-    public void Dispose() => _timer?.Dispose();
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _previewCts?.Cancel();
+    }
 }

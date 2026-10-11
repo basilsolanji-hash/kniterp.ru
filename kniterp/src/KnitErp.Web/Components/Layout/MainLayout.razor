@@ -232,6 +232,7 @@
             new("integrity", "Проверка целостности", a => a.Has(Permissions.AuditLogView)),
             new("integrations", "Интеграции (API)", a => a.Has(Permissions.OrganizationEdit)),
             new("exchange/moysklad", "Загрузка из МойСклад", a => a.Has(Permissions.MoySkladManage)),
+            new("exchange/feeds", "Фиды для площадок", a => a.Has(Permissions.OrganizationEdit) && a.Has(Permissions.PriceView)),
             new("exchange/1c", "Обмен с 1С", a => a.Has(Permissions.CatalogView) && a.Has(Permissions.WarehouseReportView) && a.Has(Permissions.PriceView)),
         ]),
     ];

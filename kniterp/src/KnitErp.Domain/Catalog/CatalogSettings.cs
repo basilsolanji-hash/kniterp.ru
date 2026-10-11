@@ -2,6 +2,19 @@ using KnitErp.Domain.Common;
 
 namespace KnitErp.Domain.Catalog;
 
+/// <summary>Блоки карточки позиции, которые организация может скрыть (D312): только отображение, данные и права не меняются.</summary>
+[Flags]
+public enum CardBlocks
+{
+    None = 0,
+    Trade = 1,
+    Packs = 2,
+    Suppliers = 4,
+    Photos = 8,
+    Modifications = 16,
+    All = Trade | Packs | Suppliers | Photos | Modifications,
+}
+
 /// <summary>
 /// Общие настройки каталога организации (D312, сессия 4): какие виды позиций используются (услуги, комплекты), автоматический код
 /// новой позиции (префикс + номер) и тип новой позиции по умолчанию. Строки нет — действуют значения по умолчанию (всё включено,
@@ -29,6 +42,14 @@ public sealed class CatalogSettings
     public byte AutoCodeDigits { get; private set; } = 5;
     public int NextNumber { get; private set; } = 1;
     public ItemType DefaultItemType { get; private set; } = ItemType.Finished;
+
+    /// <summary>Группа обязательна у новой позиции и при сохранении сведений.</summary>
+    public bool RequireGroup { get; private set; }
+
+    /// <summary>Ставка НДС обязательна у новой и изменяемой позиции.</summary>
+    public bool RequireVat { get; private set; }
+
+    public CardBlocks HiddenBlocks { get; private set; }
     public DateTime UpdatedAtUtc { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
@@ -69,6 +90,36 @@ public sealed class CatalogSettings
         NextNumber = nextNumber;
         DefaultItemType = defaultItemType;
         UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>Обязательные поля карточки (D312, часть 2). Скрытие блоков — отдельно, проверок не требует.</summary>
+    public void SetCard(bool requireGroup, bool requireVat, CardBlocks hiddenBlocks, DateTime nowUtc)
+    {
+        if ((hiddenBlocks & ~CardBlocks.All) != 0)
+        {
+            throw new BusinessRuleException("catalog.settings.blocks", "Неизвестный блок карточки.");
+        }
+
+        RequireGroup = requireGroup;
+        RequireVat = requireVat;
+        HiddenBlocks = hiddenBlocks;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void EnsureGroup(long? groupId)
+    {
+        if (RequireGroup && groupId is null)
+        {
+            throw new BusinessRuleException("catalog.required.group", "Группа обязательна в настройках каталога: выберите группу позиции.");
+        }
+    }
+
+    public void EnsureVat(long? vatRateId)
+    {
+        if (RequireVat && vatRateId is null)
+        {
+            throw new BusinessRuleException("catalog.required.vat", "Ставка НДС обязательна в настройках каталога: выберите ставку.");
+        }
     }
 
     public bool IsEnabled(ItemType type) => type switch

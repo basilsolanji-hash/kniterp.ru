@@ -198,7 +198,13 @@ public sealed class ExternalImportRun
     public int Skipped { get; private set; }
     public int Errors { get; private set; }
     public string? Message { get; private set; }
+
+    /// <summary>Пользователь попросил остановить идущую загрузку: фоновый процесс остановится на ближайшей контрольной точке.</summary>
+    public bool CancelRequested { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
+
+    public const string CancelledMessage = "Остановлена по запросу пользователя — её можно продолжить.";
 
     public bool IsActive => Status is ImportRunStatus.Queued or ImportRunStatus.Running;
 
@@ -244,6 +250,7 @@ public sealed class ExternalImportRun
 
     public void Fail(string message, DateTime nowUtc)
     {
+        CancelRequested = false;
         Status = ImportRunStatus.Failed;
         FinishedAtUtc = nowUtc;
         Message = message.Length > MessageMaxLength ? message[..MessageMaxLength] : message;
@@ -260,7 +267,24 @@ public sealed class ExternalImportRun
         Status = ImportRunStatus.Queued;
         FinishedAtUtc = null;
         Message = null;
+        CancelRequested = false;
         RequestedAtUtc = nowUtc;
+    }
+
+    /// <summary>Остановить: в очереди — сразу «прервана»; идущая — по флагу на ближайшей контрольной точке (страница записей).</summary>
+    public void RequestCancel(DateTime nowUtc)
+    {
+        switch (Status)
+        {
+            case ImportRunStatus.Queued:
+                Fail(CancelledMessage, nowUtc);
+                break;
+            case ImportRunStatus.Running:
+                CancelRequested = true;
+                break;
+            default:
+                throw new BusinessRuleException("exchange.run.not_active", "Загрузка уже закончилась — останавливать нечего.");
+        }
     }
 }
 

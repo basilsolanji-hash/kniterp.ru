@@ -56,6 +56,14 @@ if (secondPage.length !== 50 || secondPage.some(c => firstPage.includes(c))) thr
 if (!(await pager.getByRole('button', { name: 'Далее →' }).isDisabled())) throw new Error('«Далее» доступна на последней странице');
 ok('серверные страницы: 100 + 50, без повторов, «Далее» выключена на последней');
 
+// Вернуть настройки (комплекты включены, код вручную) — другие сценарии рассчитывают на значения по умолчанию.
+await page.goto(`${BASE}/catalog/settings?tab=General`); await ready(page);
+await page.locator('label:has-text("Префикс автокода") input').fill('');
+await page.locator('label:has-text("Комплекты") input[type=checkbox]').check();
+await page.getByRole('button', { name: 'Сохранить настройки' }).click();
+await page.waitForSelector('text=Настройки каталога сохранены.');
+ok('настройки возвращены');
+
 await page.setViewportSize({ width: 390, height: 844 });
 for (const url of [`${BASE}/catalog/settings?tab=General`, `${BASE}/catalog?search=PG${sfx}-`]) {
   await page.goto(url); await ready(page);

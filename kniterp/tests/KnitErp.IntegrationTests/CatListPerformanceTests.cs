@@ -81,6 +81,25 @@ public sealed class CatListPerformanceTests(SqlTestHost host, ITestOutputHelper 
         Assert.Equal(Count, (await Timed("поиск по части названия", new ItemFilter(Search: "ПРОВЕРКИ СКОРОСТИ", Take: 100))).Total);
         Assert.Equal(Count / 10, (await Timed("группа", new ItemFilter(GroupId: groupId, Take: 100))).Total);
 
+        // Фид YML на 50 000 позиций с ценой (D314): строится за секунды, файл кэшируется на 5 минут.
+        var priceType = (await c.Nomenclature.PriceTypesAsync()).Single(t => t.IsDefault).Id;
+        await using (var db = host.NewDb())
+        {
+            db.Database.SetCommandTimeout(300);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO [kniterp].[item_prices] ([OrganizationId], [ItemId], [PriceTypeId], [Price])
+                SELECT [OrganizationId], [Id], {priceType}, 100 + [Id] % 1000 FROM [kniterp].[items] WHERE [OrganizationId] = {org.OrganizationId}
+                """);
+        }
+
+        var feed = await c.Feeds.CreateAsync(new CatalogFeedCommand("Проверка скорости", priceType, null, null, false));
+        var swFeed = Stopwatch.StartNew();
+        var file = await c.Feeds.BuildAsync(feed.Key, "https://shop.example/");
+        swFeed.Stop();
+        output.WriteLine($"фид YML: {swFeed.ElapsedMilliseconds} мс, предложений {file!.Offers}, {file.Xml.Length / 1024} КБ");
+        Assert.Equal(Count + 1, file.Offers);
+        Assert.True(swFeed.ElapsedMilliseconds < 15_000, $"фид: {swFeed.ElapsedMilliseconds} мс");
+
         // Страницы не теряют и не повторяют строк: соседние страницы стыкуются по порядку.
         var p1 = await c.Catalog.ListItemsAsync(new ItemFilter(Take: 50, Skip: 1000));
         var p2 = await c.Catalog.ListItemsAsync(new ItemFilter(Take: 50, Skip: 1050));

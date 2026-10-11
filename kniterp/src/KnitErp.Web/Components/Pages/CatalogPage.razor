@@ -76,7 +76,7 @@ else
                         </InputSelect>
                     </label>
                     <label>
-                        @(_form.Type == ItemType.Service ? L("Ставка НДС (обязательна для услуги)") : L("Ставка НДС"))
+                        @(_form.Type == ItemType.Service ? L("Ставка НДС (обязательна для услуги)") : _settings.RequireVat ? L("Ставка НДС (обязательна)") : L("Ставка НДС"))
                         <InputSelect @bind-Value="_form.VatRateId">
                             <option value="">@L("не указана")</option>
                             @foreach (var r in _vatRates)
@@ -86,10 +86,10 @@ else
                         </InputSelect>
                     </label>
                     <label>@L("Описание") <InputText @bind-Value="_form.Description" maxlength="1000" placeholder="@L("Состав, цвет, размер…")" /></label>
-                    @if (_mode == Mode.Create && _groups.Count > 0)
+                    @if (_mode == Mode.Create && (_groups.Count > 0 || _settings.RequireGroup))
                     {
                         <label>
-                            @L("Группа")
+                            @(_settings.RequireGroup ? L("Группа (обязательна)") : L("Группа"))
                             <InputSelect @bind-Value="_form.GroupId">
                                 <option value="">@L("без группы")</option>
                                 @foreach (var g in _groups)

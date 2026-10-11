@@ -502,6 +502,78 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CatalogFeed", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("GroupId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("KeyHash")
+                        .IsRequired()
+                        .HasColumnType("binary(32)");
+
+                    b.Property<DateTime?>("LastRequestedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("OnlyAvailable")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Prefix")
+                        .IsRequired()
+                        .HasColumnType("varchar(9)");
+
+                    b.Property<long>("PriceTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("WarehouseId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("KeyHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_catalog_feeds_key");
+
+                    b.HasIndex("OrganizationId")
+                        .HasDatabaseName("ix_catalog_feeds_org");
+
+                    b.HasIndex("PriceTypeId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.ToTable("catalog_feeds", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.CatalogSettings", b =>
                 {
                     b.Property<long>("Id")
@@ -523,11 +595,20 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<byte>("DefaultItemType")
                         .HasColumnType("tinyint");
 
+                    b.Property<int>("HiddenBlocks")
+                        .HasColumnType("int");
+
                     b.Property<int>("NextNumber")
                         .HasColumnType("int");
 
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
+
+                    b.Property<bool>("RequireGroup")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequireVat")
+                        .HasColumnType("bit");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -549,6 +630,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("catalog_settings", "kniterp", t =>
                         {
+                            t.HasCheckConstraint("ck_catalog_settings_blocks", "[HiddenBlocks] BETWEEN 0 AND 31");
+
                             t.HasCheckConstraint("ck_catalog_settings_digits", "[AutoCodeDigits] BETWEEN 3 AND 8");
 
                             t.HasCheckConstraint("ck_catalog_settings_next", "[NextNumber] >= 1");
@@ -775,6 +858,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("CancelRequested")
+                        .HasColumnType("bit");
 
                     b.Property<int>("Created")
                         .HasColumnType("int");
@@ -5285,6 +5371,34 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_bundle_components_component");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CatalogFeed", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.ItemGroup", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_catalog_feeds_group");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.PriceType", null)
+                        .WithMany()
+                        .HasForeignKey("PriceTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_catalog_feeds_price_type");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_catalog_feeds_warehouse");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.CatalogSettings", b =>

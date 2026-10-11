@@ -10,8 +10,10 @@ namespace KnitErp.Application.Catalog;
 /// <summary>Настройки каталога для экрана. RowVersion пустой — строки ещё нет, действуют значения по умолчанию.</summary>
 public sealed record CatalogSettingsDto(
     bool ServicesEnabled, bool BundlesEnabled, string? AutoCodePrefix, byte AutoCodeDigits, int NextNumber, ItemType DefaultItemType, string? NextCode,
-    bool CanEdit, byte[] RowVersion)
+    bool CanEdit, byte[] RowVersion, bool RequireGroup = false, bool RequireVat = false, CardBlocks HiddenBlocks = CardBlocks.None)
 {
+    public bool Shows(CardBlocks block) => (HiddenBlocks & block) == 0;
+
     public bool IsEnabled(ItemType type) => type switch
     {
         ItemType.Service => ServicesEnabled,
@@ -21,7 +23,8 @@ public sealed record CatalogSettingsDto(
 }
 
 public sealed record CatalogSettingsCommand(
-    bool ServicesEnabled, bool BundlesEnabled, string? AutoCodePrefix, byte AutoCodeDigits, int NextNumber, ItemType DefaultItemType);
+    bool ServicesEnabled, bool BundlesEnabled, string? AutoCodePrefix, byte AutoCodeDigits, int NextNumber, ItemType DefaultItemType,
+    bool RequireGroup = false, bool RequireVat = false, CardBlocks HiddenBlocks = CardBlocks.None);
 
 /// <summary>
 /// Общие настройки каталога организации (D312): смотреть — «Справочники: просмотр», менять — «Справочники: изменение».
@@ -35,7 +38,7 @@ public sealed class CatalogSettingsService(IKnitErpDbContext db, IAccessGuard gu
         var s = await db.CatalogSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct)
                 ?? CatalogSettings.Default(ctx.OrganizationId);
         return new CatalogSettingsDto(s.ServicesEnabled, s.BundlesEnabled, s.AutoCodePrefix, s.AutoCodeDigits, s.NextNumber, s.DefaultItemType,
-            s.PreviewCode(), ctx.Permissions.Has(Permissions.CatalogEdit), s.RowVersion);
+            s.PreviewCode(), ctx.Permissions.Has(Permissions.CatalogEdit), s.RowVersion, s.RequireGroup, s.RequireVat, s.HiddenBlocks);
     }
 
     public async Task SaveAsync(CatalogSettingsCommand cmd, byte[] rowVersion, CancellationToken ct = default)
@@ -56,6 +59,7 @@ public sealed class CatalogSettingsService(IKnitErpDbContext db, IAccessGuard gu
         try
         {
             s.Set(cmd.ServicesEnabled, cmd.BundlesEnabled, cmd.AutoCodePrefix, cmd.AutoCodeDigits, cmd.NextNumber, cmd.DefaultItemType, clock.UtcNow);
+            s.SetCard(cmd.RequireGroup, cmd.RequireVat, cmd.HiddenBlocks, clock.UtcNow);
         }
         catch
         {
@@ -70,5 +74,6 @@ public sealed class CatalogSettingsService(IKnitErpDbContext db, IAccessGuard gu
 
     private static string Describe(CatalogSettings s) =>
         $"услуги: {(s.ServicesEnabled ? "да" : "нет")}; комплекты: {(s.BundlesEnabled ? "да" : "нет")}; автокод: {s.PreviewCode() ?? "нет"}; " +
-        $"тип по умолчанию: {ItemTypes.Name(s.DefaultItemType)}";
+        $"тип по умолчанию: {ItemTypes.Name(s.DefaultItemType)}; обязательны: {(s.RequireGroup ? "группа " : "")}{(s.RequireVat ? "НДС" : "")}; " +
+        $"скрыты блоки: {(s.HiddenBlocks == CardBlocks.None ? "нет" : s.HiddenBlocks.ToString())}";
 }
