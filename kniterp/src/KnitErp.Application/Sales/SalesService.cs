@@ -24,7 +24,7 @@ public enum ShipmentState : byte
 /// <summary>StageId: null — все, 0 — без этапа, иначе — этап.</summary>
 public sealed record SalesOrderFilter(
     SalesOrderStatus? Status = null, string? Search = null, DateOnly? From = null, DateOnly? To = null, long? StageId = null,
-    DateOnly? OverdueOn = null, long? TagId = null);
+    DateOnly? OverdueOn = null, long? TagId = null, long? CustomerId = null);
 
 /// <summary>Этап заказа (D75) — название и цвет из справочника.</summary>
 public sealed record SalesStageRefDto(long Id, string Name, string Color);
@@ -145,6 +145,12 @@ public sealed class SalesService(
     {
         var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
         var q = db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == ctx.OrganizationId);
+        if (filter.CustomerId is { } customerId)
+        {
+            // D500: история заказов в карточке контрагента.
+            q = q.Where(o => o.CustomerId == customerId);
+        }
+
         if (filter.TagId is { } tagId)
         {
             // D104: отбор по тегу — в запросе, чтобы находились и объекты за пределами первых строк списка.

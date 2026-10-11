@@ -160,6 +160,10 @@ public static class AuditActions
     public const string CatalogArchived = "catalog.archived";
     public const string CatalogRestored = "catalog.restored";
     public const string CatalogImported = "catalog.imported";
+    public const string ContractCreated = "catalog.contract.created";
+    public const string ContractChanged = "catalog.contract.changed";
+    public const string ContractFileAdded = "catalog.contract.file_added";
+    public const string ContractFileViewed = "catalog.contract.file_viewed";
     public const string StockDocumentCreated = "stock.document.created";
     public const string StockDocumentChanged = "stock.document.changed";
     public const string StockDocumentSubmitted = "stock.document.submitted";

@@ -1,0 +1,596 @@
+@page "/counterparties/{Id:long}"
+@using KnitErp.Application.Catalog
+@using KnitErp.Application.Sales
+@using KnitErp.Application.Purchasing
+@using KnitErp.Application.Warehousing
+@using KnitErp.Domain.Catalog
+@inject CounterpartyCardService Cards
+@inject SalesService Sales
+@inject PurchaseService Purchases
+@inject CustomerInvoiceService Invoices
+@inject StockDocumentService StockDocuments
+
+@* D500: карточка контрагента — реквизиты, расчёты, договоры, история заказов и документов, обсуждение. *@
+<PageTitle>@(_card?.Counterparty.Name ?? L("Контрагент")) — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <h1>@L("Контрагент не найден")</h1>
+    <p><a href="counterparties">@L("К контрагентам")</a></p>
+}
+else if (_card is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var c = _card.Counterparty;
+    <p><a href="counterparties">@L("← Контрагенты")</a></p>
+    <div class="page-head">
+        <h1>@c.Name <span class="tag">@L(c.RolesText)</span> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }</h1>
+        @if (_card.CanEdit && !c.IsArchived)
+        {
+            <a class="button secondary" href="counterparties?edit=@c.Id">@L("Изменить реквизиты")</a>
+        }
+    </div>
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.Counterparty" EntityId="Id" />
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    <dl class="facts">
+        <dt>@L("Страна")</dt><dd>@c.Country.Name</dd>
+        <dt>@c.Country.TaxIdName</dt><dd>@(c.Inn ?? "—")@if (c.Kpp is not null) { <span class="muted"> / @L("КПП") @c.Kpp</span> }</dd>
+        <dt>@L("Адрес")</dt><dd>@(c.Address ?? "—")</dd>
+        @if (c.Comment is not null)
+        {
+            <dt>@L("Комментарий")</dt><dd>@c.Comment</dd>
+        }
+        @if (_customerDebt is { } debt)
+        {
+            <dt>@L("Долг покупателя")</dt><dd class="@(debt > 0 ? "warn-text" : null)">@Amounts.Format(debt) <a href="settlement-statement?counterparty=@c.Id">@L("Акт сверки")</a></dd>
+        }
+        @if (_supplierDebt is { } ours)
+        {
+            <dt>@L("Наш долг поставщику")</dt><dd>@Amounts.Format(ours)@if (_customerDebt is null) { <a href="settlement-statement?counterparty=@c.Id"> @L("Акт сверки")</a> }</dd>
+        }
+    </dl>
+
+    <div class="tabs" role="tablist">
+        @if (_card.CanSeeContracts)
+        {
+            <button type="button" role="tab" class="@TabClass(Tab.Contracts)" aria-selected="@Selected(Tab.Contracts)" @onclick="() => OpenTabAsync(Tab.Contracts)" disabled="@_busy">@L("Договоры") @if (_contracts is not null) { <span class="muted">@_contracts.Count</span> }</button>
+        }
+        @if (_card.CanSeeSales || _card.CanSeePurchases)
+        {
+            <button type="button" role="tab" class="@TabClass(Tab.Orders)" aria-selected="@Selected(Tab.Orders)" @onclick="() => OpenTabAsync(Tab.Orders)" disabled="@_busy">@L("Заказы")</button>
+        }
+        @if (_card.CanSeeSales || _card.CanSeeStockDocuments)
+        {
+            <button type="button" role="tab" class="@TabClass(Tab.Documents)" aria-selected="@Selected(Tab.Documents)" @onclick="() => OpenTabAsync(Tab.Documents)" disabled="@_busy">@L("Документы")</button>
+        }
+        <button type="button" role="tab" class="@TabClass(Tab.Discussion)" aria-selected="@Selected(Tab.Discussion)" @onclick="() => OpenTabAsync(Tab.Discussion)" disabled="@_busy">@L("Обсуждение")</button>
+    </div>
+
+    @switch (_tab)
+    {
+        case Tab.Contracts:
+            @ContractsTab
+            break;
+        case Tab.Orders:
+            @OrdersTab
+            break;
+        case Tab.Documents:
+            @DocumentsTab
+            break;
+        case Tab.Discussion:
+            <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.Counterparty" TargetId="Id" />
+            break;
+    }
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private enum Tab { Contracts, Orders, Documents, Discussion }
+
+    private CounterpartyCardDto? _card;
+    private IReadOnlyList<ContractDto>? _contracts;
+    private IReadOnlyList<SalesOrderRowDto>? _salesOrders;
+    private IReadOnlyList<PurchaseOrderRowDto>? _purchaseOrders;
+    private IReadOnlyList<CustomerInvoiceRowDto>? _invoices;
+    private IReadOnlyList<StockDocumentRowDto>? _stockDocuments;
+    private decimal? _customerDebt;
+    private decimal? _supplierDebt;
+    private Tab _tab = Tab.Contracts;
+    private string? _denied;
+    private bool _notFound;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long? _loadedId;
+
+    // Форма договора: null — закрыта, Id = 0 — новый.
+    private ContractForm? _form;
+    private string? _formError;
+
+    /// <summary>В истории — последние строки; полный список открывается в разделе со своим отбором.</summary>
+    private const int HistoryRows = 50;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId == Id)
+        {
+            return;
+        }
+
+        _loadedId = Id;
+        _card = null;
+        _contracts = null;
+        _salesOrders = null;
+        _purchaseOrders = null;
+        _invoices = null;
+        _stockDocuments = null;
+        _customerDebt = null;
+        _supplierDebt = null;
+        _form = null;
+        _tab = Tab.Contracts;
+        _notFound = false;
+        try
+        {
+            _card = await Cards.GetAsync(Id);
+            if (_card.CanSeeContracts)
+            {
+                _contracts = await Cards.ContractsAsync(Id);
+            }
+            else
+            {
+                _tab = Tab.Discussion;
+            }
+
+            await LoadBalancesAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    /// <summary>Сальдо — из отчётов «Долги покупателей» и «Долги поставщикам»; нужно право «Цены и суммы».</summary>
+    private async Task LoadBalancesAsync()
+    {
+        if (!_card!.CanSeePrices)
+        {
+            return;
+        }
+
+        if (_card.CanSeeSales && _card.Counterparty.IsCustomer)
+        {
+            _customerDebt = (await Sales.BalancesAsync()).FirstOrDefault(b => b.CustomerId == Id)?.Debt ?? 0m;
+        }
+
+        if (_card.CanSeePurchases && _card.Counterparty.IsSupplier)
+        {
+            _supplierDebt = (await Purchases.BalancesAsync()).FirstOrDefault(b => b.SupplierId == Id)?.Debt ?? 0m;
+        }
+    }
+
+    private string TabClass(Tab tab) => _tab == tab ? "tab active" : "tab secondary";
+
+    private string Selected(Tab tab) => _tab == tab ? "true" : "false";
+
+    /// <summary>Вкладки грузятся при первом открытии и по одной: у вкладки браузера один DbContext.</summary>
+    private Task OpenTabAsync(Tab tab) => RunAsync(async () =>
+    {
+        _tab = tab;
+        switch (tab)
+        {
+            case Tab.Orders when _salesOrders is null && _purchaseOrders is null:
+                if (_card!.CanSeeSales && _card.Counterparty.IsCustomer)
+                {
+                    _salesOrders = (await Sales.ListOrdersAsync(new SalesOrderFilter(CustomerId: Id))).Take(HistoryRows).ToList();
+                }
+
+                if (_card.CanSeePurchases && _card.Counterparty.IsSupplier)
+                {
+                    _purchaseOrders = (await Purchases.ListOrdersAsync(new PurchaseOrderFilter(SupplierId: Id))).Take(HistoryRows).ToList();
+                }
+
+                break;
+            case Tab.Documents when _invoices is null && _stockDocuments is null:
+                if (_card!.CanSeeSales && _card.Counterparty.IsCustomer)
+                {
+                    _invoices = (await Invoices.ListAsync(new CustomerInvoiceFilter(IncludeCancelled: true, CustomerId: Id))).Take(HistoryRows).ToList();
+                }
+
+                if (_card.CanSeeStockDocuments)
+                {
+                    _stockDocuments = await StockDocuments.ListAsync(new StockDocumentListFilter(CounterpartyId: Id), HistoryRows);
+                }
+
+                break;
+        }
+    });
+
+    private RenderFragment ContractsTab => __builder =>
+    {
+        var today = Today();
+        <div class="page-head">
+            <h2>@L("Договоры")</h2>
+            @if (_card!.CanEditContracts && _form is null)
+            {
+                <button type="button" @onclick="OpenNewContract" disabled="@_busy">@L("Добавить договор")</button>
+            }
+        </div>
+
+        @if (_form is not null)
+        {
+            <div class="panel">
+                <h3>@(_form.Id == 0 ? L("Новый договор") : L("Договор № {0}", _form.Number ?? ""))</h3>
+                <form @onsubmit="SaveContractAsync">
+                    <div class="grid">
+                        <label>@L("Номер") <input @bind="_form.Number" maxlength="@CounterpartyContract.NumberMaxLength" required placeholder="12/2026" /></label>
+                        <label>@L("Дата") <input type="date" @bind="_form.ContractDate" required /></label>
+                        <label>
+                            @L("Вид")
+                            <select @bind="_form.Kind">
+                                @foreach (var kind in Kinds)
+                                {
+                                    <option value="@kind">@L(CounterpartyContract.KindName(kind))</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("Действует с") <input type="date" @bind="_form.ValidFrom" /></label>
+                        <label>@L("Действует по") <input type="date" @bind="_form.ValidTo" title="@L("Пусто — бессрочный")" /></label>
+                        <label>@L("Отсрочка оплаты, дней") <input type="number" min="0" max="@CounterpartyContract.MaxPaymentDays" step="1" @bind="_form.PaymentDays" inputmode="numeric" /></label>
+                        @if (_card.CanSeePrices)
+                        {
+                            <label>@L("Лимит суммы") <input type="number" min="0" step="0.01" @bind="_form.AmountLimit" inputmode="decimal" title="@L("Пусто — без лимита")" /></label>
+                        }
+                        <label class="wide">@L("Предмет договора") <input @bind="_form.Subject" maxlength="@CounterpartyContract.SubjectMaxLength" placeholder="@L("Поставка трикотажных изделий")" /></label>
+                        <label class="wide">@L("Комментарий") <input @bind="_form.Comment" maxlength="@CounterpartyContract.CommentMaxLength" /></label>
+                    </div>
+                    @if (_formError is not null)
+                    {
+                        <div class="flash error" role="alert">@_formError</div>
+                    }
+                    <div class="actions">
+                        <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                        <button type="button" class="secondary" @onclick="() => { _form = null; _formError = null; }" disabled="@_busy">@L("Отмена")</button>
+                    </div>
+                </form>
+            </div>
+        }
+
+        @if (_contracts is null || _contracts.Count == 0)
+        {
+            <p class="muted">@L("Договоров пока нет.") @if (_card.CanEditContracts) { @L("Добавьте договор, чтобы видеть срок действия и отсрочку оплаты.") }</p>
+        }
+        else
+        {
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>@L("Договор")</th><th>@L("Вид")</th><th>@L("Срок действия")</th><th class="opt">@L("Отсрочка")</th>@if (_card.CanSeePrices) { <th class="opt num">@L("Лимит")</th> }<th>@L("Статус")</th>@if (_card.CanSeeContractFiles) { <th class="opt">@L("Файлы")</th> }@if (_card.CanEditContracts) { <th>@L("Действия")</th> }</tr></thead>
+                    <tbody>
+                        @foreach (var k in _contracts)
+                        {
+                            <tr class="@(k.Status == ContractStatus.Closed ? "archived" : null)">
+                                <td>№ @k.Number @L("от") @k.ContractDate.ToString("dd.MM.yyyy")@if (k.Subject is not null) { <div class="muted">@k.Subject</div> }@if (k.Comment is not null) { <div class="muted">@k.Comment</div> }</td>
+                                <td>@L(k.KindName)</td>
+                                <td>@Period(k)@if (k.ExpiredOn(today)) { <span class="tag bad">@L("срок истёк")</span> }</td>
+                                <td>@(k.PaymentDays is { } d ? L("{0} дн.", d) : "—")</td>
+                                @if (_card.CanSeePrices)
+                                {
+                                    <td class="num">@Amounts.Format(k.AmountLimit)</td>
+                                }
+                                <td>@L(k.StatusName)</td>
+                                @if (_card.CanSeeContractFiles)
+                                {
+                                <td>
+                                    @foreach (var f in k.Files)
+                                    {
+                                        <div><a href="counterparties/contract-files/@f.Id" rel="noopener">@f.FileName</a> <span class="muted">@TimeZones.ToLocal(f.UploadedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy")</span></div>
+                                    }
+                                    @if (_card.CanEditContracts && k.Status == ContractStatus.Active)
+                                    {
+                                        <label class="file-pick" title="@L("PDF, JPEG или PNG до 5 МБ")">@L("Прикрепить скан") <InputFile OnChange="args => UploadAsync(k, args)" accept=".pdf,.jpg,.jpeg,.png" disabled="@_busy" /></label>
+                                    }
+                                </td>
+                                }
+                                @if (_card.CanEditContracts)
+                                {
+                                    <td>
+                                        <div class="row-actions">
+                                            @if (k.Status == ContractStatus.Active)
+                                            {
+                                                <button type="button" class="secondary" @onclick="() => OpenEditContract(k)" disabled="@(_busy || _form is not null)">@L("Изменить")</button>
+                                                <ConfirmButton Class="secondary" OnConfirm="() => CloseContractAsync(k)" Disabled="@(_busy || _form is not null)" Question='@L("Закрыть договор?")'>@L("Закрыть")</ConfirmButton>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="secondary" @onclick="() => ReopenContractAsync(k)" disabled="@_busy">@L("Открыть снова")</button>
+                                            }
+                                        </div>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    };
+
+    private RenderFragment OrdersTab => __builder =>
+    {
+        @if (_salesOrders is not null)
+        {
+            <h2>@L("Заказы покупателя")</h2>
+            @if (_salesOrders.Count == 0)
+            {
+                <p class="muted">@L("Заказов нет.")</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table>
+                        <thead><tr><th>@L("Номер")</th><th>@L("Дата")</th><th>@L("Статус")</th><th class="opt">@L("Склад")</th><th class="num">@L("Сумма")</th><th class="num opt">@L("Оплачено")</th></tr></thead>
+                        <tbody>
+                            @foreach (var o in _salesOrders)
+                            {
+                                <tr><td><a href="sales-orders/@o.Id">@o.Number</a></td><td>@o.OrderDate.ToString("dd.MM.yyyy")</td><td>@L(o.StatusName)</td><td>@o.Warehouse</td><td class="num">@Amounts.Format(o.Total)</td><td class="num">@Amounts.Format(o.Paid)</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p><a href="sales-orders">@L("Все заказы покупателей")</a></p>
+            }
+        }
+
+        @if (_purchaseOrders is not null)
+        {
+            <h2>@L("Заказы поставщику")</h2>
+            @if (_purchaseOrders.Count == 0)
+            {
+                <p class="muted">@L("Заказов нет.")</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table>
+                        <thead><tr><th>@L("Номер")</th><th>@L("Дата")</th><th>@L("Статус")</th><th class="opt">@L("Склад")</th><th class="opt">@L("Ожидается")</th><th class="num">@L("Сумма")</th></tr></thead>
+                        <tbody>
+                            @foreach (var o in _purchaseOrders)
+                            {
+                                <tr><td><a href="purchase-orders/@o.Id">@o.Number</a></td><td>@o.OrderDate.ToString("dd.MM.yyyy")</td><td>@L(o.StatusName)</td><td>@o.Warehouse</td><td>@(o.ExpectedDate?.ToString("dd.MM.yyyy") ?? "—")</td><td class="num">@Amounts.Format(o.Total)</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p><a href="purchase-orders">@L("Все заказы поставщикам")</a></p>
+            }
+        }
+
+        @if (_salesOrders is null && _purchaseOrders is null)
+        {
+            <p class="muted">@L("Заказов нет.")</p>
+        }
+    };
+
+    private RenderFragment DocumentsTab => __builder =>
+    {
+        @if (_invoices is not null)
+        {
+            <h2>@L("Счета покупателю")</h2>
+            @if (_invoices.Count == 0)
+            {
+                <p class="muted">@L("Документов нет.")</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table>
+                        <thead><tr><th>@L("Номер")</th><th>@L("Дата")</th><th class="opt">@L("Заказ")</th><th>@L("Статус")</th><th class="num">@L("Сумма")</th><th class="num opt">@L("Оплачено")</th></tr></thead>
+                        <tbody>
+                            @foreach (var i in _invoices)
+                            {
+                                <tr><td><a href="customer-invoices/@i.Id">@i.Number</a>@if (i.Overdue) { <span class="tag bad">@L("просрочен")</span> }</td><td>@i.Date.ToString("dd.MM.yyyy")</td><td><a href="sales-orders/@i.OrderId">@i.OrderNumber</a></td><td>@L(i.StatusName)</td><td class="num">@Amounts.Format(i.Total)</td><td class="num">@Amounts.Format(i.Paid)</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+
+        @if (_stockDocuments is not null)
+        {
+            <h2>@L("Складские документы")</h2>
+            @if (_stockDocuments.Count == 0)
+            {
+                <p class="muted">@L("Документов нет.")</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table>
+                        <thead><tr><th>@L("Номер")</th><th>@L("Вид")</th><th>@L("Дата")</th><th class="opt">@L("Склад")</th><th>@L("Статус")</th></tr></thead>
+                        <tbody>
+                            @foreach (var d in _stockDocuments)
+                            {
+                                <tr><td><a href="stock-documents/@d.Id">@d.Number</a></td><td>@L(d.KindName)</td><td>@d.DocumentDate.ToString("dd.MM.yyyy")</td><td>@d.WarehouseName</td><td>@L(d.StatusName)</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+
+        @if (_invoices is null && _stockDocuments is null)
+        {
+            <p class="muted">@L("Документов нет.")</p>
+        }
+    };
+
+    private static readonly ContractKind[] Kinds = [ContractKind.Sale, ContractKind.Purchase, ContractKind.Commission, ContractKind.Other];
+
+    private string Period(ContractDto k) => (k.ValidFrom, k.ValidTo) switch
+    {
+        (null, null) => L("бессрочный"),
+        ({ } from, null) => L("с {0}, бессрочный", from.ToString("dd.MM.yyyy")),
+        (null, { } to) => L("по {0}", to.ToString("dd.MM.yyyy")),
+        ({ } from, { } to) => $"{from:dd.MM.yyyy} — {to:dd.MM.yyyy}",
+    };
+
+    private void OpenNewContract()
+    {
+        var c = _card!.Counterparty;
+        _message = null;
+        _formError = null;
+        _form = new ContractForm
+        {
+            ContractDate = Today(),
+            ValidFrom = Today(),
+            Kind = c.IsCustomer && !c.IsSupplier ? ContractKind.Sale : c.IsSupplier && !c.IsCustomer ? ContractKind.Purchase : ContractKind.Sale,
+        };
+    }
+
+    private void OpenEditContract(ContractDto k)
+    {
+        _message = null;
+        _formError = null;
+        _form = new ContractForm
+        {
+            Id = k.Id, Number = k.Number, ContractDate = k.ContractDate, Kind = k.Kind, ValidFrom = k.ValidFrom, ValidTo = k.ValidTo,
+            Subject = k.Subject, PaymentDays = k.PaymentDays, AmountLimit = k.AmountLimit, Comment = k.Comment, RowVersion = k.RowVersion,
+        };
+    }
+
+    private async Task SaveContractAsync()
+    {
+        if (_busy || _form is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _formError = null;
+        try
+        {
+            var f = _form;
+            var terms = new ContractTerms(f.Number ?? string.Empty, f.ContractDate ?? Today(), f.Kind, f.ValidFrom, f.ValidTo, f.Subject, f.PaymentDays,
+                f.AmountLimit, f.Comment);
+            if (f.Id == 0)
+            {
+                await Cards.AddContractAsync(Id, terms);
+                _message = L("Договор добавлен.");
+            }
+            else
+            {
+                await Cards.UpdateContractAsync(f.Id, terms, f.RowVersion);
+                _message = L("Договор сохранён.");
+            }
+
+            _isError = false;
+            _form = null;
+            _contracts = await Cards.ContractsAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _formError = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task CloseContractAsync(ContractDto k) => RunAsync(async () =>
+    {
+        await Cards.CloseContractAsync(k.Id, k.RowVersion);
+        _message = L("Договор закрыт.");
+        _contracts = await Cards.ContractsAsync(Id);
+    });
+
+    private Task ReopenContractAsync(ContractDto k) => RunAsync(async () =>
+    {
+        await Cards.ReopenContractAsync(k.Id, k.RowVersion);
+        _message = L("Договор снова действует.");
+        _contracts = await Cards.ContractsAsync(Id);
+    });
+
+    private Task UploadAsync(ContractDto k, InputFileChangeEventArgs args) => RunAsync(async () =>
+    {
+        var file = args.File;
+        if (file.Size > CounterpartyContractFile.MaxBytes)
+        {
+            throw new BusinessRuleException("contract.file_size", "Файл договора — до 5 МБ.");
+        }
+
+        using var buffer = new MemoryStream();
+        await using (var stream = file.OpenReadStream(CounterpartyContractFile.MaxBytes))
+        {
+            await stream.CopyToAsync(buffer);
+        }
+
+        await Cards.AddFileAsync(k.Id, file.Name, file.ContentType, buffer.ToArray());
+        _message = L("Файл договора загружен.");
+        _contracts = await Cards.ContractsAsync(Id);
+    });
+
+    /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private DateOnly Today() => DateOnly.FromDateTime(TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId));
+
+    private sealed class ContractForm
+    {
+        public long Id { get; set; }
+        public string? Number { get; set; }
+        public DateOnly? ContractDate { get; set; }
+        public ContractKind Kind { get; set; } = ContractKind.Sale;
+        public DateOnly? ValidFrom { get; set; }
+        public DateOnly? ValidTo { get; set; }
+        public string? Subject { get; set; }
+        public int? PaymentDays { get; set; }
+        public decimal? AmountLimit { get; set; }
+        public string? Comment { get; set; }
+        public byte[] RowVersion { get; set; } = [];
+    }
+}
