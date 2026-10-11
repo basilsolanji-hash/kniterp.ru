@@ -63,8 +63,15 @@ else
 
     @if (_board.CanAssign && _board.Date >= _board.Today)
     {
+        <p>
+            <ConfirmButton Class="secondary" OnConfirm="CopyAsync" Disabled="@_busy"
+                           Question='@L("Скопировать действующие задания {0} на {1}?", _board.Date.AddDays(-1).ToString("dd.MM.yyyy"), _board.Date.ToString("dd.MM.yyyy"))'>
+                @L("Повторить задания прошлого дня")
+            </ConfirmButton>
+        </p>
         <h2>@L("Назначить задание")</h2>
         <form class="inline-form" @onsubmit="AssignAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
             <label>@L("Сотрудник")
                 <select @bind="_employee" aria-label="@L("Сотрудник")">
                     <option value="">@L("— выберите —")</option>
@@ -94,6 +101,7 @@ else
             <label>@L("План на смену") <input @bind="_plannedText" inputmode="decimal" size="6" aria-label="@L("План на смену")" /></label>
             <label>@L("Комментарий") <input @bind="_comment" maxlength="300" aria-label="@L("Комментарий")" /></label>
             <button type="submit" disabled="@_busy">@L("Назначить")</button>
+            </fieldset>
         </form>
     }
 }
@@ -158,6 +166,15 @@ else
         _plannedText = string.Empty;
         _comment = null;
         return L("Задание назначено.");
+    });
+
+    /// <summary>Задания прошлого дня — на выбранную дату (D408): мастер меняет только то, что отличается.</summary>
+    private Task CopyAsync() => RunAsync(async () =>
+    {
+        var result = await Shifts.CopyAsync(_board!.Date.AddDays(-1), _board.Date);
+        return result.Skipped == 0
+            ? L("Скопировано заданий: {0}.", result.Created)
+            : L("Скопировано заданий: {0}; пропущено: {1} (сотрудник не работает, заказ не в работе или задание уже есть).", result.Created, result.Skipped);
     });
 
     private Task CancelAsync(ShiftTaskDto task) => RunAsync(async () =>

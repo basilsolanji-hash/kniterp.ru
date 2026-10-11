@@ -41,7 +41,7 @@ else
 
         @if (op.CanMark && op.IsQualityControl)
         {
-            <fieldset class="shop-quick" aria-label="@L("Результат контроля")">
+            <fieldset class="shop-quick" aria-label="@L("Результат контроля")" disabled="@(!RendererInfo.IsInteractive)">
                 <label><input type="radio" name="qc" checked="@(_qc == QcMode.Good)" @onchange="() => _qc = QcMode.Good" /> @L("Годное")</label>
                 <label><input type="radio" name="qc" checked="@(_qc == QcMode.Defect)" @onchange="() => _qc = QcMode.Defect" /> @L("Брак")</label>
                 <label><input type="radio" name="qc" checked="@(_qc == QcMode.Rework)" @onchange="() => _qc = QcMode.Rework" /> @L("На переделку")</label>
@@ -50,6 +50,7 @@ else
         @if (op.CanMark && op.IsQualityControl && _qc != QcMode.Good)
         {
             <form @onsubmit="MarkQualityAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
                 <label>
                     @(_qc == QcMode.Defect ? L("Брак, {0}", op.UnitSymbol) : L("На переделку, {0}", op.UnitSymbol))
                     <input @bind="_quantityText" inputmode="decimal" autocomplete="off" aria-label="@L("Количество")" />
@@ -86,11 +87,13 @@ else
                         <input @bind="_comment" maxlength="300" aria-label="@L("Комментарий")" /></label>
                 }
                 <button type="submit" class="shop-submit" disabled="@_busy">@(_qc == QcMode.Defect ? L("Отметить брак") : L("Отправить на переделку"))</button>
+                </fieldset>
             </form>
         }
         else if (op.CanMark)
         {
             <form @onsubmit="MarkAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
                 <label>
                     @L("Сделано, {0}", op.UnitSymbol)
                     <input @bind="_quantityText" @bind:event="oninput" inputmode="decimal" autocomplete="off" aria-label="@L("Сделано")" />
@@ -116,6 +119,7 @@ else
                     <textarea @bind="_comment" maxlength="@ShopFloorService.CommentMaxLength" aria-label="@L("Комментарий")"></textarea>
                 </label>
                 <button type="submit" class="shop-submit" disabled="@_busy">@(IsPartial ? L("Отметить частично") : L("Отметить"))</button>
+                </fieldset>
             </form>
         }
         <p class="muted">@L("Код операции: {0}", op.Code)</p>

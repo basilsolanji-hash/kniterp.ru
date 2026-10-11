@@ -231,6 +231,8 @@
         .lang-row .chip.added { color: var(--accent-text-strong); }
         .lang-links { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; font-size: 14px; }
         .flash { display: flex; justify-content: space-between; gap: 12px; align-items: center; border: 1px solid var(--accent-line); background: var(--accent-soft-2); padding: 10px 14px; border-radius: 8px; margin: 12px 0; }
+        /* Поля формы, отключённые до подключения интерактивности: ввод до этого момента терялся бы. */
+        fieldset.until-interactive { border: 0; padding: 0; margin: 0; min-width: 0; display: contents; }
         a.button { display: inline-block; padding: 10px 14px; border-radius: 6px; background: var(--accent); color: var(--on-accent); font-weight: 600; text-decoration: none; }
         a.button.secondary { background: var(--line); color: var(--text); font-weight: 400; }
         details.panel > summary { cursor: pointer; font-weight: 600; }

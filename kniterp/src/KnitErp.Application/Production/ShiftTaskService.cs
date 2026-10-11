@@ -30,6 +30,9 @@ public sealed record ShiftBoardDto(
     DateOnly Date, DateOnly Today, IReadOnlyList<ShiftTaskDto> Tasks, bool CanAssign,
     IReadOnlyList<ShiftEmployeeOptionDto> Employees, IReadOnlyList<ShiftOrderOptionDto> Orders);
 
+/// <summary>Сколько заданий скопировано и сколько пропущено (сотрудник не работает, заказ не в работе, уже есть).</summary>
+public sealed record ShiftCopyResult(int Created, int Skipped);
+
 public sealed record ShiftTaskCommand(DateOnly Date, long EmployeeId, long OrderId, ProductionStage Stage, decimal Planned, string? Comment);
 
 /// <summary>
@@ -97,9 +100,9 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision }).SingleAsync(ct);
         StockEntry.EnsurePrecision(new EntryItemDto(unit.Id, unit.Code, unit.Name, unit.Symbol, unit.Precision), cmd.Planned);
 
-        // Одновременные назначения одному сотруднику на дату — по очереди: проверка дубля и вставка под блокировкой.
+        // Назначения и копирование заданий на одну дату — по очереди: проверка дубля и вставка под общей блокировкой даты.
         await using var tx = await db.BeginTransactionAsync(ct);
-        await db.LockAsync($"kniterp.production.shift.{ctx.OrganizationId}.{cmd.EmployeeId}.{cmd.Date:yyyyMMdd}", ct);
+        await db.LockAsync(DateLock(ctx.OrganizationId, cmd.Date), ct);
         if (await db.ShiftTasks.AnyAsync(t => t.OrganizationId == ctx.OrganizationId && t.Date == cmd.Date && t.EmployeeId == cmd.EmployeeId
                                               && t.ProductionOrderId == cmd.OrderId && t.Stage == cmd.Stage && t.CancelledAtUtc == null, ct))
         {
@@ -116,6 +119,69 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return task.Id;
+    }
+
+    /// <summary>
+    /// Повторить задания прошлой смены (D408): действующие задания даты <paramref name="from"/> переносятся на <paramref name="to"/>
+    /// с тем же количеством и комментарием. Пропускаются сотрудники, которые не работают, заказы не в работе, этапы вне маршрута
+    /// и задания, которые на новую дату уже есть. Всё — одной транзакцией под блокировкой организации и даты.
+    /// </summary>
+    public async Task<ShiftCopyResult> CopyAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionOrderEdit, ct);
+        var today = await ShopFloorService.TodayAsync(db, ctx, clock, ct);
+        if (to < today)
+        {
+            throw new BusinessRuleException("production.shift.past", "Задание назначается на сегодня или на будущую дату.");
+        }
+
+        if (from == to)
+        {
+            throw new BusinessRuleException("production.shift.copy_same", "Выберите другую дату, с которой копировать задания.");
+        }
+
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync(DateLock(ctx.OrganizationId, to), ct);
+        var source = await db.ShiftTasks.AsNoTracking()
+            .Where(t => t.OrganizationId == ctx.OrganizationId && t.Date == from && t.CancelledAtUtc == null).OrderBy(t => t.Id).ToListAsync(ct);
+        var existing = (await db.ShiftTasks.AsNoTracking()
+                .Where(t => t.OrganizationId == ctx.OrganizationId && t.Date == to && t.CancelledAtUtc == null)
+                .Select(t => new { t.EmployeeId, t.ProductionOrderId, t.Stage }).ToListAsync(ct))
+            .Select(t => (t.EmployeeId, t.ProductionOrderId, t.Stage)).ToHashSet();
+        var employeeIds = source.Select(t => t.EmployeeId).Distinct().ToList();
+        var working = (await db.Employees.AsNoTracking()
+                .Where(e => e.OrganizationId == ctx.OrganizationId && employeeIds.Contains(e.Id) && e.Status == EmploymentStatus.Working)
+                .Select(e => e.Id).ToListAsync(ct)).ToHashSet();
+        var orderIds = source.Select(t => t.ProductionOrderId).Distinct().ToList();
+        var routes = await db.ProductionOrders.AsNoTracking()
+            .Where(o => o.OrganizationId == ctx.OrganizationId && orderIds.Contains(o.Id)
+                        && (o.Status == ProductionOrderStatus.Released || o.Status == ProductionOrderStatus.PartiallyDone))
+            .ToDictionaryAsync(o => o.Id, o => o.Route, ct);
+
+        var created = new List<ShiftTask>();
+        var skipped = 0;
+        foreach (var t in source)
+        {
+            if (!working.Contains(t.EmployeeId) || !routes.TryGetValue(t.ProductionOrderId, out var route)
+                || !ProductionRoute.From(route).Contains(t.Stage) || !existing.Add((t.EmployeeId, t.ProductionOrderId, t.Stage)))
+            {
+                skipped++;
+                continue;
+            }
+
+            created.Add(ShiftTask.Create(ctx.OrganizationId, to, t.EmployeeId, t.ProductionOrderId, t.Stage, t.PlannedQuantity, t.Comment, ctx.UserId, clock.UtcNow));
+        }
+
+        db.ShiftTasks.AddRange(created);
+        await db.SaveChangesAsync(ct);
+        foreach (var task in created)
+        {
+            Audit(ctx, AuditActions.ProductionShiftTaskAssigned, task, null, $"{to:dd.MM.yyyy}: копия задания смены {from:dd.MM.yyyy}");
+        }
+
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new ShiftCopyResult(created.Count, skipped);
     }
 
     public async Task CancelAsync(long id, byte[] rowVersion, CancellationToken ct = default)
@@ -178,6 +244,8 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
                 r.Task.Comment, r.Task.ShortfallReason, r.Task.ShortfallComment, r.Task.IsCancelled, r.Task.RowVersion))
             .ToList();
     }
+
+    private static string DateLock(long organizationId, DateOnly date) => $"kniterp.production.shift.{organizationId}.{date:yyyyMMdd}";
 
     /// <summary>Конфликт версий возвращается пользователю, а изменённая строка не остаётся в контексте вкладки.</summary>
     private async Task SaveOrDiscardAsync(CancellationToken ct)

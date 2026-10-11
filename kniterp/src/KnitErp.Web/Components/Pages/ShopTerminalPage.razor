@@ -46,6 +46,10 @@ else
             <ul class="shop-totals">
                 <li><span>@L("Выполнено заданий")</span> <b>@sc.TasksDone</b></li>
                 <li><span>@L("Не выполнено (с причиной / без)")</span> <b>@sc.MissedWithReason / @sc.MissedNoReason</b></li>
+                @if (sc.MissedAbsent > 0)
+                {
+                    <li><span>@L("Не учтено: отсутствие по табелю")</span> <b>@sc.MissedAbsent</b></li>
+                }
                 <li><span>@L("Средний процент выполнения")</span> <b>@sc.AveragePercent%</b></li>
                 <li><span>@L("Брак по моей вине")</span> <b>@Quantities.Format(sc.DefectUnits)</b></li>
                 @if (sc.Points is { } points)
@@ -82,6 +86,7 @@ else
                         @if (_shortfallTask == t.Id)
                         {
                             <form @onsubmit="() => ShortfallAsync(t)">
+                                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
                                 <label>@L("Причина")
                                     <select @bind="_shortfallReason" aria-label="@L("Причина невыполнения")">
                                         <option value="">@L("— выберите —")</option>
@@ -96,6 +101,7 @@ else
                                     <button type="submit" disabled="@_busy">@L("Сообщить")</button>
                                     <button type="button" class="secondary" @onclick="() => _shortfallTask = null">@L("Отмена")</button>
                                 </div>
+                                </fieldset>
                             </form>
                         }
                     </li>
@@ -138,6 +144,7 @@ else
                         @if (_correcting == e.Id)
                         {
                             <form @onsubmit="() => CorrectAsync(e)">
+                                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
                                 <label>@L("На сколько меньше (осталось {0})", Quantities.Format(e.Remaining ?? 0))
                                     <input @bind="_correctText" inputmode="decimal" autocomplete="off" aria-label="@L("На сколько уменьшить")" /></label>
                                 <label>@L("Причина") <input @bind="_correctReason" maxlength="300" aria-label="@L("Причина исправления")" /></label>
@@ -145,6 +152,7 @@ else
                                     <button type="submit" disabled="@_busy">@L("Исправить")</button>
                                     <button type="button" class="secondary" @onclick="() => _correcting = null">@L("Отмена")</button>
                                 </div>
+                                </fieldset>
                             </form>
                         }
                     </li>
