@@ -97,6 +97,8 @@ public sealed partial class TranslationCoverageTests
         // Прочие названия, которые экраны переводят при выводе.
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Structure.EmploymentStatus>().Select(KnitErp.Domain.Structure.Employee.StatusName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Catalog.VatRateKind>().Select(KnitErp.Domain.Catalog.VatRate.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Catalog.ContractKind>().Select(KnitErp.Domain.Catalog.CounterpartyContract.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Catalog.ContractStatus>().Select(KnitErp.Domain.Catalog.CounterpartyContract.StatusName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Workspace.SupportTicketStatus>().Select(KnitErp.Domain.Workspace.SupportTicket.StatusName));
         keys.UnionWith(new[] { (true, true), (true, false), (false, true) }.Select(r => KnitErp.Domain.Catalog.Counterparty.RolesText(r.Item1, r.Item2)));
         keys.UnionWith(SystemRoles.Ordered.Select(SystemRoles.NameOf));

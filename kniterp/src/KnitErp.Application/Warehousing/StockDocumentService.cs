@@ -46,7 +46,7 @@ public sealed record StockDocumentOptions(
 /// <summary>Фильтр реестра документов: вид, статус, период по дате документа, склад (отправитель или получатель), поиск по номеру и контрагенту.</summary>
 public sealed record StockDocumentListFilter(
     StockOperationKind? Kind = null, StockDocumentStatus? Status = null, DateOnly? From = null, DateOnly? To = null,
-    long? WarehouseId = null, string? Search = null, bool? ByOrder = null, long? TagId = null);
+    long? WarehouseId = null, string? Search = null, bool? ByOrder = null, long? TagId = null, long? CounterpartyId = null);
 
 /// <summary>
 /// Поступление, списание и перемещение: черновик → проведение (движения регистра) → при ошибке сторно.
@@ -81,6 +81,11 @@ public sealed class StockDocumentService(
         if (visible is not null)
         {
             q = q.Where(d => visible.Contains(d.WarehouseId) || (d.TargetWarehouseId != null && visible.Contains(d.TargetWarehouseId.Value)));
+        }
+
+        if (filter.CounterpartyId is { } counterpartyId)
+        {
+            q = q.Where(d => d.CounterpartyId == counterpartyId);
         }
 
         if (filter.Kind is { } kind)

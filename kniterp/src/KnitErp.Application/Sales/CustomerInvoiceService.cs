@@ -16,7 +16,7 @@ public enum InvoicePaymentState : byte
     Paid = 2,
 }
 
-public sealed record CustomerInvoiceFilter(string? Search = null, DateOnly? From = null, DateOnly? To = null, bool IncludeCancelled = false);
+public sealed record CustomerInvoiceFilter(string? Search = null, DateOnly? From = null, DateOnly? To = null, bool IncludeCancelled = false, long? CustomerId = null);
 
 public sealed record CustomerInvoiceRowDto(
     long Id, string Number, DateOnly Date, DateOnly? DueDate, long CustomerId, string Customer, long OrderId, string OrderNumber,
@@ -53,6 +53,11 @@ public sealed class CustomerInvoiceService(IKnitErpDbContext db, IAccessGuard gu
     {
         var ctx = await DemandViewAsync(ct);
         var q = db.CustomerInvoices.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId);
+        if (filter.CustomerId is { } customerId)
+        {
+            q = q.Where(i => i.CustomerId == customerId);
+        }
+
         if (!filter.IncludeCancelled)
         {
             q = q.Where(i => i.Status == CustomerInvoiceStatus.Issued);

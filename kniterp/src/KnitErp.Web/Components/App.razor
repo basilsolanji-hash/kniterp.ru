@@ -558,6 +558,11 @@
             .menu-toggle { display: inline-block; }
             .nav-body { display: none; max-height: calc(100vh - 64px); overflow-y: auto; padding-top: 8px; }
             .nav-body.open { display: block; }
+            /* Открытое меню — во всю высоту экрана (dvh учитывает строку адреса браузера) и прокручивается само:
+               прокрутка не «протекает» на страницу (overscroll-behavior), а страница под меню заблокирована. */
+            .side:has(> .nav-body.open) { position: fixed; inset: 0 0 auto 0; z-index: 30; display: flex; flex-direction: column; height: 100vh; height: 100dvh; box-sizing: border-box; }
+            .side > .nav-body.open { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: env(safe-area-inset-bottom, 0px); }
+            html:has(.nav-body.open), body:has(.nav-body.open) { overflow: hidden; overscroll-behavior: none; }
             .main { flex: 1 1 auto; padding: 16px 12px; }
             h1 { font-size: 22px; }
         }

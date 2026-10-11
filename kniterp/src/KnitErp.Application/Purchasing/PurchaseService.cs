@@ -22,7 +22,7 @@ public enum ReceiptState : byte
 
 public sealed record PurchaseOrderFilter(
     PurchaseOrderStatus? Status = null, string? Search = null, DateOnly? From = null, DateOnly? To = null, DateOnly? OverdueOn = null,
-    long? TagId = null);
+    long? TagId = null, long? SupplierId = null);
 
 /// <summary>Total — null, если у пользователя нет права «Цены и суммы».</summary>
 public sealed record PurchaseOrderRowDto(
@@ -145,6 +145,12 @@ public sealed class PurchaseService(
     {
         var ctx = await guard.DemandAsync(Permissions.PurchaseView, ct);
         var q = db.PurchaseOrders.AsNoTracking().Where(o => o.OrganizationId == ctx.OrganizationId);
+        if (filter.SupplierId is { } supplierId)
+        {
+            // D400: история заказов в карточке контрагента.
+            q = q.Where(o => o.SupplierId == supplierId);
+        }
+
         if (filter.TagId is { } tagId)
         {
             // D104: отбор по тегу — в запросе, чтобы находились и объекты за пределами первых строк списка.

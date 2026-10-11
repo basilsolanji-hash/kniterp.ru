@@ -28,7 +28,7 @@
                 <a role="menuitem" href="security">@L("Вход и резервные коды")</a>
                 <div class="menu-caption">@L("Язык")</div>
                 <div class="lang-row">
-                    @foreach (var lang in KnitErp.Domain.Access.UiLanguages.All)
+                    @foreach (var lang in KnitErp.Domain.Access.UiLanguages.Menu)
                     {
                         <button type="button" role="menuitemradio" aria-checked="@(lang.Code == CurrentCode ? "true" : "false")"
                                 class="@(lang.Code == CurrentCode ? "chip added" : "chip")" @onclick="() => ChangeLanguageAsync(lang.Code)">@lang.NativeName</button>
