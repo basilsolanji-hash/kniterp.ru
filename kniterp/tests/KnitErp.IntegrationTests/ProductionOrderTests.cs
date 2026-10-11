@@ -853,6 +853,106 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         new(item, quantity, Day, null, ProductionSource.Plan, null, f.Wip, f.Store, null);
 
     [SqlFact]
+    public async Task Rework_redo_is_not_paid_in_hr_output()
+    {
+        // D224 (сессия «Сотрудники», решение владельца): исправление брака не оплачивается — к оплате только годное (D407, ст. 156 ТК РФ).
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.ShopFloor.MarkAsync(order, stage, new ShopMarkCommand(10, null, null));
+            }
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 3) with { Kind = ProductionOperationKind.Rework, ReturnTo = ProductionStage.Knitting });
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(13, null, null)); // 3 — перевязка, 10 — новые
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Assembly, new ShopMarkCommand(3, null, null));  // пересборка
+        }
+
+        await using var db = host.NewDb();
+        var output = await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day, Day, CancellationToken.None);
+        Assert.Equal(new[] { (1L, 20m), (2L, 10m), (3L, 10m) },
+            output.Where(o => o.EmployeeId == employee).Select(o => (o.OperationId, o.Quantity)).ToArray());
+    }
+
+    [SqlFact]
+    public async Task Repeat_work_after_rework_is_marked_and_not_paid_twice()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.ShopFloor.MarkAsync(order, stage, new ShopMarkCommand(10, null, null));
+            }
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Контроль качества возвращает 3 на вязание: их заново проходят вязание, сборка и ВТО.
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Rework, 3,
+                ProductionStage.Knitting, "петли", Day));
+        }
+
+        long knit;
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(5, null, null));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Assembly, new ShopMarkCommand(2, null, null));
+            var day = await s.ShopFloor.MyDayAsync();
+            var entry = day.Entries.First(e => e.Stage == ProductionStage.Knitting);
+            Assert.Equal((5m, 3m), (entry.Quantity, entry.Repeat));
+            Assert.Equal(2m, day.Entries.First(e => e.Stage == ProductionStage.Assembly).Repeat);
+            knit = entry.Id;
+
+            // Исправление сначала уменьшает оплачиваемую часть (2), затем повторную (1).
+            await s.Floor.CorrectAsync(order, knit, 3, "ошибся");
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var history = (await s.Floor.ProgressAsync(order)).History;
+            Assert.Equal(3m, history.Single(h => h.Id == knit).Repeat);
+            Assert.Equal(-1m, history.First(h => h.Kind == ProductionOperationKind.Correction).Repeat);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var output = await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day, Day, CancellationToken.None);
+            // Вязание: 10 + (5 − 3 повторно) + (−3 + 1 повторно) = 10; сборка: 10 + (2 − 2) = 10; ВТО — 10.
+            Assert.Equal(new[] { (1L, 10m), (2L, 10m), (3L, 10m) }, output.Select(o => (o.OperationId, o.Quantity)).ToArray());
+            Assert.Equal(1m, ProductionRepeat.Pending(ProductionStage.Knitting,
+                await db.ProductionOperations.Where(o => o.ProductionOrderId == order).ToListAsync()));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO [kniterp].[production_operations] ([OrganizationId], [ProductionOrderId], [Stage], [Kind], [Quantity], [RepeatQuantity], [OccurredOn], [CreatedByUserId], [CreatedAtUtc]) VALUES ({0}, {1}, 1, 1, 1, 2, {2}, {3}, SYSUTCDATETIME())",
+                f.Org.OrganizationId, order, Day.ToDateTime(TimeOnly.MinValue), f.Org.OwnerUserId));
+        }
+    }
+
+    [SqlFact]
     public async Task Worker_marks_operation_from_terminal_and_output_goes_to_hr()
     {
         var f = await SetUpAsync();
@@ -1241,6 +1341,70 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                 static decimal Num(string v) => decimal.Parse(v.TrimEnd('.'), System.Globalization.CultureInfo.InvariantCulture);
                 // Числа записаны числами (ячейки Excel), не текстом.
                 Assert.Equal(("Петрова А. С.", 1m, 1m, 2m, -3m), (workerRow[0], Num(workerRow[2]), Num(workerRow[4]), Num(workerRow[8]), Num(workerRow[9])));
+                // У Владельца есть право на персональные данные — причина и комментарий невыполнения в файле.
+                var tasksSheet = SqlTestHost.Spreadsheet.ReadNamedSheet(new MemoryStream(file), "Сменные задания", 100)!;
+                Assert.Equal(["Причина", "Комментарий"], tasksSheet[0].TakeLast(2));
+                Assert.Contains(tasksSheet, r => r.Contains("Ждал предыдущий этап"));
+            }
+
+            // D411: выгрузка — только с правом на сотрудников в пределах подразделений, причина — только с правом на персональные данные.
+            var (master, _) = await AddWorkerAsync(f, grant: false, "0105", "Мастерова");
+            long warehouseDepartment, workshop;
+            await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                workshop = (await s.Structure.GetAsync()).Departments.First().Id;
+                warehouseDepartment = await s.Structure.CreateDepartmentAsync("Склад", null);
+            }
+
+            await using (var db = host.NewDb())
+            {
+                db.RoleAssignments.Add(RoleAssignment.ForPermission(f.Org.OrganizationId, master, Permissions.ProductionOrderView, false, f.Org.OwnerUserId,
+                    host.Clock.UtcNow, "мастер"));
+                await db.SaveChangesAsync();
+            }
+
+            await using (var s = host.As(master, f.Org.OrganizationId))
+            {
+                await Assert.ThrowsAsync<AccessDeniedException>(() => s.Scores.ExportAsync(Day, Day.AddDays(2)));
+            }
+
+            await using (var db = host.NewDb())
+            {
+                db.RoleAssignments.Add(RoleAssignment.ForPermission(f.Org.OrganizationId, master, Permissions.EmployeeView, false, f.Org.OwnerUserId,
+                    host.Clock.UtcNow, "кладовая", departmentId: warehouseDepartment));
+                await db.SaveChangesAsync();
+            }
+
+            await using (var s = host.As(master, f.Org.OrganizationId))
+            {
+                var file = await s.Scores.ExportAsync(Day, Day.AddDays(2));
+                Assert.Single(SqlTestHost.Spreadsheet.ReadFirstSheet(new MemoryStream(file), 100)); // только заголовок: в «Складе» вязальщиц нет
+            }
+
+            await using (var db = host.NewDb())
+            {
+                db.RoleAssignments.Add(RoleAssignment.ForPermission(f.Org.OrganizationId, master, Permissions.EmployeeView, false, f.Org.OwnerUserId,
+                    host.Clock.UtcNow, "цех", departmentId: workshop));
+                await db.SaveChangesAsync();
+            }
+
+            await using (var s = host.As(master, f.Org.OrganizationId))
+            {
+                var file = await s.Scores.ExportAsync(Day, Day.AddDays(2));
+                Assert.Contains(SqlTestHost.Spreadsheet.ReadFirstSheet(new MemoryStream(file), 100), r => r[1] == "0101");
+                var tasksSheet = SqlTestHost.Spreadsheet.ReadNamedSheet(new MemoryStream(file), "Сменные задания", 100)!;
+                Assert.Equal("Итог", tasksSheet[0][^1]);
+                Assert.DoesNotContain(tasksSheet, r => r.Contains("Ждал предыдущий этап"));
+            }
+
+            await using (var db = host.NewDb())
+            {
+                var exports = await db.AuditEntries.Where(e => e.OrganizationId == f.Org.OrganizationId && e.Action == "production.scores.exported")
+                    .OrderBy(e => e.Id).Select(e => new { e.ActorUserId, e.After, e.Reason }).ToListAsync();
+                Assert.Equal(3, exports.Count);
+                Assert.EndsWith("с причинами невыполнения", exports[0].After);
+                Assert.Equal((master, "в пределах подразделений"), (exports[2].ActorUserId, exports[2].Reason));
+                Assert.EndsWith("без причин невыполнения", exports[2].After);
             }
 
             // D409: невыполненное задание в день болезни по табелю кадров не штрафуется; прогул — штрафуется.
@@ -1518,6 +1682,22 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             var op = await s.ShopFloor.OperationAsync(order, ProductionStage.QualityControl);
             Assert.True(op.IsQualityControl);
             Assert.Equal([ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming], op.ReworkStages);
+            // D412: виновника указывает только тот, у кого есть отдельное право; без него списка нет, а запрос с виновником отклоняется.
+            Assert.Null(op.Culprits);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ShopFloor.MarkQualityAsync(order,
+                new ShopQualityCommand(ProductionOperationKind.Defect, 1, "петли", knitter, null)));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            db.RoleAssignments.Add(RoleAssignment.ForPermission(f.Org.OrganizationId, controller, Permissions.ProductionDefectCulprit, false,
+                f.Org.OwnerUserId, host.Clock.UtcNow, "контролёр ОТК"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var s = host.As(controller, f.Org.OrganizationId))
+        {
+            var op = await s.ShopFloor.OperationAsync(order, ProductionStage.QualityControl);
             Assert.Contains(op.Culprits!, e => e.Id == knitter);
             Assert.Null((await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting)).Culprits);
 

@@ -20,7 +20,7 @@ public sealed class ProductionWorkOutputSource(IKnitErpDbContext db) : IWorkOutp
                           join p in db.ProductionOrders.AsNoTracking() on o.ProductionOrderId equals p.Id
                           join i in db.Items.AsNoTracking() on p.ItemId equals i.Id
                           join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
-                          group o.Quantity by new { EmployeeId = o.EmployeeId!.Value, o.OccurredOn, o.Stage, p.ItemId, u.Symbol } into g
+                          group o.Quantity - o.RepeatQuantity by new { EmployeeId = o.EmployeeId!.Value, o.OccurredOn, o.Stage, p.ItemId, u.Symbol } into g
                           select new { g.Key, Quantity = g.Sum() }).ToListAsync(ct);
         return rows.Where(r => r.Quantity != 0)
             .OrderBy(r => r.Key.EmployeeId).ThenBy(r => r.Key.OccurredOn).ThenBy(r => r.Key.Stage)

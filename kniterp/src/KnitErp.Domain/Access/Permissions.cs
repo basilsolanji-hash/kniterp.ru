@@ -42,6 +42,7 @@ public static class Permissions
     public const string ProductionOrderEdit = "production.order.edit";
     public const string ProductionStageMark = "production.stage.mark";
     public const string ProductionMaterialMove = "production.material.move";
+    public const string ProductionDefectCulprit = "production.defect.culprit";
 
     /// <summary>D302 (сессия № 4): состав комплектов.</summary>
     public const string BundleEdit = "catalog.bundle.edit";
@@ -88,6 +89,7 @@ public static class Permissions
         [ProductionOrderEdit] = "Производство: заказы — создание, запуск и отмена",
         [ProductionStageMark] = "Производство: отметка этапов и контроль качества",
         [ProductionMaterialMove] = "Производство: выдача, возврат и списание материалов, выпуск",
+        [ProductionDefectCulprit] = "Производство: указание виновника брака",
         [BundleEdit] = "Номенклатура: состав комплектов",
         [PriceEdit] = "Цены: переоценка",
     };

@@ -1,6 +1,8 @@
 using KnitErp.Application.Access;
 using KnitErp.Application.Common;
+using KnitErp.Application.Structure;
 using KnitErp.Domain.Access;
+using KnitErp.Domain.Audit;
 using KnitErp.Domain.Common;
 using KnitErp.Domain.Hr;
 using KnitErp.Domain.Production;
@@ -24,7 +26,7 @@ public sealed record ScoreBoardDto(
 /// кроме прогула и неявки без причины) — «отсутствие»: баллов и среднего процента не меняет (D409). Брак — единицы, где сотрудник указан виновником на контроле качества.
 /// Мастер видит всех (право просмотра заказов), сотрудник на терминале — только себя.
 /// </summary>
-public sealed class ProductionScoreService(IKnitErpDbContext db, IAccessGuard guard, IClock clock, ISpreadsheetFormat? spreadsheet = null)
+public sealed class ProductionScoreService(IKnitErpDbContext db, IAccessGuard guard, IClock clock, ICurrentUser currentUser, ISpreadsheetFormat? spreadsheet = null)
 {
     /// <summary>Самый длинный период отчёта — чтобы запрос не уходил на годы.</summary>
     public const int MaxDays = 93;
@@ -37,20 +39,35 @@ public sealed class ProductionScoreService(IKnitErpDbContext db, IAccessGuard gu
 
     /// <summary>
     /// Выгрузка в Excel для кадров и мастера (премии, разбор смен): лист показателей по сотрудникам и лист сменных заданий
-    /// с планом, фактом, процентом и причиной. Права — как у таблицы «Баллы и показатели».
+    /// с планом, фактом, процентом и итогом (D411). Файл уходит за пределы программы, поэтому кроме просмотра заказов нужно право
+    /// «Сотрудники: просмотр» — в файл попадают только сотрудники подразделений из его области. Причина и комментарий невыполнения
+    /// пишет сотрудник о себе (болезнь, семья), поэтому они — только с правом на персональные данные. Каждая выгрузка — в журнал аудита.
     /// </summary>
     public async Task<byte[]> ExportAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.ProductionOrderView, ct);
+        if (!ctx.Permissions.Has(Permissions.EmployeeView))
+        {
+            await guard.DenyAsync(ctx, Permissions.EmployeeView, ct);
+        }
+
         var board = await BuildAsync(ctx, from, to, null, ct);
-        var tasks = await ShiftTaskService.ListAsync(db, ctx.OrganizationId, from, to, null, ct);
+        var visible = await StructureScope.VisibleDepartmentsAsync(db, ctx, Permissions.EmployeeView, ct);
+        var allowed = visible is null
+            ? null
+            : (await db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && visible.Contains(e.DepartmentId))
+                .Select(e => e.Id).ToListAsync(ct)).ToHashSet();
+        var withReasons = ctx.Permissions.Has(Permissions.PersonalDataView);
+        var rows = board.Rows.Where(r => allowed is null || allowed.Contains(r.EmployeeId)).ToList();
+        var tasks = (await ShiftTaskService.ListAsync(db, ctx.OrganizationId, from, to, null, ct))
+            .Where(t => allowed is null || allowed.Contains(t.EmployeeId)).ToList();
         var header = new List<string> { "Сотрудник", "Табельный номер", "Выполнено заданий", "Не выполнено с причиной", "Без причины", "Отсутствие по табелю", "В работе", "Средний %", "Брак по вине" };
         if (board.PointsEnabled)
         {
             header.Add("Баллы");
         }
 
-        var scores = board.Rows.Select(r =>
+        var scores = rows.Select(r =>
         {
             var row = new List<string> { r.Name, r.PersonnelNumber, I(r.TasksDone), I(r.MissedWithReason), I(r.MissedNoReason), I(r.MissedAbsent), I(r.InProgress), I(r.AveragePercent), N(r.DefectUnits) };
             if (r.Points is { } p)
@@ -60,17 +77,37 @@ public sealed class ProductionScoreService(IKnitErpDbContext db, IAccessGuard gu
 
             return (IReadOnlyList<string>)row;
         }).ToList();
-        var details = tasks.Select(t => (IReadOnlyList<string>)[t.Date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture), t.EmployeeName, t.PersonnelNumber,
-            t.OrderNumber, t.ItemName, t.StageName, N(t.Planned), N(t.Fact), t.UnitSymbol, t.IsCancelled ? "" : I(t.Percent),
-            t.IsCancelled ? "отменено" : t.Done ? "выполнено" : "не выполнено", t.ShortfallReason ?? "", t.ShortfallComment ?? ""]).ToList();
+        var details = tasks.Select(t =>
+        {
+            var row = new List<string> { t.Date.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture), t.EmployeeName, t.PersonnelNumber,
+                t.OrderNumber, t.ItemName, t.StageName, N(t.Planned), N(t.Fact), t.UnitSymbol, t.IsCancelled ? "" : I(t.Percent),
+                t.IsCancelled ? "отменено" : t.Done ? "выполнено" : "не выполнено" };
+            if (withReasons)
+            {
+                row.AddRange([t.ShortfallReason ?? "", t.ShortfallComment ?? ""]);
+            }
+
+            return (IReadOnlyList<string>)row;
+        }).ToList();
+        List<string> detailHeader = ["Дата", "Сотрудник", "Табельный номер", "Заказ", "Изделие", "Этап", "План", "Факт", "Ед.", "%", "Итог"];
+        if (withReasons)
+        {
+            detailHeader.AddRange(["Причина", "Комментарий"]);
+        }
+
         var format = spreadsheet ?? throw new InvalidOperationException("Не настроена выгрузка в Excel.");
-        return format.Write(
+        var content = format.Write(
         [
             new SheetData($"Показатели {from:dd.MM}–{to:dd.MM.yyyy}", header, scores,
                 board.PointsEnabled ? new HashSet<int> { 2, 3, 4, 5, 6, 7, 8, 9 } : new HashSet<int> { 2, 3, 4, 5, 6, 7, 8 }),
-            new SheetData("Сменные задания", ["Дата", "Сотрудник", "Табельный номер", "Заказ", "Изделие", "Этап", "План", "Факт", "Ед.", "%", "Итог",
-                "Причина", "Комментарий"], details, new HashSet<int> { 6, 7, 9 }),
+            new SheetData("Сменные задания", detailHeader, details, new HashSet<int> { 6, 7, 9 }),
         ]);
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ProductionScoresExported, "ProductionScores",
+            $"{from:yyyy-MM-dd}..{to:yyyy-MM-dd}", null,
+            $"{from:dd.MM.yyyy}–{to:dd.MM.yyyy}: сотрудников {rows.Count}, заданий {tasks.Count}" + (withReasons ? ", с причинами невыполнения" : ", без причин невыполнения"),
+            visible is null ? null : "в пределах подразделений", currentUser.CorrelationId));
+        await db.SaveChangesAsync(ct);
+        return content;
     }
 
     private static string I(int value) => value.ToString(CultureInfo.InvariantCulture);
