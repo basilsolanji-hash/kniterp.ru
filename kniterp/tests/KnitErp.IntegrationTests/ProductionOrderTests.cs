@@ -549,6 +549,72 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D98: отчёт — заказы в работе с просрочкой, брак по причинам, отклонения сверх допуска, себестоимость только с правом, Excel.</summary>
+    [SqlFact]
+    public async Task Production_report_shows_work_defects_deviations_and_costs()
+    {
+        var f = await SetUpAsync();
+        long late, done;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Просроченный заказ: срок вчера (часы тестов — 09.10.2026), ничего не выпущено.
+            late = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 5) with { OrderDate = Day.AddDays(-3), DueDate = Day.AddDays(-1) });
+            await s.ProductionOrders.ReleaseAsync(late, (await s.ProductionOrders.GetAsync(late)).RowVersion);
+            await s.Floor.RecordAsync(late, Mark(ProductionStage.Knitting, 3));
+
+            done = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10));
+            await s.ProductionOrders.ReleaseAsync(done, (await s.ProductionOrders.GetAsync(done)).RowVersion);
+            await s.Materials.MoveAsync(done, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 3.6m), (f.Buttons, 50m)));
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(done, Mark(stage, 10));
+            }
+
+            await s.Floor.RecordAsync(done, Mark(ProductionStage.QualityControl, 9));
+            await s.Floor.RecordAsync(done, Mark(ProductionStage.QualityControl, 1) with { Kind = ProductionOperationKind.Defect, Reason = "Дыры" });
+            await s.Floor.RecordAsync(late, Mark(ProductionStage.Assembly, 3));
+            await s.Floor.RecordAsync(done, Mark(ProductionStage.Packing, 9));
+            // Расход по факту 3,6 кг при норме на 9 + 1 брак 3,296 кг — больше допуска.
+            await s.Materials.OutputAsync(done, new OutputCommand(9, Day, [new(f.Yarn, 3.6m), new(f.Buttons, 50m)], null));
+
+            var report = await s.ProductionReports.BuildAsync(new ProductionReportFilter(Day.AddDays(-7), Day));
+            Assert.Equal(late, report.InWork.First().Id); // просроченные — первыми
+            Assert.True(report.InWork.First().Overdue);
+            var doneRow = report.InWork.Single(r => r.Id == done);
+            Assert.Equal((false, 9m, 1m, 0m, ProductionOrderStatus.PartiallyDone), (doneRow.Overdue, doneRow.Released, doneRow.Defect, doneRow.ReadyForOutput, doneRow.Status));
+            Assert.Equal(new[] { 10m, 10m, 10m, 9m, 9m }, doneRow.StageDone);
+            var defect = Assert.Single(report.Defects);
+            Assert.Equal(("Дыры", 1m, 1), (defect.Reason, defect.Quantity, defect.Orders));
+            var yarn = report.Deviations.Single(d => d.OrderId == done && d.MaterialCode == "ПР-1");
+            Assert.Equal((3.296m, 3.6m, 9.22m, true), (yarn.Normative, yarn.Actual, yarn.DeviationPercent, yarn.OverTolerance));
+            var cost = report.Costs!.Single(c => c.OrderId == done);
+            // План на единицу: (3,296 × 1 000 + 50 × 5) / 10 = 354,6; факт: (3 600 + 250) / 9 = 427,78.
+            Assert.Equal((354.6m, 427.78m, 20.64m), (cost.PlannedUnitCost!.Value, cost.ActualUnitCost!.Value, cost.DiffPercent!.Value));
+
+            var xlsx = await s.ProductionReports.ExportAsync(new ProductionReportFilter(Day.AddDays(-7), Day));
+            var sheet = SqlTestHost.Spreadsheet.ReadFirstSheet(new MemoryStream(xlsx), 100);
+            Assert.Equal("Номер", sheet[0][0]);
+            Assert.Equal(3, sheet.Count); // заголовок и два заказа
+            Assert.Equal("production.report.period", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ProductionReports.BuildAsync(new ProductionReportFilter(Day, Day.AddDays(-1))))).Code);
+        }
+
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            var report = await s.ProductionReports.BuildAsync(new ProductionReportFilter(Day.AddDays(-7), Day));
+            Assert.Null(report.Costs);
+            Assert.Equal(2, report.InWork.Count);
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            var report = await s.ProductionReports.BuildAsync(new ProductionReportFilter(Day.AddDays(-7), Day));
+            Assert.Empty(report.InWork);
+            Assert.Empty(report.Defects);
+        }
+    }
+
     private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
         new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 

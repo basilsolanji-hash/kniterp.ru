@@ -197,6 +197,7 @@
         [
             new("production-orders", "Производственные заказы", a => a.Has(Permissions.ProductionOrderView)),
             new("tech-cards", "Техкарты", a => a.Has(Permissions.CatalogView)),
+            new("reports/production", "Отчёт по производству", a => a.Has(Permissions.ProductionOrderView)),
         ]),
         new("reports", "Отчёты",
         [

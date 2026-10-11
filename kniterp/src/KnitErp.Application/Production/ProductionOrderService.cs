@@ -455,36 +455,8 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             .ToList();
     }
 
-    /// <summary>
-    /// Плановая цена единицы материала без НДС — как себестоимость в «Прибыльности» (D69): средняя цена приёмок по заказам
-    /// поставщикам за вычетом возвратов, для полуфабриката — по его действующей техкарте.
-    /// </summary>
-    private async Task<IReadOnlyDictionary<long, decimal>> MaterialPricesAsync(AccessContext ctx, IReadOnlyList<long> itemIds, CancellationToken ct)
-    {
-        var cards = await db.TechCards.AsNoTracking().Include(c => c.Lines)
-            .Where(c => c.OrganizationId == ctx.OrganizationId && c.Status == TechCardStatus.Active).ToDictionaryAsync(c => c.ItemId, ct);
-        var received = await db.StockDocuments.AsNoTracking()
-            .Where(d => d.OrganizationId == ctx.OrganizationId && d.PurchaseOrderId != null && d.Status == StockDocumentStatus.Posted
-                        && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.ReturnToSupplier))
-            .SelectMany(d => d.Lines.Select(l => new { OrderId = d.PurchaseOrderId!.Value, d.Kind, l.ItemId, l.Quantity }))
-            .ToListAsync(ct);
-        var orderIds = received.Select(r => r.OrderId).Distinct().ToList();
-        var orders = await db.PurchaseOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
-        var purchases = received.GroupBy(r => r.ItemId).ToDictionary(g => g.Key, g =>
-        {
-            decimal quantity = 0, value = 0;
-            foreach (var r in g)
-            {
-                var line = orders[r.OrderId].Lines.Single(l => l.ItemId == r.ItemId);
-                var sign = r.Kind == StockOperationKind.ReturnToSupplier ? -1 : 1;
-                quantity += sign * r.Quantity;
-                value += sign * r.Quantity * (line.Amount - line.VatAmount) / line.Quantity;
-            }
-
-            return (quantity, value);
-        });
-        return UnitCosts.Calculate(purchases, cards, itemIds).ToDictionary(x => x.Key, x => x.Value.Cost);
-    }
+    private Task<IReadOnlyDictionary<long, decimal>> MaterialPricesAsync(AccessContext ctx, IReadOnlyList<long> itemIds, CancellationToken ct) =>
+        ProductionPrices.CurrentAsync(db, ctx.OrganizationId, itemIds, ct);
 
     private sealed record ItemRow(long Id, string Code, string Name, string UnitSymbol, byte Precision, ItemType Type, long? ParentItemId, bool IsArchived);
 

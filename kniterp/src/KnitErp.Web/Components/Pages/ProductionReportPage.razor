@@ -1,0 +1,204 @@
+@page "/reports/production"
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ProductionReportService Reports
+
+<PageTitle>@L("Отчёт по производству") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Отчёт по производству")</h1>
+        <a class="button secondary" href="@($"reports/production.xlsx?from={_from:yyyy-MM-dd}&to={_to:yyyy-MM-dd}")" download data-enhance-nav="false" title="@L("Выгрузить с текущими фильтрами")">Excel</a>
+    </div>
+    <p class="muted">@L("Заказы в работе — на сегодня; брак — по дате отметки; отклонения расхода и себестоимость — по заказам с датой в периоде.")</p>
+
+    <form class="inline-form" @onsubmit="LoadAsync">
+        <label>@L("С") <input type="date" @bind="_from" aria-label="@L("Начало периода")" /></label>
+        <label>@L("По") <input type="date" @bind="_to" aria-label="@L("Конец периода")" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    @if (_error is not null)
+    {
+        <div class="error" role="alert">@_error</div>
+    }
+
+    @if (_report is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else
+    {
+        var r = _report;
+        <h2 style="margin-top: 24px">@L("Заказы в работе ({0})", r.InWork.Count)</h2>
+        <div class="scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>@L("Номер")</th><th>@L("Изделие")</th><th class="num">@L("Количество")</th>
+                        @foreach (var s in ProductionFlow.Stages)
+                        {
+                            <th class="opt num">@L(ProductionFlow.StageName(s))</th>
+                        }
+                        <th class="num">@L("Брак")</th><th class="num">@L("Выпущено")</th><th class="num">@L("Готово к выпуску")</th><th>@L("Срок")</th><th>@L("Статус")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (r.InWork.Count == 0)
+                    {
+                        <tr><td colspan="13" class="muted">@L("Заказов в работе нет.")</td></tr>
+                    }
+                    @foreach (var o in r.InWork)
+                    {
+                        <tr class="@(o.Overdue ? "short" : "")">
+                            <td><a href="production-orders/@o.Id">@o.Number</a></td>
+                            <td>@o.ItemCode @o.ItemName</td>
+                            <td class="num">@Quantities.Format(o.Quantity) @o.UnitSymbol</td>
+                            @foreach (var d in o.StageDone)
+                            {
+                                <td class="num">@Quantities.Format(d)</td>
+                            }
+                            <td class="num">@Quantities.Format(o.Defect)</td>
+                            <td class="num">@Quantities.Format(o.Released)</td>
+                            <td class="num">@Quantities.Format(o.ReadyForOutput)</td>
+                            <td>@(o.DueDate?.ToString("dd.MM.yyyy") ?? "—")@(o.Overdue ? " " + L("(просрочен)") : "")</td>
+                            <td><span class="tag @ProductionOrdersPage.StatusClass(o.Status)">@L(o.StatusName)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <h2 style="margin-top: 24px">@L("Брак по причинам")</h2>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Причина")</th><th>@L("Изделие")</th><th class="num">@L("Количество")</th><th class="num">@L("Заказов")</th></tr></thead>
+                <tbody>
+                    @if (r.Defects.Count == 0)
+                    {
+                        <tr><td colspan="4" class="muted">@L("Брака за период нет.")</td></tr>
+                    }
+                    @foreach (var d in r.Defects)
+                    {
+                        <tr>
+                            <td>@d.Reason</td>
+                            <td>@d.ItemCode @d.ItemName</td>
+                            <td class="num">@Quantities.Format(d.Quantity) @d.UnitSymbol</td>
+                            <td class="num">@d.Orders</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <h2 style="margin-top: 24px">@L("Отклонения расхода от нормы")</h2>
+        <p class="muted">@L("Допуск — {0}%; строки сверх допуска выделены.", r.TolerancePercent.ToString("0.##"))</p>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Заказ")</th><th>@L("Материал")</th><th class="num">@L("Норма на сделанное")</th><th class="num">@L("Расход с отходами")</th><th>@L("Ед.")</th><th class="num">@L("Отклонение, %")</th></tr></thead>
+                <tbody>
+                    @if (r.Deviations.Count == 0)
+                    {
+                        <tr><td colspan="6" class="muted">@L("Нет заказов с выпуском за период.")</td></tr>
+                    }
+                    @foreach (var d in r.Deviations)
+                    {
+                        <tr class="@(d.OverTolerance ? "short" : "")">
+                            <td><a href="production-orders/@d.OrderId">@d.OrderNumber</a></td>
+                            <td>@d.MaterialCode @d.MaterialName</td>
+                            <td class="num">@Quantities.Format(decimal.Round(d.Normative, 3))</td>
+                            <td class="num">@Quantities.Format(d.Actual)</td>
+                            <td>@d.UnitSymbol</td>
+                            <td class="num">@d.DeviationPercent.ToString("0.##")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (r.Costs is { } costs)
+        {
+            <h2 style="margin-top: 24px">@L("Себестоимость: план и факт")</h2>
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>@L("Заказ")</th><th>@L("Изделие")</th><th class="num">@L("Выпущено")</th><th class="num">@L("Плановая на единицу")</th><th class="num">@L("Фактическая на единицу")</th><th class="num">@L("Отклонение, %")</th></tr></thead>
+                    <tbody>
+                        @if (costs.Count == 0)
+                        {
+                            <tr><td colspan="6" class="muted">@L("Нет заказов за период.")</td></tr>
+                        }
+                        @foreach (var c in costs)
+                        {
+                            <tr>
+                                <td><a href="production-orders/@c.OrderId">@c.OrderNumber</a></td>
+                                <td>@c.ItemCode @c.ItemName</td>
+                                <td class="num">@Quantities.Format(c.Released)</td>
+                                <td class="num">@(c.PlannedUnitCost?.ToString("N2") ?? "—")</td>
+                                <td class="num">@(c.ActualUnitCost?.ToString("N2") ?? "—")</td>
+                                <td class="num">@(c.DiffPercent?.ToString("0.##") ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private ProductionReportDto? _report;
+    private DateTime _from;
+    private DateTime _to;
+    private bool _busy;
+    private string? _denied;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+        _from = new DateTime(today.Year, today.Month, 1);
+        _to = today;
+        try
+        {
+            await LoadCoreAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await LoadCoreAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadCoreAsync() =>
+        _report = await Reports.BuildAsync(new ProductionReportFilter(DateOnly.FromDateTime(_from), DateOnly.FromDateTime(_to)));
+}

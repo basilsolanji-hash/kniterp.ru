@@ -213,6 +213,28 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         }
     }
 
+    /// <summary>D98: начальник цеха видит заказ в отчёте по производству и скачивает отчёт в Excel.</summary>
+    [SqlFact]
+    public async Task Workshop_head_opens_production_report_and_downloads_excel()
+    {
+        var order = await app.CreatePackedOrderAsync(7);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page);
+        await page.GotoAsync("reports/production");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Отчёт по производству" })).ToBeVisibleAsync();
+        var row = page.GetByRole(AriaRole.Row).Filter(new() { Has = page.Locator($"a[href='production-orders/{order}']") });
+        await Assertions.Expect(row).ToContainTextAsync("7 шт");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Брак по причинам" })).ToBeVisibleAsync();
+        // Себестоимость начальнику цеха без права «Цены и суммы» не показывается.
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Себестоимость: план и факт" })).ToHaveCountAsync(0);
+
+        var href = await page.GetByRole(AriaRole.Link, new() { Name = "Excel" }).GetAttributeAsync("href");
+        var response = await page.APIRequest.GetAsync(href!);
+        Assert.Equal(200, response.Status);
+        Assert.StartsWith("application/vnd.openxmlformats", response.Headers["content-type"]);
+    }
+
     private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);
 
     private async Task LoginAsync(IPage page, string email)
