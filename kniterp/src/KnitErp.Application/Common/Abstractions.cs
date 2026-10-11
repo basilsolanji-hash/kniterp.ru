@@ -64,6 +64,10 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<PriceRevaluation> PriceRevaluations { get; }
     DbSet<ItemPack> ItemPacks { get; }
     DbSet<ItemSupplier> ItemSuppliers { get; }
+    DbSet<ExternalLink> ExternalLinks { get; }
+    DbSet<ExternalConnection> ExternalConnections { get; }
+    DbSet<ExternalImportRun> ExternalImportRuns { get; }
+    DbSet<ExternalImportIssue> ExternalImportIssues { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }

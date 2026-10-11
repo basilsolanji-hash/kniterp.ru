@@ -26,6 +26,7 @@ public sealed class ApiToken
         Access.Permissions.UserManage, Access.Permissions.AdminGrant, Access.Permissions.OrganizationEdit, Access.Permissions.ClosedPeriodReopen,
         Access.Permissions.PersonalDataView,
         Access.Permissions.PriceEdit, // D306 (сессия 4): переоценка — только в интерфейсе
+        Access.Permissions.MoySkladManage, // D310 (сессия 4): токен МойСклад — только в интерфейсе
     };
 
     private ApiToken()

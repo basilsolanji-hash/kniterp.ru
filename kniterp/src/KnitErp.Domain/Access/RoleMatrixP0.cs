@@ -78,6 +78,8 @@ public static class RoleMatrixP0
         (Permissions.BundleEdit,              [Full, Full, None, None, None, None, None, None]),
         // Допущение D306: массовую переоценку проводят Владелец и Администратор (цены видят — право «Цены и суммы»).
         (Permissions.PriceEdit,               [Full, Full, None, None, None, None, None, None]),
+        // Допущение D310: МойСклад подключают Владелец и Администратор (ТЗ каталога, этап 4).
+        (Permissions.MoySkladManage,          [Full, Full, None, None, None, None, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();

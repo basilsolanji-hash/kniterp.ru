@@ -38,6 +38,9 @@ public static class Permissions
     /// <summary>D306 (сессия № 4): массовая переоценка. Через API не выдаётся.</summary>
     public const string PriceEdit = "catalog.price.edit";
 
+    /// <summary>D310 (сессия № 4): подключение и загрузка из МойСклад. Через API не выдаётся.</summary>
+    public const string MoySkladManage = "integration.moysklad.manage";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -68,6 +71,7 @@ public static class Permissions
         [SalesEdit] = "Продажи: заказы покупателей и оплаты",
         [BundleEdit] = "Номенклатура: состав комплектов",
         [PriceEdit] = "Цены: переоценка",
+        [MoySkladManage] = "МойСклад: подключение и загрузка",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;

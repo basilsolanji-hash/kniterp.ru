@@ -145,3 +145,87 @@ internal sealed class ItemSupplierConfiguration : IEntityTypeConfiguration<ItemS
         b.HasIndex(x => new { x.OrganizationId, x.SupplierId, x.SupplierArticle }).HasDatabaseName("ix_item_suppliers_article");
     }
 }
+
+internal sealed class ExternalLinkConfiguration : IEntityTypeConfiguration<ExternalLink>
+{
+    public void Configure(EntityTypeBuilder<ExternalLink> b)
+    {
+        b.ToTable("external_links", t => t.HasCheckConstraint("ck_external_links_kinds", "[System] BETWEEN 1 AND 8 AND [ObjectType] BETWEEN 1 AND 6"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.System).HasConversion<byte>();
+        b.Property(x => x.ObjectType).HasConversion<byte>();
+        b.Property(x => x.ExternalId).HasColumnType("varchar(64)").IsRequired();
+        b.Property(x => x.ExternalCode).HasMaxLength(ExternalLink.ExternalCodeMaxLength);
+        b.Property(x => x.ExternalVersion).HasColumnType("varchar(40)");
+        b.Property(x => x.ContentHash).HasColumnType("char(64)");
+        b.Property(x => x.SyncedAtUtc).HasColumnType("datetime2(3)");
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.System, x.ObjectType, x.ExternalId }).IsUnique().HasDatabaseName("ux_external_links_external");
+        b.HasIndex(x => new { x.OrganizationId, x.System, x.ObjectType, x.LocalId }).IsUnique().HasDatabaseName("ux_external_links_local");
+        b.HasIndex(x => new { x.OrganizationId, x.System, x.ObjectType, x.ExternalCode }).HasDatabaseName("ix_external_links_code");
+    }
+}
+
+internal sealed class ExternalConnectionConfiguration : IEntityTypeConfiguration<ExternalConnection>
+{
+    public void Configure(EntityTypeBuilder<ExternalConnection> b)
+    {
+        b.ToTable("external_connections");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.System).HasConversion<byte>();
+        // Токен внешней системы — только зашифрованным мастер-ключом (AES-256-GCM), как секреты 2FA и вебхуков.
+        b.Property(x => x.Token).HasMaxLength(1000).IsRequired()
+            .HasConversion(v => KnitErp.Infrastructure.Security.SecretCipher.Encrypt(v), v => KnitErp.Infrastructure.Security.SecretCipher.Decrypt(v));
+        b.Property(x => x.TokenHint).HasMaxLength(8).IsRequired();
+        b.Property(x => x.AccountName).HasMaxLength(ExternalConnection.AccountMaxLength);
+        b.Property(x => x.ConnectedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<KnitErp.Domain.Access.UserAccount>().WithMany().HasForeignKey(x => x.ConnectedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.System }).IsUnique().HasDatabaseName("ux_external_connections_org_system");
+    }
+}
+
+internal sealed class ExternalImportRunConfiguration : IEntityTypeConfiguration<ExternalImportRun>
+{
+    public void Configure(EntityTypeBuilder<ExternalImportRun> b)
+    {
+        b.ToTable("external_import_runs", t => t.HasCheckConstraint("ck_external_import_runs_status", "[Status] IN (1, 2, 3, 4)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.System).HasConversion<byte>();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.DefaultItemType).HasConversion<byte>();
+        b.Property(x => x.Stage).HasColumnType("varchar(40)");
+        b.Property(x => x.Message).HasMaxLength(ExternalImportRun.MessageMaxLength);
+        b.Property(x => x.RequestedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.StartedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.FinishedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.IsActive);
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<KnitErp.Domain.Access.UserAccount>().WithMany().HasForeignKey(x => x.RequestedByUserId).OnDelete(DeleteBehavior.Restrict);
+        // Одна активная загрузка на организацию и систему.
+        b.HasIndex(x => new { x.OrganizationId, x.System }).IsUnique().HasFilter("[Status] IN (1, 2)").HasDatabaseName("ux_external_import_runs_active");
+        b.HasIndex(x => new { x.Status, x.RequestedAtUtc }).HasDatabaseName("ix_external_import_runs_queue");
+    }
+}
+
+internal sealed class ExternalImportIssueConfiguration : IEntityTypeConfiguration<ExternalImportIssue>
+{
+    public void Configure(EntityTypeBuilder<ExternalImportIssue> b)
+    {
+        b.ToTable("external_import_issues");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Entity).HasColumnType("varchar(40)").IsRequired();
+        b.Property(x => x.ExternalId).HasColumnType("varchar(64)");
+        b.Property(x => x.Code).HasMaxLength(255);
+        b.Property(x => x.Name).HasMaxLength(300);
+        b.Property(x => x.Text).HasMaxLength(ExternalImportIssue.TextMaxLength).IsRequired();
+        b.HasOne<ExternalImportRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.RunId, x.Id }).HasDatabaseName("ix_external_import_issues_run");
+    }
+}

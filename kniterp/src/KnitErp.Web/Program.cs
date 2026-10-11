@@ -100,6 +100,12 @@ if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
     builder.Services.AddHostedService<KnitErp.Web.Api.WebhookWorker>();
 }
 
+// D310 (сессия 4): фоновая загрузка из МойСклад; в тестовых стендах отключается ключом MoySklad:WorkerDisabled.
+if (!builder.Configuration.GetValue<bool>("MoySklad:WorkerDisabled"))
+{
+    builder.Services.AddHostedService<KnitErp.Web.Exchange.MoySkladImportWorker>();
+}
+
 // D102: тело запросов API — как и ответы: перечисления строками («Receipt»), имена в camelCase.
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddOpenApi("v1", o =>
@@ -407,6 +413,10 @@ app.MapGet("/signins.xlsx", (DateOnly? from, DateOnly? to, bool? failures, KnitE
     FileOrForbid(() => export.SignInsAsync(from, to, failures == true, ct), $"zhurnal-vhodov-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
 app.MapGet("/inventory/{id:long}/sheet.xlsx", (long id, InventoryService inventory, CancellationToken ct) =>
     FileOrForbid(() => inventory.CountSheetAsync(id, ct), $"blank-inventarizacii-{id}.xlsx"));
+
+// D310 (сессия 4): отчёт загрузки из МойСклад — итоги и замечания по строкам.
+app.MapGet("/exchange/moysklad/runs/{id:long}/report.xlsx", (long id, KnitErp.Application.Exchange.MoySklad.MoySkladImportService import, CancellationToken ct) =>
+    FileOrForbid(() => import.ReportAsync(id, ct), $"moysklad-zagruzka-{id}.xlsx"));
 
 // Встраивать страницы knitERP в чужие сайты запрещено (как и в общей CSP).
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode(o => o.ContentSecurityFrameAncestorsPolicy = "'none'");
