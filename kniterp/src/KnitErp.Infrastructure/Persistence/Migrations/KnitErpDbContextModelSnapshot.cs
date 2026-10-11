@@ -2362,6 +2362,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("CreatedByUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("EmployeeId")
+                        .HasColumnType("bigint");
+
                     b.Property<byte>("Kind")
                         .HasColumnType("tinyint");
 
@@ -2393,6 +2396,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrganizationId", "ProductionOrderId")
                         .HasDatabaseName("ix_production_operations_org_order");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "OccurredOn")
+                        .HasDatabaseName("ix_production_operations_org_employee_date")
+                        .HasFilter("[EmployeeId] IS NOT NULL");
 
                     b.ToTable("production_operations", "kniterp", t =>
                         {
@@ -5513,6 +5520,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_production_operations_employee");
 
                     b.HasOne("KnitErp.Domain.Production.ProductionOrder", null)
                         .WithMany()

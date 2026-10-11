@@ -88,7 +88,7 @@
                                 <td>@L(h.KindName)@(h.ReturnToName is null ? "" : $" → {L(h.ReturnToName)}")</td>
                                 <td class="num">@Quantities.Format(h.Quantity)</td>
                                 <td>@h.Reason</td>
-                                <td>@h.CreatedBy</td>
+                                <td>@h.CreatedBy@(h.Employee is null ? "" : $" ({L("исполнитель")} {h.Employee})")</td>
                             </tr>
                         }
                     </tbody>

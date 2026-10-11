@@ -54,13 +54,19 @@ public sealed class ProductionOperation
 
     public string? Reason { get; private set; }
     public DateOnly OccurredOn { get; private set; }
+
+    /// <summary>Исполнитель — сотрудник, чья это выработка (терминал цеха); у отметки мастера с карточки заказа может не быть.</summary>
+    public long? EmployeeId { get; private set; }
+
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 
     /// <summary>Новая запись; что её можно применить к заказу, проверяет <see cref="ProductionFlow.EnsureCanApply"/>.</summary>
     public static ProductionOperation Create(
-        long organizationId, long orderId, ProductionStep step, string? reason, DateOnly occurredOn, long userId, DateTime nowUtc) => new()
+        long organizationId, long orderId, ProductionStep step, string? reason, DateOnly occurredOn, long userId, DateTime nowUtc,
+        long? employeeId = null) => new()
     {
+        EmployeeId = employeeId,
         OrganizationId = organizationId,
         ProductionOrderId = orderId,
         Stage = step.Stage,

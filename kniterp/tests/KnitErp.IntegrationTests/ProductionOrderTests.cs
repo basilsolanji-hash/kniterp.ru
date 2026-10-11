@@ -852,6 +852,157 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
     private static ProductionOrderCommand Command(Fixture f, long item, decimal quantity) =>
         new(item, quantity, Day, null, ProductionSource.Plan, null, f.Wip, f.Store, null);
 
+    [SqlFact]
+    public async Task Worker_marks_operation_from_terminal_and_output_goes_to_hr()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            var op = await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting);
+            Assert.Equal((20m, 0m, 0m, true, ShopHint.None, "Петрова А. С.", $"ОП-{order}-1"),
+                (op.Available, op.Done, op.MyToday, op.CanMark, op.Hint, op.EmployeeName, op.Code));
+            Assert.Equal(Day, op.Today);
+
+            // Частично: 12 из 20 с причиной из списка и комментарием.
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(12, "Поломка оборудования", " станок № 3 "));
+            op = await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting);
+            Assert.Equal((8m, 12m, 12m), (op.Available, op.Done, op.MyToday));
+            Assert.Equal("production.stage.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(9, null, null)))).Code);
+            Assert.Equal("production.shop.reason", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(1, "Плохое настроение", null)))).Code);
+            Assert.Equal("production.shop.comment", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(1, null, new string('я', 301))))).Code);
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Assembly, new ShopMarkCommand(12, null, null));
+
+            var day = await s.ShopFloor.MyDayAsync();
+            Assert.Equal((Day, 2, "Петрова А. С.", ShopHint.None), (day.Date, day.Entries.Count, day.EmployeeName, day.Hint));
+            Assert.Equal("Не выполнено полностью: Поломка оборудования. станок № 3", day.Entries.Single(e => e.Stage == ProductionStage.Knitting).Reason);
+            var tasks = day.Tasks.Where(t => t.OrderId == order).ToDictionary(t => t.Stage, t => t.Available);
+            Assert.Equal(new Dictionary<ProductionStage, decimal> { [ProductionStage.Knitting] = 8, [ProductionStage.Steaming] = 12 }, tasks);
+            Assert.Empty((await s.ShopFloor.MyDayAsync(Day.AddDays(-1))).Entries);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Отметка мастера с карточки — без исполнителя: в выработку сотрудников не попадает.
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.Knitting, ProductionOperationKind.Done, 3, null, null, Day));
+            var history = (await s.Floor.ProgressAsync(order)).History;
+            Assert.Equal(2, history.Count(h => h.Employee == "Петрова А. С."));
+            Assert.Null(history.First().Employee);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var stored = await db.ProductionOperations.Where(o => o.ProductionOrderId == order).OrderBy(o => o.Id).ToListAsync();
+            Assert.Equal(new long?[] { employee, employee, null }, stored.Select(o => o.EmployeeId).ToArray());
+            Assert.All(stored, o => Assert.Equal(Day, o.OccurredOn));
+            var audit = await db.AuditEntries.Where(e => e.Action == "production.stage.marked" && e.EntityId == order.ToString())
+                .Select(e => e.After).ToListAsync();
+            Assert.Equal(2, audit.Count(a => a!.Contains("исполнитель Петрова А. С. (таб. № 0101)")));
+
+            var output = await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day, Day, CancellationToken.None);
+            Assert.Equal(
+                new[] { (employee, Day, 1L, "Вязание", (long?)f.Sweater, 12m, "шт"), (employee, Day, 2L, "Сборка", (long?)f.Sweater, 12m, "шт") },
+                output.Select(o => (o.EmployeeId, o.Date, o.OperationId, o.OperationName, o.ItemId, o.Quantity, o.Unit)).ToArray());
+            Assert.Empty(await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day.AddDays(1), Day.AddDays(5), CancellationToken.None));
+        }
+    }
+
+    [SqlFact]
+    public async Task Terminal_requires_right_linked_employee_order_in_work_and_own_organization()
+    {
+        var f = await SetUpAsync();
+        var other = await SetUpAsync();
+        var (worker, _) = await AddWorkerAsync(f, grant: true);
+        var (noGrant, _) = await AddWorkerAsync(f, grant: false);
+        long draft, released, foreign;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            draft = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 5));
+            released = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 5));
+            await s.ProductionOrders.ReleaseAsync(released, (await s.ProductionOrders.GetAsync(released)).RowVersion);
+
+            // Владелец без карточки сотрудника видит операцию, но отметить с терминала не может.
+            var op = await s.ShopFloor.OperationAsync(released, ProductionStage.Knitting);
+            Assert.Equal((false, ShopHint.NoEmployee), (op.CanMark, op.Hint));
+            Assert.Equal("production.shop.no_employee", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShopFloor.MarkAsync(released, ProductionStage.Knitting, new ShopMarkCommand(1, null, null)))).Code);
+        }
+
+        await using (var s = host.As(other.Org.OwnerUserId, other.Org.OrganizationId))
+        {
+            foreign = await s.ProductionOrders.CreateAsync(Command(other, other.Sweater, 5));
+            await s.ProductionOrders.ReleaseAsync(foreign, (await s.ProductionOrders.GetAsync(foreign)).RowVersion);
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            Assert.Equal((false, ShopHint.NotInWork), ((await s.ShopFloor.OperationAsync(draft, ProductionStage.Knitting)).CanMark,
+                (await s.ShopFloor.OperationAsync(draft, ProductionStage.Knitting)).Hint));
+            await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShopFloor.MarkAsync(draft, ProductionStage.Knitting, new ShopMarkCommand(1, null, null)));
+            Assert.Equal(ShopHint.NothingAvailable, (await s.ShopFloor.OperationAsync(released, ProductionStage.Assembly)).Hint);
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShopFloor.OperationAsync(foreign, ProductionStage.Knitting));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShopFloor.MarkAsync(foreign, ProductionStage.Knitting, new ShopMarkCommand(1, null, null)));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShopFloor.OperationAsync(released, (ProductionStage)9));
+            Assert.DoesNotContain((await s.ShopFloor.MyDayAsync()).Tasks, t => t.OrderId == foreign);
+        }
+
+        await using (var s = host.As(noGrant, f.Org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ShopFloor.MyDayAsync());
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ShopFloor.MarkAsync(released, ProductionStage.Knitting, new ShopMarkCommand(1, null, null)));
+        }
+
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ShopFloor.OperationAsync(released, ProductionStage.Knitting));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.False(await db.ProductionOperations.AnyAsync(o => o.ProductionOrderId == released || o.ProductionOrderId == foreign));
+        }
+    }
+
+    /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
+    private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant)
+    {
+        long user, employee;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var structure = await s.Structure.GetAsync();
+            var department = structure.Departments.FirstOrDefault()?.Id ?? await s.Structure.CreateDepartmentAsync("Вязальный цех", null);
+            var position = await s.Structure.CreatePositionAsync($"Вязальщица {Guid.NewGuid():N}"[..20]);
+            var number = grant ? "0101" : "0102";
+            employee = await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand(number, "Петрова", "Анна", "Сергеевна", department, position, Day.AddYears(-1)));
+            user = (await s.Access.InviteAsync(new InviteUserCommand($"worker-{Guid.NewGuid():N}@test.local", "Вязальщица", SystemRoles.Employee, null,
+                EmployeeId: employee))).UserId;
+        }
+
+        await using (var db = host.NewDb())
+        {
+            (await db.Users.SingleAsync(u => u.Id == user)).Activate();
+            if (grant)
+            {
+                db.RoleAssignments.Add(RoleAssignment.ForPermission(f.Org.OrganizationId, user, Permissions.ProductionStageMark, false, f.Org.OwnerUserId,
+                    host.Clock.UtcNow, "мастер цеха"));
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        return (user, employee);
+    }
+
     private sealed record Fixture(
         CreatedOrganization Org, long Wip, long Store, long YarnStore, long Sweater, long Hat, long Yarn, long Buttons, long Card, long Customer, long Senior);
 

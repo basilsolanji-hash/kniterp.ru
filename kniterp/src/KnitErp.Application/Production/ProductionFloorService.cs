@@ -17,7 +17,7 @@ public sealed record ProductionStageDto(ProductionStage Stage, decimal Done, dec
 
 public sealed record ProductionOperationDto(
     long Id, DateOnly OccurredOn, ProductionStage Stage, ProductionOperationKind Kind, decimal Quantity, ProductionStage? ReturnTo, string? Reason,
-    string CreatedBy, DateTime CreatedAtUtc)
+    string CreatedBy, DateTime CreatedAtUtc, string? Employee = null)
 {
     public string StageName => ProductionFlow.StageName(Stage);
     public string KindName => ProductionFlow.KindName(Kind);
@@ -56,9 +56,14 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         var flow = await FlowAsync(order, ops, ct);
         var userIds = ops.Select(o => o.CreatedByUserId).Distinct().ToList();
         var users = await db.Users.AsNoTracking().Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+        var employeeIds = ops.Where(o => o.EmployeeId != null).Select(o => o.EmployeeId!.Value).Distinct().ToList();
+        var employees = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && employeeIds.Contains(e.Id))
+            .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName }).ToListAsync(ct);
+        var employeeNames = employees.ToDictionary(e => e.Id, e => ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName));
         var history = ops.OrderByDescending(o => o.Id)
             .Select(o => new ProductionOperationDto(o.Id, o.OccurredOn, o.Stage, o.Kind, o.Quantity, o.ReturnToStage, o.Reason,
-                users.GetValueOrDefault(o.CreatedByUserId) ?? "—", o.CreatedAtUtc))
+                users.GetValueOrDefault(o.CreatedByUserId) ?? "—", o.CreatedAtUtc,
+                o.EmployeeId is { } e ? employeeNames.GetValueOrDefault(e) : null))
             .ToList();
         var inWork = order.Status is ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone;
         return new ProductionProgressDto(order.Id, order.Status, order.Quantity, unit.Symbol, unit.Precision,
@@ -71,6 +76,12 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
     public async Task<long> RecordAsync(long orderId, ProductionOperationCommand command, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.ProductionStageMark, ct);
+        return await RecordCoreAsync(ctx, orderId, command, null, ct);
+    }
+
+    /// <summary>Отметка с исполнителем (терминал цеха); право уже проверено вызывающим сервисом.</summary>
+    internal async Task<long> RecordCoreAsync(AccessContext ctx, long orderId, ProductionOperationCommand command, long? employeeId, CancellationToken ct)
+    {
         await using var tx = await db.BeginTransactionAsync(ct);
         var order = await ProductionLocks.LockOrderAsync(db, ctx, orderId, ct);
         order.EnsureInWork();
@@ -86,11 +97,18 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         var ops = await db.ProductionOperations.AsNoTracking()
             .Where(o => o.OrganizationId == ctx.OrganizationId && o.ProductionOrderId == orderId).ToListAsync(ct);
         (await FlowAsync(order, ops, ct)).EnsureCanApply(step);
-        var op = ProductionOperation.Create(ctx.OrganizationId, orderId, step, command.Reason, command.OccurredOn, ctx.UserId, clock.UtcNow);
+        var op = ProductionOperation.Create(ctx.OrganizationId, orderId, step, command.Reason, command.OccurredOn, ctx.UserId, clock.UtcNow, employeeId);
         db.ProductionOperations.Add(op);
         await db.SaveChangesAsync(ct);
         var text = $"{ProductionFlow.StageName(step.Stage)}: {ProductionFlow.KindName(step.Kind)} {Quantities.Format(step.Quantity)} {item.Symbol}"
                    + (step.ReturnTo is { } r ? $" → {ProductionFlow.StageName(r)}" : "");
+        if (employeeId is { } performer)
+        {
+            var e = await db.Employees.AsNoTracking().Where(x => x.Id == performer)
+                .Select(x => new { x.PersonnelNumber, x.LastName, x.FirstName, x.MiddleName }).SingleAsync(ct);
+            text += $"; исполнитель {ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName)} (таб. № {e.PersonnelNumber})";
+        }
+
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ProductionStageMarked, nameof(ProductionOrder),
             order.Id.ToString(), null, text, op.Reason is null ? order.Number : $"{order.Number}: {op.Reason}", currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
@@ -99,7 +117,7 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
     }
 
     /// <summary>Поток заказа: отметки этапов и выпущенное количество.</summary>
-    private async Task<ProductionFlow> FlowAsync(ProductionOrder order, IEnumerable<ProductionOperation> ops, CancellationToken ct) =>
+    internal async Task<ProductionFlow> FlowAsync(ProductionOrder order, IEnumerable<ProductionOperation> ops, CancellationToken ct) =>
         new(order.Quantity, ops.Select(o => o.Step), await ProductionLocks.ReleasedAsync(db, order, ct));
 }
 

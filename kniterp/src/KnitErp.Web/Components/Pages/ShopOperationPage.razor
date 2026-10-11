@@ -1,0 +1,163 @@
+@page "/shop/op/{OrderId:long}/{Stage:int}"
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ShopFloorService Shop
+
+@* Операция на терминале цеха (D92, дополнение): этап заказа по QR-коду, отметка целиком или частично с причиной. *@
+<PageTitle>@(_op is null ? L("Операция") : $"{_op.OrderNumber} · {L(_op.StageName)}") — knitERP</PageTitle>
+<ShopStyles />
+
+<p><a href="shop">@L("← Терминал цеха")</a></p>
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <p>@L("Операция не найдена — проверьте код.")</p>
+}
+else if (_op is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var op = _op;
+    <div class="shop">
+        <h1>@L(op.StageName)</h1>
+        <p><b>@op.OrderNumber</b> — @op.ItemCode @op.ItemName@(op.DueDate is { } d ? ", " + L("срок {0}", d.ToString("dd.MM.yyyy")) : "")</p>
+        <ShopHintMessage Hint="op.Hint" EmployeeName="@op.EmployeeName" />
+
+        <div class="shop-big">
+            <div>@L("Можно отметить")<b>@Quantities.Format(op.Available)</b>@op.UnitSymbol</div>
+            <div>@L("Сделано на этапе")<b>@Quantities.Format(op.Done)</b>@L("из {0}", Quantities.Format(op.OrderQuantity))</div>
+            <div>@L("Я сегодня")<b>@Quantities.Format(op.MyToday)</b>@op.UnitSymbol</div>
+        </div>
+
+        @if (_message is not null)
+        {
+            <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+        }
+
+        @if (op.CanMark)
+        {
+            <form @onsubmit="MarkAsync">
+                <label>
+                    @L("Сделано, {0}", op.UnitSymbol)
+                    <input @bind="_quantityText" @bind:event="oninput" inputmode="decimal" autocomplete="off" aria-label="@L("Сделано")" />
+                </label>
+                <div class="shop-quick">
+                    <button type="button" class="secondary" @onclick="() => _quantityText = Quantities.Format(op.Available)">@L("Всё: {0}", Quantities.Format(op.Available))</button>
+                </div>
+                @if (IsPartial)
+                {
+                    <label>
+                        @L("Почему не всё")
+                        <select @bind="_shortfall" aria-label="@L("Почему не всё")">
+                            <option value="">@L("— не указано —")</option>
+                            @foreach (var r in ShopFloorShortfall.Reasons)
+                            {
+                                <option value="@r">@L(r)</option>
+                            }
+                        </select>
+                    </label>
+                }
+                <label>
+                    @L("Комментарий")
+                    <textarea @bind="_comment" maxlength="@ShopFloorService.CommentMaxLength" aria-label="@L("Комментарий")"></textarea>
+                </label>
+                <button type="submit" class="shop-submit" disabled="@_busy">@(IsPartial ? L("Отметить частично") : L("Отметить"))</button>
+            </form>
+        }
+        <p class="muted">@L("Код операции: {0}", op.Code)</p>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long OrderId { get; set; }
+
+    [Parameter]
+    public int Stage { get; set; }
+
+    private ShopOperationDto? _op;
+    private string? _denied;
+    private bool _notFound;
+    private bool _busy;
+    private string _quantityText = string.Empty;
+    private string _shortfall = string.Empty;
+    private string? _comment;
+    private string? _message;
+    private bool _messageIsError;
+
+    /// <summary>Введено меньше доступного — спрашиваем причину.</summary>
+    private bool IsPartial => _op is not null && Quantities.TryParse(_quantityText, out var q) && q > 0 && q < _op.Available;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _op = null;
+        _notFound = false;
+        _message = null;
+        try
+        {
+            _op = await Shop.OperationAsync(OrderId, (ProductionStage)Stage);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task MarkAsync()
+    {
+        if (_busy || _op is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!Quantities.TryParse(_quantityText, out var quantity))
+            {
+                throw new BusinessRuleException("production.stage.quantity_invalid", L("Укажите количество числом, например 100."));
+            }
+
+            var partial = IsPartial;
+            await Shop.MarkAsync(OrderId, _op.Stage, new ShopMarkCommand(quantity, partial && _shortfall.Length > 0 ? _shortfall : null, _comment));
+            _message = L("Отмечено: {0} {1}.", Quantities.Format(quantity), _op.UnitSymbol);
+            _quantityText = string.Empty;
+            _shortfall = string.Empty;
+            _comment = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                var message = (_message, _messageIsError);
+                _op = await Shop.OperationAsync(OrderId, (ProductionStage)Stage);
+                (_message, _messageIsError) = message;
+            }
+            catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+            {
+                _message = UiErrors.Message(ex);
+                _messageIsError = true;
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

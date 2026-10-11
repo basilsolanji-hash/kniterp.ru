@@ -94,6 +94,10 @@ else
         </dl>
 
         <div class="actions">
+            @if (_order.Status is ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone)
+            {
+                <a class="button secondary" href="print/production-orders/@_order.Id/route" target="_blank">@L("Маршрутный лист с QR-кодами")</a>
+            }
             @if (_order.CanEdit)
             {
                 <button type="button" class="secondary" @onclick="EditAsync" disabled="@_busy">@L("Изменить")</button>

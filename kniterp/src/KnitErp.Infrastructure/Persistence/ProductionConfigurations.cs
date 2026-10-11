@@ -136,6 +136,12 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
             .HasConstraintName("fk_production_operations_order");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.ProductionOrderId }).HasDatabaseName("ix_production_operations_org_order");
+        // Исполнитель — сотрудник той же организации; выработка по сотруднику и дню (терминал цеха, IWorkOutputSource).
+        b.HasOne<KnitErp.Domain.Structure.Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_operations_employee");
+        b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.OccurredOn }).HasDatabaseName("ix_production_operations_org_employee_date")
+            .HasFilter("[EmployeeId] IS NOT NULL");
     }
 }
 

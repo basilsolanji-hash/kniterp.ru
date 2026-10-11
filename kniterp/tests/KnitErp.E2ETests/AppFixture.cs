@@ -23,6 +23,7 @@ public sealed class AppFixture : IAsyncLifetime
 {
     public const string UserEmail = "nachalnik-ceha@e2e.local";
     public const string StorekeeperEmail = "kladovshik@e2e.local";
+    public const string WorkerEmail = "vyazalshchica@e2e.local";
 
     private readonly SqlTestHost _host = new();
     private readonly List<string> _log = [];
@@ -84,7 +85,7 @@ public sealed class AppFixture : IAsyncLifetime
                 "Europe/Moscow", "owner@e2e.local", "Владелец", "RU"));
         }
 
-        string token, storekeeperToken;
+        string token, storekeeperToken, workerToken;
         await using (var s = _host.As(org.OwnerUserId, org.OrganizationId))
         {
             var units = await s.Catalog.ListUnitsAsync();
@@ -109,6 +110,12 @@ public sealed class AppFixture : IAsyncLifetime
             await s.Documents.PostAsync(receipt, (await s.Documents.GetAsync(receipt)).RowVersion);
             storekeeperToken = (await s.Access.InviteAsync(new InviteUserCommand(StorekeeperEmail, "Кладовщик пряжи", SystemRoles.SeniorStorekeeper, null,
                 WarehouseId: yarnStore))).SetupToken!;
+            // Вязальщица с карточкой сотрудника — для терминала цеха (вымышленные данные).
+            var department = await s.Structure.CreateDepartmentAsync("Вязальный цех", null);
+            var position = await s.Structure.CreatePositionAsync("Вязальщица");
+            var worker = await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand("0101", "Петрова", "Анна", "Сергеевна",
+                department, position, DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-1)));
+            workerToken = (await s.Access.InviteAsync(new InviteUserCommand(WorkerEmail, "Вязальщица", SystemRoles.Employee, null, EmployeeId: worker))).SetupToken!;
             var invitation = await s.Access.InviteAsync(new InviteUserCommand(UserEmail, "Начальник цеха", SystemRoles.DepartmentHead, null));
             token = invitation.SetupToken!;
             _userId = invitation.UserId;
@@ -120,6 +127,7 @@ public sealed class AppFixture : IAsyncLifetime
         {
             await s.SignIn.AcceptInvitationAsync(token, Password, Password);
             await s.SignIn.AcceptInvitationAsync(storekeeperToken, Password, Password);
+            await s.SignIn.AcceptInvitationAsync(workerToken, Password, Password);
         }
 
         // Кладовщику пряжи — ещё склад цеха и склад готовой продукции отдельными правами: он выдаёт, выпускает и возвращает остатки.
@@ -137,6 +145,11 @@ public sealed class AppFixture : IAsyncLifetime
                         DateTime.UtcNow, "e2e", warehouseId: warehouse));
                 }
             }
+
+            // Вязальщице — право отмечать этапы отдельной выдачей (D92): так мастер допускает рабочего к терминалу.
+            var workerUser = await db.Users.Where(u => u.Email == WorkerEmail).Select(u => u.Id).SingleAsync();
+            db.RoleAssignments.Add(KnitErp.Domain.Access.RoleAssignment.ForPermission(org.OrganizationId, workerUser, Permissions.ProductionStageMark, false,
+                org.OwnerUserId, DateTime.UtcNow, "e2e"));
 
             await db.SaveChangesAsync();
         }

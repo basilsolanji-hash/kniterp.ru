@@ -92,6 +92,7 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(KnitErp.Domain.Production.ProductionFlow.Stages.Select(KnitErp.Domain.Production.ProductionFlow.StageName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Production.ProductionOperationKind>().Select(KnitErp.Domain.Production.ProductionFlow.KindName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Production.ProductionDocumentPurpose>().Select(KnitErp.Domain.Production.ProductionOrderDocument.PurposeName));
+        keys.UnionWith(KnitErp.Domain.Production.ShopFloorShortfall.Reasons);
 
         // Прочие названия, которые экраны переводят при выводе.
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Structure.EmploymentStatus>().Select(KnitErp.Domain.Structure.Employee.StatusName));
