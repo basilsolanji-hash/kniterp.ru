@@ -29,6 +29,7 @@ public static class AuditLabels
         [AuditActions.ExpenseReportCancelled] = "Отменён авансовый отчёт",
         [AuditActions.StockBatchCreated] = "Создана партия",
         [AuditActions.TagCreated] = "Создан тег",
+        [AuditActions.ExchangeExported] = "Выгрузка в 1С",
         [AuditActions.TagChanged] = "Изменён тег",
         [AuditActions.TagArchived] = "Тег в архиве",
         [AuditActions.TagAssigned] = "Поставлен тег",

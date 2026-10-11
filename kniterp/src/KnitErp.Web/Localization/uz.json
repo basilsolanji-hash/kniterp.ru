@@ -2407,5 +2407,17 @@
   "Цветные метки, как в Finder на Mac: отмечайте позиции, контрагентов, заказы, складские документы и партии, а потом находите всё отмеченное одним нажатием. Тег ставится на карточке объекта кнопкой «+ Тег»; в быстром поиске (Ctrl+K) наберите «#» и название.": "Mac'dagi Finder kabi rangli belgilar: pozitsiyalar, kontragentlar, buyurtmalar, ombor hujjatlari va partiyalarni belgilang, keyin barcha belgilanganlarni bir bosishda toping. Teg obyekt kartochkasida «+ Teg» tugmasi bilan qo'yiladi; tezkor qidiruvda (Ctrl+K) «#» va nomini tering.",
   "Что": "Nima",
   "Этот объект нельзя отметить тегом.": "Bu obyektni teg bilan belgilab bo'lmaydi.",
-  "Теги: {0}": "Teglar: {0}"
+  "Теги: {0}": "Teglar: {0}",
+  "В 1С откройте «Администрирование → Обслуживание → Загрузка данных из файла» (или обработку «Выгрузка и загрузка данных EnterpriseData»).": "1Cda «Администрирование → Обслуживание → Загрузка данных из файла» (yoki «Выгрузка и загрузка данных EnterpriseData» ishlovini) oching.",
+  "Выберите скачанный XML-файл и загрузите. Справочники сопоставятся по ИНН и КПП контрагентов и по коду номенклатуры.": "Yuklab olingan XML faylni tanlang va yuklang. Ma'lumotnomalar kontragentlarning INN va KPP bo'yicha hamda nomenklatura kodi bo'yicha moslashtiriladi.",
+  "Выгрузка в 1С": "1Cga yuklash",
+  "Заполните реквизиты юрлица организации — без них 1С не примет документы.": "Tashkilot yuridik shaxsi rekvizitlarini to'ldiring — ularsiz 1C hujjatlarni qabul qilmaydi.",
+  "Как загрузить в 1С": "1Cga qanday yuklash",
+  "Обмен с 1С": "1C bilan almashinuv",
+  "Перед первой загрузкой в рабочую базу проверьте файл на копии базы 1С: настройки сопоставления у каждой базы свои.": "Ishchi bazaga birinchi yuklashdan oldin faylni 1C bazasi nusxasida tekshiring: har bir bazaning moslashtirish sozlamalari o'ziga xos.",
+  "Период — не длиннее {0} дней, начало не позже конца.": "Davr — {0} kundan oshmasin, boshi oxiridan kech emas.",
+  "Скачать файл для 1С": "1C uchun faylni yuklab olish",
+  "Сторнированные документы не выгружаются. Если такой документ уже был загружен в 1С раньше, пометьте его на удаление в 1С вручную.": "Storno qilingan hujjatlar yuklanmaydi. Agar bunday hujjat 1Cga avval yuklangan bo'lsa, uni 1Cda qo'lda o'chirishga belgilang.",
+  "Файл в универсальном формате обмена EnterpriseData 1.8: его загружают «Бухгалтерия предприятия 3.0», «Управление торговлей 11» и «Комплексная автоматизация 2». В файле — проведённые складские документы за период (поступления, реализации, перемещения, списания, возвраты, оприходования) со справочниками, на которые они ссылаются. Повторная выгрузка того же периода обновляет документы в 1С, а не создаёт дубли.": "EnterpriseData 1.8 universal almashinuv formatidagi fayl: uni «Бухгалтерия предприятия 3.0», «Управление торговлей 11» va «Комплексная автоматизация 2» yuklaydi. Faylda — davr uchun o'tkazilgan ombor hujjatlari (kirimlar, sotuvlar, ko'chirishlar, hisobdan chiqarishlar, qaytarishlar, kirim qilishlar) va ular havola qiladigan ma'lumotnomalar. O'sha davrni qayta yuklash 1Cdagi hujjatlarni yangilaydi, dublikat yaratmaydi.",
+  "Этот вид документа не выгружается.": "Bu hujjat turi yuklanmaydi."
 }

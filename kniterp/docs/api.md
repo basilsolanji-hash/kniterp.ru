@@ -65,6 +65,7 @@ curl -X POST https://erp.example.ru/api/v1/customer-payments \
 | GET, POST | `/api/v1/batches?itemId=&search=&withBalance=true` | партии (цвет, крашение), новая партия |
 | GET | `/api/v1/batches/balances?warehouseId=&search=` | остатки с разбивкой по партиям |
 | GET | `/api/v1/tags`, `/api/v1/tags/{id}/objects` | теги и отмеченные объекты (в пределах прав) |
+| GET | `/api/v1/exchange/enterprise-data?from=&to=&legalEntityId=` | выгрузка для 1С (XML EnterpriseData 1.8): номенклатура, отчёты склада, цены |
 | POST | `/api/v1/tags/{id}/objects` | поставить тег: `{"entity":"StockDocument","entityId":15}` |
 
 Новый заказ со строками и подтверждением — одной транзакцией (ошибка в строке — заказа нет):

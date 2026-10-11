@@ -381,6 +381,28 @@ app.MapGet("/opening-balances.xlsx", (KnitErp.Web.Exports.ReportExports export, 
     FileOrForbid(() => export.OpeningBalancesAsync(ct), $"reestr-nachalnyh-ostatkov-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
 app.MapGet("/audit.xlsx", (KnitErp.Web.Exports.ReportExports export, CancellationToken ct) =>
     FileOrForbid(() => export.AuditAsync(ct), $"zhurnal-audita-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
+// D105: выгрузка для 1С в формате EnterpriseData; права проверяет сервис, ошибки правил — текстом.
+app.MapGet("/exchange/enterprise-data.xml", async (DateOnly from, DateOnly to, long? entity, KnitErp.Application.Exchange.EnterpriseDataExportService export,
+    CancellationToken ct) =>
+{
+    try
+    {
+        var file = await export.ExportAsync(from, to, entity, ct);
+        return Results.File(file.Xml, "application/xml", file.FileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+    catch (KnitErp.Domain.Common.BusinessRuleException ex)
+    {
+        return Results.Text(ex.Message, "text/plain; charset=utf-8", statusCode: StatusCodes.Status422UnprocessableEntity);
+    }
+});
 app.MapGet("/signins.xlsx", (DateOnly? from, DateOnly? to, bool? failures, KnitErp.Web.Exports.ReportExports export, CancellationToken ct) =>
     FileOrForbid(() => export.SignInsAsync(from, to, failures == true, ct), $"zhurnal-vhodov-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
 app.MapGet("/inventory/{id:long}/sheet.xlsx", (long id, InventoryService inventory, CancellationToken ct) =>

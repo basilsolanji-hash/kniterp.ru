@@ -1,0 +1,61 @@
+@page "/exchange/1c"
+@using KnitErp.Application.Organizations
+@inject LegalEntityService LegalEntities
+
+<PageTitle>@L("Обмен с 1С") — knitERP</PageTitle>
+
+@*
+    D105: выгрузка в 1С в универсальном формате EnterpriseData. Файл формирует сервер по ссылке — права, область складов и журнал
+    аудита проверяет сервис выгрузки.
+*@
+<h1>@L("Обмен с 1С")</h1>
+<p class="muted">@L("Файл в универсальном формате обмена EnterpriseData 1.8: его загружают «Бухгалтерия предприятия 3.0», «Управление торговлей 11» и «Комплексная автоматизация 2». В файле — проведённые складские документы за период (поступления, реализации, перемещения, списания, возвраты, оприходования) со справочниками, на которые они ссылаются. Повторная выгрузка того же периода обновляет документы в 1С, а не создаёт дубли.")</p>
+
+<form class="panel" @onsubmit:preventDefault>
+    <div class="grid">
+        <label>@L("С") <input type="date" @bind="_from" /></label>
+        <label>@L("По") <input type="date" @bind="_to" /></label>
+        <label>
+            @L("Юрлицо")
+            <select @bind="_entity">
+                <option value="">@L("Все")</option>
+                @foreach (var e in _entities)
+                {
+                    <option value="@e.Id">@e.ShortName</option>
+                }
+            </select>
+        </label>
+    </div>
+    <div class="actions">
+        <a class="button" href="@Href" download data-enhance-nav="false">@L("Скачать файл для 1С")</a>
+    </div>
+</form>
+
+<h2>@L("Как загрузить в 1С")</h2>
+<ol>
+    <li>@L("В 1С откройте «Администрирование → Обслуживание → Загрузка данных из файла» (или обработку «Выгрузка и загрузка данных EnterpriseData»).")</li>
+    <li>@L("Выберите скачанный XML-файл и загрузите. Справочники сопоставятся по ИНН и КПП контрагентов и по коду номенклатуры.")</li>
+    <li>@L("Перед первой загрузкой в рабочую базу проверьте файл на копии базы 1С: настройки сопоставления у каждой базы свои.")</li>
+</ol>
+<p class="muted small">@L("Сторнированные документы не выгружаются. Если такой документ уже был загружен в 1С раньше, пометьте его на удаление в 1С вручную.")</p>
+
+@code {
+    private IReadOnlyList<LegalEntityOptionDto> _entities = [];
+    private DateTime _from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private DateTime _to = DateTime.Today;
+    private long? _entity;
+
+    private string Href => $"exchange/enterprise-data.xml?from={_from:yyyy-MM-dd}&to={_to:yyyy-MM-dd}" + (_entity is { } e ? $"&entity={e}" : "");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _entities = await LegalEntities.OptionsAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _entities = [];
+        }
+    }
+}

@@ -321,6 +321,14 @@ public static class ApiV1
         api.MapGet("/reports/cash-flow", async (CashReportsService reports, DateOnly from, DateOnly to, long? legalEntityId, CancellationToken ct) =>
             ApiResult.Ok(await reports.CashFlowAsync(from, to, legalEntityId, ct))).WithSummary("Движение денег по статьям");
 
+        api.MapGet("/exchange/enterprise-data", async (KnitErp.Application.Exchange.EnterpriseDataExportService export, DateOnly from, DateOnly to,
+                long? legalEntityId, CancellationToken ct) =>
+            {
+                var file = await export.ExportAsync(from, to, legalEntityId, ct);
+                return Results.File(file.Xml, "application/xml", file.FileName);
+            })
+            .WithSummary("Выгрузка для 1С в формате EnterpriseData 1.8 (XML) за период");
+
         api.MapGet("/webhook-events", () => ApiResult.Ok(WebhookEvents.All.Select(e => new { e.Event, e.Title })))
             .WithSummary("Типы событий для вебхуков");
     }
