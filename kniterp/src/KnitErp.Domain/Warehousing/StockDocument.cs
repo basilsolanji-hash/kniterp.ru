@@ -135,6 +135,13 @@ public sealed class StockDocument
         }
     }
 
+    /// <summary>Разбивка строк по партиям изменилась (D89): версия документа растёт, устаревшая форма получит конфликт.</summary>
+    public void MarkLinesChanged()
+    {
+        EnsureDraft();
+        LinesRevision++;
+    }
+
     public void RemoveLine(long itemId)
     {
         EnsureDraft();

@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Web.Components.Shared
 @inject StockDocumentService Documents
+@inject StockBatchService BatchService
 
 <PageTitle>@(_doc?.Number ?? L("Документ")) — knitERP</PageTitle>
 
@@ -174,6 +175,126 @@ else
         </table>
     </div>
 
+    @if (_batches is { } bt && bt.Items.Count > 0 && (bt.CanEdit || bt.Items.Any(i => i.Rows.Count > 0) || bt.Movements.Count > 0))
+    {
+        @* D89: разбивка строк по партиям (цвет, крашение), места, брутто/нетто и пересчёт в кг. *@
+        <h2 style="margin-top: 24px">@L("Партии и вес")</h2>
+        <p class="muted small">
+            @(bt.IsIncoming
+                ? L("Укажите партию (номер, цвет, крашение) для каждой позиции — сумма по партиям должна совпасть с количеством строки. Без разбивки товар поступит «без партии».")
+                : L("Выберите партии для расхода. Без выбора спишется сначала остаток без партии, затем самые старые партии."))
+        </p>
+        <div class="scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th>@L("Позиция")</th><th>@L("Партия")</th><th class="num">@L("Количество")</th><th class="num">@L("Нетто, кг")</th>
+                        <th class="num">@L("Мест")</th><th class="num opt">@L("Брутто, кг")</th><th class="num opt">@L("Тара, кг")</th><th class="num opt">@L("Кг на место")</th>
+                        @if (bt.CanEdit) { <th></th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var it in bt.Items)
+                    {
+                        <tr class="@(it.Matches ? null : "short")">
+                            <td><strong>@it.Code</strong> <span class="muted small">@it.Name</span></td>
+                            <td class="muted">@(it.Rows.Count == 0 ? L("без разбивки") : it.Matches ? L("разбито полностью") : L("по партиям {0} из {1}", Quantities.Format(it.Allocated), Quantities.Format(it.LineQuantity)))</td>
+                            <td class="num"><strong>@Quantities.Format(it.LineQuantity) @it.UnitSymbol</strong></td>
+                            <td class="num">@KgText(it.LineKg)</td>
+                            <td class="num">@(it.Rows.Any(r => r.Packages is not null) ? it.Rows.Sum(r => r.Packages ?? 0).ToString() : "")</td>
+                            <td class="num opt">@(it.Rows.Any(r => r.GrossWeightKg is not null) ? KgText(it.Rows.Sum(r => r.GrossWeightKg ?? 0)) : "")</td>
+                            <td class="opt"></td><td class="opt"></td>
+                            @if (bt.CanEdit) { <td></td> }
+                        </tr>
+                        @foreach (var r in it.Rows)
+                        {
+                            <tr>
+                                <td></td>
+                                <td>@r.BatchLabel</td>
+                                <td class="num">@Quantities.Format(r.Quantity)</td>
+                                <td class="num">@KgText(r.NetKg)</td>
+                                <td class="num">@(r.Packages?.ToString() ?? "—")</td>
+                                <td class="num opt">@KgText(r.GrossWeightKg)</td>
+                                <td class="num opt @(r.TareKg < 0 ? "neg" : null)">@KgText(r.TareKg)</td>
+                                <td class="num opt">@KgText(r.NetPerPackageKg)</td>
+                                @if (bt.CanEdit)
+                                {
+                                    <td><button type="button" class="secondary" @onclick="() => RemoveBatchAsync(r)" disabled="@_busy" aria-label="@L("Убрать партию {0}", r.BatchLabel)">@L("Убрать")</button></td>
+                                }
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (bt.CanEdit)
+        {
+            var selected = bt.Items.FirstOrDefault(i => i.ItemId == _bItemId);
+            <form class="panel" @onsubmit="AddBatchAsync">
+                <div class="grid">
+                    <label>
+                        @L("Позиция")
+                        <select @bind="_bItemId" @bind:after="BatchItemChanged">
+                            <option value="">—</option>
+                            @foreach (var it in bt.Items)
+                            {
+                                <option value="@it.ItemId">@it.Code — @it.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Партия")
+                        <select @bind="_bBatchId">
+                            @if (bt.IsIncoming)
+                            {
+                                <option value="0">@L("+ новая партия")</option>
+                            }
+                            else
+                            {
+                                <option value="">—</option>
+                            }
+                            @foreach (var o in selected?.Options ?? [])
+                            {
+                                <option value="@o.Id">@o.Label@(o.Available is { } a ? " — " + L("есть {0}", Quantities.Format(a)) : "")</option>
+                            }
+                        </select>
+                    </label>
+                    @if (bt.IsIncoming && _bBatchId == 0)
+                    {
+                        <label>@L("Номер партии") <input @bind="_bNumber" maxlength="@KnitErp.Domain.Warehousing.StockBatch.NumberMaxLength" /></label>
+                        <label>@L("Цвет") <input @bind="_bColor" maxlength="@KnitErp.Domain.Warehousing.StockBatch.ColorMaxLength" /></label>
+                        <label>@L("Номер крашения") <input @bind="_bDyeLot" maxlength="@KnitErp.Domain.Warehousing.StockBatch.DyeLotMaxLength" /></label>
+                    }
+                    <label>@L("Количество") <input @bind="_bQty" inputmode="decimal" placeholder="@(selected is null ? "" : Quantities.Format(selected.LineQuantity - selected.Allocated))" /></label>
+                    <label>@L("Мест (бобин)") <input @bind="_bPackages" inputmode="numeric" /></label>
+                    <label>@L("Брутто, кг") <input @bind="_bGross" inputmode="decimal" /></label>
+                </div>
+                <div class="actions"><button type="submit" disabled="@(_busy || _bItemId is null)">@L("Добавить партию")</button></div>
+            </form>
+        }
+
+        @if (bt.Movements.Count > 0)
+        {
+            <h3>@L("Движения партий")</h3>
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Склад")</th><th>@L("Код")</th><th>@L("Партия")</th><th class="num">@L("Количество")</th><th class="num">@L("кг")</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in bt.Movements)
+                        {
+                            <tr>
+                                <td>@m.WarehouseName</td><td>@m.ItemCode</td><td>@m.BatchLabel</td>
+                                <td class="num @(m.Quantity < 0 ? "neg" : null)">@Quantities.Format(m.Quantity) @m.UnitSymbol</td>
+                                <td class="num">@KgText(m.Kg)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+
     <div class="actions" style="margin-top: 16px">
         @if (_doc.CanPost)
         {
@@ -244,7 +365,64 @@ else
         }
     }
 
-    private async Task LoadAsync() => _doc = await Documents.GetAsync(Id);
+    private DocumentBatchesDto? _batches;
+    private long? _bItemId;
+    private long? _bBatchId = 0;
+    private string? _bNumber;
+    private string? _bColor;
+    private string? _bDyeLot;
+    private string? _bQty;
+    private string? _bPackages;
+    private string? _bGross;
+
+    private async Task LoadAsync()
+    {
+        _doc = await Documents.GetAsync(Id);
+        _batches = await BatchService.ForDocumentAsync(Id);
+    }
+
+    private void BatchItemChanged() => _bBatchId = _batches?.IsIncoming == true ? 0 : null;
+
+    private static string KgText(decimal? kg) => kg is { } v ? v.ToString("#,0.###") : "—";
+
+    private Task AddBatchAsync() => RunAsync(async () =>
+    {
+        var item = _batches!.Items.FirstOrDefault(i => i.ItemId == _bItemId)
+                   ?? throw new BusinessRuleException("stock.batch.item", L("Выберите позицию."));
+        var qty = string.IsNullOrWhiteSpace(_bQty) ? item.LineQuantity - item.Allocated
+            : Quantities.TryParse(_bQty, out var q) ? q : throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));
+        int? packages = null;
+        if (!string.IsNullOrWhiteSpace(_bPackages))
+        {
+            packages = int.TryParse(_bPackages.Trim(), out var p) ? p : throw new BusinessRuleException("stock.batch.packages", L("Мест — целое положительное число."));
+        }
+
+        decimal? gross = null;
+        if (!string.IsNullOrWhiteSpace(_bGross))
+        {
+            gross = Quantities.TryParse(_bGross, out var g) ? g : throw new BusinessRuleException("stock.batch.gross_weight", L("Вес брутто — числом, например 25,4."));
+        }
+
+        long batchId;
+        if (_batches.IsIncoming && _bBatchId is 0)
+        {
+            // Вес места новой партии — из нетто строки и числа мест, если вес позиции известен.
+            var netKg = item.LineQuantity == 0 || item.LineKg is null ? null : (decimal?)(item.LineKg.Value / item.LineQuantity * qty);
+            decimal? perPackage = netKg is { } kg && packages is > 0 ? decimal.Round(kg / packages.Value, 3) : null;
+            batchId = await BatchService.CreateAsync(item.ItemId,
+                new KnitErp.Domain.Warehousing.StockBatchData(_bNumber, _bColor, _bDyeLot, StockDocument.WithSupplier(_doc!.Kind) ? _doc.CounterpartyId : null, perPackage is > 0 ? perPackage : null, null));
+            _batches = await BatchService.ForDocumentAsync(Id);
+        }
+        else
+        {
+            batchId = _bBatchId ?? throw new BusinessRuleException("stock.batch.required", L("Выберите партию."));
+        }
+
+        await BatchService.SetDocumentBatchAsync(Id, item.ItemId, batchId, qty, packages, gross, _batches.RowVersion);
+        _bNumber = _bColor = _bDyeLot = _bQty = _bPackages = _bGross = null;
+    }, L("Партия добавлена."));
+
+    private Task RemoveBatchAsync(DocumentBatchRowDto r) => RunAsync(() => BatchService.RemoveDocumentBatchAsync(Id, r.Id, _batches!.RowVersion), null);
 
     private Task EditHeaderAsync() => RunAsync(async () =>
     {

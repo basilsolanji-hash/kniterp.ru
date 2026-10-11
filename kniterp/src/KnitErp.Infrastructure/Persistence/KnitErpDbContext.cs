@@ -69,6 +69,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<OpeningBalance> OpeningBalances => Set<OpeningBalance>();
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();
     public DbSet<StockDocument> StockDocuments => Set<StockDocument>();
+    public DbSet<StockBatch> StockBatches => Set<StockBatch>();
+    public DbSet<StockDocumentBatchLine> StockDocumentBatchLines => Set<StockDocumentBatchLine>();
+    public DbSet<StockBatchMovement> StockBatchMovements => Set<StockBatchMovement>();
     public DbSet<InventoryCount> InventoryCounts => Set<InventoryCount>();
     public DbSet<PeriodClosure> PeriodClosures => Set<PeriodClosure>();
     public DbSet<KnitErp.Domain.Workspace.UserToolData> UserToolData => Set<KnitErp.Domain.Workspace.UserToolData>();
@@ -86,6 +89,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
         Database.CurrentTransaction is { } outer
             ? Task.FromResult<IDbContextTransaction>(new JoinedTransaction(outer))
             : Database.BeginTransactionAsync(cancellationToken);
+
+    public void DiscardChanges() => ChangeTracker.Clear();
 
     /// <summary>Участие во внешней транзакции: фиксация и откат — дело внешнего сценария.</summary>
     private sealed class JoinedTransaction(IDbContextTransaction outer) : IDbContextTransaction

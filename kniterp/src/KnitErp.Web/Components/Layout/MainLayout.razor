@@ -183,6 +183,7 @@
             Soon("picking-waves", "Волны отбора"),
             Soon("internal-orders", "Внутренние заказы"),
             new("stock", "Остатки", a => a.Has(Permissions.WarehouseReportView)),
+            new("stock-batches", "Партии и вес", a => a.Has(Permissions.WarehouseReportView) || Docs(a)),
             new("reports/turnover", "Обороты", a => a.Has(Permissions.WarehouseReportView)),
             new("warehouses", "Склады", a => a.Has(Permissions.CatalogView)),
             new("opening-balances", "Начальные остатки", a => a.Has(Permissions.OpeningBalanceCreate) || a.Has(Permissions.OpeningBalanceApprove)

@@ -338,6 +338,19 @@ public sealed class StockDocumentService(
     /// </summary>
     public async Task PostAsync(long id, byte[] rowVersion, CancellationToken ct = default)
     {
+        try
+        {
+            await PostCoreAsync(id, rowVersion, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // отказ после doc.Post не должен оставить «проведённый» документ в контексте вкладки
+            throw;
+        }
+    }
+
+    private async Task PostCoreAsync(long id, byte[] rowVersion, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentPost, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
@@ -371,8 +384,10 @@ public sealed class StockDocumentService(
             await EnsureReturnWithinShippedAsync(ctx, doc, salesOrderId, ct);
         }
 
+        var batchMoves = await StockBatchLedger.PlanPostAsync(db, ctx, doc, ct);
         doc.Post(ctx.UserId, requiresComment, clock.UtcNow);
         await WriteMovementsAsync(ctx, doc, doc.MovementDeltas(), StockSource.StockDocument, ct);
+        StockBatchLedger.Write(db, ctx, doc, batchMoves, StockSource.StockDocument, clock.UtcNow);
         Audit(ctx, AuditActions.StockDocumentPosted, doc, "Черновик", "Проведён", $"строк: {doc.Lines.Count}");
         await ClosedPeriod.SaveAsync(db, ct);
         await tx.CommitAsync(ct);
@@ -384,10 +399,24 @@ public sealed class StockDocumentService(
     /// </summary>
     public async Task ReverseAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct = default)
     {
+        try
+        {
+            await ReverseCoreAsync(id, reason, rowVersion, ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    private async Task ReverseCoreAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentPost, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.DocumentDate, ct);
+        var batchMoves = doc.Status == StockDocumentStatus.Posted ? await StockBatchLedger.PlanReverseAsync(db, ctx, doc, ct) : [];
         doc.Reverse(ctx.UserId, reason, clock.UtcNow);
 
         // Аудит 10.10.2026 (п. 1): сторно гасит фактически записанные движения документа, а не пересчёт по строкам —
@@ -398,6 +427,7 @@ public sealed class StockDocumentService(
                 .ToListAsync(ct))
             .Where(d => d.Sum != 0).Select(d => (d.WarehouseId, d.ItemId, -d.Sum)).ToList();
         await WriteMovementsAsync(ctx, doc, deltas, StockSource.StockDocumentReversal, ct);
+        StockBatchLedger.Write(db, ctx, doc, batchMoves, StockSource.StockDocumentReversal, clock.UtcNow);
         Audit(ctx, AuditActions.StockDocumentReversed, doc, "Проведён", "Сторнирован", doc.ReversalReason);
         await ClosedPeriod.SaveAsync(db, ct);
         await tx.CommitAsync(ct);

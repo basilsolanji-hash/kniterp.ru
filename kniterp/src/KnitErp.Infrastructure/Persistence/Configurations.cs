@@ -1374,6 +1374,86 @@ internal sealed class StockDocumentLineConfiguration : IEntityTypeConfiguration<
     }
 }
 
+internal sealed class StockBatchConfiguration : IEntityTypeConfiguration<StockBatch>
+{
+    public void Configure(EntityTypeBuilder<StockBatch> b)
+    {
+        b.ToTable("stock_batches", t =>
+            t.HasCheckConstraint("ck_stock_batches_package_weight", "[PackageWeightKg] IS NULL OR [PackageWeightKg] > 0"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Number).HasMaxLength(StockBatch.NumberMaxLength).IsRequired();
+        b.Property(x => x.Color).HasMaxLength(StockBatch.ColorMaxLength);
+        b.Property(x => x.DyeLot).HasMaxLength(StockBatch.DyeLotMaxLength);
+        b.Property(x => x.Comment).HasMaxLength(StockBatch.CommentMaxLength);
+        b.Property(x => x.PackageWeightKg).HasColumnType("decimal(18,6)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_stock_batches_org_id");
+        b.HasAlternateKey(x => new { x.OrganizationId, x.ItemId, x.Id }).HasName("ak_stock_batches_org_item_id");
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_batches_item");
+        b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SupplierId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_batches_supplier");
+        b.HasIndex(x => new { x.OrganizationId, x.ItemId, x.Number }).IsUnique().HasDatabaseName("ux_stock_batches_org_item_number");
+    }
+}
+
+internal sealed class StockDocumentBatchLineConfiguration : IEntityTypeConfiguration<StockDocumentBatchLine>
+{
+    public void Configure(EntityTypeBuilder<StockDocumentBatchLine> b)
+    {
+        b.ToTable("stock_document_batch_lines", t =>
+        {
+            t.HasCheckConstraint("ck_stock_document_batch_lines_quantity", "[Quantity] > 0");
+            t.HasCheckConstraint("ck_stock_document_batch_lines_packages", "[Packages] IS NULL OR [Packages] > 0");
+            t.HasCheckConstraint("ck_stock_document_batch_lines_gross", "[GrossWeightKg] IS NULL OR [GrossWeightKg] > 0");
+            t.HasTrigger("tr_stock_document_batch_lines_draft_only");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.GrossWeightKg).HasColumnType("decimal(18,6)");
+        b.HasOne<StockDocument>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DocumentId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_document_batch_lines_document");
+        // Партия той же позиции, что и строка: составной ключ (организация, позиция, партия).
+        b.HasOne<StockBatch>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId, x.BatchId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.ItemId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_document_batch_lines_batch");
+        b.HasIndex(x => new { x.DocumentId, x.ItemId, x.BatchId }).IsUnique().HasDatabaseName("ux_stock_document_batch_lines_doc_item_batch");
+    }
+}
+
+internal sealed class StockBatchMovementConfiguration : IEntityTypeConfiguration<StockBatchMovement>
+{
+    public void Configure(EntityTypeBuilder<StockBatchMovement> b)
+    {
+        b.ToTable("stock_batch_movements", t =>
+        {
+            t.HasTrigger("tr_stock_batch_movements_immutable");
+            t.HasCheckConstraint("ck_stock_batch_movements_quantity", "[Quantity] <> 0");
+            t.HasCheckConstraint("ck_stock_batch_movements_source", "[Source] IN (2, 3)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.Source).HasConversion<byte>();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<Warehouse>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.WarehouseId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_batch_movements_warehouse");
+        b.HasOne<StockBatch>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId, x.BatchId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.ItemId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_batch_movements_batch");
+        b.HasIndex(x => new { x.OrganizationId, x.WarehouseId, x.ItemId, x.BatchId }).HasDatabaseName("ix_stock_batch_movements_org_wh_item_batch");
+        b.HasIndex(x => new { x.OrganizationId, x.BatchId }).HasDatabaseName("ix_stock_batch_movements_org_batch");
+        b.HasIndex(x => new { x.Source, x.SourceId }).HasDatabaseName("ix_stock_batch_movements_source");
+    }
+}
+
 internal sealed class InventoryCountConfiguration : IEntityTypeConfiguration<InventoryCount>
 {
     public void Configure(EntityTypeBuilder<InventoryCount> b)

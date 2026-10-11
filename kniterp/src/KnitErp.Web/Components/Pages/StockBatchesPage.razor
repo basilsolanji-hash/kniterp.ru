@@ -1,0 +1,434 @@
+@page "/stock-batches"
+@using KnitErp.Application.Warehousing
+@using KnitErp.Application.Structure
+@using KnitErp.Domain.Warehousing
+@using KnitErp.Web.Components.Shared
+@inject StockBatchService Batches
+@inject StockService Stock
+
+<PageTitle>@L("Партии и вес") — knitERP</PageTitle>
+
+@*
+    D89: партии пряжи (номер, цвет, крашение), остатки по партиям и пересчёт кг ↔ шт ↔ места. Партия выбирается в строках
+    складского документа; расход без выбора партии списывает сначала остаток «без партии», затем самые старые партии.
+*@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Партии и вес")</h1>
+    <p class="muted">@L("Пряжа разных крашений одного цвета отличается тоном — партии учитываются раздельно. Партия указывается в строках поступления, расход без партии списывает сначала остаток без партии, затем самые старые партии.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="@(_tab == 0 ? "tab active" : "tab secondary")" aria-selected="@(_tab == 0 ? "true" : "false")" @onclick="() => _tab = 0">@L("Партии")</button>
+        @if (_canReport)
+        {
+            <button type="button" role="tab" class="@(_tab == 1 ? "tab active" : "tab secondary")" aria-selected="@(_tab == 1 ? "true" : "false")" @onclick="ShowBalancesAsync">@L("Остатки по партиям")</button>
+        }
+        <button type="button" role="tab" class="@(_tab == 2 ? "tab active" : "tab secondary")" aria-selected="@(_tab == 2 ? "true" : "false")" @onclick="() => _tab = 2">@L("Пересчёт кг ↔ шт")</button>
+    </div>
+
+    @if (_tab == 0)
+    {
+        <form class="inline-form" @onsubmit="ReloadAsync">
+            <label>@L("Поиск") <input @bind="_search" placeholder="@L("Партия, цвет, крашение, позиция")" /></label>
+            <label class="check"><input type="checkbox" @bind="_onlyBalance" /> @L("Только с остатком")</label>
+            <label class="check"><input type="checkbox" @bind="_archived" /> @L("Показать архив")</label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+            @if (_canEdit && _form is null)
+            {
+                <button type="button" @onclick="NewBatch" disabled="@_busy">@L("Новая партия")</button>
+            }
+        </form>
+
+        @if (_form is not null)
+        {
+            <form class="panel" @onsubmit="SaveAsync">
+                <h2>@(_form.Id is null ? L("Новая партия") : L("Партия {0}", _form.Number ?? ""))</h2>
+                <div class="grid">
+                    @if (_form.Id is null)
+                    {
+                        <label>
+                            @L("Позиция")
+                            <input list="batch-items" @bind="_form.ItemText" placeholder="@L("Код или наименование")" required />
+                            <datalist id="batch-items">
+                                @foreach (var i in _items)
+                                {
+                                    <option value="@($"{i.Code} — {i.Name}")">@i.UnitSymbol</option>
+                                }
+                            </datalist>
+                        </label>
+                    }
+                    <label>@L("Номер партии") <input @bind="_form.Number" maxlength="@StockBatch.NumberMaxLength" required /></label>
+                    <label>@L("Цвет") <input @bind="_form.Color" maxlength="@StockBatch.ColorMaxLength" placeholder="@L("бордо, 1432")" /></label>
+                    <label>@L("Номер крашения") <input @bind="_form.DyeLot" maxlength="@StockBatch.DyeLotMaxLength" /></label>
+                    <label>
+                        @L("Поставщик")
+                        <select @bind="_form.SupplierId">
+                            <option value="">—</option>
+                            @foreach (var s in _suppliers)
+                            {
+                                <option value="@s.Id">@s.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Вес места (бобины), кг") <input @bind="_form.PackageWeightText" inputmode="decimal" placeholder="1,25" /></label>
+                    <label class="wide">@L("Комментарий") <input @bind="_form.Comment" maxlength="@StockBatch.CommentMaxLength" /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                    <button type="button" class="secondary" @onclick="() => _form = null">@L("Отмена")</button>
+                </div>
+            </form>
+        }
+
+        <div class="scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th>@L("Позиция")</th><th>@L("Партия")</th><th>@L("Цвет")</th><th>@L("Крашение")</th><th class="opt">@L("Поставщик")</th>
+                        <th class="num">@L("Остаток")</th><th class="num">@L("кг")</th><th class="num opt">@L("Мест")</th><th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_rows.Count == 0)
+                    {
+                        <tr><td colspan="9" class="muted">@L("Партий пока нет.")</td></tr>
+                    }
+                    @foreach (var b in _rows)
+                    {
+                        <tr class="@(b.IsArchived ? "archived" : null)">
+                            <td>@b.ItemCode<div class="muted small">@b.ItemName</div></td>
+                            <td>@b.Number</td>
+                            <td>@(b.Color ?? "—")</td>
+                            <td>@(b.DyeLot ?? "—")</td>
+                            <td class="opt">@(b.SupplierName ?? "—")</td>
+                            <td class="num">@Quantities.Format(b.Balance) @b.UnitSymbol</td>
+                            <td class="num">@Kg(b.BalanceKg)</td>
+                            <td class="num opt">@(b.BalancePackages is { } p ? p.ToString("0.#") : "—")</td>
+                            <td>
+                                @if (_canEdit && !b.IsArchived)
+                                {
+                                    <div class="row-actions">
+                                        <button type="button" class="secondary" @onclick="() => Edit(b)" disabled="@_busy">@L("Изменить")</button>
+                                        <ConfirmButton Class="secondary" Disabled="_busy" Question="@L("Перенести партию в архив?")" OnConfirm="() => ArchiveAsync(b)">@L("В архив")</ConfirmButton>
+                                    </div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_tab == 1 && _balances is not null)
+    {
+        <form class="inline-form" @onsubmit="ShowBalancesAsync">
+            <label>
+                @L("Склад")
+                <select @bind="_warehouse">
+                    <option value="">@L("Все доступные")</option>
+                    @foreach (var w in _warehouses)
+                    {
+                        <option value="@w.Id">@w.Name</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Поиск") <input @bind="_balanceSearch" placeholder="@L("Позиция, партия, цвет")" /></label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        </form>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Склад")</th><th>@L("Позиция")</th><th>@L("Партия")</th><th class="num">@L("Остаток")</th><th class="num">@L("кг")</th><th class="num">@L("Мест")</th></tr></thead>
+                <tbody>
+                    @if (_balances.Count == 0)
+                    {
+                        <tr><td colspan="6" class="muted">@L("Остатков по партиям нет.")</td></tr>
+                    }
+                    @foreach (var r in _balances)
+                    {
+                        <tr>
+                            <td>@r.WarehouseName</td>
+                            <td colspan="2"><strong>@r.ItemCode</strong> @r.ItemName</td>
+                            <td class="num"><strong>@Quantities.Format(r.Total) @r.UnitSymbol</strong></td>
+                            <td class="num"><strong>@Kg(r.TotalKg)</strong></td>
+                            <td></td>
+                        </tr>
+                        @foreach (var p in r.Batches)
+                        {
+                            <tr>
+                                <td></td><td></td>
+                                <td>@p.Label</td>
+                                <td class="num">@Quantities.Format(p.Quantity)</td>
+                                <td class="num">@Kg(p.Kg)</td>
+                                <td class="num">@(p.Packages is { } n ? n.ToString("0.#") : "—")</td>
+                            </tr>
+                        }
+                        @if (r.WithoutBatch != 0)
+                        {
+                            <tr class="@(r.WithoutBatch < 0 ? "short" : null)">
+                                <td></td><td></td>
+                                <td class="muted">@(r.WithoutBatch < 0 ? L("расхождение: израсходовано без партии") : L("без партии"))</td>
+                                <td class="num @(r.WithoutBatch < 0 ? "neg" : null)">@Quantities.Format(r.WithoutBatch)</td>
+                                <td></td><td></td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_tab == 2)
+    {
+        <div class="panel">
+            <h2>@L("Пересчёт кг ↔ шт")</h2>
+            <p class="muted small">@L("Штучная позиция пересчитывается через вес единицы из карточки номенклатуры, весовая — в места через вес места партии.")</p>
+            <div class="grid">
+                <label>
+                    @L("Позиция")
+                    <input list="conv-items" @bind="_convItemText" @bind:after="ConvChanged" placeholder="@L("Код или наименование")" />
+                    <datalist id="conv-items">
+                        @foreach (var i in _items)
+                        {
+                            <option value="@($"{i.Code} — {i.Name}")">@i.UnitSymbol</option>
+                        }
+                    </datalist>
+                </label>
+                <label>
+                    @L("Партия (для веса места)")
+                    <select @bind="_convBatchId">
+                        <option value="">—</option>
+                        @foreach (var b in _rows.Where(b => b.ItemId == ConvItem?.Id && b.PackageWeightKg is not null))
+                        {
+                            <option value="@b.Id">@b.Label (@Kg(b.PackageWeightKg) @L("кг"))</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Вес места, кг") <input @bind="_convPackageText" inputmode="decimal" placeholder="@L("из партии или вручную")" /></label>
+                <label>@L("Количество") <input @bind="_convQtyText" @bind:event="oninput" inputmode="decimal" /></label>
+                <label>
+                    @L("Что введено")
+                    <select @bind="_convFrom">
+                        <option value="unit">@L("в единицах позиции")</option>
+                        <option value="kg">@L("в кг")</option>
+                        <option value="pkg">@L("в местах (бобинах)")</option>
+                    </select>
+                </label>
+            </div>
+            @if (ConvItem is { } ci)
+            {
+                <dl class="facts">
+                    <dt>@L("Единица")</dt><dd>@ci.UnitSymbol@(ci.KgPerUnit is { } k ? $" = {Kg(k)} " + L("кг") : " — " + L("вес единицы не указан в карточке"))</dd>
+                    @if (Convert() is { } r)
+                    {
+                        <dt>@L("В единицах")</dt><dd>@(r.Units is { } u ? Quantities.Format(u) + " " + ci.UnitSymbol : "—")</dd>
+                        <dt>@L("В кг")</dt><dd>@Kg(r.Kg)</dd>
+                        <dt>@L("В местах")</dt><dd>@(r.Packages is { } p ? p.ToString("0.#") : "—")</dd>
+                    }
+                </dl>
+            }
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<StockBatchRowDto>? _rows;
+    private IReadOnlyList<BatchBalanceDto>? _balances;
+    private IReadOnlyList<BatchItemDto> _items = [];
+    private IReadOnlyList<LookupDto> _suppliers = [];
+    private IReadOnlyList<LookupWarehouseDto> _warehouses = [];
+    private BatchForm? _form;
+    private int _tab;
+    private bool _canEdit;
+    private bool _canReport;
+    private string? _search;
+    private bool _onlyBalance;
+    private bool _archived;
+    private long? _warehouse;
+    private string? _balanceSearch;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private string? _convItemText;
+    private long? _convBatchId;
+    private string? _convPackageText;
+    private string? _convQtyText;
+    private string _convFrom = "unit";
+
+    private sealed class BatchForm
+    {
+        public long? Id { get; set; }
+        public byte[] RowVersion { get; set; } = [];
+        public string? ItemText { get; set; }
+        public string? Number { get; set; }
+        public string? Color { get; set; }
+        public string? DyeLot { get; set; }
+        public long? SupplierId { get; set; }
+        public string? PackageWeightText { get; set; }
+        public string? Comment { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canEdit = CurrentAccess.Has(Permissions.WarehouseDocumentCreate);
+        _canReport = CurrentAccess.Has(Permissions.WarehouseReportView);
+        try
+        {
+            await LoadAsync();
+            _items = await Batches.ItemsAsync();
+            if (_canEdit)
+            {
+                _suppliers = await Batches.SuppliersAsync();
+            }
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync() =>
+        _rows = await Batches.ListAsync(new StockBatchFilter(null, _search, _archived, _onlyBalance));
+
+    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
+
+    private Task ShowBalancesAsync() => RunAsync(async () =>
+    {
+        if (_warehouses.Count == 0)
+        {
+            _warehouses = await Stock.ListWarehousesAsync();
+        }
+
+        _balances = await Batches.BalancesAsync(_warehouse, _balanceSearch);
+        _tab = 1;
+    }, null);
+
+    private void NewBatch() => _form = new BatchForm();
+
+    private void Edit(StockBatchRowDto b) => _form = new BatchForm
+    {
+        Id = b.Id, RowVersion = b.RowVersion, Number = b.Number, Color = b.Color, DyeLot = b.DyeLot, SupplierId = b.SupplierId,
+        PackageWeightText = b.PackageWeightKg?.ToString("0.###"), Comment = b.Comment,
+    };
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var f = _form!;
+        decimal? weight = null;
+        if (!string.IsNullOrWhiteSpace(f.PackageWeightText))
+        {
+            weight = Quantities.TryParse(f.PackageWeightText, out var w)
+                ? w
+                : throw new BusinessRuleException("stock.batch.package_weight", L("Вес места — числом, например 1,25."));
+        }
+
+        var data = new StockBatchData(f.Number, f.Color, f.DyeLot, f.SupplierId, weight, f.Comment);
+        if (f.Id is { } id)
+        {
+            await Batches.UpdateAsync(id, data, f.RowVersion);
+        }
+        else
+        {
+            var item = FindItem(f.ItemText) ?? throw new BusinessRuleException("stock.item.unknown", L("Позиция «{0}» не найдена. Выберите из списка.", f.ItemText ?? ""));
+            await Batches.CreateAsync(item.Id, data);
+        }
+
+        _form = null;
+    }, L("Партия сохранена."));
+
+    private Task ArchiveAsync(StockBatchRowDto b) => RunAsync(() => Batches.ArchiveAsync(b.Id, b.RowVersion), L("Партия в архиве."));
+
+    private BatchItemDto? FindItem(string? text)
+    {
+        var code = (text ?? "").Split(" — ", 2)[0].Trim();
+        return _items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private BatchItemDto? ConvItem => FindItem(_convItemText);
+
+    private long? _convItemId;
+
+    /// <summary>Партия сбрасывается только при смене позиции: change поля приходит и при простом уходе фокуса.</summary>
+    private void ConvChanged()
+    {
+        if (ConvItem?.Id != _convItemId)
+        {
+            _convItemId = ConvItem?.Id;
+            _convBatchId = null;
+        }
+    }
+
+    private (decimal? Units, decimal? Kg, decimal? Packages)? Convert()
+    {
+        if (ConvItem is not { } item || !Quantities.TryParse(_convQtyText, out var value) || value < 0)
+        {
+            return null;
+        }
+
+        decimal? package = Quantities.TryParse(_convPackageText, out var manual) && manual > 0
+            ? manual
+            : _rows!.FirstOrDefault(b => b.Id == _convBatchId)?.PackageWeightKg;
+        var kgPerUnit = item.KgPerUnit;
+        decimal? kg = _convFrom switch
+        {
+            "kg" => value,
+            "pkg" => package is { } p ? value * p : null,
+            _ => kgPerUnit is { } k ? value * k : null,
+        };
+        decimal? units = _convFrom == "unit"
+            ? value
+            : kg is { } x ? WeightConversion.FromKg(x, item.UnitCode, item.WeightKg, item.Precision) : null;
+        return (units, kg is { } r ? decimal.Round(r, 3) : null, kg is { } y ? WeightConversion.Packages(y, package) : null);
+    }
+
+    private static string Kg(decimal? kg) => kg is { } v ? v.ToString("#,0.###") : "—";
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

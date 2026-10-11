@@ -100,6 +100,9 @@ public static class AuditActions
     public const string ExpenseReportChanged = "expense_report.changed";
     public const string ExpenseReportApproved = "expense_report.approved";
     public const string ExpenseReportCancelled = "expense_report.cancelled";
+    public const string StockBatchCreated = "stock.batch.created";
+    public const string StockBatchChanged = "stock.batch.changed";
+    public const string StockBatchArchived = "stock.batch.archived";
     public const string ApiTokenIssued = "api.token.issued";
     public const string ApiTokenRevoked = "api.token.revoked";
     public const string WebhookCreated = "webhook.created";

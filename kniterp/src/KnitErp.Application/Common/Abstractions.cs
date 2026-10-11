@@ -102,6 +102,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<OpeningBalance> OpeningBalances { get; }
     DbSet<StockMovement> StockMovements { get; }
     DbSet<StockDocument> StockDocuments { get; }
+    DbSet<StockBatch> StockBatches { get; }
+    DbSet<StockDocumentBatchLine> StockDocumentBatchLines { get; }
+    DbSet<StockBatchMovement> StockBatchMovements { get; }
     DbSet<InventoryCount> InventoryCounts { get; }
     DbSet<PeriodClosure> PeriodClosures { get; }
     DbSet<KnitErp.Domain.Workspace.UserToolData> UserToolData { get; }
@@ -111,6 +114,12 @@ public interface IKnitErpDbContext : IAsyncDisposable
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Забыть несохранённые изменения после отказа сценария: у вкладки Blazor один контекст, и без этого изменённая в памяти
+    /// сущность (например, «проведённый» документ, проведение которого отклонено) ушла бы в базу со следующим сохранением.
+    /// </summary>
+    void DiscardChanges();
 
     /// <summary>
     /// Исключительная блокировка складов до конца текущей транзакции: проверка остатка и запись расхода
