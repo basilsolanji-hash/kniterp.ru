@@ -54,5 +54,8 @@ description: Модуль «Производство» knitERP — произв�
 - `TaggedEntity`: 1–10 общие, 11–19 производство (`ProductionOrder = 11`), 20–29 кадры; CHECK тегов и обсуждений — `BETWEEN 1 AND 29` (D202).
 - `IWorkOutputSource` (`Application/Hr/WorkOutput.cs`) — файл побайтно одинаковый в обеих ветках; производство регистрирует `ProductionWorkOutputSource`
   через `AddScoped`, кадры — заглушку через `TryAddScoped`: при любом порядке строк побеждает производство. Идентификатор операции — номер этапа 1–5.
+- Номера этапов 1–5 — коды операций в сдельных расценках кадров: не перенумеровывать; новый вид работы — новый номер (6, 7…).
+- `IProductionDashboardSource` (главный экран, D111 базы) — `ProductionDashboardSource`; смена этапа заказа покупателя (D110) —
+  `StageAutomation.ApplyAsync` при запуске и полном выпуске (D406).
 - `ItemType` 10 и 11 заняты каталогом (сессия 4) — не использовать.
 - В ветку `claude/fervent-volta-3pn88r` не пушить; перед новой миграцией — `git merge origin/claude/fervent-volta-3pn88r`.
