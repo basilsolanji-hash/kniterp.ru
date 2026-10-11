@@ -97,6 +97,7 @@ public static class AuditLabels
         [AuditActions.PayrollApproved] = "Утверждён расчёт заработка",
         [AuditActions.PayslipViewed] = "Просмотр расчётного листка",
         [AuditActions.PayrollExported] = "Выгрузка начислений в 1С",
+        [AuditActions.ProductionScoresExported] = "Выгрузка баллов и показателей сотрудников в Excel",
         [AuditActions.HrSettingsChanged] = "Изменены настройки кадров и заработка",
         [AuditActions.StockDocumentCreated] = "Создан складской документ",
         [AuditActions.StockDocumentChanged] = "Изменён складской документ",

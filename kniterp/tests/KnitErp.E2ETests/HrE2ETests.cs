@@ -285,6 +285,32 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         }
     });
 
+    /// <summary>D221: блок «Смена сегодня» на главном — неявка видна по имени (в выходной — выход сверх графика), ссылка ведёт в табель.</summary>
+    [SqlFact]
+    public async Task Dashboard_shows_shift_today_and_links_to_timesheet()
+    {
+        var workday = await app.MarkShiftTodayAsync();
+        foreach (var phone in new[] { false, true })
+        {
+            await RunAsync(phone ? "hr-dashboard-phone" : "hr-dashboard", phone, async page =>
+            {
+                await OpenAsync(page, "");
+                var shift = page.Locator("a.prod-shift");
+                await Expect(shift).ToBeVisibleAsync();
+                await Expect(shift).ToContainTextAsync("Смена сегодня");
+                if (workday)
+                {
+                    await Expect(shift).ToContainTextAsync("не вышли");
+                    await Expect(shift).ToContainTextAsync("Петрова А.");
+                }
+
+                Assert.True(await NoHorizontalScrollAsync(page), "Горизонтальная прокрутка на главном");
+                await shift.ClickAsync();
+                await page.WaitForURLAsync(new Regex("/hr/timesheet$"));
+            });
+        }
+    }
+
     /// <summary>Телефон 390 px: страницы кадров без горизонтальной прокрутки; таблица табеля прокручивается внутри себя (ТЗ §8).</summary>
     [SqlFact]
     public Task Hr_pages_have_no_horizontal_scroll_on_phone() => RunAsync("hr-phone", true, async page =>

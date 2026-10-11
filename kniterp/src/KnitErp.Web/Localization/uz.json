@@ -3538,5 +3538,6 @@
   "Сохранить поставщика": "Yetkazib beruvchini saqlash",
   "У комплекта нет поставщиков — их задают у компонентов.": "To‘plamda yetkazib beruvchilar yo‘q — ular tarkibiy qismlarda belgilanadi.",
   "У позиции не больше {0} поставщиков.": "Pozitsiyada {0} tadan ortiq yetkazib beruvchi bo‘lmaydi.",
-  "Убрать поставщика?": "Yetkazib beruvchi olib tashlansinmi?"
+  "Убрать поставщика?": "Yetkazib beruvchi olib tashlansinmi?",
+  "Выгрузка баллов и показателей сотрудников в Excel": "Xodimlarning ballari va koʻrsatkichlarini Excel ga eksport qilish"
 }

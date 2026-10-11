@@ -62,6 +62,12 @@ public sealed class ProductionScoreService(IKnitErpDbContext db, IAccessGuard gu
             t.OrderNumber, t.ItemName, t.StageName, N(t.Planned), N(t.Fact), t.UnitSymbol, t.IsCancelled ? "" : I(t.Percent),
             t.IsCancelled ? "отменено" : t.Done ? "выполнено" : "не выполнено", t.ShortfallReason ?? "", t.ShortfallComment ?? ""]).ToList();
         var format = spreadsheet ?? throw new InvalidOperationException("Не настроена выгрузка в Excel.");
+        // D223 (сессия «Сотрудники»): массовая выгрузка ФИО, табельных номеров и брака по вине уходит за пределы системы — запись в журнал,
+        // как у выгрузки начислений. Без имён и чисел: только период и количество строк.
+        db.AuditEntries.Add(KnitErp.Domain.Audit.AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId,
+            KnitErp.Domain.Audit.AuditActions.ProductionScoresExported, "ProductionScores", null, null,
+            $"{from:dd.MM.yyyy}–{to:dd.MM.yyyy}: сотрудников {board.Rows.Count}, заданий {details.Count}", "Excel"));
+        await db.SaveChangesAsync(ct);
         return format.Write(
         [
             new SheetData($"Показатели {from:dd.MM}–{to:dd.MM.yyyy}", header, scores,
