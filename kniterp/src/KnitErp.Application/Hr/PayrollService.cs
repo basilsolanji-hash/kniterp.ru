@@ -21,7 +21,7 @@ public sealed record PayrollEmployeeDto(long EmployeeId, string PersonnelNumber,
 
 public sealed record PayrollDto(
     long? Id, int Year, int Month, PayrollStatus? Status, bool TimesheetsClosed, DateTime? CalculatedAtUtc, IReadOnlyList<PayrollEmployeeDto> Employees,
-    bool CanCalculate, byte[]? RowVersion)
+    bool CanCalculate, byte[]? RowVersion, bool OutputChanged = false)
 {
     public decimal Total => Employees.Sum(e => e.Total);
 }
@@ -48,8 +48,34 @@ public sealed record PayslipDto(
 /// Считает Бухгалтер или Владелец; сотрудник видит только свой листок; каждый просмотр чужого листка — в журнал.
 /// </summary>
 public sealed class PayrollService(
-    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, TimesheetService timesheets, IWorkOutputSource output)
+    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, TimesheetService timesheets, IWorkOutputSource output,
+    ISpreadsheetFormat spreadsheet)
 {
+    /// <summary>
+    /// Расчёт месяца в Excel для сверки с данными фабрики (приёмка, D216): строка на каждое начисление — табельный номер, ФИО, вид,
+    /// расчёт, количество, ставка, сумма. Суммы видны только с правом просмотра заработка; выгрузка — в журнал.
+    /// </summary>
+    public async Task<(string FileName, byte[] Content)> ExportAsync(int year, int month, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.PayrollView, ct);
+        var run = await db.PayrollRuns.AsNoTracking().SingleOrDefaultAsync(r => r.OrganizationId == ctx.OrganizationId && r.Year == year && r.Month == month, ct)
+                  ?? throw new NotFoundException("Расчёт");
+        var rows = await (from l in db.PayrollLines.AsNoTracking()
+                          join e in db.Employees.AsNoTracking() on l.EmployeeId equals e.Id
+                          where l.RunId == run.Id
+                          orderby e.LastName, e.FirstName, l.Kind, l.Id
+                          select new { e.PersonnelNumber, e.LastName, e.FirstName, e.MiddleName, l.Kind, l.Description, l.Quantity, l.Rate, l.Amount }).ToListAsync(ct);
+        static string Inv(decimal v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+        var content = spreadsheet.Write([new SheetData($"Заработок {month:00}.{year}",
+            ["Таб. №", "ФИО", "Вид начисления", "Расчёт", "Количество", "Ставка", "Сумма"],
+            rows.Select(r => (IReadOnlyList<string>)[r.PersonnelNumber, Name(r.LastName, r.FirstName, r.MiddleName), PayrollRules.KindName(r.Kind),
+                r.Description, Inv(r.Quantity), Inv(r.Rate), Inv(r.Amount)]).ToList(), new HashSet<int> { 4, 5, 6 })]);
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.PayrollExported, nameof(PayrollRun), run.Id.ToString(),
+            null, $"{month:00}.{year}: строк {rows.Count}", "Excel для сверки", currentUser.CorrelationId));
+        await db.SaveChangesAsync(ct);
+        return ($"payroll-{year}-{month:00}.xlsx", content);
+    }
+
     public async Task<IReadOnlyList<PieceRateDto>> RatesAsync(CancellationToken ct = default)
     {
         var ctx = await DemandViewAsync(ct);
@@ -111,16 +137,144 @@ public sealed class PayrollService(
             rows = employees.OrderBy(e => e.LastName).ThenBy(e => e.FirstName).Select(e =>
             {
                 var own = lines.Where(l => l.EmployeeId == e.Id).ToList();
-                var piece = own.Where(l => l.Kind == PayrollLineKind.Piece).Sum(l => l.Amount);
+                var piece = own.Where(l => l.Kind is PayrollLineKind.Piece or PayrollLineKind.PieceCorrection).Sum(l => l.Amount);
                 var salary = own.Where(l => l.Kind == PayrollLineKind.Salary).Sum(l => l.Amount);
                 return new PayrollEmployeeDto(e.Id, e.PersonnelNumber, Name(e.LastName, e.FirstName, e.MiddleName), e.Position, piece, salary,
                     own.Sum(l => l.Amount) - piece - salary, own.Sum(l => l.Amount));
             }).ToList();
         }
 
+        var outputChanged = run is not null && !run.OutputMatches(await OutputFingerprintAsync(ctx.OrganizationId, run, ct));
         return new PayrollDto(run?.Id, year, month, run?.Status, run?.TimesheetsClosed ?? false, run?.CalculatedAtUtc, rows,
-            ctx.Permissions.Has(Permissions.PayrollCalculate) && run?.Status != PayrollStatus.Approved, run?.RowVersion);
+            ctx.Permissions.Has(Permissions.PayrollCalculate) && run?.Status != PayrollStatus.Approved, run?.RowVersion, outputChanged);
     }
+
+    /// <summary>Сдельные строки сотрудника: выработка × расценка на дату; без расценки или с другой единицей — предупреждение, не оплачивается.</summary>
+    private static (List<PayrollLine> Lines, decimal Piece) PieceLines(long org, long runId, long employeeId, string fullName, IEnumerable<WorkOutputDto> outputs,
+        IReadOnlyList<PieceRate> rates, List<string>? warnings)
+    {
+        var lines = new List<PayrollLine>();
+        decimal piece = 0;
+        foreach (var g in outputs.GroupBy(o => (o.OperationId, o.ItemId, Unit: PieceRate.NormalizeUnit(o.Unit))))
+        {
+            foreach (var byRate in g.GroupBy(o => PieceRate.Find(rates, o.OperationId, o.ItemId, o.Date)))
+            {
+                var qty = byRate.Sum(o => o.Quantity);
+                if (byRate.Key is not { } rate)
+                {
+                    warnings?.Add($"{fullName}: нет расценки на «{g.First().OperationName}» — {qty:0.###} {g.Key.Unit} не оплачено.");
+                    continue;
+                }
+
+                if (PieceRate.NormalizeUnit(rate.Unit) != g.Key.Unit)
+                {
+                    warnings?.Add($"{fullName}: «{rate.OperationName}» — выработка в «{g.Key.Unit}», расценка в «{rate.Unit}»: не оплачено.");
+                    continue;
+                }
+
+                var amount = Money.Round(qty * rate.Price);
+                piece += amount;
+                lines.Add(PayrollLine.Create(org, runId, employeeId, PayrollLineKind.Piece, $"{rate.OperationName}, {rate.Unit}", qty, rate.Price, amount));
+            }
+        }
+
+        return (lines, piece);
+    }
+
+    /// <summary>
+    /// Перерасчёт (D219): по утверждённым месяцам за последний год, выработку которых исправили после расчёта, сдельная оплата считается
+    /// заново по текущей выработке и расценкам. Недоплата = новая сумма − утверждённая сдельная − перерасчёты в других утверждённых расчётах;
+    /// она начисляется доплатой в этом месяце. Переплата не удерживается автоматически (ст. 137 ТК РФ) — только предупреждение бухгалтеру.
+    /// Расценки — те, что были заведены к расчёту того месяца: расценка, добавленная задним числом позже, перерасчёт не запускает.
+    /// Доплаты сдельщика, посчитанные от ставки «сдельный заработок / часы», пересчитываются пропорционально (D220).
+    /// </summary>
+    private async Task<List<PayrollLine>> CorrectionsAsync(long org, PayrollRun run, IReadOnlyList<PieceRate> rates, List<string> warnings, CancellationToken ct)
+    {
+        var result = new List<PayrollLine>();
+        var oldest = run.From.AddMonths(-12);
+        var approved = (await db.PayrollRuns.AsNoTracking().Where(r => r.OrganizationId == org && r.Status == PayrollStatus.Approved && r.Id != run.Id)
+            .ToListAsync(ct)).Where(r => r.From < run.From && r.From >= oldest).OrderBy(r => r.From).ToList();
+        if (approved.Count == 0)
+        {
+            return result;
+        }
+
+        var approvedIds = await db.PayrollRuns.AsNoTracking().Where(r => r.OrganizationId == org && r.Status == PayrollStatus.Approved && r.Id != run.Id)
+            .Select(r => r.Id).ToListAsync(ct);
+        foreach (var past in approved)
+        {
+            var current = (await output.OutputAsync(org, past.From, past.To, ct)).Where(o => o.Date >= past.From && o.Date <= past.To).ToList();
+            // Как в исходном расчёте: только сотрудники, работавшие в том месяце; расценки — известные на момент его расчёта.
+            var employed = (await db.Employees.AsNoTracking()
+                .Where(e => e.OrganizationId == org && e.HiredOn <= past.To && (e.DismissedOn == null || e.DismissedOn >= past.From))
+                .Select(e => e.Id).ToListAsync(ct)).ToHashSet();
+            var pastRates = rates.Where(r => r.CreatedAtUtc <= past.CalculatedAtUtc).ToList();
+            var prior = await db.PayrollLines.AsNoTracking()
+                .Where(l => l.OrganizationId == org && l.CorrectsPeriod == past.From && approvedIds.Contains(l.RunId)).ToListAsync(ct);
+            if (past.OutputMatches(WorkOutputFingerprint.Of(current)) && prior.Count == 0)
+            {
+                continue;
+            }
+
+            var approvedPiece = await db.PayrollLines.AsNoTracking().Where(l => l.RunId == past.Id && l.Kind == PayrollLineKind.Piece)
+                .GroupBy(l => l.EmployeeId).Select(g => new { g.Key, Sum = g.Sum(l => l.Amount) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+            var fromPiece = await db.PayrollLines.AsNoTracking().Where(l => l.RunId == past.Id && l.FromPiece).ToListAsync(ct);
+            var ids = approvedPiece.Keys.Union(prior.Select(l => l.EmployeeId)).Union(current.Select(o => o.EmployeeId).Where(employed.Contains)).ToHashSet();
+            var names = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == org && ids.Contains(e.Id))
+                .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName }).ToListAsync(ct);
+            foreach (var e in names.OrderBy(e => e.LastName))
+            {
+                var name = Name(e.LastName, e.FirstName, e.MiddleName);
+                var expected = employed.Contains(e.Id) ? PieceLines(org, run.Id, e.Id, name, current.Where(o => o.EmployeeId == e.Id), pastRates, null).Piece : 0;
+                var approvedEmployeePiece = approvedPiece.GetValueOrDefault(e.Id);
+                var diff = Money.Round(expected - approvedEmployeePiece
+                                       - prior.Where(l => l.EmployeeId == e.Id && l.Kind == PayrollLineKind.PieceCorrection).Sum(l => l.Amount));
+                if (diff > 0)
+                {
+                    result.Add(PayrollLine.Correction(org, run.Id, e.Id, PayrollLineKind.PieceCorrection, past.From, diff));
+                }
+                else if (diff < 0)
+                {
+                    warnings.Add($"{name}: выработку за {past.From:MM.yyyy} уменьшили после утверждения — переплата {-diff:0.00} руб. "
+                                 + "Автоматически не удерживается: удержание — только по ст. 137 ТК РФ, решение за бухгалтером.");
+                }
+
+                // Доплаты сдельщика от ставки «сдельный заработок / часы» меняются в той же пропорции, что и сдельная оплата (D220).
+                var premiumOver = 0m;
+                foreach (var kind in fromPiece.Where(l => l.EmployeeId == e.Id).GroupBy(l => l.Kind))
+                {
+                    var approvedPremium = kind.Sum(l => l.Amount);
+                    var target = approvedEmployeePiece > 0 ? Money.Round(approvedPremium * expected / approvedEmployeePiece) : approvedPremium;
+                    var premiumDiff = target - approvedPremium - prior.Where(l => l.EmployeeId == e.Id && l.Kind == kind.Key).Sum(l => l.Amount);
+                    if (premiumDiff > 0)
+                    {
+                        result.Add(PayrollLine.Correction(org, run.Id, e.Id, kind.Key, past.From, premiumDiff));
+                    }
+                    else
+                    {
+                        premiumOver -= premiumDiff;
+                    }
+                }
+
+                if (premiumOver > 0)
+                {
+                    warnings.Add($"{name}: доплаты за {past.From:MM.yyyy} (от ставки сдельщика) уменьшились после исправления выработки — переплата {premiumOver:0.00} руб. "
+                                 + "Автоматически не удерживается (ст. 137 ТК РФ).");
+                }
+
+                if (approvedEmployeePiece == 0 && expected > 0)
+                {
+                    warnings.Add($"{name}: сдельная оплата за {past.From:MM.yyyy} появилась после утверждения — "
+                                 + "если были ночные, сверхурочные или праздничные часы, доплаты к ним проверьте вручную.");
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<byte[]> OutputFingerprintAsync(long org, PayrollRun run, CancellationToken ct) =>
+        WorkOutputFingerprint.Of((await output.OutputAsync(org, run.From, run.To, ct)).Where(o => o.Date >= run.From && o.Date <= run.To));
 
     /// <summary>
     /// Расчёт (или пересчёт черновика) за месяц: сдельно = Σ выработка × расценка на дату; оклад × отработано / норма;
@@ -132,7 +286,7 @@ public sealed class PayrollService(
         var ctx = await guard.DemandAsync(Permissions.PayrollCalculate, ct);
         var org = ctx.OrganizationId;
         await using var tx = await db.BeginTransactionAsync(ct);
-        await db.LockAsync($"kniterp.hr.payroll.{org}.{year}.{month}", ct);
+        await db.LockAsync(PayrollLock(org), ct); // одна на организацию: перерасчёт читает утверждённые месяцы (D219)
         var run = await db.PayrollRuns.SingleOrDefaultAsync(r => r.OrganizationId == org && r.Year == year && r.Month == month, ct);
         if (run is null)
         {
@@ -153,20 +307,23 @@ public sealed class PayrollService(
             .Where(e => e.OrganizationId == org && e.HiredOn <= to && (e.DismissedOn == null || e.DismissedOn >= from)).ToListAsync(ct);
         var ids = employees.Select(e => e.Id).ToHashSet();
         var (days, closed) = await timesheets.DaysAsync(org, from, to, ct);
-        var outputs = (await output.OutputAsync(org, from, to, ct)).Where(o => ids.Contains(o.EmployeeId) && o.Date >= from && o.Date <= to).ToList();
+        var periodOutput = (await output.OutputAsync(org, from, to, ct)).Where(o => o.Date >= from && o.Date <= to).ToList();
+        var outputs = periodOutput.Where(o => ids.Contains(o.EmployeeId)).ToList();
         var rates = await db.PieceRates.AsNoTracking().Where(r => r.OrganizationId == org && r.ValidFrom <= to).ToListAsync(ct);
         var assignments = (await db.EmploymentHistory.AsNoTracking()
                 .Where(h => h.OrganizationId == org && ids.Contains(h.EmployeeId) && h.EffectiveFrom <= to
                             && (h.Kind == PersonnelOrderKind.Hire || h.Kind == PersonnelOrderKind.Transfer)).ToListAsync(ct))
             .GroupBy(h => h.EmployeeId).ToDictionary(g => g.Key, g => g.OrderByDescending(h => h.EffectiveFrom).ThenByDescending(h => h.Id).First());
-        var norms = await timesheets.NormHoursAsync(org, ids, from, to, assignments.ToDictionary(a => a.Key, a => a.Value.Rate), ct);
+        var norms = await timesheets.NormAsync(org, ids, from, to, assignments.ToDictionary(a => a.Key, a => a.Value.Rate), ct);
+        var settings = (await HrSettingsService.ForOrganizationAsync(db, org, ct)).Payroll; // D216: доплаты и база оклада организации
+        var nightShare = settings.NightPercent / 100m;
         if (days.Count == 0)
         {
             warnings.Add($"За {month:00}.{year} нет табелей: оплата по окладу и доплаты не начислены.");
         }
 
         decimal total = 0;
-        var paid = 0;
+        var paid = new HashSet<long>();
         foreach (var e in employees.OrderBy(e => e.LastName))
         {
             var lines = new List<PayrollLine>();
@@ -174,71 +331,78 @@ public sealed class PayrollService(
             var worked = own.Where(d => TimesheetCodes.IsWorked(d.Code)).ToList();
             var workedHours = worked.Sum(d => d.Hours);
 
-            decimal piece = 0;
-            foreach (var g in outputs.Where(o => o.EmployeeId == e.Id).GroupBy(o => (o.OperationId, o.ItemId, Unit: PieceRate.NormalizeUnit(o.Unit))))
+            var (pieceLines, piece) = PieceLines(org, run.Id, e.Id, e.FullName, outputs.Where(o => o.EmployeeId == e.Id), rates, warnings);
+            lines.AddRange(pieceLines);
+
+            var salary = assignments.TryGetValue(e.Id, out var a) ? a.Salary ?? 0 : 0;
+            var (norm, normDays) = norms.GetValueOrDefault(e.Id);
+            if (salary > 0 && workedHours > 0)
             {
-                foreach (var byRate in g.GroupBy(o => PieceRate.Find(rates, o.OperationId, o.ItemId, o.Date)))
+                if (settings.SalaryBase == SalaryBase.Days)
                 {
-                    var qty = byRate.Sum(o => o.Quantity);
-                    if (byRate.Key is not { } rate)
-                    {
-                        warnings.Add($"{e.FullName}: нет расценки на «{g.First().OperationName}» — {qty:0.###} {g.Key.Unit} не оплачено.");
-                        continue;
-                    }
-
-                    if (PieceRate.NormalizeUnit(rate.Unit) != g.Key.Unit)
-                    {
-                        warnings.Add($"{e.FullName}: «{rate.OperationName}» — выработка в «{g.Key.Unit}», расценка в «{rate.Unit}»: не оплачено.");
-                        continue;
-                    }
-
-                    var amount = Money.Round(qty * rate.Price);
-                    piece += amount;
-                    lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Piece, $"{rate.OperationName}, {rate.Unit}", qty, rate.Price, amount));
+                    lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Salary, $"Оклад {salary:0.##} × {worked.Count} дн. / {normDays} дн.", worked.Count,
+                        normDays > 0 ? salary / normDays : 0, PayrollRules.SalaryPart(salary, worked.Count, normDays)));
+                }
+                else
+                {
+                    lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Salary, $"Оклад {salary:0.##} × {workedHours:0.##} ч / {norm:0.##} ч", workedHours,
+                        norm > 0 ? salary / norm : 0, PayrollRules.SalaryPart(salary, workedHours, norm)));
                 }
             }
 
-            var salary = assignments.TryGetValue(e.Id, out var a) ? a.Salary ?? 0 : 0;
-            var norm = norms.GetValueOrDefault(e.Id);
-            if (salary > 0 && workedHours > 0)
-            {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Salary, $"Оклад {salary:0.##} × {workedHours:0.##} ч / {norm:0.##} ч", workedHours,
-                    norm > 0 ? salary / norm : 0, PayrollRules.SalaryPart(salary, workedHours, norm)));
-            }
-
-            var hourRate = salary > 0 && norm > 0 ? salary / norm : workedHours > 0 ? piece / workedHours : 0;
+            // Часовая ставка для доплат: оклад / норма; у сдельщика — тарифная ставка из настроек, иначе сдельный заработок / часы.
+            var hourRate = salary > 0 && norm > 0 ? salary / norm
+                : settings.PieceHourlyRate is { } tariff ? tariff
+                : workedHours > 0 ? piece / workedHours : 0;
+            var premiumsFrom = lines.Count;
+            var fromPiece = !(salary > 0 && norm > 0) && settings.PieceHourlyRate is null; // ставка = сдельный заработок / часы (D220)
             var night = worked.Sum(d => d.NightHours);
             if (night > 0 && hourRate > 0)
             {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Night, $"Ночные часы × 20 % часовой ставки", night,
-                    hourRate * PayrollRules.NightShare, night * hourRate * PayrollRules.NightShare));
+                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Night, $"Ночные часы × {settings.NightPercent:0.##} % часовой ставки", night,
+                    hourRate * nightShare, night * hourRate * nightShare));
             }
 
             var overtime = worked.Where(d => d.OvertimeHours > 0).ToList();
             if (overtime.Count > 0 && hourRate > 0)
             {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Overtime, "Первые 2 часа в день × 1,5, далее × 2",
-                    overtime.Sum(d => d.OvertimeHours), hourRate, overtime.Sum(d => PayrollRules.OvertimeDay(d.OvertimeHours, hourRate))));
+                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Overtime,
+                    $"Первые 2 часа в день × {settings.OvertimeFirst:0.##}, далее × {settings.OvertimeNext:0.##}", overtime.Sum(d => d.OvertimeHours), hourRate,
+                    overtime.Sum(d => PayrollRules.OvertimeDay(d.OvertimeHours, hourRate, settings.OvertimeFirst, settings.OvertimeNext))));
             }
 
             var holiday = worked.Where(d => d.Code == TimesheetCodes.Holiday).Sum(d => d.Hours);
             if (holiday > 0 && hourRate > 0)
             {
-                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Holiday, "Доплата до двойного размера за часы в праздники и выходные",
-                    holiday, hourRate * PayrollRules.HolidayExtra, holiday * hourRate * PayrollRules.HolidayExtra));
+                var extra = settings.HolidayMultiplier - 1;
+                lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Holiday, $"Доплата до {settings.HolidayMultiplier:0.##}-кратного размера за часы в праздники и выходные",
+                    holiday, hourRate * extra, holiday * hourRate * extra));
+            }
+
+            if (fromPiece)
+            {
+                lines.Skip(premiumsFrom).ToList().ForEach(l => l.MarkFromPiece());
             }
 
             if (lines.Count > 0)
             {
                 db.PayrollLines.AddRange(lines);
                 total += lines.Sum(l => l.Amount);
-                paid++;
+                paid.Add(e.Id);
             }
         }
 
-        run.Recalculated(closed, ctx.UserId, clock.UtcNow);
+        var corrections = await CorrectionsAsync(org, run, rates, warnings, ct);
+        if (corrections.Count > 0)
+        {
+            db.PayrollLines.AddRange(corrections);
+            total += corrections.Sum(l => l.Amount);
+            paid.UnionWith(corrections.Select(l => l.EmployeeId));
+        }
+
+        run.Recalculated(closed, WorkOutputFingerprint.Of(periodOutput), ctx.UserId, clock.UtcNow);
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.PayrollCalculated, nameof(PayrollRun), run.Id.ToString(), null,
-            $"{month:00}.{year}: сотрудников {paid}", closed ? null : "табели не закрыты", currentUser.CorrelationId));
+            $"{month:00}.{year}: сотрудников {paid.Count}", closed ? null : "табели не закрыты", currentUser.CorrelationId));
         try
         {
             await db.SaveChangesAsync(ct);
@@ -250,12 +414,14 @@ public sealed class PayrollService(
         }
 
         await tx.CommitAsync(ct);
-        return new PayrollCalculationDto(run.Id, paid, total, warnings);
+        return new PayrollCalculationDto(run.Id, paid.Count, total, warnings);
     }
 
     public async Task ApproveAsync(long runId, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.PayrollCalculate, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync(PayrollLock(ctx.OrganizationId), ct); // не пересекается с расчётом и другим утверждением (D219)
         var run = await db.PayrollRuns.SingleOrDefaultAsync(r => r.Id == runId && r.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Расчёт");
         if (!run.RowVersion.AsSpan().SequenceEqual(rowVersion))
         {
@@ -268,6 +434,25 @@ public sealed class PayrollService(
         {
             db.DiscardChanges();
             throw new BusinessRuleException("hr.payroll.stale", "Табели месяца изменились после расчёта: пересчитайте и утвердите снова.");
+        }
+
+        // Перерасчёт за прошлые месяцы уже начислен в расчёте, утверждённом после этого расчёта, — иначе доплата удвоится (D219).
+        if (await db.PayrollLines.AnyAsync(l => l.RunId == run.Id && l.CorrectsPeriod != null, ct)
+            && await (from l in db.PayrollLines
+                      join r in db.PayrollRuns on l.RunId equals r.Id
+                      where r.OrganizationId == ctx.OrganizationId && r.Id != run.Id && r.Status == PayrollStatus.Approved
+                            && r.ApprovedAtUtc >= run.CalculatedAtUtc && l.CorrectsPeriod != null
+                      select l.Id).AnyAsync(ct))
+        {
+            db.DiscardChanges();
+            throw new BusinessRuleException("hr.payroll.stale_corrections", "После расчёта утверждён другой месяц с перерасчётом: пересчитайте и утвердите снова.");
+        }
+
+        // Выработку производства исправили после расчёта — сдельные суммы уже не те (D217).
+        if (!run.OutputMatches(await OutputFingerprintAsync(ctx.OrganizationId, run, ct)))
+        {
+            db.DiscardChanges();
+            throw new BusinessRuleException("hr.payroll.output_changed", "Выработка месяца изменилась после расчёта: пересчитайте и утвердите снова.");
         }
 
         try
@@ -283,7 +468,10 @@ public sealed class PayrollService(
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.PayrollApproved, nameof(PayrollRun), runId.ToString(),
             "черновик", "утверждён", $"{run.Month:00}.{run.Year}", currentUser.CorrelationId));
         await db.SaveOrConflictAsync(ct);
+        await tx.CommitAsync(ct);
     }
+
+    private static string PayrollLock(long organizationId) => $"kniterp.hr.payroll.{organizationId}";
 
     /// <summary>Расчётный листок сотрудника. Свой — с уровнем «С»; чужой — с правом просмотра заработка, каждый просмотр в журнал.</summary>
     public async Task<PayslipDto> PayslipAsync(int year, int month, long employeeId, CancellationToken ct = default)

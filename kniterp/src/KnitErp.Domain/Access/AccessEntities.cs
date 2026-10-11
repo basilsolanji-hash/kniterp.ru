@@ -455,6 +455,28 @@ public sealed class Role
 
         return role;
     }
+
+    /// <summary>
+    /// Включить или выключить право системной роли по настройке организации (D216: «Кадровик закрывает табель»).
+    /// Только для прав, которые настройка переключает явно; матрица P0 остаётся источником значений по умолчанию.
+    /// </summary>
+    public bool Toggle(string permissionCode, PermissionLevel level, bool enabled)
+    {
+        var existing = _permissions.FirstOrDefault(p => p.PermissionCode == permissionCode);
+        if (enabled && existing is null)
+        {
+            _permissions.Add(new RolePermission(permissionCode, level));
+            return true;
+        }
+
+        if (!enabled && existing is not null)
+        {
+            _permissions.Remove(existing);
+            return true;
+        }
+
+        return false;
+    }
 }
 
 public sealed class RolePermission

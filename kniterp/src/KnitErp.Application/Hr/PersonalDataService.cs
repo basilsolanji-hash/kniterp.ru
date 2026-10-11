@@ -102,6 +102,17 @@ public sealed class PersonalDataService(IKnitErpDbContext db, IAccessGuard guard
         var ctx = await guard.DemandAsync(Permissions.PersonalDataEdit, ct);
         var employee = await LoadEmployeeAsync(ctx, employeeId, forView: false, ct);
         var today = await TodayAsync(ctx, ct);
+        if ((await HrSettingsService.ForOrganizationAsync(db, ctx.OrganizationId, ct)).BlockPersonalDataWithoutConsent) // D216
+        {
+            var consent = await db.EmployeePersonalData.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.EmployeeId == employeeId)
+                .Select(p => new { p.ConsentGivenOn, p.ConsentValidUntil, p.ConsentRevokedOn }).SingleOrDefaultAsync(ct);
+            if (EmployeePersonalData.StateOf(consent?.ConsentGivenOn, consent?.ConsentValidUntil, consent?.ConsentRevokedOn, today) != ConsentState.Valid)
+            {
+                throw new Domain.Common.BusinessRuleException("hr.personal_data.no_consent",
+                    "В организации персональные данные вводятся только при действующем согласии: сначала отметьте согласие сотрудника.");
+            }
+        }
+
         IReadOnlyList<string> changed = [];
         var pd = await EditAsync(ctx, employee, rowVersion, p => changed = p.Update(values, today, clock.UtcNow), ct);
         if (changed.Count > 0)

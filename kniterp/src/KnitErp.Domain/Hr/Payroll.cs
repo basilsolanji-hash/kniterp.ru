@@ -99,6 +99,9 @@ public enum PayrollLineKind : byte
 
     /// <summary>Доплата за работу в выходные и праздники (ст. 153 ТК РФ).</summary>
     Holiday = 5,
+
+    /// <summary>Перерасчёт сдельной оплаты за утверждённый месяц, выработку которого исправили (D219).</summary>
+    PieceCorrection = 6,
 }
 
 public enum PayrollStatus : byte
@@ -121,10 +124,11 @@ public static class PayrollRules
     public const decimal HolidayExtra = 1m;
 
     /// <summary>Оплата сверхурочных одного дня по часовой ставке.</summary>
-    public static decimal OvertimeDay(decimal hours, decimal hourRate) =>
-        Math.Min(hours, OvertimeFirstHours) * hourRate * OvertimeFirst + Math.Max(0, hours - OvertimeFirstHours) * hourRate * OvertimeNext;
+    public static decimal OvertimeDay(decimal hours, decimal hourRate, decimal first = OvertimeFirst, decimal next = OvertimeNext) =>
+        Math.Min(hours, OvertimeFirstHours) * hourRate * first + Math.Max(0, hours - OvertimeFirstHours) * hourRate * next;
 
     /// <summary>Оклад за отработанное время: оклад × отработано / норма (норма — по графику с учётом ставки).</summary>
+    /// <remarks>Работает и для дней: отработано дней / норма дней (база оклада задаётся в настройках, D216).</remarks>
     public static decimal SalaryPart(decimal salary, decimal workedHours, decimal normHours) =>
         normHours <= 0 ? 0 : Money.Round(salary * Math.Min(workedHours, normHours) / normHours);
 
@@ -135,6 +139,7 @@ public static class PayrollRules
         PayrollLineKind.Night => "Доплата за работу в ночное время (ст. 154 ТК РФ)",
         PayrollLineKind.Overtime => "Оплата сверхурочной работы (ст. 152 ТК РФ)",
         PayrollLineKind.Holiday => "Оплата работы в выходные и праздники (ст. 153 ТК РФ)",
+        PayrollLineKind.PieceCorrection => "Перерасчёт сдельной оплаты за прошлый месяц",
         _ => kind.ToString(),
     };
 }
@@ -159,6 +164,9 @@ public sealed class PayrollRun
 
     public DateTime CalculatedAtUtc { get; private set; }
     public long CalculatedByUserId { get; private set; }
+
+    /// <summary>SHA-256 выработки месяца на момент расчёта (D217): исправление выработки после расчёта видно при утверждении и выгрузке.</summary>
+    public byte[]? OutputFingerprint { get; private set; }
     public long? ApprovedByUserId { get; private set; }
     public DateTime? ApprovedAtUtc { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
@@ -180,13 +188,17 @@ public sealed class PayrollRun
         };
     }
 
-    public void Recalculated(bool timesheetsClosed, long userId, DateTime nowUtc)
+    public void Recalculated(bool timesheetsClosed, byte[] outputFingerprint, long userId, DateTime nowUtc)
     {
         EnsureDraft();
         TimesheetsClosed = timesheetsClosed;
+        OutputFingerprint = outputFingerprint;
         CalculatedByUserId = userId;
         CalculatedAtUtc = nowUtc;
     }
+
+    /// <summary>Выработка совпадает с той, по которой считали. Старые расчёты без отпечатка считаются совпадающими.</summary>
+    public bool OutputMatches(byte[] currentFingerprint) => OutputFingerprint is null || OutputFingerprint.AsSpan().SequenceEqual(currentFingerprint);
 
     /// <summary>Утверждение: только по закрытым табелям — иначе часы ещё могут измениться.</summary>
     public void Approve(long userId, DateTime nowUtc)
@@ -229,6 +241,46 @@ public sealed class PayrollLine
     public decimal Quantity { get; private set; }
     public decimal Rate { get; private set; }
     public decimal Amount { get; private set; }
+
+    /// <summary>Месяц, за который сделан перерасчёт (только у <see cref="PayrollLineKind.PieceCorrection"/>): первое число месяца.</summary>
+    public DateOnly? CorrectsPeriod { get; private set; }
+
+    /// <summary>
+    /// Доплата считалась от часовой ставки «сдельный заработок / часы» (у сдельщика без оклада и тарифа): при исправлении выработки
+    /// она пересчитывается пропорционально сдельной оплате (D220). Только у ночных, сверхурочных и праздничных.
+    /// </summary>
+    public bool FromPiece { get; private set; }
+
+    public PayrollLine MarkFromPiece()
+    {
+        if (Kind is not (PayrollLineKind.Night or PayrollLineKind.Overtime or PayrollLineKind.Holiday))
+        {
+            throw new BusinessRuleException("hr.payroll.from_piece", "От сдельной ставки считаются только доплаты.");
+        }
+
+        FromPiece = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Доплата по перерасчёту за утверждённый месяц <paramref name="period"/>, выработку которого исправили (D219, D220). Сдельная —
+    /// видом «Перерасчёт сдельной оплаты», доплата сдельщику — тем же видом доплаты (свой код в 1С: ЗУП). Только положительная.
+    /// </summary>
+    public static PayrollLine Correction(long organizationId, long runId, long employeeId, PayrollLineKind kind, DateOnly period, decimal amount)
+    {
+        if (amount <= 0 || period.Day != 1
+            || kind is not (PayrollLineKind.PieceCorrection or PayrollLineKind.Night or PayrollLineKind.Overtime or PayrollLineKind.Holiday))
+        {
+            throw new BusinessRuleException("hr.payroll.correction", "Перерасчёт — положительная доплата за прошлый месяц.");
+        }
+
+        var description = kind == PayrollLineKind.PieceCorrection
+            ? $"Перерасчёт сдельной оплаты за {period:MM.yyyy}: исправлена выработка"
+            : $"Перерасчёт за {period:MM.yyyy}: исправлена выработка — изменилась часовая ставка сдельщика";
+        var line = Create(organizationId, runId, employeeId, kind, description, 1, amount, amount);
+        line.CorrectsPeriod = period;
+        return line;
+    }
 
     public static PayrollLine Create(long organizationId, long runId, long employeeId, PayrollLineKind kind, string description, decimal quantity,
         decimal rate, decimal amount)

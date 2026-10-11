@@ -144,6 +144,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates { get; }
     DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns { get; }
     DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
+    DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

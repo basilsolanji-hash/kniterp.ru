@@ -61,7 +61,7 @@ public sealed class HrPayrollRulesTests
     {
         var run = PayrollRun.Create(1, 2026, 12, 1, Now);
         Assert.Equal("hr.payroll.timesheets_open", Assert.Throws<BusinessRuleException>(() => run.Approve(1, Now)).Code);
-        run.Recalculated(true, 1, Now);
+        run.Recalculated(true, new byte[32], 1, Now);
         run.Approve(1, Now);
         Assert.Equal("hr.payroll.approved", Assert.Throws<BusinessRuleException>(run.EnsureDraft).Code);
     }
@@ -72,4 +72,29 @@ public sealed class HrPayrollRulesTests
     [InlineData("звоните +7 (900) 000-00-00", "звоните [скрыто]")]
     [InlineData("Заказ № 12345, 40 шт по 1 500 руб.", "Заказ № 12345, 40 шт по 1 500 руб.")]
     public void Mask_hides_long_numbers_only(string text, string expected) => Assert.Equal(expected, PersonalDataMask.Mask(text));
+
+    [Fact]
+    public void Output_fingerprint_ignores_order_and_unit_spelling_but_sees_quantity()
+    {
+        var a = new KnitErp.Application.Hr.WorkOutputDto(1, new DateOnly(2026, 12, 3), 1, "Вязание", null, 10, "шт");
+        var b = new KnitErp.Application.Hr.WorkOutputDto(2, new DateOnly(2026, 12, 4), 2, "Сборка", 7, 1.5m, "пар");
+        var f = KnitErp.Application.Hr.WorkOutputFingerprint.Of([a, b]);
+        Assert.Equal(f, KnitErp.Application.Hr.WorkOutputFingerprint.Of([b with { Unit = "Пар." }, a with { OperationName = "вязание" }]));
+        Assert.NotEqual(f, KnitErp.Application.Hr.WorkOutputFingerprint.Of([a with { Quantity = 10.000001m }, b]));
+        Assert.NotEqual(f, KnitErp.Application.Hr.WorkOutputFingerprint.Of([a]));
+        Assert.Equal(32, f.Length);
+    }
+
+    [Fact]
+    public void Corrections_are_positive_for_past_month_and_only_premiums_come_from_piece_rate()
+    {
+        var period = new DateOnly(2026, 11, 1);
+        Assert.Equal(PayrollLineKind.Night, PayrollLine.Correction(1, 1, 1, PayrollLineKind.Night, period, 10m).Kind);
+        Assert.Equal(period, PayrollLine.Correction(1, 1, 1, PayrollLineKind.PieceCorrection, period, 10m).CorrectsPeriod);
+        Assert.Equal("hr.payroll.correction", Assert.Throws<BusinessRuleException>(() => PayrollLine.Correction(1, 1, 1, PayrollLineKind.Salary, period, 10m)).Code);
+        Assert.Equal("hr.payroll.correction", Assert.Throws<BusinessRuleException>(() => PayrollLine.Correction(1, 1, 1, PayrollLineKind.Night, period, -1m)).Code);
+        Assert.Equal("hr.payroll.correction", Assert.Throws<BusinessRuleException>(() => PayrollLine.Correction(1, 1, 1, PayrollLineKind.Night, period.AddDays(1), 1m)).Code);
+        Assert.True(PayrollLine.Create(1, 1, 1, PayrollLineKind.Overtime, "x", 1, 1, 1).MarkFromPiece().FromPiece);
+        Assert.Equal("hr.payroll.from_piece", Assert.Throws<BusinessRuleException>(() => PayrollLine.Create(1, 1, 1, PayrollLineKind.Piece, "x", 1, 1, 1).MarkFromPiece()).Code);
+    }
 }
