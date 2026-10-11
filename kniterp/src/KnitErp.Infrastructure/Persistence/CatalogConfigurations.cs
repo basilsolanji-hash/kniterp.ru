@@ -245,6 +245,8 @@ internal sealed class CatalogSettingsConfiguration : IEntityTypeConfiguration<Ca
             t.HasCheckConstraint("ck_catalog_settings_digits", "[AutoCodeDigits] BETWEEN 3 AND 8");
             t.HasCheckConstraint("ck_catalog_settings_next", "[NextNumber] >= 1");
             t.HasCheckConstraint("ck_catalog_settings_blocks", "[HiddenBlocks] BETWEEN 0 AND 31");
+            t.HasCheckConstraint("ck_catalog_settings_barcode", "[BarcodePrefix] BETWEEN 20 AND 29 AND [NextBarcodeNumber] BETWEEN 1 AND 9999999999");
+            t.HasCheckConstraint("ck_catalog_settings_article", "[ArticleDigits] BETWEEN 3 AND 8 AND [NextArticleNumber] >= 1");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
@@ -254,6 +256,11 @@ internal sealed class CatalogSettingsConfiguration : IEntityTypeConfiguration<Ca
         b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.AutoCode);
         b.Property(x => x.HiddenBlocks).HasConversion<int>();
+        b.Property(x => x.ArticleTemplateText).HasMaxLength(ArticleTemplate.MaxLength);
+        b.Property(x => x.BarcodePrefix).HasDefaultValue((byte)20);
+        b.Property(x => x.NextBarcodeNumber).HasDefaultValue(1L);
+        b.Property(x => x.ArticleDigits).HasDefaultValue((byte)5);
+        b.Property(x => x.NextArticleNumber).HasDefaultValue(1);
         b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_catalog_settings_org");
     }
@@ -278,5 +285,33 @@ internal sealed class CatalogFeedConfiguration : IEntityTypeConfiguration<Catalo
         b.HasOne<KnitErp.Domain.Warehousing.Warehouse>().WithMany().HasForeignKey(x => x.WarehouseId).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_catalog_feeds_warehouse");
         b.HasOne<ItemGroup>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_catalog_feeds_group");
+    }
+}
+
+/// <summary>D316: шаблоны этикеток; строки шаблона — JSON (проверяются в домене), размеры — CHECK в базе.</summary>
+internal sealed class LabelTemplateConfiguration : IEntityTypeConfiguration<LabelTemplate>
+{
+    public void Configure(EntityTypeBuilder<LabelTemplate> b)
+    {
+        b.ToTable("label_templates", t =>
+        {
+            t.HasCheckConstraint("ck_label_templates_size", "[WidthMm] BETWEEN 15 AND 150 AND [HeightMm] BETWEEN 15 AND 150 AND [PaddingMm] BETWEEN 0 AND 10");
+            t.HasCheckConstraint("ck_label_templates_grid", "[Columns] BETWEEN 1 AND 8 AND [Rows] BETWEEN 1 AND 30 AND [Sheet] IN (1, 2)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(LabelTemplate.NameMaxLength).IsRequired();
+        b.Property(x => x.WidthMm).HasColumnType("decimal(5,1)");
+        b.Property(x => x.HeightMm).HasColumnType("decimal(5,1)");
+        b.Property(x => x.PaddingMm).HasColumnType("decimal(4,1)");
+        b.Property(x => x.Sheet).HasConversion<byte>();
+        b.Property(x => x.ElementsJson).HasMaxLength(8000).IsRequired();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Elements);
+        b.HasIndex(x => x.OrganizationId, "ix_label_templates_org");
+        // Основной шаблон — один на организацию.
+        b.HasIndex(x => x.OrganizationId, "ux_label_templates_default").IsUnique().HasFilter("[IsDefault] = 1");
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<PriceType>().WithMany().HasForeignKey(x => x.PriceTypeId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_label_templates_price_type");
     }
 }

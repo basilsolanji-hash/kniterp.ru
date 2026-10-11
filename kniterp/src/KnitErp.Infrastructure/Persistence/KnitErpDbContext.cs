@@ -31,6 +31,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<ItemSupplier> ItemSuppliers => Set<ItemSupplier>();
     public DbSet<CatalogSettings> CatalogSettings => Set<CatalogSettings>();
     public DbSet<CatalogFeed> CatalogFeeds => Set<CatalogFeed>();
+    public DbSet<LabelTemplate> LabelTemplates => Set<LabelTemplate>();
     public DbSet<ExternalLink> ExternalLinks => Set<ExternalLink>();
     public DbSet<ExternalConnection> ExternalConnections => Set<ExternalConnection>();
     public DbSet<ExternalImportRun> ExternalImportRuns => Set<ExternalImportRun>();

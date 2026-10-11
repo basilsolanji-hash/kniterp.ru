@@ -582,12 +582,32 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<byte>("ArticleDigits")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)5);
+
+                    b.Property<string>("ArticleTemplateText")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("AutoArticle")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoBarcode")
+                        .HasColumnType("bit");
+
                     b.Property<byte>("AutoCodeDigits")
                         .HasColumnType("tinyint");
 
                     b.Property<string>("AutoCodePrefix")
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
+
+                    b.Property<byte>("BarcodePrefix")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)20);
 
                     b.Property<bool>("BundlesEnabled")
                         .HasColumnType("bit");
@@ -597,6 +617,16 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("HiddenBlocks")
                         .HasColumnType("int");
+
+                    b.Property<int>("NextArticleNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
+                    b.Property<long>("NextBarcodeNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("NextNumber")
                         .HasColumnType("int");
@@ -630,6 +660,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("catalog_settings", "kniterp", t =>
                         {
+                            t.HasCheckConstraint("ck_catalog_settings_article", "[ArticleDigits] BETWEEN 3 AND 8 AND [NextArticleNumber] >= 1");
+
+                            t.HasCheckConstraint("ck_catalog_settings_barcode", "[BarcodePrefix] BETWEEN 20 AND 29 AND [NextBarcodeNumber] BETWEEN 1 AND 9999999999");
+
                             t.HasCheckConstraint("ck_catalog_settings_blocks", "[HiddenBlocks] BETWEEN 0 AND 31");
 
                             t.HasCheckConstraint("ck_catalog_settings_digits", "[AutoCodeDigits] BETWEEN 3 AND 8");
@@ -1514,6 +1548,81 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_item_suppliers_article");
 
                     b.ToTable("item_suppliers", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.LabelTemplate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<byte>("Columns")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("ElementsJson")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("HeightMm")
+                        .HasColumnType("decimal(5,1)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("PaddingMm")
+                        .HasColumnType("decimal(4,1)");
+
+                    b.Property<long?>("PriceTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Rows")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("Sheet")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<decimal>("WidthMm")
+                        .HasColumnType("decimal(5,1)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PriceTypeId");
+
+                    b.HasIndex(new[] { "OrganizationId" }, "ix_label_templates_org");
+
+                    b.HasIndex(new[] { "OrganizationId" }, "ux_label_templates_default")
+                        .IsUnique()
+                        .HasFilter("[IsDefault] = 1");
+
+                    b.ToTable("label_templates", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_label_templates_grid", "[Columns] BETWEEN 1 AND 8 AND [Rows] BETWEEN 1 AND 30 AND [Sheet] IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_label_templates_size", "[WidthMm] BETWEEN 15 AND 150 AND [HeightMm] BETWEEN 15 AND 150 AND [PaddingMm] BETWEEN 0 AND 10");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.Lookup", b =>
@@ -5651,6 +5760,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_item_suppliers_supplier");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.LabelTemplate", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.PriceType", null)
+                        .WithMany()
+                        .HasForeignKey("PriceTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_label_templates_price_type");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.Lookup", b =>
