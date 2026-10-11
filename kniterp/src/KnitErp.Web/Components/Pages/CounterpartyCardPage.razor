@@ -63,7 +63,10 @@ else
     </dl>
 
     <div class="tabs" role="tablist">
-        <button type="button" role="tab" class="@TabClass(Tab.Contracts)" aria-selected="@Selected(Tab.Contracts)" @onclick="() => OpenTabAsync(Tab.Contracts)" disabled="@_busy">@L("Договоры") @if (_contracts is not null) { <span class="muted">@_contracts.Count</span> }</button>
+        @if (_card.CanSeeContracts)
+        {
+            <button type="button" role="tab" class="@TabClass(Tab.Contracts)" aria-selected="@Selected(Tab.Contracts)" @onclick="() => OpenTabAsync(Tab.Contracts)" disabled="@_busy">@L("Договоры") @if (_contracts is not null) { <span class="muted">@_contracts.Count</span> }</button>
+        }
         @if (_card.CanSeeSales || _card.CanSeePurchases)
         {
             <button type="button" role="tab" class="@TabClass(Tab.Orders)" aria-selected="@Selected(Tab.Orders)" @onclick="() => OpenTabAsync(Tab.Orders)" disabled="@_busy">@L("Заказы")</button>
@@ -146,7 +149,15 @@ else
         try
         {
             _card = await Cards.GetAsync(Id);
-            _contracts = await Cards.ContractsAsync(Id);
+            if (_card.CanSeeContracts)
+            {
+                _contracts = await Cards.ContractsAsync(Id);
+            }
+            else
+            {
+                _tab = Tab.Discussion;
+            }
+
             await LoadBalancesAsync();
         }
         catch (AccessDeniedException ex)
@@ -273,7 +284,7 @@ else
         {
             <div class="scroll">
                 <table>
-                    <thead><tr><th>@L("Договор")</th><th>@L("Вид")</th><th>@L("Срок действия")</th><th class="opt">@L("Отсрочка")</th>@if (_card.CanSeePrices) { <th class="opt num">@L("Лимит")</th> }<th>@L("Статус")</th><th class="opt">@L("Файлы")</th>@if (_card.CanEditContracts) { <th>@L("Действия")</th> }</tr></thead>
+                    <thead><tr><th>@L("Договор")</th><th>@L("Вид")</th><th>@L("Срок действия")</th><th class="opt">@L("Отсрочка")</th>@if (_card.CanSeePrices) { <th class="opt num">@L("Лимит")</th> }<th>@L("Статус")</th>@if (_card.CanSeeContractFiles) { <th class="opt">@L("Файлы")</th> }@if (_card.CanEditContracts) { <th>@L("Действия")</th> }</tr></thead>
                     <tbody>
                         @foreach (var k in _contracts)
                         {
@@ -287,6 +298,8 @@ else
                                     <td class="num">@Amounts.Format(k.AmountLimit)</td>
                                 }
                                 <td>@L(k.StatusName)</td>
+                                @if (_card.CanSeeContractFiles)
+                                {
                                 <td>
                                     @foreach (var f in k.Files)
                                     {
@@ -297,6 +310,7 @@ else
                                         <label class="file-pick" title="@L("PDF, JPEG или PNG до 5 МБ")">@L("Прикрепить скан") <InputFile OnChange="args => UploadAsync(k, args)" accept=".pdf,.jpg,.jpeg,.png" disabled="@_busy" /></label>
                                     }
                                 </td>
+                                }
                                 @if (_card.CanEditContracts)
                                 {
                                     <td>

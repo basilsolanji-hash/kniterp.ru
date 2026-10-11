@@ -186,6 +186,11 @@ else
         </div>
     }
 
+    @if (_rightsUser is { } rightsUser)
+    {
+        <UserRightsPanel UserId="rightsUser" OnClose="() => _rightsUser = null" @key="rightsUser" />
+    }
+
     <div class="scroll">
         <table>
             <thead>
@@ -217,10 +222,12 @@ else
                                 @if (u.IsCurrentUser)
                                 {
                                     <span class="muted">@L("это вы")</span>
+                                    <button type="button" class="link" @onclick="() => _rightsUser = u.UserId">@L("Права")</button>
                                 }
                                 else
                                 {
                                     <div class="row-actions">
+                                        <button type="button" class="secondary" @onclick="() => _rightsUser = u.UserId" disabled="@(_mode != Mode.None)">@L("Права")</button>
                                         <button type="button" class="secondary" @onclick="() => OpenChangeRoleAsync(u)" disabled="@(_mode != Mode.None)">@L("Изменить роль")</button>
                                         @if (u.MembershipStatus == MembershipStatus.Active)
                                         {
@@ -256,6 +263,9 @@ else
 
 @code {
     private enum Mode { None, Add, ChangeRole, Block, Unblock, ResetTwoFactor, ResetPassword }
+
+    /// <summary>D112: открыта панель прав этого пользователя.</summary>
+    private long? _rightsUser;
 
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;

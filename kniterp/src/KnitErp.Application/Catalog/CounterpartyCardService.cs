@@ -14,7 +14,7 @@ namespace KnitErp.Application.Catalog;
 /// </summary>
 public sealed record CounterpartyCardDto(
     CounterpartyDto Counterparty, bool CanEdit, bool CanEditContracts, bool CanSeePrices, bool CanSeeSales, bool CanSeePurchases,
-    bool CanSeeStockDocuments);
+    bool CanSeeStockDocuments, bool CanSeeContracts = false, bool CanSeeContractFiles = false);
 
 public sealed record ContractFileDto(long Id, string FileName, int SizeBytes, DateTime UploadedAtUtc, string UploadedBy);
 
@@ -47,20 +47,21 @@ public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard g
             .Select(x => new CounterpartyDto(x.Id, x.Name, x.Inn, x.Kpp, x.IsSupplier, x.IsCustomer, x.Comment, x.IsArchived, x.RowVersion, x.CountryCode, x.Address))
             .SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Контрагент");
         var p = ctx.Permissions;
-        return new CounterpartyCardDto(c, p.Has(Permissions.CatalogEdit), p.Has(Permissions.CatalogEdit) && !c.IsArchived, p.Has(Permissions.PriceView),
-            p.Has(Permissions.SalesView), p.Has(Permissions.PurchaseView), StockViewPermissions.Any(p.Has));
+        return new CounterpartyCardDto(c, p.Has(Permissions.CatalogEdit), p.Has(Permissions.CatalogEdit) && !c.IsArchived && CanSeeContracts(ctx), p.Has(Permissions.PriceView),
+            p.Has(Permissions.SalesView), p.Has(Permissions.PurchaseView), StockViewPermissions.Any(p.Has),
+            CanSeeContracts(ctx), CanSeeContracts(ctx) && p.Has(Permissions.PriceView));
     }
 
     public async Task<IReadOnlyList<ContractDto>> ContractsAsync(long counterpartyId, CancellationToken ct = default)
     {
-        var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
+        var ctx = await DemandContractsAsync(Permissions.CatalogView, ct);
         await EnsureCounterpartyAsync(ctx, counterpartyId, ct);
         var prices = ctx.Permissions.Has(Permissions.PriceView);
         var contracts = await db.CounterpartyContracts.AsNoTracking()
             .Where(x => x.OrganizationId == ctx.OrganizationId && x.CounterpartyId == counterpartyId)
             .OrderBy(x => x.Status).ThenByDescending(x => x.ContractDate).ThenByDescending(x => x.Id)
             .ToListAsync(ct);
-        var ids = contracts.Select(x => x.Id).ToList();
+        var ids = prices ? contracts.Select(x => x.Id).ToList() : [];
         var files = await db.CounterpartyContractFiles.AsNoTracking()
             .Where(f => f.OrganizationId == ctx.OrganizationId && ids.Contains(f.ContractId))
             .OrderByDescending(f => f.UploadedAtUtc)
@@ -78,7 +79,7 @@ public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard g
 
     public async Task<long> AddContractAsync(long counterpartyId, ContractTerms terms, CancellationToken ct = default)
     {
-        var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
+        var ctx = await DemandContractsAsync(Permissions.CatalogEdit, ct);
         var counterparty = await EnsureCounterpartyAsync(ctx, counterpartyId, ct);
         if (counterparty.IsArchived)
         {
@@ -99,7 +100,7 @@ public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard g
 
     public async Task UpdateContractAsync(long contractId, ContractTerms terms, byte[] rowVersion, CancellationToken ct = default)
     {
-        var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
+        var ctx = await DemandContractsAsync(Permissions.CatalogEdit, ct);
         var contract = await FindContractAsync(ctx, contractId, ct);
         contract.EnsureVersion(contract.RowVersion, rowVersion);
         terms = WithLimitAllowed(ctx, terms, contract.AmountLimit);
@@ -115,7 +116,7 @@ public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard g
 
     public async Task CloseContractAsync(long contractId, byte[] rowVersion, CancellationToken ct = default)
     {
-        var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
+        var ctx = await DemandContractsAsync(Permissions.CatalogEdit, ct);
         var contract = await FindContractAsync(ctx, contractId, ct);
         contract.EnsureVersion(contract.RowVersion, rowVersion);
         contract.Close();
@@ -125,7 +126,7 @@ public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard g
 
     public async Task ReopenContractAsync(long contractId, byte[] rowVersion, CancellationToken ct = default)
     {
-        var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
+        var ctx = await DemandContractsAsync(Permissions.CatalogEdit, ct);
         var contract = await FindContractAsync(ctx, contractId, ct);
         contract.EnsureVersion(contract.RowVersion, rowVersion);
         contract.Reopen();
@@ -135,7 +136,8 @@ public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard g
 
     public async Task<long> AddFileAsync(long contractId, string? fileName, string? contentType, byte[] content, CancellationToken ct = default)
     {
-        var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
+        var ctx = await DemandContractsAsync(Permissions.CatalogEdit, ct);
+        await guard.DemandAsync(Permissions.PriceView, ct);
         var contract = await FindContractAsync(ctx, contractId, ct);
         if (contract.Status == ContractStatus.Closed)
         {
@@ -152,16 +154,34 @@ public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard g
         return file.Id;
     }
 
-    /// <summary>Скачивание скана: право просмотра справочников, своя организация. Просмотр пишется в журнал — договор может быть коммерческой тайной.</summary>
+    /// <summary>Скачивание скана: доступ к договорам и право «Цены и суммы» (в скане — цены и условия), своя организация. Просмотр пишется в журнал.</summary>
     public async Task<(string FileName, string ContentType, byte[] Content)> GetFileAsync(long fileId, CancellationToken ct = default)
     {
-        var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
+        var ctx = await DemandContractsAsync(Permissions.CatalogView, ct);
+        await guard.DemandAsync(Permissions.PriceView, ct);
         var file = await db.CounterpartyContractFiles.AsNoTracking()
             .SingleOrDefaultAsync(f => f.Id == fileId && f.OrganizationId == ctx.OrganizationId, ct)
             ?? throw new NotFoundException("Файл договора");
         Audit(ctx, AuditActions.ContractFileViewed, file.ContractId, null, file.FileName, null);
         await db.SaveChangesAsync(ct);
         return (file.FileName, file.ContentType, file.Content);
+    }
+
+    /// <summary>
+    /// Договоры видят те, кто работает с продажами или закупками (D500, согласовано с сессией № 1): кладовщику и рабочему договоры не нужны.
+    /// </summary>
+    private static bool CanSeeContracts(AccessContext ctx) =>
+        ctx.Permissions.Has(Permissions.SalesView) || ctx.Permissions.Has(Permissions.PurchaseView);
+
+    private async Task<AccessContext> DemandContractsAsync(string permission, CancellationToken ct)
+    {
+        var ctx = await guard.DemandAsync(permission, ct);
+        if (!CanSeeContracts(ctx))
+        {
+            await guard.DenyAsync(ctx, Permissions.SalesView, ct);
+        }
+
+        return ctx;
     }
 
     /// <summary>Без права «Цены и суммы» лимит не виден и не меняется: сохраняется прежнее значение.</summary>

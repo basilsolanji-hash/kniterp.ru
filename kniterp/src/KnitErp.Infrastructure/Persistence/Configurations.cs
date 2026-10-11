@@ -199,8 +199,12 @@ internal sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Code).HasMaxLength(64).IsRequired();
-        b.Property(x => x.Name).HasMaxLength(150).IsRequired();
+        b.Property(x => x.Name).HasMaxLength(Role.NameMaxLength).IsRequired();
+        b.Property(x => x.Description).HasMaxLength(Role.DescriptionMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.IsAdministrative);
+        // D112: своя роль — с кодом «custom.…»; системные роли не архивируются.
+        b.ToTable(t => t.HasCheckConstraint("ck_roles_archive_custom", "[IsArchived] = 0 OR [IsSystem] = 0"));
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique().HasDatabaseName("ux_roles_org_code");
         b.HasMany(x => x.Permissions).WithOne().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
@@ -1103,6 +1107,23 @@ internal sealed class CustomFieldValueConfiguration : IEntityTypeConfiguration<C
             .HasConstraintName("fk_custom_field_values_field");
         b.HasIndex(x => new { x.FieldId, x.TargetId }).IsUnique().HasDatabaseName("ux_custom_field_values_field_target");
         b.HasIndex(x => new { x.OrganizationId, x.TargetId }).HasDatabaseName("ix_custom_field_values_org_target");
+    }
+}
+
+/// <summary>D110: правила автоматической смены этапа — одно на событие в организации, этап — своей организации.</summary>
+internal sealed class SalesStageRuleConfiguration : IEntityTypeConfiguration<SalesStageRule>
+{
+    public void Configure(EntityTypeBuilder<SalesStageRule> b)
+    {
+        b.ToTable("sales_stage_rules", t => t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 8"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Trigger).HasConversion<byte>();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<SalesOrderStage>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.StageId })
+            .HasPrincipalKey(s => new { s.OrganizationId, s.Id }).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.Trigger }).IsUnique().HasDatabaseName("ux_sales_stage_rules_org_trigger");
     }
 }
 

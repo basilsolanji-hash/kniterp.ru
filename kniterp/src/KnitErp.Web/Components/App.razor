@@ -246,6 +246,7 @@
         .checklist .todo .mark { background: var(--bad-bg); color: var(--bad-text); }
         .checklist .manual .mark { background: var(--warn-bg); color: var(--warn-text); }
         .flash.error { border-color: var(--bad-line); background: var(--bad-bg-2); }
+        .flash.warn { border-color: color-mix(in srgb, var(--warn-text) 45%, transparent); background: var(--warn-bg); color: var(--warn-text); }
         .denied { border: 1px solid var(--bad-line); background: var(--bad-bg-2); padding: 20px; border-radius: 10px; }
         .denied h1 { font-size: 22px; margin: 8px 0; }
         .denied-code { font-weight: 700; color: var(--bad-text); }
@@ -434,18 +435,19 @@
         .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--kpi, var(--accent)); }
         .kpi:hover { border-color: var(--kpi, var(--accent)); }
         .kpi-label { font-size: 12px; color: var(--muted); }
-        .kpi-value { font-size: 24px; font-weight: 600; letter-spacing: -.01em; }
+        .kpi-value { font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
         .kpi-delta { font-size: 12px; }
         .kpi-delta.good { color: var(--good); }
         .kpi-delta.bad { color: var(--bad); }
         .kpi-hint { font-size: 11px; color: var(--muted-2); }
         .kpi-spark { width: 100%; height: 26px; margin-top: 2px; }
         .kpi-spark polyline { fill: none; stroke: var(--kpi, var(--accent)); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
-        .charts-large { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+        /* D114: динамика наверху главного — четыре графика в ряд на широком экране, по два на планшете. */
+        .charts-large { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); margin-bottom: 4px; }
         .chart-plot { position: relative; display: block; padding-left: 52px; }
         .chart-y { position: absolute; left: 0; top: 0; bottom: 0; width: 48px; display: flex; flex-direction: column; justify-content: space-between;
                    font-size: 10px; color: var(--muted-2); text-align: right; font-variant-numeric: tabular-nums; }
-        .chart-large svg { height: 110px; }
+        .chart-large svg { height: 72px; }
         .chart-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
         .chart-base { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
         .chart-large .chart-axis { padding-left: 52px; }
@@ -470,7 +472,7 @@
         .money-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); min-width: 0; }
         .money-card .tag { align-self: flex-start; }
         .money-card .money-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .money-card b { font-size: 17px; font-variant-numeric: tabular-nums; }
+        .money-card b { font-size: 15px; font-variant-numeric: tabular-nums; }
         .attention li { break-inside: avoid; }
         @@media (max-width: 1279px) {
             .dash-blocks > .span-3, .dash-blocks > .span-4, .dash-blocks > .span-6 { grid-column: span 6; }
@@ -479,7 +481,7 @@
         @@media (max-width: 899px) { .dash-blocks > .span-3, .dash-blocks > .span-4, .dash-blocks > .span-6, .dash-blocks > .span-8 { grid-column: span 12; } }
         .quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
         @@media (max-width: 599px) { .quick-actions { grid-template-columns: 1fr 1fr; } .quick-actions .quick-action { font-size: 12.5px; padding: 6px 8px; gap: 8px; } }
-        .quick-action { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+        .quick-action { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px;
                         background: var(--raised); color: var(--text); text-decoration: none; font-size: 13px; font-weight: 500; text-align: left; }
         .quick-action:hover { border-color: var(--sec, var(--accent)); background: var(--field); }
         .quick-action .qa-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; flex: none;
@@ -505,6 +507,78 @@
         td.neg, td.late { color: var(--bad); }
         td.late { font-weight: 600; }
         .small { font-size: 12px; }
+        /* D112: роли — карточки, редактор прав с переключателями по группам; права пользователя. */
+        .role-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+        .role-card { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); min-width: 0; }
+        .role-card.mine { border-color: var(--accent); }
+        .role-card.archived { opacity: .65; }
+        .role-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+        .role-card header .tag { margin-left: 0; }
+        .role-card p { margin: 0; }
+        .role-card .actions { margin-top: auto; padding-top: 6px; flex-wrap: wrap; }
+        .role-perms { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+        .role-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+        .role-tools input[type=search] { flex: 1 1 220px; max-width: 360px; }
+        .perm-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+        .perm-group { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px 10px; margin: 0; min-width: 0; }
+        .perm-group legend { padding: 0 4px; }
+        .perm-all { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        .switch { display: flex; align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; }
+        .switch.locked { opacity: .55; cursor: not-allowed; }
+        .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+        .switch-ui { flex: 0 0 34px; height: 20px; border-radius: 999px; background: var(--line); position: relative; transition: background .15s; }
+        .switch-ui::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+        .switch input:checked + .switch-ui { background: var(--accent); }
+        .switch input:checked + .switch-ui::after { transform: translateX(14px); background: #fff; }
+        .switch input:focus-visible + .switch-ui { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .switch .tag { margin-left: 4px; }
+        .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; align-self: flex-end; }
+        .segmented button { border: 0; border-radius: 0; background: transparent; color: var(--text); padding: 7px 12px; }
+        .segmented button.on { background: var(--accent); color: #fff; }
+        .segmented button.on.bad { background: var(--bad); }
+        .panel .perm-group label.switch, .panel .perm-group label.perm-all { flex-direction: row; align-items: center; justify-content: flex-start; text-align: left;
+            font-size: 13px; color: var(--text); gap: 10px; }
+        .perm-group label.perm-all { gap: 8px; }
+        .perm-group label.perm-all input { width: 18px; height: 18px; min-height: 0; flex: none; }
+        .switch > span:last-child { flex: 1 1 auto; min-width: 0; }
+        .switch-ui { display: inline-block; background: color-mix(in srgb, var(--text) 22%, transparent); }
+        .panel form.rights-add { display: grid; grid-template-columns: minmax(220px, 2fr) auto minmax(150px, 1fr) minmax(200px, 2fr) auto;
+            gap: 10px; align-items: end; justify-items: stretch; }
+        .panel form.rights-add label { text-align: left; }
+        .panel form.rights-add .segmented { align-self: end; }
+        @@media (max-width: 899px) { .panel form.rights-add { grid-template-columns: 1fr; } .panel form.rights-add .segmented { justify-self: start; } }
+        .rights-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+        .rights-list .tag { margin-left: 0; }
+        .rights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px 18px; }
+        .rights-group ul { margin: 4px 0 0; }
+        .rights-group li { display: flex; gap: 8px; padding: 2px 0; }
+        .rights-group li.off { color: var(--muted-2); }
+        /* D111: производство на главном экране — воронка этапов, готовность заказов, смена. */
+        .prod-box h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .prod-box h2 > a { margin-left: auto; font-weight: 400; }
+        .prod-funnel { list-style: none; margin: 0 0 10px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; counter-reset: step; }
+        .prod-funnel li { position: relative; min-width: 0; }
+        .prod-step { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field);
+            color: var(--text); text-decoration: none; height: 100%; box-sizing: border-box; }
+        .prod-step:hover { border-color: var(--accent); }
+        .prod-step b { font-size: 18px; line-height: 1.1; }
+        .prod-step .stage { align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .prod-late { font-size: 12px; color: var(--bad); }
+        .prod-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+        .prod-col { min-width: 0; }
+        .prod-orders { list-style: none; margin: 8px 0 0; padding: 0; }
+        .prod-orders a { display: grid; grid-template-columns: minmax(0, 1fr) 90px 40px auto; align-items: center; gap: 8px; padding: 6px 2px;
+            border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; }
+        .prod-orders li:last-child a { border-bottom: 0; }
+        .prod-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .prod-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+        .prod-bar span { display: block; height: 100%; background: var(--accent); }
+        .prod-pct { text-align: right; font-variant-numeric: tabular-nums; }
+        .prod-shift { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); text-decoration: none; }
+        .prod-shift b { font-size: 17px; }
+        .neg { color: var(--bad); }
+        @@media (max-width: 599px) { .prod-funnel { grid-template-columns: 1fr 1fr; } .prod-orders a { grid-template-columns: minmax(0, 1fr) 60px 36px; } .prod-orders a > :last-child:not(.prod-pct) { display: none; } }
         .attention { list-style: none; margin: 0; padding: 0; }
         .attention li a { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; }
         .attention li:last-child a { border-bottom: 0; }
@@ -529,7 +603,7 @@
         .chart { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: inherit; text-decoration: none; }
         .chart:hover { border-color: var(--accent); }
         .chart-head { display: flex; justify-content: space-between; gap: 6px; }
-        .chart-total { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+        .chart-total { font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
         .chart-change { font-size: 11px; font-variant-numeric: tabular-nums; }
         .chart-change.up { color: var(--good); }
         .chart-change.down { color: var(--bad); }
@@ -563,20 +637,22 @@
             .side:has(> .nav-body.open) { position: fixed; inset: 0 0 auto 0; z-index: 30; display: flex; flex-direction: column; height: 100vh; height: 100dvh; box-sizing: border-box; }
             .side > .nav-body.open { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: env(safe-area-inset-bottom, 0px); }
             html:has(.nav-body.open), body:has(.nav-body.open) { overflow: hidden; overscroll-behavior: none; }
-            .main { flex: 1 1 auto; padding: 16px 12px; }
-            h1 { font-size: 22px; }
+            .main { flex: 1 1 auto; padding: 12px 10px; }
+            h1 { font-size: 18px; }
         }
 
-        /* Телефон: поля и кнопки во всю ширину и не мельче 16px (iOS не увеличивает страницу при вводе). */
+        /* Телефон (D114: компактно по умолчанию): поля ввода — 16px, иначе iOS увеличивает страницу при вводе; текст и кнопки — 14px,
+           высота касания 38px. Крупнее — «Размер интерфейса» в профиле. */
         @@media (max-width: 599px) {
-            body { font-size: 16px; }
-            input, select, button, a.button { font-size: 16px; min-height: 44px; box-sizing: border-box; }
+            body { font-size: 14px; }
+            input, select, textarea { font-size: 16px; min-height: 38px; padding: 6px 10px; box-sizing: border-box; }
+            button, a.button { font-size: 14px; min-height: 38px; padding: 6px 12px; box-sizing: border-box; }
             .inline-form { flex-direction: column; align-items: stretch; }
             .inline-form label, .inline-form input, .inline-form select { width: 100%; }
             .inline-form input[size] { width: 100%; }
             input[type=checkbox], .inline-form input[type=checkbox] { width: 22px; height: 22px; min-height: 0; flex: none; }
             .actions > *, .page-head > button, .page-head > a.button { flex: 1 1 100%; text-align: center; }
-            .row-actions button { min-height: 40px; }
+            .row-actions button { min-height: 34px; }
             .confirm { flex: 1 1 100%; } .confirm button { flex: 1 1 0; }
             dl.facts { grid-template-columns: 1fr; gap: 2px; }
             dl.facts dd { margin-bottom: 8px; }
@@ -585,8 +661,8 @@
             /* Таблицы-списки становятся карточками: подпись столбца берётся из заголовка таблицы (скрипт ниже). */
             .scroll table:not(.matrix) thead { display: none; }
             .scroll table:not(.matrix), .scroll table:not(.matrix) tbody { display: block; }
-            .scroll table:not(.matrix) tr { display: block; border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 10px; background: var(--surface-2); }
-            .scroll table:not(.matrix) td { display: flex; justify-content: space-between; gap: 12px; border: 0; padding: 6px 0; text-align: right; overflow-wrap: anywhere; }
+            .scroll table:not(.matrix) tr { display: block; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; margin-bottom: 6px; background: var(--surface-2); }
+            .scroll table:not(.matrix) td { display: flex; justify-content: space-between; gap: 12px; border: 0; padding: 3px 0; text-align: right; overflow-wrap: anywhere; }
             .scroll table:not(.matrix) td[data-label]::before { content: attr(data-label); color: var(--muted); text-align: left; flex: 0 0 40%; }
             .scroll table:not(.matrix) td:not([data-label]) { justify-content: flex-start; text-align: left; }
             .scroll table:not(.matrix) td:empty { display: none; }
@@ -774,8 +850,9 @@
 
         /* Клавиатура: видимый фокус на всех элементах управления. */
         :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        /* Сенсорный экран: цели не меньше 44 px. */
-        @@media (pointer: coarse) { button, a.button, select, input:not([type=checkbox]), .quick-btn, .side a { min-height: 44px; } }
+        /* Сенсорный экран (D114): цели не меньше 36 px — компактно, но попадание пальцем надёжное; 44 px — «Обычно» в профиле. */
+        @@media (pointer: coarse) { button, a.button, select, input:not([type=checkbox]), .quick-btn, .side a { min-height: 36px; }
+            .side a, .nav-group-head, .nav-single { min-height: 32px; padding-top: 5px; padding-bottom: 5px; } }
         /* Большие мониторы: крупнее шрифт и поля, таблицы во всю ширину. */
         @@media (min-width: 1600px) { .main { padding: 24px 36px; } .topbar { padding: 0 36px; } .side { flex-basis: 248px; } }
 
@@ -795,6 +872,35 @@
         @@media (max-height: 500px) and (orientation: landscape) {
             .side { position: static; }
             .drawer { height: 100vh; height: 100dvh; border-radius: 0; }
+        }
+        /* D114: размер интерфейса — «Компактно» (по умолчанию, правила выше), «Обычно» (крупные цели касания и 16px на телефоне),
+           «Крупно» (ещё и крупнее текст на компьютере). Выбор — в профиле, хранится на этом устройстве (атрибут data-density). */
+        :root[data-density="normal"] .kpi-value, :root[data-density="large"] .kpi-value { font-size: 24px; }
+        :root[data-density="normal"] .chart-large svg, :root[data-density="large"] .chart-large svg { height: 110px; }
+        :root[data-density="normal"] .quick-action, :root[data-density="large"] .quick-action { min-height: 44px; padding: 8px 12px; }
+        @@media (pointer: coarse) {
+            :root[data-density="normal"] :is(button, a.button, select, input:not([type=checkbox]), .quick-btn, .side a),
+            :root[data-density="large"] :is(button, a.button, select, input:not([type=checkbox]), .quick-btn, .side a) { min-height: 44px; }
+            :root[data-density="normal"] :is(.side a, .nav-group-head, .nav-single), :root[data-density="large"] :is(.side a, .nav-group-head, .nav-single) { min-height: 44px; }
+        }
+        @@media (max-width: 599px) {
+            :root[data-density="normal"] body, :root[data-density="large"] body { font-size: 16px; }
+            :root[data-density="normal"] :is(input, select, textarea, button, a.button),
+            :root[data-density="large"] :is(input, select, textarea, button, a.button) { font-size: 16px; min-height: 44px; padding: 8px 12px; }
+            :root[data-density="normal"] .scroll table:not(.matrix) td, :root[data-density="large"] .scroll table:not(.matrix) td { padding: 6px 0; }
+        }
+        @@media (min-width: 600px) {
+            :root[data-density="normal"] body { font-size: 14px; }
+            :root[data-density="normal"] :is(input, select, textarea) { padding: 6px 10px; font-size: 14px; }
+            :root[data-density="normal"] :is(button, a.button) { padding: 6px 12px; font-size: 14px; }
+            :root[data-density="normal"] :is(th, td) { padding: 6px 10px; }
+            :root[data-density="large"] body { font-size: 15px; line-height: 1.45; }
+            :root[data-density="large"] h1 { font-size: 22px; }
+            :root[data-density="large"] h2 { font-size: 16px; }
+            :root[data-density="large"] :is(input, select, textarea) { padding: 8px 12px; font-size: 15px; }
+            :root[data-density="large"] :is(button, a.button) { padding: 8px 14px; font-size: 15px; }
+            :root[data-density="large"] :is(th, td) { padding: 8px 12px; }
+            :root[data-density="large"] .side a { padding: 9px 12px; }
         }
     </style>
     <HeadOutlet @rendermode="PageRenderMode" />

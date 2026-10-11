@@ -210,6 +210,10 @@ else
     [SupplyParameterFromQuery(Name = "overdue")]
     public int? OverdueQuery { get; set; }
 
+    /// <summary>D111: «?stage=…» с главного экрана — список заказов на этапе.</summary>
+    [SupplyParameterFromQuery(Name = "stage")]
+    public long? StageQuery { get; set; }
+
     private string _status = string.Empty;
     private bool _overdue;
     private string _stage = string.Empty;
@@ -232,6 +236,7 @@ else
         try
         {
             _overdue = OverdueQuery == 1;
+            _stage = StageQuery?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             _stages = await StageList.ListAsync();
             await LoadAsync();
             if (NewQuery == "1")

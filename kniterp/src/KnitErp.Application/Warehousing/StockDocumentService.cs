@@ -265,6 +265,17 @@ public sealed class StockDocumentService(
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
         await ValidateHeaderAsync(ctx, kind, header, ct);
+        // Аудит 11.10.2026 (D109): строки из API и из заказов — позиция своей организации, количество по точности единицы.
+        // Иначе в документ попала бы номенклатура другой организации. Архивная позиция допустима: заказ мог быть до архива.
+        var ids = lines.Select(l => l.ItemId).Distinct().ToList();
+        var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && ids.Contains(i.Id))
+            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new EntryItemDto(i.Id, i.Code, i.Name, u.Symbol, u.Precision))
+            .ToDictionaryAsync(i => i.Id, ct);
+        foreach (var (itemId, quantity) in lines)
+        {
+            StockEntry.EnsurePrecision(items.GetValueOrDefault(itemId) ?? throw new NotFoundException("Номенклатура"), quantity);
+        }
+
         await using var tx = await db.BeginTransactionAsync(ct);
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, StockDocument.NumberPrefix(kind), ct);
         var doc = StockDocument.Create(ctx.OrganizationId, number, kind, header, ctx.UserId, clock.UtcNow);
@@ -403,6 +414,13 @@ public sealed class StockDocumentService(
         StockBatchLedger.Write(db, ctx, doc, batchMoves, StockSource.StockDocument, clock.UtcNow);
         Audit(ctx, AuditActions.StockDocumentPosted, doc, "Черновик", "Проведён", $"строк: {doc.Lines.Count}");
         await ClosedPeriod.SaveAsync(db, ct);
+        // D110: отгрузка по заказу покупателя двигает его этап («Отгружен частично / полностью»).
+        if (doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } shippedOrder)
+        {
+            await KnitErp.Application.Sales.StageAutomation.ApplyAsync(db, ctx, [shippedOrder], clock.UtcNow, currentUser.CorrelationId, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
         await tx.CommitAsync(ct);
     }
 

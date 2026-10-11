@@ -1,0 +1,157 @@
+@using KnitErp.Application.Access
+@inject UserAccessService Access
+
+@*
+    D112: права пользователя — что у него есть и откуда (роль, особое право, запрет), особые права и запреты со сроком и причиной.
+    Запрет сильнее любого разрешения. Права проверяет сервер; эта панель только показывает и передаёт команды.
+*@
+<section class="panel user-rights" aria-label="@L("Права пользователя")">
+    <div class="page-head">
+        <h2>@L("Права: {0}", _rights?.Name ?? "…")</h2>
+        <button type="button" class="secondary" @onclick="OnClose">@L("Закрыть")</button>
+    </div>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    @if (_rights is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else
+    {
+        <p class="muted small">@L("Роли: {0}", _rights.Roles.Count == 0 ? "—" : string.Join(", ", _rights.Roles.Select(r => L(r))))</p>
+        @if (!_rights.Active)
+        {
+            <div class="flash warn" role="status">@L("Пользователь ещё не вошёл или заблокирован — права начнут действовать, когда он войдёт в программу.")</div>
+        }
+
+        @if (_rights.CanEdit)
+        {
+            <form class="inline-form rights-add" @onsubmit="AddAsync">
+                <label>@L("Право")
+                    <select @bind="_code" required>
+                        <option value="">@L("— выберите —")</option>
+                        @foreach (var g in _rights.Rows.GroupBy(r => r.Group))
+                        {
+                            <optgroup label="@L(g.Key)">
+                                @foreach (var r in g)
+                                {
+                                    <option value="@r.Code">@L(r.Label)</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                </label>
+                <div class="segmented" role="radiogroup" aria-label="@L("Разрешить или запретить")">
+                    <button type="button" role="radio" aria-checked="@(!_deny ? "true" : "false")" class="@(!_deny ? "on" : null)" @onclick="() => _deny = false">@L("Разрешить")</button>
+                    <button type="button" role="radio" aria-checked="@(_deny ? "true" : "false")" class="@(_deny ? "on bad" : null)" @onclick="() => _deny = true">@L("Запретить")</button>
+                </div>
+                <label>@L("До (включительно)") <input type="date" @bind="_until" /></label>
+                <label>@L("Причина") <input @bind="_reason" maxlength="500" required="@_deny" placeholder="@(_deny ? L("Обязательна для запрета") : L("Например: на время отпуска коллеги"))" /></label>
+                <button type="submit" disabled="@(_busy || string.IsNullOrEmpty(_code))">@L("Добавить")</button>
+            </form>
+        }
+
+        @if (_rights.Individual.Count > 0)
+        {
+            <h3>@L("Особые права и запреты")</h3>
+            <ul class="plain rights-list">
+                @foreach (var i in _rights.Individual)
+                {
+                    <li @key="i.Id">
+                        <span class="tag @(i.Deny ? "bad" : "ok")">@(i.Deny ? L("запрет") : L("разрешено"))</span>
+                        <b>@L(i.Label)</b>
+                        <span class="muted small">@(i.ValidToUtc is { } to ? L("до {0}", TimeZones.ToLocal(to, CurrentAccess.TimeZoneId).AddDays(-1).ToString("dd.MM.yyyy")) : L("бессрочно"))
+                            · @i.GrantedBy, @TimeZones.ToLocal(i.GrantedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy")
+                            @if (i.Reason is not null) { <text> · «@i.Reason»</text> }</span>
+                        @if (_rights.CanEdit)
+                        {
+                            <ConfirmButton Class="link" Disabled="_busy" Question="@L("Отозвать?")" OnConfirm="() => RevokeAsync(i)">@L("Отозвать")</ConfirmButton>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        <h3>@L("Итоговые права")</h3>
+        <div class="rights-grid">
+            @foreach (var g in _rights.Rows.GroupBy(r => r.Group))
+            {
+                <div class="rights-group">
+                    <b>@L(g.Key)</b>
+                    <ul class="plain">
+                        @foreach (var r in g)
+                        {
+                            <li class="@(r.Effective ? "on" : "off")">
+                                <span aria-hidden="true">@(r.Effective ? "✓" : "—")</span>
+                                <span>@L(r.Label)
+                                    <span class="muted small">@Source(r)</span></span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public long UserId { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private UserRightsDto? _rights;
+    private string? _code;
+    private bool _deny;
+    private DateTime? _until;
+    private string? _reason;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    protected override Task OnParametersSetAsync() => RunAsync(() => Task.CompletedTask, null);
+
+    private string Source(UserRightRowDto r) =>
+        r.Denied ? L("запрещено особо") : r.Granted && r.FromRoles is null ? L("особое право") : r.FromRoles is { } roles ? L("роль: {0}", roles) : string.Empty;
+
+    private Task AddAsync() => RunAsync(async () =>
+    {
+        await Access.GrantIndividualAsync(UserId, _code!, _deny, _until is { } d ? DateOnly.FromDateTime(d) : null, _reason);
+        (_code, _deny, _until, _reason) = (null, false, null, null);
+    }, L("Сохранено. Права действуют сразу."));
+
+    private Task RevokeAsync(IndividualRightDto i) => RunAsync(() => Access.RevokeIndividualAsync(i.Id, null), L("Отозвано."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _rights = await Access.UserRightsAsync(UserId);
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

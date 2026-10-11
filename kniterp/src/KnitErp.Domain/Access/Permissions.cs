@@ -90,6 +90,25 @@ public static class Permissions
 
     public static string Describe(string code) => Labels.TryGetValue(code, out var label) ? label : code;
 
+    /// <summary>Группы прав для редактора ролей (D112), в порядке разделов меню.</summary>
+    public static readonly IReadOnlyList<string> Groups =
+        ["Продажи", "Закупки", "Склад", "Деньги и цены", "Справочники", "Производство", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
+
+    /// <summary>Группа права по его коду — так новые права модулей (производство, кадры) сами попадают в свой раздел.</summary>
+    public static string GroupOf(string code) => code.Split('.')[0] switch
+    {
+        "sales" => "Продажи",
+        "purchase" => "Закупки",
+        "warehouse" or "period" => "Склад",
+        "finance" or "money" => "Деньги и цены",
+        "catalog" => "Справочники",
+        "production" => "Производство",
+        "organization" or "structure" or "hr" => "Организация и сотрудники",
+        "access" => "Пользователи и доступ",
+        "audit" => "Журнал и контроль",
+        _ => "Прочее",
+    };
+
     /// <summary>Права, выдача которых считается выдачей административных прав (ТЗ §4.8 KA3634).</summary>
     public static bool IsAdministrative(string code) => code is UserManage or AdminGrant;
 }

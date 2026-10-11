@@ -116,6 +116,9 @@ else
                 case DashboardBlocks.Money:
                     @MoneyBlock(f)
                     break;
+                case DashboardBlocks.Production:
+                    @ProductionBlock(_data.Production)
+                    break;
                 case DashboardBlocks.Attention:
                     @AttentionBlock(f, layout.Shows(DashboardBlocks.Debtors) && f is { TopDebtors.Count: > 0 })
                     break;
@@ -324,6 +327,7 @@ else
         DashboardBlocks.Recent => L("Последние документы"),
         DashboardBlocks.Month => L("Склад за месяц"),
         DashboardBlocks.Reference => L("Справочно"),
+        DashboardBlocks.Production => L("Производство"),
         DashboardBlocks.Readiness => L("Готовность к запуску"),
         _ => block,
     };
@@ -511,6 +515,99 @@ else
         c.PreviousTotal == 0 ? null : Math.Round((c.Total - c.PreviousTotal) / c.PreviousTotal * 100, 0);
 
     /// <summary>Строка «требует внимания»: есть что делать — жёлтый знак «!» и число; нечего — зелёная галочка.</summary>
+    /// <summary>
+    /// D111: производство — воронка заказов покупателей по этапам (очередь → в работе → собрано), готовность производственных заказов,
+    /// выпуск за день, что требует внимания и смена сегодня (последние три — из модулей производства и сотрудников).
+    /// </summary>
+    private RenderFragment ProductionBlock(DashboardProductionDto? p) => __builder =>
+    {
+        @if (p is not null)
+        {
+            <section class="dash-box wide prod-box">
+                <h2>@L("Производство")
+                    @if (p.OverdueTotal > 0) { <span class="tag warn">@L("просрочено: {0}", p.OverdueTotal)</span> }
+                    <a class="muted small" href="sales-order-stages#automation">@L("Этапы и автосмена")</a></h2>
+                @if (p.Funnel.Count > 0)
+                {
+                    <ol class="prod-funnel" aria-label="@L("Заказы покупателей по этапам производства")">
+                        @foreach (var step in p.Funnel)
+                        {
+                            <li>
+                                <a href="sales-orders?stage=@step.StageId" class="prod-step">
+                                    <StageChip Stage="@(new KnitErp.Application.Sales.SalesStageRefDto(step.StageId, step.Stage, step.Color))" />
+                                    <b>@step.Orders</b>
+                                    <span class="muted small">@L("заказов")@(step.Amount is { } a && a > 0 ? " · " + Amounts.Format(a) : "")</span>
+                                    @if (step.Overdue > 0) { <span class="prod-late">@L("срок отгрузки прошёл: {0}", step.Overdue)</span> }
+                                </a>
+                            </li>
+                        }
+                    </ol>
+                }
+                <div class="prod-grid">
+                    @if (p.Production is { } m)
+                    {
+                        <div class="prod-col">
+                            <div class="mini-stats">
+                                <span><b>@m.OrdersInWork</b><span>@L("в работе")</span></span>
+                                <span class="@(m.OrdersLate > 0 ? "neg" : null)"><b>@m.OrdersLate</b><span>@L("с опозданием")</span></span>
+                                @if (m.OutputToday is { } output)
+                                {
+                                    <span><b>@Quantities.Format(output)</b><span>@L("выпуск сегодня, {0}", m.OutputUnit ?? "")</span></span>
+                                }
+                            </div>
+                            @if (m.Orders.Count > 0)
+                            {
+                                <ul class="prod-orders">
+                                    @foreach (var o in m.Orders)
+                                    {
+                                        var pct = Math.Clamp(o.Percent, 0, 100);
+                                        <li>
+                                            <a href="@o.Href">
+                                                <span class="prod-name"><b>@o.Number</b> @o.Product
+                                                    @if (o.Operation is not null) { <span class="muted small">· @o.Operation</span> }</span>
+                                                <span class="prod-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)pct)"
+                                                      aria-label="@L("Готовность {0}", o.Number)"><span style="width: @(pct.ToString("0.#", CultureInfo.InvariantCulture))%"></span></span>
+                                                <span class="prod-pct">@pct.ToString("0", CultureInfo.InvariantCulture)%</span>
+                                                @if (o.DueDate is { } due) { <span class="small @(o.Late ? "neg" : "muted")">@due.ToString("dd.MM")</span> }
+                                            </a>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                    @if (p.Production is { Alerts.Count: > 0 } || p.Shift is not null)
+                    {
+                        <div class="prod-col">
+                            @if (p.Shift is { } sh)
+                            {
+                                <a class="prod-shift" href="@sh.Href">
+                                    <span class="muted small">@L("Смена сегодня")</span>
+                                    <b>@sh.OnShift <span class="muted">/ @sh.Planned</span></b>
+                                    <span class="small @(sh.Absent > 0 ? "neg" : "muted")">@(sh.Absent > 0 ? L("не вышли: {0}", sh.Absent) : L("все на месте"))</span>
+                                    @if (sh.AbsentNames is { Count: > 0 } names) { <span class="muted small">@string.Join(", ", names.Take(5))</span> }
+                                </a>
+                            }
+                            @if (p.Production is { Alerts.Count: > 0 } pa)
+                            {
+                                <ul class="attention">
+                                    @foreach (var a in pa.Alerts)
+                                    {
+                                        @Attention(a.Text, a.Count, a.Critical ? L("срочно") : L("проверьте"), a.Href, null)
+                                    }
+                                </ul>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (p.Production is null && p.Shift is null)
+                {
+                    <p class="muted small">@L("Готовность заказов по операциям, выпуск за день и смена появятся здесь, когда в программе начнут вести производственные заказы и табель.")</p>
+                }
+            </section>
+        }
+    };
+
     private RenderFragment Attention(string title, int count, string hint, string href, decimal? amount) => __builder =>
     {
         <li class="@(count > 0 ? "todo" : "done")">

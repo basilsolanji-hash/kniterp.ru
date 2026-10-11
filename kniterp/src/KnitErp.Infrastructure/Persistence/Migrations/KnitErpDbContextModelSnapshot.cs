@@ -114,6 +114,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsSystem")
                         .HasColumnType("bit");
 
@@ -125,13 +132,22 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.HasKey("Id");
 
                     b.HasIndex("OrganizationId", "Code")
                         .IsUnique()
                         .HasDatabaseName("ux_roles_org_code");
 
-                    b.ToTable("roles", "kniterp");
+                    b.ToTable("roles", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_roles_archive_custom", "[IsArchived] = 0 OR [IsSystem] = 0");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Access.RoleAssignment", b =>
@@ -4588,6 +4604,43 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesStageRule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("StageId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Trigger")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "StageId");
+
+                    b.HasIndex("OrganizationId", "Trigger")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sales_stage_rules_org_trigger");
+
+                    b.ToTable("sales_stage_rules", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 8");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Structure.Department", b =>
                 {
                     b.Property<long>("Id")
@@ -7367,6 +7420,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesStageRule", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Sales.SalesOrderStage", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "StageId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Structure.Department", b =>

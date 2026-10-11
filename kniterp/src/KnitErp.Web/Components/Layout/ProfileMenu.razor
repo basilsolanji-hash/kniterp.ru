@@ -41,6 +41,12 @@
                         <button type="button" role="menuitemradio" class="chip" data-theme-choice="@themeCode">@themeTitle</button>
                     }
                 </div>
+                <div class="menu-caption">@L("Размер интерфейса")</div>
+                <div class="lang-row" role="radiogroup" aria-label="@L("Размер интерфейса")">
+                    <button type="button" role="menuitemradio" class="chip" data-density-choice="compact">@L("Компактно")</button>
+                    <button type="button" role="menuitemradio" class="chip" data-density-choice="normal">@L("Обычно")</button>
+                    <button type="button" role="menuitemradio" class="chip" data-density-choice="large">@L("Крупно")</button>
+                </div>
                 <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(QuickBar.SettingsId))">@L("Настроить панель")</button>
                 <form method="post" action="account/logout">
                     <AntiforgeryToken />

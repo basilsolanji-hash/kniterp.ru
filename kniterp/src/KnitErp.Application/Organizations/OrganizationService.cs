@@ -129,6 +129,8 @@ public sealed class OrganizationService(IKnitErpDbContext db, IAccessGuard guard
         db.OrganizationMembers.Add(OrganizationMember.Join(org.Id, owner.Id, now));
         await db.SaveChangesAsync(ct);
 
+        // D110: правила автоматической смены этапа — к этапам по умолчанию (их id известны после сохранения).
+        Sales.StageAutomation.SeedDefaults(db, org.Id, db.SalesOrderStages.Local.Where(st => st.OrganizationId == org.Id));
         var ownerRole = roles.Single(r => r.Code == SystemRoles.Owner);
         db.RoleAssignments.Add(RoleAssignment.ForRole(org.Id, owner.Id, ownerRole.Id, owner.Id, now, "Создание организации"));
         db.AuditEntries.Add(AuditEntry.Create(now, org.Id, null, AuditActions.OrganizationCreated, nameof(Organization),

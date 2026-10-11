@@ -86,7 +86,7 @@ public sealed class CounterpartyCardTests(SqlTestHost host) : IClassFixture<SqlT
     }
 
     [SqlFact]
-    public async Task Foreign_organization_sees_nothing_and_storekeeper_cannot_edit_or_see_amounts()
+    public async Task Foreign_organization_sees_nothing_storekeeper_sees_no_contracts_accountant_reads_only()
     {
         var a = await CreateOrganizationAsync();
         var b = await CreateOrganizationAsync();
@@ -111,13 +111,28 @@ public sealed class CounterpartyCardTests(SqlTestHost host) : IClassFixture<SqlT
 
         var storekeeper = await InviteActiveAsync(a, SystemRoles.Storekeeper);
         {
+            // Кладовщику карточка открыта, договоры и их сканы — нет (D500).
             var (cards, s) = As(storekeeper, a.OrganizationId);
             await using var _ = s;
             var card = await cards.GetAsync(customer);
-            Assert.False(card.CanEditContracts || card.CanSeePrices || card.CanSeeSales);
-            var contract = Assert.Single(await cards.ContractsAsync(customer));
-            Assert.Null(contract.AmountLimit);
+            Assert.False(card.CanSeeContracts || card.CanSeeContractFiles || card.CanEditContracts || card.CanSeePrices || card.CanSeeSales);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => cards.ContractsAsync(customer));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => cards.GetFileAsync(fileId));
             await Assert.ThrowsAsync<AccessDeniedException>(() => cards.AddContractAsync(customer, Terms("3")));
+        }
+
+        var accountant = await InviteActiveAsync(a, SystemRoles.Accountant);
+        {
+            // Бухгалтер видит договоры с лимитом и сканы, но не меняет их.
+            var (cards, s) = As(accountant, a.OrganizationId);
+            await using var _ = s;
+            var card = await cards.GetAsync(customer);
+            Assert.True(card.CanSeeContracts && card.CanSeeContractFiles);
+            Assert.False(card.CanEditContracts);
+            var contract = Assert.Single(await cards.ContractsAsync(customer));
+            Assert.NotNull(contract.AmountLimit);
+            Assert.Single(contract.Files);
+            Assert.Equal("scan.pdf", (await cards.GetFileAsync(fileId)).FileName);
             await Assert.ThrowsAsync<AccessDeniedException>(() => cards.CloseContractAsync(contractId, contract.RowVersion));
             await Assert.ThrowsAsync<AccessDeniedException>(() => cards.AddFileAsync(contractId, "x.pdf", "application/pdf", Pdf));
         }
