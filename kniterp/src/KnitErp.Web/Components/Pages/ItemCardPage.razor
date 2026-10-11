@@ -8,6 +8,7 @@
 @inject BundleService Bundles
 @inject ItemTradeService Trade
 @inject PackService PackList
+@inject ItemSupplierService Suppliers
 @inject CatalogService Catalog
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
@@ -410,6 +411,72 @@ else
         }
     }
 
+    @if (_item.Type != ItemType.Bundle)
+    {
+        <h2 style="margin-top: 20px">@L("Поставщики")</h2>
+        <div class="scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th>@L("Поставщик")</th><th class="opt">@L("Его артикул")</th><th class="opt">@L("Его наименование")</th>
+                        @if (_item.CanSeePrices) { <th class="num">@L("Последняя цена без НДС")</th> }
+                        @if (editable) { <th></th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_suppliers.Count == 0)
+                    {
+                        <tr><td colspan="5" class="muted">@L("Поставщики не указаны.")</td></tr>
+                    }
+                    @foreach (var s in _suppliers)
+                    {
+                        var supplier = s;
+                        <tr>
+                            <td>@s.Supplier @if (s.IsMain) { <span class="tag ok">@L("основной")</span> }</td>
+                            <td>@(s.SupplierArticle ?? "—")</td>
+                            <td>@(s.SupplierItemName ?? "—")</td>
+                            @if (_item.CanSeePrices)
+                            {
+                                <td class="num">@(s.LastPrice is { } lp ? $"{Amounts.Format(lp)} ({s.LastOrderDate:dd.MM.yyyy})" : "—")</td>
+                            }
+                            @if (editable)
+                            {
+                                <td>
+                                    <div class="row-actions">
+                                        @if (!s.IsMain)
+                                        {
+                                            <button type="button" class="secondary" @onclick='() => RunAsync(() => Suppliers.SetAsync(Id, supplier.SupplierId, supplier.SupplierArticle, supplier.SupplierItemName, true), L("Основной поставщик изменён."))' disabled="@_busy">@L("Основной")</button>
+                                        }
+                                        <ConfirmButton Class="secondary" OnConfirm='() => RunAsync(() => Suppliers.RemoveAsync(supplier.Id, supplier.RowVersion), L("Поставщик убран."))' Disabled="@_busy" Question='@L("Убрать поставщика?")'>@L("Убрать")</ConfirmButton>
+                                    </div>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (editable)
+        {
+            <form class="inline-form" @onsubmit="SaveSupplierAsync">
+                <label>
+                    @L("Поставщик")
+                    <select @bind="_supplierId">
+                        <option value="">@L("— выберите —")</option>
+                        @foreach (var o in _supplierOptions)
+                        {
+                            <option value="@o.Id">@o.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Его артикул") <input @bind="_supplierArticle" maxlength="@ItemSupplier.ArticleMaxLength" size="12" /></label>
+                <label>@L("Его наименование") <input @bind="_supplierName" maxlength="@ItemSupplier.NameMaxLength" size="24" /></label>
+                <label class="inline"><input type="checkbox" @bind="_supplierMain" /> @L("основной")</label>
+                <button type="submit" disabled="@_busy">@L("Сохранить поставщика")</button>
+            </form>
+        }
+    }
+
     <h2 style="margin-top: 20px">@L("Фото")</h2>
     <p class="muted">@L("JPEG, PNG или WebP до 2 МБ, не больше {0}. Первое — основное: оно видно в списке номенклатуры.", ItemPhoto.MaxPerItem)</p>
     @if (_photos.Count > 0)
@@ -588,6 +655,27 @@ else
     private BundleDto? _bundle;
     private ItemTradeDto? _trade;
     private IReadOnlyList<ItemPackDto> _packs = [];
+    private IReadOnlyList<ItemSupplierDto> _suppliers = [];
+    private IReadOnlyList<SupplierOptionDto> _supplierOptions = [];
+    private string _supplierId = string.Empty;
+    private string? _supplierArticle;
+    private string? _supplierName;
+    private bool _supplierMain;
+
+    /// <summary>D309: поставщик тот же — меняются его артикул, наименование, признак «основной».</summary>
+    private Task SaveSupplierAsync() => RunAsync(async () =>
+    {
+        if (!long.TryParse(_supplierId, out var supplierId))
+        {
+            throw new BusinessRuleException("catalog.supplier.choose", L("Выберите поставщика."));
+        }
+
+        await Suppliers.SetAsync(Id, supplierId, _supplierArticle, _supplierName, _supplierMain);
+        _supplierId = string.Empty;
+        _supplierArticle = null;
+        _supplierName = null;
+        _supplierMain = false;
+    }, L("Поставщик сохранён."));
     private IReadOnlyList<UnitDto> _units = [];
     private string _packUnit = string.Empty;
     private string? _packFactor;
@@ -717,6 +805,8 @@ else
         _bundle = _item.Type == ItemType.Bundle ? await Bundles.GetAsync(Id) : null;
         _trade = await Trade.GetAsync(Id);
         _packs = _item.IsStocked ? await PackList.ListAsync(Id) : [];
+        _suppliers = _item.Type != ItemType.Bundle ? await Suppliers.ListAsync(Id) : [];
+        _supplierOptions = _item.Type != ItemType.Bundle && _item.CanEdit && !_item.IsArchived ? await Suppliers.SupplierOptionsAsync() : [];
         _units = _item.IsStocked && _item.CanEdit ? await Catalog.ListUnitsAsync() : [];
         _tradeForm = new TradeForm
         {

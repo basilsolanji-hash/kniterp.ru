@@ -25,18 +25,26 @@ public sealed record ItemImportRow(
     int RowNumber, string Code, string Name, string TypeText, string UnitText, string Description,
     ImportAction Action, IReadOnlyList<string> Errors, IReadOnlyDictionary<string, string>? Extra = null);
 
-/// <summary>Протокол проверки и контрольные итоги. Применить можно только файл без ошибок.</summary>
+/// <summary>
+/// Протокол проверки и контрольные итоги. Применить можно только файл без ошибок. Bundles — строки листа «Состав комплектов» (D308):
+/// для каждого комплекта из листа состав заменяется целиком.
+/// </summary>
 public sealed record ItemImportPlan(IReadOnlyList<ItemImportRow> Rows)
 {
+    public IReadOnlyList<BundleImportRow> Bundles { get; init; } = [];
     public int Total => Rows.Count;
     public int ToCreate => Rows.Count(r => r.Action == ImportAction.Create);
     public int ToUpdate => Rows.Count(r => r.Action == ImportAction.Update);
     public int Unchanged => Rows.Count(r => r.Action == ImportAction.Unchanged);
-    public int ErrorRows => Rows.Count(r => r.Action == ImportAction.Error);
-    public bool CanApply => ErrorRows == 0 && ToCreate + ToUpdate > 0;
+    public int ErrorRows => Rows.Count(r => r.Action == ImportAction.Error) + Bundles.Count(b => b.Errors.Count > 0);
+    public bool CanApply => ErrorRows == 0 && (ToCreate + ToUpdate > 0 || Bundles.Count > 0);
 }
 
-public sealed record ItemImportResult(int Created, int Updated);
+public sealed record ItemImportResult(int Created, int Updated)
+{
+    /// <summary>Комплектов с заменённым составом (D308).</summary>
+    public int Bundles { get; init; }
+}
 
 /// <summary>
 /// Шаблонный импорт и выгрузка номенклатуры в Excel (MVP 1.0: «шаблонный импорт и экспорт основных данных,
@@ -48,7 +56,7 @@ public sealed record ItemImportResult(int Created, int Updated);
 /// поле); столбца нет — поле не меняется. Цены — только с правом «Цены и суммы».
 /// </para>
 /// </summary>
-public sealed class ItemExchangeService(
+public sealed partial class ItemExchangeService(
     IKnitErpDbContext db, IAccessGuard guard, ISpreadsheetFormat spreadsheet, ICurrentUser currentUser, IClock clock)
 {
     public const int MaxRows = 5000;
@@ -72,7 +80,7 @@ public sealed class ItemExchangeService(
     public static readonly IReadOnlyList<string> ExtraColumns =
     [
         ArticleColumn, GroupColumn, BarcodesColumn, CountryColumn, DeclarationColumn, TnVedColumn, WeightColumn, VolumeColumn, MinStockColumn,
-        PurchasePriceColumn, ParentColumn, VariantColumn,
+        PurchasePriceColumn, ParentColumn, VariantColumn, PaymentSubjectColumn, MarkingColumn, GtinColumn, MinPriceColumn, PacksColumn,
     ];
 
     private static readonly string[] DetailColumns =
@@ -95,8 +103,8 @@ public sealed class ItemExchangeService(
                 Example("ПР-0001", "Пряжа шерсть 50% серая", ItemTypes.Name(ItemType.RawMaterial), "кг", "Пример — удалите строку", "YW-50"),
                 Example("Ф-015", "Пуговица 15 мм", ItemTypes.Name(ItemType.Accessory), "шт", ""),
             ]),
-            new SheetData("Допустимые значения", ["Тип", "Единица (обозначение)", "Единица (наименование)", "Группа", "Характеристика"],
-                Enumerable.Range(0, new[] { ItemTypes.All.Count, units.Count, lookups.Groups.Count, lookups.Characteristics.Count }.Max())
+            new SheetData("Допустимые значения", ["Тип", "Единица (обозначение)", "Единица (наименование)", "Группа", "Характеристика", MarkingColumn, PaymentSubjectColumn],
+                Enumerable.Range(0, new[] { ItemTypes.All.Count, units.Count, lookups.Groups.Count, lookups.Characteristics.Count, Marking.All.Count }.Max())
                     .Select(i => (IReadOnlyList<string>)
                     [
                         i < ItemTypes.All.Count ? ItemTypes.Name(ItemTypes.All[i]) : "",
@@ -104,6 +112,8 @@ public sealed class ItemExchangeService(
                         i < units.Count ? units[i].Name : "",
                         i < lookups.Groups.Count ? lookups.Groups.Keys.ElementAt(i) : "",
                         i < lookups.Characteristics.Count ? lookups.Characteristics.Keys.ElementAt(i) : "",
+                        i == 0 ? NotMarked : i < Marking.All.Count ? Marking.Name(Marking.All[i]) : "",
+                        i < 3 ? TradeRules.PaymentSubjectName(new[] { PaymentSubject.Goods, PaymentSubject.ExcisableGoods, PaymentSubject.Service }[i]) : "",
                     ]).ToList()),
             new SheetData("Как заполнять", ["Столбец", "Что писать"],
             [
@@ -114,7 +124,14 @@ public sealed class ItemExchangeService(
                 [CountryColumn, "Цифровой код по ОКСМ: 643 — Россия, 156 — Китай."],
                 [ParentColumn + ", " + VariantColumn, "Для модификации: код основной позиции и «Цвет: красный; Размер: 48»."],
                 [PricePrefix + "…", "Цена по виду цен, как в карточке позиции (нужно право «Цены и суммы»)."],
+                [PaymentSubjectColumn, "«Товар», «Подакцизный товар» или «Услуга» (у услуги — всегда «Услуга»)."],
+                [MarkingColumn, "Вид продукции «Честного ЗНАКа» с листа «Допустимые значения» или «нет»."],
+                [GtinColumn, "14 цифр с контрольной (или EAN-13 — дополнится нулём); уникален в организации."],
+                [MinPriceColumn, "Минимальная цена продажи (нужно право «Цены и суммы»)."],
+                [PacksColumn, "«упак = 12; кор = 48 / 4600000000008»: единица из справочника = сколько основных единиц, после «/» — штрихкод упаковки."],
+                [BundleSheet, "Лист с тремя столбцами: код комплекта, код компонента, количество. Состав каждого комплекта из листа заменяется целиком."],
             ]),
+            new SheetData(BundleSheet, BundleColumns, [["НБ-001", "Ш-001", "1"], ["НБ-001", "ШФ-001", "1"]]),
         ]);
     }
 
@@ -138,6 +155,7 @@ public sealed class ItemExchangeService(
             ? (await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == org).ToListAsync(ct)).ToLookup(p => p.ItemId)
             : null;
         var header = HeaderFor(prices, lookups.PriceTypes.Keys);
+        var packs = (await db.ItemPacks.AsNoTracking().Where(p => p.OrganizationId == org).ToListAsync(ct)).ToLookup(p => p.ItemId);
         var rows = items.Select(i =>
         {
             var cells = new Dictionary<string, string>
@@ -155,6 +173,7 @@ public sealed class ItemExchangeService(
                 [ParentColumn] = i.ParentItemId is { } p && codes.TryGetValue(p, out var parentCode) ? parentCode : "",
                 [VariantColumn] = VariantText(values[i.Id].Select(v => (characteristicName.GetValueOrDefault(v.CharacteristicId, "?"), v.Value))),
             };
+            ExportTrade(cells, i, packs, units, prices); // D308
             foreach (var (name, id) in lookups.PriceTypes)
             {
                 cells[PricePrefix + name] = Number(itemPrices?[i.Id].FirstOrDefault(p => p.PriceTypeId == id)?.Price);
@@ -170,7 +189,7 @@ public sealed class ItemExchangeService(
                 _ => cells.GetValueOrDefault(h, ""),
             }).ToList();
         }).ToList();
-        return spreadsheet.Write([new SheetData("Номенклатура", header, rows)]);
+        return spreadsheet.Write([new SheetData("Номенклатура", header, rows), new SheetData(BundleSheet, BundleColumns, await ExportBundlesAsync(org, ct))]);
     }
 
     /// <summary>Чтение и полная проверка файла. В базе ничего не меняется.</summary>
@@ -237,14 +256,27 @@ public sealed class ItemExchangeService(
             throw new BusinessRuleException("import.file_empty", "В файле нет строк с данными.");
         }
 
-        return (await PlanAsync(ctx, raw, ct)).Plan;
+        var plan = (await PlanAsync(ctx, raw, ct)).Plan;
+        // D308: лист «Состав комплектов» — необязательный; листа нет — составы не меняются.
+        var bundleSheet = file.CanSeek ? spreadsheet.ReadNamedSheet(Rewind(file), BundleSheet, MaxRows) : null;
+        return plan with { Bundles = await PlanBundlesAsync(ctx, bundleSheet, plan.Rows, ct) };
+
+        static Stream Rewind(Stream s)
+        {
+            s.Position = 0;
+            return s;
+        }
     }
 
     /// <summary>
     /// Применение. Строки проверяются заново на текущих данных базы (между проверкой и применением справочник мог измениться);
     /// при любой ошибке не применяется ничего.
     /// </summary>
-    public async Task<ItemImportResult> ApplyAsync(IReadOnlyList<ItemImportRow> rows, CancellationToken ct = default)
+    public async Task<ItemImportResult> ApplyAsync(IReadOnlyList<ItemImportRow> rows, CancellationToken ct = default) =>
+        await ApplyAsync(rows, [], ct);
+
+    /// <summary>Применение со строками листа «Состав комплектов» (D308): они тоже проверяются заново.</summary>
+    public async Task<ItemImportResult> ApplyAsync(IReadOnlyList<ItemImportRow> rows, IReadOnlyList<BundleImportRow> bundles, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogImport, ct);
         if (rows.Count is 0 or > MaxRows)
@@ -259,6 +291,9 @@ public sealed class ItemExchangeService(
 
         await using var tx = await db.BeginTransactionAsync(ct);
         var (plan, parsed) = await PlanAsync(ctx, rows, ct);
+        IReadOnlyList<IReadOnlyList<string>> bundleSheet =
+            [BundleColumns, .. bundles.Select(b => (IReadOnlyList<string>)[b.BundleCode, b.ComponentCode, b.QuantityText])];
+        plan = plan with { Bundles = await PlanBundlesAsync(ctx, bundleSheet, plan.Rows, ct) };
         if (plan.ErrorRows > 0)
         {
             throw new BusinessRuleException("import.has_errors",
@@ -329,6 +364,8 @@ public sealed class ItemExchangeService(
             await ApplyExtrasAsync(ctx, item, parsed[row.RowNumber], ct);
         }
 
+        var bundlesChanged = await ApplyBundlesAsync(ctx, plan.Bundles, ct); // D308
+
         foreach (var item in created)
         {
             Audit(ctx, AuditActions.CatalogCreated, nameof(Item), item.Id.ToString(), null, $"{item.Code} {item.Name}", "Импорт");
@@ -338,13 +375,13 @@ public sealed class ItemExchangeService(
             $"строк {plan.Total}: создано {created.Count}, обновлено {updated}, без изменений {plan.Unchanged}", null);
         await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
-        return new ItemImportResult(created.Count, updated);
+        return new ItemImportResult(created.Count, updated) { Bundles = bundlesChanged };
     }
 
     /// <summary>Разобранные необязательные столбцы строки. null у поля — столбца нет, поле не меняется.</summary>
     private sealed record Parsed(
         ItemDetails? Details, IReadOnlyList<(BarcodeType Type, string Code)>? Barcodes, IReadOnlyDictionary<long, decimal?>? Prices,
-        string? ParentCode, IReadOnlyDictionary<long, string>? Values)
+        string? ParentCode, IReadOnlyDictionary<long, string>? Values, TradeSpec? Trade = null)
     {
         public static readonly Parsed None = new(null, null, null, null, null);
     }
@@ -413,6 +450,8 @@ public sealed class ItemExchangeService(
                     price?.ToString("0.00##", CultureInfo.InvariantCulture), "Импорт: цена");
             }
         }
+
+        await ApplyTradeAsync(ctx, item, p.Trade, ct); // D308
 
         if (p.Values is { } values && item.IsModification)
         {
@@ -513,6 +552,7 @@ public sealed class ItemExchangeService(
             : (await db.BundleComponents.AsNoTracking().Where(c => c.OrganizationId == org && bundleIds.Contains(c.BundleItemId))
                 .Select(c => c.BundleItemId).Distinct().ToListAsync(ct)).ToHashSet();
 
+        var catalogLookups = await CatalogLookupsAsync(org, raw, existing, ct); // D308: торговые столбцы и упаковки
         var rows = new List<ItemImportRow>(raw.Count);
         var parsed = new Dictionary<int, Parsed>();
         foreach (var r in raw)
@@ -571,6 +611,12 @@ public sealed class ItemExchangeService(
                                 {
                                     errors.Add($"У позиции {parent} уже есть модификация с такими характеристиками.");
                                 }
+                            }
+
+                            if (ParseTrade(extra, current, candidate, catalogLookups, errors, ctx.Permissions.Has(Permissions.PriceView), r.RowNumber) is { } trade)
+                            {
+                                p = p with { Trade = trade };
+                                extrasChanged |= trade.Changed;
                             }
                         }
 
@@ -886,11 +932,11 @@ public sealed class ItemExchangeService(
         .Select(b => b.Replace(" ", string.Empty, StringComparison.Ordinal));
 
     private static bool IsPriceColumn(string column) =>
-        column == PurchasePriceColumn || column.StartsWith(PricePrefix, StringComparison.Ordinal);
+        column == PurchasePriceColumn || column == MinPriceColumn || column.StartsWith(PricePrefix, StringComparison.Ordinal);
 
     private static IReadOnlyList<string> HeaderFor(bool prices, IEnumerable<string> priceTypes) =>
     [
-        .. Columns, .. ExtraColumns.Where(c => prices || c != PurchasePriceColumn), .. prices ? priceTypes.Select(t => PricePrefix + t) : [],
+        .. Columns, .. ExtraColumns.Where(c => prices || (c != PurchasePriceColumn && c != MinPriceColumn)), .. prices ? priceTypes.Select(t => PricePrefix + t) : [],
     ];
 
     private static string Number(decimal? value) =>
