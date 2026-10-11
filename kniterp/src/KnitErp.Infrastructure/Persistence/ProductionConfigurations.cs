@@ -118,6 +118,7 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
             t.HasCheckConstraint("ck_production_operations_return",
                 "([Kind] = 3 AND [ReturnToStage] IN (1, 2, 3)) OR ([Kind] <> 3 AND [ReturnToStage] IS NULL)");
             t.HasCheckConstraint("ck_production_operations_reason", "[Kind] NOT IN (2, 4) OR [Reason] IS NOT NULL");
+            t.HasCheckConstraint("ck_production_operations_corrects", "[CorrectsOperationId] IS NULL OR ([Kind] = 2 AND [EmployeeId] IS NOT NULL)");
             // Только вставка — триггер в миграции AddProductionStages.
             t.HasTrigger("tr_production_operations_immutable");
         });
@@ -140,6 +141,10 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
         b.HasOne<KnitErp.Domain.Structure.Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_production_operations_employee");
+        // Исправление отметки рабочего ссылается на неё (та же организация); ссылку имеет только исправление.
+        b.HasOne<ProductionOperation>().WithMany().HasForeignKey(x => x.CorrectsOperationId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_operations_corrects");
+        b.HasIndex(x => x.CorrectsOperationId).HasDatabaseName("ix_production_operations_corrects").HasFilter("[CorrectsOperationId] IS NOT NULL");
         b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.OccurredOn }).HasDatabaseName("ix_production_operations_org_employee_date")
             .HasFilter("[EmployeeId] IS NOT NULL");
     }

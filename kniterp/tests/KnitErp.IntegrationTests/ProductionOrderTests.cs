@@ -973,8 +973,86 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Worker_mark_is_corrected_today_by_worker_or_master_and_output_follows()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        var (colleague, _) = await AddWorkerAsync(f, grant: true, "0103", "Сидорова");
+        long order, mark, masterMark;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            masterMark = await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.Knitting, ProductionOperationKind.Done, 2, null, null, Day));
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            mark = await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(12, null, null));
+            // Ошиблась на 2 — уменьшает сама в тот же день, с причиной.
+            await Assert.ThrowsAsync<BusinessRuleException>(() => s.Floor.CorrectAsync(order, mark, 2, " "));
+            await s.Floor.CorrectAsync(order, mark, 2, "ошиблась при вводе");
+            Assert.Equal("production.stage.correct_exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.CorrectAsync(order, mark, 11, "ещё"))).Code);
+            var entry = (await s.ShopFloor.MyDayAsync()).Entries.Single(e => e.Id == mark);
+            Assert.Equal((10m, true), (entry.Remaining!.Value, entry.CanCorrect));
+            Assert.Equal(10m, (await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting)).MyToday);
+            // Отметку мастера без исполнителя так не исправить.
+            Assert.Equal("production.stage.correct_target", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.CorrectAsync(order, masterMark, 1, "чужая"))).Code);
+        }
+
+        await using (var s = host.As(colleague, f.Org.OrganizationId))
+        {
+            // Чужую отметку рабочий не исправляет — нужно право изменения заказов.
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Floor.CorrectAsync(order, mark, 1, "не моя"));
+        }
+
+        host.Clock.UtcNow = host.Clock.UtcNow.AddDays(1);
+        try
+        {
+            await using (var s = host.As(worker, f.Org.OrganizationId))
+            {
+                // На следующий день своя вчерашняя отметка — только через мастера.
+                await Assert.ThrowsAsync<AccessDeniedException>(() => s.Floor.CorrectAsync(order, mark, 1, "вчера"));
+                Assert.False((await s.ShopFloor.MyDayAsync(Day)).Entries.Single(e => e.Id == mark).CanCorrect);
+            }
+
+            await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                Assert.True((await s.Floor.ProgressAsync(order)).History.Single(h => h.Id == mark).CanCorrect);
+                await s.Floor.CorrectAsync(order, mark, 1, "пересчёт мастером");
+                var h = (await s.Floor.ProgressAsync(order)).History.Single(x => x.Id == mark);
+                Assert.Equal(9m, h.Remaining);
+                await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.Assembly, ProductionOperationKind.Done, 11, null, null, Day.AddDays(1)));
+                // Ниже ушедшего на сборку не уменьшить: сделано на вязании 2 + 9 = 11, на сборке 11.
+                Assert.Equal("production.stage.correction_exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                    s.Floor.CorrectAsync(order, mark, 1, "ещё"))).Code);
+            }
+        }
+        finally
+        {
+            host.Clock.UtcNow = host.Clock.UtcNow.AddDays(-1);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var corrections = await db.ProductionOperations.Where(o => o.CorrectsOperationId == mark).OrderBy(o => o.Id).ToListAsync();
+            Assert.Equal(new[] { (Day, -2m), (Day.AddDays(1), -1m) }, corrections.Select(c => (c.OccurredOn, c.Quantity)).ToArray());
+            Assert.All(corrections, c => Assert.Equal((ProductionOperationKind.Correction, (long?)employee), (c.Kind, c.EmployeeId)));
+            // Выработка: вчера 10 (12 − 2), сегодня −1 — прошлый день задним числом не меняется.
+            var output = await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day, Day.AddDays(1), CancellationToken.None);
+            Assert.Equal(new[] { (Day, 10m), (Day.AddDays(1), -1m) },
+                output.Where(o => o.EmployeeId == employee).Select(o => (o.Date, o.Quantity)).ToArray());
+            // Ссылку на отметку может иметь только исправление с исполнителем — и в обход приложения.
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[production_operations] SET [CorrectsOperationId] = {0} WHERE [Id] = {1}", mark, masterMark));
+        }
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
-    private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant)
+    private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {
         long user, employee;
         await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
@@ -982,8 +1060,8 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             var structure = await s.Structure.GetAsync();
             var department = structure.Departments.FirstOrDefault()?.Id ?? await s.Structure.CreateDepartmentAsync("Вязальный цех", null);
             var position = await s.Structure.CreatePositionAsync($"Вязальщица {Guid.NewGuid():N}"[..20]);
-            var number = grant ? "0101" : "0102";
-            employee = await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand(number, "Петрова", "Анна", "Сергеевна", department, position, Day.AddYears(-1)));
+            var number = personnelNumber ?? (grant ? "0101" : "0102");
+            employee = await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand(number, lastName, "Анна", "Сергеевна", department, position, Day.AddYears(-1)));
             user = (await s.Access.InviteAsync(new InviteUserCommand($"worker-{Guid.NewGuid():N}@test.local", "Вязальщица", SystemRoles.Employee, null,
                 EmployeeId: employee))).UserId;
         }

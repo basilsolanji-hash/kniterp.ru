@@ -58,15 +58,22 @@ public sealed class ProductionOperation
     /// <summary>Исполнитель — сотрудник, чья это выработка (терминал цеха); у отметки мастера с карточки заказа может не быть.</summary>
     public long? EmployeeId { get; private set; }
 
+    /// <summary>Какую отметку рабочего уменьшает это исправление (выработка исполнителя уменьшается сегодняшним днём).</summary>
+    public long? CorrectsOperationId { get; private set; }
+
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 
     /// <summary>Новая запись; что её можно применить к заказу, проверяет <see cref="ProductionFlow.EnsureCanApply"/>.</summary>
     public static ProductionOperation Create(
         long organizationId, long orderId, ProductionStep step, string? reason, DateOnly occurredOn, long userId, DateTime nowUtc,
-        long? employeeId = null) => new()
+        long? employeeId = null, long? correctsOperationId = null) => new()
     {
         EmployeeId = employeeId,
+        CorrectsOperationId = step.Kind == ProductionOperationKind.Correction
+            ? correctsOperationId
+            : correctsOperationId is null ? null
+            : throw new BusinessRuleException("production.stage.corrects_kind", "Ссылку на отметку рабочего может иметь только исправление."),
         OrganizationId = organizationId,
         ProductionOrderId = orderId,
         Stage = step.Stage,

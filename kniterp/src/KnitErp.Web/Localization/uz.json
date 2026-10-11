@@ -2702,5 +2702,18 @@
   "Терминал цеха": "Sex terminali",
   "Учётная запись не привязана к сотруднику — обратитесь к кадровику или администратору.": "Hisob xodimga bog‘lanmagan — kadrlar bo‘limi xodimi yoki administratorga murojaat qiling.",
   "Этап производства": "Ishlab chiqarish bosqichi",
-  "Я сегодня": "Men bugun"
+  "Я сегодня": "Men bugun",
+  "Исправить": "Tuzatish",
+  "Исправить отметку {0}": "{0} belgini tuzatish",
+  "На сколько": "Qanchaga",
+  "На сколько меньше (осталось {0})": "Qanchaga kam (qoldi {0})",
+  "На сколько уменьшить": "Qanchaga kamaytirish",
+  "Отметка исправлена.": "Belgi tuzatildi.",
+  "Отметку можно уменьшить не больше чем на {0} — столько от неё осталось.": "Belgini {0} dan ortiq kamaytirib bo‘lmaydi — undan shuncha qoldi.",
+  "Ошибся — уменьшить": "Xato qildim — kamaytirish",
+  "Ошибся — уменьшить отметку {0}": "Xato qildim — {0} belgini kamaytirish",
+  "Причина исправления": "Tuzatish sababi",
+  "Ссылку на отметку рабочего может иметь только исправление.": "Ishchi belgisiga havola faqat tuzatishda bo‘ladi.",
+  "Так исправляется только отметка «Сделано» рабочего с терминала; остальные отметки — исправлением этапа.": "Shunday faqat terminaldagi ishchining «Bajarildi» belgisi tuzatiladi; qolgan belgilar — bosqichni tuzatish orqali.",
+  "Уменьшить выработку {0} (осталось {1}); исправление встанет сегодняшним днём.": "{0} ish natijasini kamaytirish (qoldi {1}); tuzatish bugungi kun bilan yoziladi."
 }

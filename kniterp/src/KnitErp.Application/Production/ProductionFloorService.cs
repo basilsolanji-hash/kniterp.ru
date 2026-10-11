@@ -17,7 +17,7 @@ public sealed record ProductionStageDto(ProductionStage Stage, decimal Done, dec
 
 public sealed record ProductionOperationDto(
     long Id, DateOnly OccurredOn, ProductionStage Stage, ProductionOperationKind Kind, decimal Quantity, ProductionStage? ReturnTo, string? Reason,
-    string CreatedBy, DateTime CreatedAtUtc, string? Employee = null)
+    string CreatedBy, DateTime CreatedAtUtc, string? Employee = null, decimal? Remaining = null, bool CanCorrect = false)
 {
     public string StageName => ProductionFlow.StageName(Stage);
     public string KindName => ProductionFlow.KindName(Kind);
@@ -60,12 +60,17 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         var employees = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && employeeIds.Contains(e.Id))
             .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName }).ToListAsync(ct);
         var employeeNames = employees.ToDictionary(e => e.Id, e => ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName));
+        var correctable = inWorkStatus(order) && ctx.Permissions.Has(Permissions.ProductionOrderEdit);
         var history = ops.OrderByDescending(o => o.Id)
-            .Select(o => new ProductionOperationDto(o.Id, o.OccurredOn, o.Stage, o.Kind, o.Quantity, o.ReturnToStage, o.Reason,
-                users.GetValueOrDefault(o.CreatedByUserId) ?? "—", o.CreatedAtUtc,
-                o.EmployeeId is { } e ? employeeNames.GetValueOrDefault(e) : null))
+            .Select(o =>
+            {
+                decimal? remaining = o.Kind == ProductionOperationKind.Done && o.EmployeeId is not null ? Remaining(o, ops) : null;
+                return new ProductionOperationDto(o.Id, o.OccurredOn, o.Stage, o.Kind, o.Quantity, o.ReturnToStage, o.Reason,
+                    users.GetValueOrDefault(o.CreatedByUserId) ?? "—", o.CreatedAtUtc,
+                    o.EmployeeId is { } e ? employeeNames.GetValueOrDefault(e) : null, remaining, correctable && remaining > 0);
+            })
             .ToList();
-        var inWork = order.Status is ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone;
+        var inWork = inWorkStatus(order);
         return new ProductionProgressDto(order.Id, order.Status, order.Quantity, unit.Symbol, unit.Precision,
             ProductionFlow.Stages.Select(s => new ProductionStageDto(s, flow.Done(s), inWork ? flow.Available(s) : 0)).ToList(),
             flow.Done(ProductionStage.QualityControl), flow.Defect, flow.Rework, flow.ReadyForOutput, flow.Released, history,
@@ -80,7 +85,8 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
     }
 
     /// <summary>Отметка с исполнителем (терминал цеха); право уже проверено вызывающим сервисом.</summary>
-    internal async Task<long> RecordCoreAsync(AccessContext ctx, long orderId, ProductionOperationCommand command, long? employeeId, CancellationToken ct)
+    internal async Task<long> RecordCoreAsync(AccessContext ctx, long orderId, ProductionOperationCommand command, long? employeeId, CancellationToken ct,
+        long? correctsOperationId = null)
     {
         await using var tx = await db.BeginTransactionAsync(ct);
         var order = await ProductionLocks.LockOrderAsync(db, ctx, orderId, ct);
@@ -96,8 +102,15 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
             command.Kind == ProductionOperationKind.Correction ? -command.Quantity : command.Quantity, command.ReturnTo);
         var ops = await db.ProductionOperations.AsNoTracking()
             .Where(o => o.OrganizationId == ctx.OrganizationId && o.ProductionOrderId == orderId).ToListAsync(ct);
+        if (correctsOperationId is { } corrected
+            && Remaining(ops.Single(o => o.Id == corrected), ops) is var left && command.Quantity > left)
+        {
+            throw new BusinessRuleException("production.stage.correct_exceeds",
+                $"Отметку можно уменьшить не больше чем на {Quantities.Format(left)} — столько от неё осталось.");
+        }
+
         (await FlowAsync(order, ops, ct)).EnsureCanApply(step);
-        var op = ProductionOperation.Create(ctx.OrganizationId, orderId, step, command.Reason, command.OccurredOn, ctx.UserId, clock.UtcNow, employeeId);
+        var op = ProductionOperation.Create(ctx.OrganizationId, orderId, step, command.Reason, command.OccurredOn, ctx.UserId, clock.UtcNow, employeeId, correctsOperationId);
         db.ProductionOperations.Add(op);
         await db.SaveChangesAsync(ct);
         var text = $"{ProductionFlow.StageName(step.Stage)}: {ProductionFlow.KindName(step.Kind)} {Quantities.Format(step.Quantity)} {item.Symbol}"
@@ -115,6 +128,40 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         await tx.CommitAsync(ct);
         return op.Id;
     }
+
+    /// <summary>
+    /// Исправление отметки рабочего с терминала (D92, дополнение): уменьшает её на указанное количество с причиной.
+    /// Дата — сегодня по часовому поясу организации: выработка исполнителя уменьшается в текущем периоде, а расчёт за прошлые месяцы
+    /// не меняется задним числом. Свою отметку рабочий исправляет только в день отметки; чужую — с правом изменения заказов (мастер, начальник цеха).
+    /// </summary>
+    public async Task<long> CorrectAsync(long orderId, long operationId, decimal quantity, string? reason, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionStageMark, ct);
+        var target = await db.ProductionOperations.AsNoTracking()
+                         .SingleOrDefaultAsync(o => o.Id == operationId && o.OrganizationId == ctx.OrganizationId && o.ProductionOrderId == orderId, ct)
+                     ?? throw new NotFoundException("Отметка");
+        if (target.Kind != ProductionOperationKind.Done || target.EmployeeId is null)
+        {
+            throw new BusinessRuleException("production.stage.correct_target",
+                "Так исправляется только отметка «Сделано» рабочего с терминала; остальные отметки — исправлением этапа.");
+        }
+
+        var today = await ShopFloorService.TodayAsync(db, ctx, clock, ct);
+        var self = await ShopFloorService.EmployeeIdAsync(db, ctx, ct) == target.EmployeeId;
+        if (!self || target.OccurredOn != today)
+        {
+            await guard.DemandAsync(Permissions.ProductionOrderEdit, ct);
+        }
+
+        return await RecordCoreAsync(ctx, orderId,
+            new ProductionOperationCommand(target.Stage, ProductionOperationKind.Correction, quantity, null, reason, today), target.EmployeeId, ct, target.Id);
+    }
+
+    /// <summary>Сколько осталось от отметки рабочего после её исправлений.</summary>
+    internal static decimal Remaining(ProductionOperation done, IEnumerable<ProductionOperation> ops) =>
+        done.Quantity + ops.Where(o => o.CorrectsOperationId == done.Id).Sum(o => o.Quantity);
+
+    private static bool inWorkStatus(ProductionOrder order) => order.Status is ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone;
 
     /// <summary>Поток заказа: отметки этапов и выпущенное количество.</summary>
     internal async Task<ProductionFlow> FlowAsync(ProductionOrder order, IEnumerable<ProductionOperation> ops, CancellationToken ct) =>

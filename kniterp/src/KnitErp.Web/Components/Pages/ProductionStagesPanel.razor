@@ -88,8 +88,29 @@
                                 <td>@L(h.KindName)@(h.ReturnToName is null ? "" : $" → {L(h.ReturnToName)}")</td>
                                 <td class="num">@Quantities.Format(h.Quantity)</td>
                                 <td>@h.Reason</td>
-                                <td>@h.CreatedBy@(h.Employee is null ? "" : $" ({L("исполнитель")} {h.Employee})")</td>
+                                <td>
+                                    @h.CreatedBy@(h.Employee is null ? "" : $" ({L("исполнитель")} {h.Employee})")
+                                    @if (h.CanCorrect && _correcting != h.Id)
+                                    {
+                                        <button type="button" class="secondary" disabled="@_busy" @onclick="() => StartCorrect(h.Id)"
+                                                aria-label="@L("Исправить отметку {0}", h.Id)">@L("Исправить")</button>
+                                    }
+                                </td>
                             </tr>
+                            @if (_correcting == h.Id)
+                            {
+                                <tr>
+                                    <td colspan="6">
+                                        <form class="inline-form" @onsubmit="() => CorrectAsync(h.Id)">
+                                            <span>@L("Уменьшить выработку {0} (осталось {1}); исправление встанет сегодняшним днём.", h.Employee ?? "", Quantities.Format(h.Remaining ?? 0))</span>
+                                            <label>@L("На сколько") <input @bind="_correctText" inputmode="decimal" size="6" aria-label="@L("На сколько уменьшить")" /></label>
+                                            <label>@L("Причина") <input @bind="_correctReason" maxlength="300" aria-label="@L("Причина исправления")" /></label>
+                                            <button type="submit" disabled="@_busy">@L("Исправить")</button>
+                                            <button type="button" class="secondary" @onclick="() => _correcting = null">@L("Отмена")</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            }
                         }
                     </tbody>
                 </table>
@@ -123,6 +144,56 @@
     private string _quantityText = string.Empty;
     private string? _reason;
     private DateTime _date = DateTime.Today;
+    private long? _correcting;
+    private string _correctText = string.Empty;
+    private string? _correctReason;
+
+    private void StartCorrect(long id)
+    {
+        _correcting = id;
+        _correctText = string.Empty;
+        _correctReason = null;
+    }
+
+    /// <summary>Исправление отметки рабочего: уменьшает её выработку сегодняшним днём (D92, дополнение).</summary>
+    private async Task CorrectAsync(long operationId)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!Quantities.TryParse(_correctText, out var quantity))
+            {
+                throw new BusinessRuleException("production.stage.quantity_invalid", L("Укажите количество числом, например 100."));
+            }
+
+            await Floor.CorrectAsync(OrderId, operationId, quantity, _correctReason);
+            _message = L("Отметка исправлена.");
+            _correcting = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                await OnChanged.InvokeAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
 
     protected override void OnInitialized() => _date = Today.ToDateTime(TimeOnly.MinValue);
 

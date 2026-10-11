@@ -350,6 +350,15 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.Locator(".shop-list li").Filter(new() { HasText = $"{number} · Вязание" }).Filter(new() { HasText = "можно отметить 4 шт" }))
             .ToHaveCountAsync(1);
         Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
+
+        // Ошиблась на одну — уменьшает свою сегодняшнюю отметку сама.
+        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Ошибся — уменьшить") }).First,
+            page.GetByLabel("На сколько уменьшить"));
+        await page.GetByLabel("На сколько уменьшить").FillAsync("1");
+        await page.GetByLabel("Причина исправления").FillAsync("ошиблась при вводе (e2e)");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Исправить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Отметка исправлена.");
+        await Assertions.Expect(page.Locator(".shop-totals li").Filter(new() { HasText = "Вязание" })).ToContainTextAsync("5 шт");
     }
 
     /// <summary>Маршрутный лист: QR-код и текстовый код на каждый этап.</summary>

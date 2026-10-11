@@ -32,7 +32,7 @@ public sealed record ShopMarkCommand(decimal Quantity, string? ShortfallReason, 
 
 public sealed record ShopEntryDto(
     long Id, DateTime CreatedAtUtc, long OrderId, string OrderNumber, string ItemName, ProductionStage Stage, ProductionOperationKind Kind,
-    decimal Quantity, string UnitSymbol, string? Reason, TimeOnly LocalTime = default)
+    decimal Quantity, string UnitSymbol, string? Reason, TimeOnly LocalTime = default, decimal? Remaining = null, bool CanCorrect = false)
 {
     public string StageName => ProductionFlow.StageName(Stage);
     public string KindName => ProductionFlow.KindName(Kind);
@@ -135,15 +135,20 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         var entries = new List<ShopEntryDto>();
         if (employee is not null)
         {
-            entries = await (from o in db.ProductionOperations.AsNoTracking()
-                             where o.OrganizationId == ctx.OrganizationId && o.EmployeeId == employee.Id && o.OccurredOn == day
-                             join p in db.ProductionOrders.AsNoTracking() on o.ProductionOrderId equals p.Id
-                             join i in db.Items.AsNoTracking() on p.ItemId equals i.Id
-                             join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
-                             orderby o.Id descending
-                             select new ShopEntryDto(o.Id, o.CreatedAtUtc, p.Id, p.Number, i.Name, o.Stage, o.Kind, o.Quantity, u.Symbol, o.Reason))
+            var loaded = await (from o in db.ProductionOperations.AsNoTracking()
+                                where o.OrganizationId == ctx.OrganizationId && o.EmployeeId == employee.Id && o.OccurredOn == day
+                                join p in db.ProductionOrders.AsNoTracking() on o.ProductionOrderId equals p.Id
+                                join i in db.Items.AsNoTracking() on p.ItemId equals i.Id
+                                join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
+                                orderby o.Id descending
+                                select new
+                                {
+                                    Entry = new ShopEntryDto(o.Id, o.CreatedAtUtc, p.Id, p.Number, i.Name, o.Stage, o.Kind, o.Quantity, u.Symbol, o.Reason),
+                                    InWork = p.Status == ProductionOrderStatus.Released || p.Status == ProductionOrderStatus.PartiallyDone,
+                                })
                 .ToListAsync(ct);
-            entries = entries.Select(e => e with { LocalTime = TimeOnly.FromDateTime(Local(e.CreatedAtUtc, zone)) }).ToList();
+            entries = await CorrectableAsync(loaded.Select(x => (x.Entry, x.InWork)).ToList(),
+                day == today && employee.Status == EmploymentStatus.Working, zone, ct);
         }
 
         var orders = await (from p in db.ProductionOrders.AsNoTracking()
@@ -171,6 +176,25 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         return new ShopDayDto(day, today, employee?.ShortName, hint, entries, tasks);
     }
 
+    /// <summary>Местное время, остаток каждой отметки «Сделано» после исправлений и можно ли её уменьшить сейчас.</summary>
+    private async Task<List<ShopEntryDto>> CorrectableAsync(List<(ShopEntryDto Entry, bool InWork)> loaded, bool editable, TimeZoneInfo zone, CancellationToken ct)
+    {
+        var ids = loaded.Where(x => x.Entry.Kind == ProductionOperationKind.Done).Select(x => (long?)x.Entry.Id).ToList();
+        var corrected = await db.ProductionOperations.AsNoTracking().Where(o => ids.Contains(o.CorrectsOperationId))
+            .GroupBy(o => o.CorrectsOperationId!.Value).Select(g => new { g.Key, Sum = g.Sum(o => o.Quantity) })
+            .ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+        return loaded.Select(x =>
+        {
+            decimal? remaining = x.Entry.Kind == ProductionOperationKind.Done ? x.Entry.Quantity + corrected.GetValueOrDefault(x.Entry.Id) : null;
+            return x.Entry with
+            {
+                LocalTime = TimeOnly.FromDateTime(Local(x.Entry.CreatedAtUtc, zone)),
+                Remaining = remaining,
+                CanCorrect = editable && x.InWork && remaining > 0,
+            };
+        }).ToList();
+    }
+
     /// <summary>Фамилия и инициалы: «Иванова А. П.».</summary>
     public static string ShortName(string lastName, string firstName, string? middleName) =>
         $"{lastName} {firstName[..1]}." + (string.IsNullOrEmpty(middleName) ? "" : $" {middleName[..1]}.");
@@ -195,11 +219,24 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         return e is null ? null : new Performer(e.Id, e.Status, ShortName(e.LastName, e.FirstName, e.MiddleName));
     }
 
-    private async Task<DateOnly> TodayAsync(AccessContext ctx, CancellationToken ct) => DateOnly.FromDateTime(Local(clock.UtcNow, await ZoneAsync(ctx, ct)));
+    private Task<DateOnly> TodayAsync(AccessContext ctx, CancellationToken ct) => TodayAsync(db, ctx, clock, ct);
 
-    private async Task<TimeZoneInfo> ZoneAsync(AccessContext ctx, CancellationToken ct) =>
+    private Task<TimeZoneInfo> ZoneAsync(AccessContext ctx, CancellationToken ct) => ZoneAsync(db, ctx, ct);
+
+    /// <summary>Сегодня по часовому поясу организации — дата отметок терминала и исправлений выработки.</summary>
+    internal static async Task<DateOnly> TodayAsync(IKnitErpDbContext db, AccessContext ctx, IClock clock, CancellationToken ct) =>
+        DateOnly.FromDateTime(Local(clock.UtcNow, await ZoneAsync(db, ctx, ct)));
+
+    private static async Task<TimeZoneInfo> ZoneAsync(IKnitErpDbContext db, AccessContext ctx, CancellationToken ct) =>
         TimeZoneInfo.FindSystemTimeZoneById(
             await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct));
+
+    /// <summary>Сотрудник, привязанный к учётной записи (сначала работающий).</summary>
+    internal static async Task<long?> EmployeeIdAsync(IKnitErpDbContext db, AccessContext ctx, CancellationToken ct) =>
+        await db.Employees.AsNoTracking()
+            .Where(x => x.OrganizationId == ctx.OrganizationId && x.UserId == ctx.UserId)
+            .OrderBy(x => x.Status).ThenByDescending(x => x.Id)
+            .Select(x => (long?)x.Id).FirstOrDefaultAsync(ct);
 
     private static DateTime Local(DateTime utc, TimeZoneInfo zone) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), zone);
 

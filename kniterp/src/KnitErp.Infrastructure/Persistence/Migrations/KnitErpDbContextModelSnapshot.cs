@@ -2356,6 +2356,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("CorrectsOperationId")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2(3)");
 
@@ -2392,6 +2395,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CorrectsOperationId")
+                        .HasDatabaseName("ix_production_operations_corrects")
+                        .HasFilter("[CorrectsOperationId] IS NOT NULL");
+
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("OrganizationId", "ProductionOrderId")
@@ -2404,6 +2411,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("production_operations", "kniterp", t =>
                         {
                             t.HasTrigger("tr_production_operations_immutable");
+
+                            t.HasCheckConstraint("ck_production_operations_corrects", "[CorrectsOperationId] IS NULL OR ([Kind] = 2 AND [EmployeeId] IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_production_operations_kind", "[Kind] IN (1, 2, 3, 4)");
 
@@ -5509,6 +5518,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("KnitErp.Domain.Production.ProductionOperation", b =>
                 {
+                    b.HasOne("KnitErp.Domain.Production.ProductionOperation", null)
+                        .WithMany()
+                        .HasForeignKey("CorrectsOperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_production_operations_corrects");
+
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
