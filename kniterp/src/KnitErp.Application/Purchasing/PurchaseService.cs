@@ -21,7 +21,8 @@ public enum ReceiptState : byte
 }
 
 public sealed record PurchaseOrderFilter(
-    PurchaseOrderStatus? Status = null, string? Search = null, DateOnly? From = null, DateOnly? To = null, DateOnly? OverdueOn = null);
+    PurchaseOrderStatus? Status = null, string? Search = null, DateOnly? From = null, DateOnly? To = null, DateOnly? OverdueOn = null,
+    long? TagId = null);
 
 /// <summary>Total — null, если у пользователя нет права «Цены и суммы».</summary>
 public sealed record PurchaseOrderRowDto(
@@ -144,6 +145,12 @@ public sealed class PurchaseService(
     {
         var ctx = await guard.DemandAsync(Permissions.PurchaseView, ct);
         var q = db.PurchaseOrders.AsNoTracking().Where(o => o.OrganizationId == ctx.OrganizationId);
+        if (filter.TagId is { } tagId)
+        {
+            // D104: отбор по тегу — в запросе, чтобы находились и объекты за пределами первых строк списка.
+            q = q.Where(o => db.TagLinks.Any(l => l.TagId == tagId && l.Entity == KnitErp.Domain.Tagging.TaggedEntity.PurchaseOrder && l.EntityId == o.Id));
+        }
+
         if (filter.Status is { } status)
         {
             q = q.Where(o => o.Status == status);

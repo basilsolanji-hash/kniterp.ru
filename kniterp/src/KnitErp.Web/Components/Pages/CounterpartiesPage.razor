@@ -1,6 +1,7 @@
 @page "/counterparties"
 @using KnitErp.Application.Catalog
 @using KnitErp.Web.Components.Shared
+@inject KnitErp.Application.Tagging.TagService TagLookup
 @inject CounterpartyService Counterparties
 @inject CounterpartyExchangeService Exchange
 @inject KnitErp.Application.Common.RequisitesLookupService Requisites
@@ -86,6 +87,7 @@ else
                  ShownColumns="@([0, 1, 2])" Preview="s => Exchange.PreviewAsync(s)" Apply="r => Exchange.ApplyAsync(r)" Applied="ReloadAsync" />
 
     <form class="inline-form" @onsubmit="ReloadAsync">
+        <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Показать")
             <select @bind="_role">
@@ -110,7 +112,7 @@ else
                 @foreach (var c in _list.Counterparties)
                 {
                     <tr class="@(c.IsArchived ? "archived" : null)">
-                        <td>@c.Name @if (c.IsArchived) { <span class="tag">@L("архив")</span> }@if (c.Comment is not null) { <div class="muted">@c.Comment</div> }</td>
+                        <td>@c.Name<TagDots Tags="@_tagMap.GetValueOrDefault(c.Id)" /> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }@if (c.Comment is not null) { <div class="muted">@c.Comment</div> }</td>
                         <td>@if (c.Inn is not null) { <span class="muted">@c.Country.TaxIdName </span>@c.Inn } else { <span>—</span> }@if (c.Kpp is not null) { <span class="muted"> / @c.Kpp</span> }@if (c.CountryCode != _orgCountry) { <div class="muted">@c.Country.Name</div> }</td>
                         <td>@L(c.RolesText)</td>
                         @if (_list.CanEdit || _list.CanArchive)
@@ -143,6 +145,18 @@ else
 }
 
 @code {
+    // D104: отбор по тегу и цветные точки тегов у строк.
+    private long? _tagId;
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>> _tagMap = new Dictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>>();
+
+    private Task TagChangedAsync(long? tagId)
+    {
+        _tagId = tagId;
+        return ReloadAsync();
+    }
+
+    private async Task LoadTagsAsync() => _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.Counterparty, _list!.Counterparties.Select(r => r.Id).ToList());
+
     private enum Mode { None, Create, Edit }
 
     private CounterpartyListDto? _list;
@@ -189,9 +203,12 @@ else
         }
     }
 
-    private async Task LoadAsync() =>
+    private async Task LoadAsync()
+    {
         _list = await Counterparties.ListAsync(new CounterpartyFilter(
-            _role == "s" ? true : null, _role == "c" ? true : null, _search, _includeArchived));
+            _role == "s" ? true : null, _role == "c" ? true : null, _search, _includeArchived, _tagId));
+        await LoadTagsAsync();
+    }
 
     private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
 

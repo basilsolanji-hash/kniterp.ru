@@ -20,7 +20,7 @@ public sealed record ItemDto(
 }
 
 /// <summary>GroupId — группа с подгруппами (D79), 0 — позиции без группы. Search — по коду, названию, артикулу и штрихкоду.</summary>
-public sealed record ItemFilter(ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null);
+public sealed record ItemFilter(ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null);
 
 public sealed record ItemListDto(IReadOnlyList<ItemDto> Items, int Total, bool CanEdit, bool CanArchive);
 
@@ -91,6 +91,12 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
         var query = db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId);
+        if (filter.TagId is { } tagId)
+        {
+            // D104: отбор по тегу — в запросе, чтобы находились и объекты за пределами первых строк списка.
+            query = query.Where(i => db.TagLinks.Any(l => l.TagId == tagId && l.Entity == KnitErp.Domain.Tagging.TaggedEntity.Item && l.EntityId == i.Id));
+        }
+
         if (!filter.IncludeArchived)
         {
             query = query.Where(i => !i.IsArchived);

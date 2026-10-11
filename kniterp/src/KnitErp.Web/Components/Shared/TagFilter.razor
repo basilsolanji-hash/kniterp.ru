@@ -1,0 +1,38 @@
+@using KnitErp.Application.Tagging
+@inject TagService TagService
+@* D104: отбор списка по тегу. Список тегов грузится своим контекстом базы (TagService) — страницу не задерживает. *@
+<label>
+    @L("Тег")
+    <select value="@Value" @onchange="ChangedAsync">
+        <option value="">@L("Все")</option>
+        @foreach (var t in _tags)
+        {
+            <option value="@t.Id">● @t.Name</option>
+        }
+    </select>
+</label>
+
+@code {
+    [Parameter]
+    public long? Value { get; set; }
+
+    [Parameter]
+    public EventCallback<long?> ValueChanged { get; set; }
+
+    private IReadOnlyList<TagDto> _tags = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _tags = await TagService.ListAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _tags = [];
+        }
+    }
+
+    private Task ChangedAsync(ChangeEventArgs e) =>
+        ValueChanged.InvokeAsync(long.TryParse(e.Value?.ToString(), out var id) ? id : null);
+}

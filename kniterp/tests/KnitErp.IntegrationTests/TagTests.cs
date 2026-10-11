@@ -2,6 +2,8 @@ using KnitErp.Application.Access;
 using KnitErp.Application.Catalog;
 using KnitErp.Application.Common;
 using KnitErp.Application.Organizations;
+using KnitErp.Application.Purchasing;
+using KnitErp.Application.Sales;
 using KnitErp.Application.Warehousing;
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Catalog;
@@ -91,6 +93,46 @@ public sealed class TagTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             Assert.Contains(await s.Tags.ForEntityAsync(TaggedEntity.Item, item), x => x.Id == urgent);
             Assert.True(await s.Db.AuditEntries.AnyAsync(a => a.Action == KnitErp.Domain.Audit.AuditActions.TagAssigned && a.EntityId == urgent.ToString()));
         }
+    }
+
+    [SqlFact]
+    public async Task Lists_filter_by_tag_on_the_server_and_map_tag_dots()
+    {
+        var (org, yarn, _, item) = await SetUpAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var units = await s.Catalog.ListUnitsAsync();
+        var other = await s.Catalog.CreateItemAsync(new ItemCommand("ПР-2", "Пряжа другая", ItemType.RawMaterial, units.Single(u => u.Symbol == "кг").Id, null));
+        var supplier = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Нить»", null, null, true, true, null));
+        await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Другое»", null, null, true, true, null));
+        var reason = await s.Db.OperationReasons.Where(r => r.OrganizationId == org.OrganizationId && r.Kind == StockOperationKind.Receipt).Select(r => r.Id).FirstAsync();
+        var doc = await s.Documents.CreateAsync(StockOperationKind.Receipt, new StockDocumentHeader(yarn, null, supplier, reason, new DateOnly(2026, 10, 11), null));
+        await s.Documents.CreateAsync(StockOperationKind.Receipt, new StockDocumentHeader(yarn, null, supplier, reason, new DateOnly(2026, 10, 11), null));
+        var po = await s.Purchases.CreateOrderAsync(new KnitErp.Domain.Purchasing.PurchaseOrderHeader(new DateOnly(2026, 10, 11), supplier, yarn, null, null, true, null));
+        await s.Purchases.CreateOrderAsync(new KnitErp.Domain.Purchasing.PurchaseOrderHeader(new DateOnly(2026, 10, 11), supplier, yarn, null, null, true, null));
+        var so = await s.Sales.CreateOrderAsync(new KnitErp.Domain.Sales.SalesOrderHeader(new DateOnly(2026, 10, 11), supplier, yarn, null, null, true, null));
+        await s.Sales.CreateOrderAsync(new KnitErp.Domain.Sales.SalesOrderHeader(new DateOnly(2026, 10, 11), supplier, yarn, null, null, true, null));
+
+        var tag = await s.Tags.CreateAsync("Сезон", TagColor.Purple);
+        await s.Tags.AssignAsync(TaggedEntity.Item, item, tag);
+        await s.Tags.AssignAsync(TaggedEntity.Counterparty, supplier, tag);
+        await s.Tags.AssignAsync(TaggedEntity.StockDocument, doc, tag);
+        await s.Tags.AssignAsync(TaggedEntity.PurchaseOrder, po, tag);
+        await s.Tags.AssignAsync(TaggedEntity.SalesOrder, so, tag);
+
+        Assert.Equal([item], (await s.Catalog.ListItemsAsync(new ItemFilter(TagId: tag))).Items.Select(i => i.Id));
+        Assert.Equal(2, (await s.Catalog.ListItemsAsync(new ItemFilter())).Items.Count);
+        Assert.Equal([supplier], (await s.Counterparties.ListAsync(new CounterpartyFilter(TagId: tag))).Counterparties.Select(c => c.Id));
+        Assert.Equal([doc], (await s.Documents.ListAsync(new StockDocumentListFilter(TagId: tag))).Select(d => d.Id));
+        Assert.Equal([po], (await s.Purchases.ListOrdersAsync(new PurchaseOrderFilter(TagId: tag))).Select(o => o.Id));
+        Assert.Equal([so], (await s.Sales.ListOrdersAsync(new SalesOrderFilter(TagId: tag))).Select(o => o.Id));
+
+        // Точки тегов для строк списка — одним запросом; архивный тег не показывается.
+        var map = await s.Tags.MapAsync(TaggedEntity.Item, [item, other]);
+        Assert.Equal("Сезон", Assert.Single(map[item]).Name);
+        Assert.False(map.ContainsKey(other));
+        var t = (await s.Tags.ListAsync()).Single();
+        await s.Tags.ArchiveAsync(tag, true, t.RowVersion);
+        Assert.Empty(await s.Tags.MapAsync(TaggedEntity.Item, [item]));
     }
 
     private async Task<(CreatedOrganization Org, long Yarn, long Shop, long Item)> SetUpAsync()

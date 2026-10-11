@@ -145,13 +145,13 @@ public static class ApiV1
                 ctx.Permissions.GrantedCodes.Order(StringComparer.Ordinal).ToList()));
         }).WithSummary("Кто я: организация, создатель токена и действующие права запроса");
 
-        api.MapGet("/items", async (CatalogService catalog, string? search, ItemType? type, int? offset, int? limit, CancellationToken ct) =>
-            ApiResult.Ok(Paged((await catalog.ListItemsAsync(new ItemFilter(type, search, Take: 5000), ct)).Items, offset, limit)))
+        api.MapGet("/items", async (CatalogService catalog, string? search, ItemType? type, long? tagId, int? offset, int? limit, CancellationToken ct) =>
+            ApiResult.Ok(Paged((await catalog.ListItemsAsync(new ItemFilter(type, search, Take: 5000, TagId: tagId), ct)).Items, offset, limit)))
             .WithSummary("Номенклатура");
 
-        api.MapGet("/counterparties", async (CounterpartyService counterparties, string? search, string? role, int? offset, int? limit, CancellationToken ct) =>
+        api.MapGet("/counterparties", async (CounterpartyService counterparties, string? search, string? role, long? tagId, int? offset, int? limit, CancellationToken ct) =>
             ApiResult.Ok(Paged((await counterparties.ListAsync(new CounterpartyFilter(
-                role == "supplier" ? true : null, role == "customer" ? true : null, search), ct)).Counterparties, offset, limit)))
+                role == "supplier" ? true : null, role == "customer" ? true : null, search, TagId: tagId), ct)).Counterparties, offset, limit)))
             .WithSummary("Контрагенты (role = customer | supplier)");
 
         api.MapPost("/counterparties", async (CounterpartyService counterparties, CounterpartyCommand body, CancellationToken ct) =>
@@ -165,9 +165,9 @@ public static class ApiV1
             ApiResult.Ok(Paged(await stock.BalancesAsync(new StockFilter(warehouseId, type, search), ct), offset, limit)))
             .WithSummary("Остатки по складам");
 
-        api.MapGet("/sales-orders", async (SalesService sales, SalesOrderStatus? status, DateOnly? from, DateOnly? to, string? search, int? offset, int? limit,
+        api.MapGet("/sales-orders", async (SalesService sales, SalesOrderStatus? status, DateOnly? from, DateOnly? to, string? search, long? tagId, int? offset, int? limit,
                 CancellationToken ct) =>
-            ApiResult.Ok(Paged(await sales.ListOrdersAsync(new SalesOrderFilter(status, search, from, to), ct), offset, limit)))
+            ApiResult.Ok(Paged(await sales.ListOrdersAsync(new SalesOrderFilter(status, search, from, to, TagId: tagId), ct), offset, limit)))
             .WithSummary("Заказы покупателей");
 
         api.MapGet("/sales-orders/{id:long}", async (SalesService sales, long id, CancellationToken ct) => ApiResult.Ok(await sales.GetOrderAsync(id, ct)))
@@ -207,9 +207,9 @@ public static class ApiV1
                 body.DocumentNumber, body.MoneyAccountId, ct))))
             .AddEndpointFilter(IdempotencyAsync).WithSummary("Записать оплату покупателя");
 
-        api.MapGet("/purchase-orders", async (PurchaseService purchases, PurchaseOrderStatus? status, DateOnly? from, DateOnly? to, string? search, int? offset,
+        api.MapGet("/purchase-orders", async (PurchaseService purchases, PurchaseOrderStatus? status, DateOnly? from, DateOnly? to, string? search, long? tagId, int? offset,
                 int? limit, CancellationToken ct) =>
-            ApiResult.Ok(Paged(await purchases.ListOrdersAsync(new PurchaseOrderFilter(status, search, from, to), ct), offset, limit)))
+            ApiResult.Ok(Paged(await purchases.ListOrdersAsync(new PurchaseOrderFilter(status, search, from, to, TagId: tagId), ct), offset, limit)))
             .WithSummary("Заказы поставщикам");
 
         api.MapGet("/purchase-orders/{id:long}", async (PurchaseService purchases, long id, CancellationToken ct) =>
@@ -240,8 +240,8 @@ public static class ApiV1
         }).AddEndpointFilter(IdempotencyAsync).WithSummary("Подтвердить заказ поставщику");
 
         api.MapGet("/stock-documents", async (StockDocumentService documents, StockOperationKind? kind, StockDocumentStatus? status, DateOnly? from,
-                DateOnly? to, long? warehouseId, string? search, int? offset, int? limit, CancellationToken ct) =>
-            ApiResult.Ok(Paged(await documents.ListAsync(new StockDocumentListFilter(kind, status, from, to, warehouseId, search), ct), offset, limit)))
+                DateOnly? to, long? warehouseId, string? search, long? tagId, int? offset, int? limit, CancellationToken ct) =>
+            ApiResult.Ok(Paged(await documents.ListAsync(new StockDocumentListFilter(kind, status, from, to, warehouseId, search, TagId: tagId), ct), offset, limit)))
             .WithSummary("Складские документы (в области складов токена)");
 
         api.MapGet("/stock-documents/options", async (StockDocumentService documents, StockOperationKind kind, CancellationToken ct) =>

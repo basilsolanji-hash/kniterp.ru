@@ -1,6 +1,7 @@
 @page "/sales-orders"
 @using KnitErp.Application.Sales
 @using KnitErp.Domain.Sales
+@inject KnitErp.Application.Tagging.TagService TagLookup
 @inject SalesService Sales
 @inject SalesStageService StageList
 @inject NavigationManager Navigation
@@ -88,6 +89,7 @@ else
     }
 
     <form class="inline-form" @onsubmit="ReloadAsync">
+        <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Статус")
             <select @bind="_status">
@@ -141,7 +143,7 @@ else
                     var paidFull = o.Total is > 0 && o.Paid >= o.Total;
                     var shippedFull = o.Shipped == ShipmentState.Full;
                     <tr class="@(o.Status == SalesOrderStatus.Cancelled ? "archived" : null)">
-                        <td><a href="sales-orders/@o.Id">@o.Number</a></td>
+                        <td><a href="sales-orders/@o.Id">@o.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(o.Id)" /></td>
                         <td>@o.OrderDate.ToString("dd.MM.yyyy")</td>
                         <td>@o.Customer</td>
                         @if (showSums)
@@ -177,6 +179,18 @@ else
 }
 
 @code {
+    // D104: отбор по тегу и цветные точки тегов у строк.
+    private long? _tagId;
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>> _tagMap = new Dictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>>();
+
+    private Task TagChangedAsync(long? tagId)
+    {
+        _tagId = tagId;
+        return ReloadAsync();
+    }
+
+    private async Task LoadTagsAsync() => _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.SalesOrder, _rows!.Select(r => r.Id).ToList());
+
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
@@ -222,11 +236,14 @@ else
         }
     }
 
-    private async Task LoadAsync() =>
+    private async Task LoadAsync()
+    {
         _rows = await Sales.ListOrdersAsync(new SalesOrderFilter(
             byte.TryParse(_status, out var st) ? (SalesOrderStatus)st : null, _search,
             _from is { } f ? DateOnly.FromDateTime(f) : null, _to is { } t ? DateOnly.FromDateTime(t) : null,
-            long.TryParse(_stage, out var stage) ? stage : null, _overdue ? Today : null));
+            long.TryParse(_stage, out var stage) ? stage : null, _overdue ? Today : null, _tagId));
+        await LoadTagsAsync();
+    }
 
     private DateOnly Today => DateOnly.FromDateTime(TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId));
 

@@ -23,7 +23,7 @@ public sealed record CounterpartyDto(
 public sealed record CounterpartyCommand(
     string Name, string? Inn, string? Kpp, bool IsSupplier, bool IsCustomer, string? Comment, string? CountryCode = null, string? Address = null);
 
-public sealed record CounterpartyFilter(bool? Suppliers = null, bool? Customers = null, string? Search = null, bool IncludeArchived = false);
+public sealed record CounterpartyFilter(bool? Suppliers = null, bool? Customers = null, string? Search = null, bool IncludeArchived = false, long? TagId = null);
 
 public sealed record CounterpartyListDto(IReadOnlyList<CounterpartyDto> Counterparties, bool CanEdit, bool CanArchive);
 
@@ -34,6 +34,12 @@ public sealed class CounterpartyService(IKnitErpDbContext db, IAccessGuard guard
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
         var q = db.Counterparties.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId);
+        if (filter.TagId is { } tagId)
+        {
+            // D104: отбор по тегу — в запросе, чтобы находились и объекты за пределами первых строк списка.
+            q = q.Where(c => db.TagLinks.Any(l => l.TagId == tagId && l.Entity == KnitErp.Domain.Tagging.TaggedEntity.Counterparty && l.EntityId == c.Id));
+        }
+
         if (!filter.IncludeArchived)
         {
             q = q.Where(c => !c.IsArchived);

@@ -2406,5 +2406,6 @@
   "Укажите название тега.": "Teg nomini kiriting.",
   "Цветные метки, как в Finder на Mac: отмечайте позиции, контрагентов, заказы, складские документы и партии, а потом находите всё отмеченное одним нажатием. Тег ставится на карточке объекта кнопкой «+ Тег»; в быстром поиске (Ctrl+K) наберите «#» и название.": "Mac'dagi Finder kabi rangli belgilar: pozitsiyalar, kontragentlar, buyurtmalar, ombor hujjatlari va partiyalarni belgilang, keyin barcha belgilanganlarni bir bosishda toping. Teg obyekt kartochkasida «+ Teg» tugmasi bilan qo'yiladi; tezkor qidiruvda (Ctrl+K) «#» va nomini tering.",
   "Что": "Nima",
-  "Этот объект нельзя отметить тегом.": "Bu obyektni teg bilan belgilab bo'lmaydi."
+  "Этот объект нельзя отметить тегом.": "Bu obyektni teg bilan belgilab bo'lmaydi.",
+  "Теги: {0}": "Teglar: {0}"
 }

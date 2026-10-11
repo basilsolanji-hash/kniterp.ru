@@ -1,0 +1,17 @@
+@using KnitErp.Application.Tagging
+@using KnitErp.Domain.Tagging
+@* D104: теги строки списка — цветные точки, как метки в списке файлов Finder; название — во всплывающей подсказке. *@
+@if (Tags is { Count: > 0 })
+{
+    <span class="tag-dots" title="@string.Join(", ", Tags.Select(t => t.Name))" aria-label="@L("Теги: {0}", string.Join(", ", Tags.Select(t => t.Name)))">
+        @foreach (var t in Tags.Take(5))
+        {
+            <span class="tag-dot @(t.Color == TagColor.None ? "hollow" : null)" style="background: @t.Css"></span>
+        }
+    </span>
+}
+
+@code {
+    [Parameter]
+    public IReadOnlyList<TagDto>? Tags { get; set; }
+}

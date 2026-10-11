@@ -46,7 +46,7 @@ public sealed record StockDocumentOptions(
 /// <summary>Фильтр реестра документов: вид, статус, период по дате документа, склад (отправитель или получатель), поиск по номеру и контрагенту.</summary>
 public sealed record StockDocumentListFilter(
     StockOperationKind? Kind = null, StockDocumentStatus? Status = null, DateOnly? From = null, DateOnly? To = null,
-    long? WarehouseId = null, string? Search = null, bool? ByOrder = null);
+    long? WarehouseId = null, string? Search = null, bool? ByOrder = null, long? TagId = null);
 
 /// <summary>
 /// Поступление, списание и перемещение: черновик → проведение (движения регистра) → при ошибке сторно.
@@ -72,6 +72,12 @@ public sealed class StockDocumentService(
         var ctx = await DemandAnyAsync(ct);
         var visible = WarehouseScope.Visible(ctx, ViewPermissions);
         var q = db.StockDocuments.AsNoTracking().Where(d => d.OrganizationId == ctx.OrganizationId);
+        if (filter.TagId is { } tagId)
+        {
+            // D104: отбор по тегу — в запросе, чтобы находились и объекты за пределами первых строк списка.
+            q = q.Where(d => db.TagLinks.Any(l => l.TagId == tagId && l.Entity == KnitErp.Domain.Tagging.TaggedEntity.StockDocument && l.EntityId == d.Id));
+        }
+
         if (visible is not null)
         {
             q = q.Where(d => visible.Contains(d.WarehouseId) || (d.TargetWarehouseId != null && visible.Contains(d.TargetWarehouseId.Value)));

@@ -2,6 +2,7 @@
 @using KnitErp.Application.Warehousing
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Web.Components.Shared
+@inject KnitErp.Application.Tagging.TagService TagLookup
 @inject StockDocumentService Documents
 @inject NavigationManager Navigation
 
@@ -63,6 +64,7 @@ else
     }
 
     <form class="inline-form" @onsubmit="ReloadAsync">
+        <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Вид")
             <select @bind="_kind">
@@ -115,7 +117,7 @@ else
                 @foreach (var d in _rows)
                 {
                     <tr>
-                        <td><a href="stock-documents/@d.Id">@d.Number</a></td>
+                        <td><a href="stock-documents/@d.Id">@d.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(d.Id)" /></td>
                         <td>@d.DocumentDate.ToString("dd.MM.yyyy")</td>
                         <td>@L(d.KindName)</td>
                         <td>@d.WarehouseName</td>
@@ -131,6 +133,18 @@ else
 }
 
 @code {
+    // D104: отбор по тегу и цветные точки тегов у строк.
+    private long? _tagId;
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>> _tagMap = new Dictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>>();
+
+    private Task TagChangedAsync(long? tagId)
+    {
+        _tagId = tagId;
+        return ReloadAsync();
+    }
+
+    private async Task LoadTagsAsync() => _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.StockDocument, _rows!.Select(r => r.Id).ToList());
+
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
@@ -195,12 +209,16 @@ else
         byte.TryParse(_kind, out var k) ? (StockOperationKind)k : null,
         byte.TryParse(_status, out var st) ? (StockDocumentStatus)st : null,
         _from is { } f ? DateOnly.FromDateTime(f) : null, _to is { } t ? DateOnly.FromDateTime(t) : null,
-        long.TryParse(_warehouse, out var w) ? w : null, _search, OrderQuery switch { "1" => true, "0" => false, _ => null });
+        long.TryParse(_warehouse, out var w) ? w : null, _search, OrderQuery switch { "1" => true, "0" => false, _ => null }, _tagId);
 
     private string ExportHref => KnitErp.Web.Exports.ExportLink.Build("stock-documents.xlsx", ("kind", _kind), ("status", _status),
         ("from", KnitErp.Web.Exports.ExportLink.Date(_from)), ("to", KnitErp.Web.Exports.ExportLink.Date(_to)), ("warehouse", _warehouse), ("search", _search), ("order", OrderQuery));
 
-    private async Task LoadAsync() => _rows = await Documents.ListAsync(Filter);
+    private async Task LoadAsync()
+    {
+        _rows = await Documents.ListAsync(Filter);
+        await LoadTagsAsync();
+    }
 
     private Task ReloadAsync() => RunAsync(LoadAsync);
 

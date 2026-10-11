@@ -2,6 +2,7 @@
 @using KnitErp.Application.Catalog
 @using KnitErp.Domain.Catalog
 @using KnitErp.Web.Components.Shared
+@inject KnitErp.Application.Tagging.TagService TagLookup
 @inject CatalogService Catalog
 @inject ItemExchangeService Exchange
 @inject VatRateService VatRates
@@ -181,6 +182,7 @@ else
     </nav>
     <div>
     <form class="inline-form" @onsubmit="ReloadAsync">
+        <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Тип")
             <select @bind="_typeFilter">
@@ -220,7 +222,7 @@ else
                 {
                     <tr class="@(i.IsArchived ? "archived" : null)">
                         <td>@i.Code</td>
-                        <td>@if (i.PhotoId is { } photo) { <img class="item-thumb" src="catalog/photos/@photo" alt="" loading="lazy" /> }@if (i.ParentItemId is not null) { <span class="variant-of" title="@L("Модификация")">↳ </span> }<a href="catalog/items/@i.Id">@i.Name</a> @if (i.Modifications > 0) { <span class="tag">@L("модификаций: {0}", i.Modifications)</span> } @if (i.IsArchived) { <span class="tag">@L("архив")</span> }@if (i.Description is not null) { <div class="muted">@i.Description</div> }</td>
+                        <td>@if (i.PhotoId is { } photo) { <img class="item-thumb" src="catalog/photos/@photo" alt="" loading="lazy" /> }@if (i.ParentItemId is not null) { <span class="variant-of" title="@L("Модификация")">↳ </span> }<a href="catalog/items/@i.Id">@i.Name</a><TagDots Tags="@_tagMap.GetValueOrDefault(i.Id)" /> @if (i.Modifications > 0) { <span class="tag">@L("модификаций: {0}", i.Modifications)</span> } @if (i.IsArchived) { <span class="tag">@L("архив")</span> }@if (i.Description is not null) { <div class="muted">@i.Description</div> }</td>
                         <td>@(i.Article ?? "—")</td>
                         <td>@L(i.TypeName)</td>
                         <td>@i.UnitSymbol</td>
@@ -266,6 +268,18 @@ else
 }
 
 @code {
+    // D104: отбор по тегу и цветные точки тегов у строк.
+    private long? _tagId;
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>> _tagMap = new Dictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>>();
+
+    private Task TagChangedAsync(long? tagId)
+    {
+        _tagId = tagId;
+        return ReloadAsync();
+    }
+
+    private async Task LoadTagsAsync() => _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.Item, _list!.Items.Select(r => r.Id).ToList());
+
     private enum Mode { None, Create, Edit }
 
     private ItemListDto? _list;
@@ -310,7 +324,8 @@ else
     private async Task LoadAsync()
     {
         ItemType? type = byte.TryParse(_typeFilter, out var t) ? (ItemType)t : null;
-        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, GroupId: _groupId));
+        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, GroupId: _groupId, TagId: _tagId));
+        await LoadTagsAsync();
         _groups = await Nomenclature.GroupsAsync();
         _units = await Catalog.ListUnitsAsync(_includeArchived);
         _vatRates = await VatRates.ActiveAsync();

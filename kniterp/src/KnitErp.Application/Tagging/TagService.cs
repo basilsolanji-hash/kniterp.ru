@@ -100,6 +100,26 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
                       select new TagDto(t.Id, t.Name, t.Color, t.IsFavorite, false, 0, t.RowVersion)).ToListAsync(ct);
     }
 
+    /// <summary>Теги строк списка одним запросом (D104): id объекта → его теги, для цветных точек в списках.</summary>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<TagDto>>> MapAsync(TaggedEntity entity, IReadOnlyCollection<long> entityIds,
+        CancellationToken ct = default)
+    {
+        if (entityIds.Count == 0)
+        {
+            return new Dictionary<long, IReadOnlyList<TagDto>>();
+        }
+
+        await using var db = factory.Create();
+        var ctx = await Guard(db).CurrentAsync(ct);
+        var ids = entityIds.Distinct().Take(5000).ToList();
+        var rows = await (from l in db.TagLinks.AsNoTracking()
+                          join t in db.Tags.AsNoTracking() on l.TagId equals t.Id
+                          where l.OrganizationId == ctx.OrganizationId && l.Entity == entity && ids.Contains(l.EntityId) && !t.IsArchived
+                          orderby t.Name
+                          select new { l.EntityId, Tag = new TagDto(t.Id, t.Name, t.Color, t.IsFavorite, false, 0, t.RowVersion) }).ToListAsync(ct);
+        return rows.GroupBy(r => r.EntityId).ToDictionary(g => g.Key, g => (IReadOnlyList<TagDto>)g.Select(r => r.Tag).ToList());
+    }
+
     /// <summary>Поставить тег; по названию — существующий или новый (как ввод метки в Finder).</summary>
     public async Task AssignAsync(TaggedEntity entity, long entityId, long? tagId, string? newName = null, TagColor newColor = TagColor.None,
         CancellationToken ct = default)
