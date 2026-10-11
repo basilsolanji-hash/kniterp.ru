@@ -13,6 +13,7 @@
 | D300–D399 | каталог — `claude/catalog-products` |
 | D500–D599 | контрагенты и договоры, удобство — `claude/fervent-gates-248buc` (её D400–D402 переносятся в D500–D502) |
 | D600–D699 | CRM — `claude/crm`, ТЗ `docs/tz/crm.md`; `TaggedEntity` 30–39 |
+| D700–D799 | «Разработка» (модели, образцы) — `claude/development`, ТЗ `docs/tz/development.md`; `TaggedEntity` 40–49 |
 
 ## Состояние слияний (11.10.2026)
 - Владелец продукта разрешил сливать модули в базу всегда, без отдельного вопроса.
