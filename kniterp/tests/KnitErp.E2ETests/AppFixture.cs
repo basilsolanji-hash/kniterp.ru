@@ -172,7 +172,7 @@ public sealed class AppFixture : IAsyncLifetime
         return order;
     }
 
-    /// <summary>Подтверждённый заказ покупателя на свитера; начальнику цеха выдан просмотр продаж (отдельным правом), чтобы открыть карточку.</summary>
+    /// <summary>Подтверждённый заказ покупателя на свитера; начальник цеха видит его по роли (D91, дополнение).</summary>
     public async Task<long> CreateConfirmedSalesOrderAsync(decimal quantity)
     {
         await using var s = _host.As(_ownerId, _organizationId);
@@ -182,13 +182,6 @@ public sealed class AppFixture : IAsyncLifetime
         var order = await s.Sales.CreateOrderAsync(new KnitErp.Domain.Sales.SalesOrderHeader(today, customer, store, today.AddDays(10), null, false, null));
         await s.Sales.SetOrderLineAsync(order, Sweater, quantity, 2500m, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
         await s.Sales.ConfirmOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion);
-        if (!await s.Db.RoleAssignments.AnyAsync(a => a.UserId == _userId && a.PermissionCode == Permissions.SalesView))
-        {
-            s.Db.RoleAssignments.Add(KnitErp.Domain.Access.RoleAssignment.ForPermission(_organizationId, _userId, Permissions.SalesView, false, _ownerId,
-                DateTime.UtcNow, "e2e"));
-            await s.Db.SaveChangesAsync();
-        }
-
         return order;
     }
 

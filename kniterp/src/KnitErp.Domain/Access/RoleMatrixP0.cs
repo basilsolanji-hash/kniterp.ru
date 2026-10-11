@@ -72,7 +72,9 @@ public static class RoleMatrixP0
         (Permissions.PurchaseView,            [Full, Full, None, Full, None, Full, Full, None]),
         (Permissions.PurchaseEdit,            [Full, Full, None, None, None, Full, None, None]),
         // Допущение D65: продажи — так же, как закупки.
-        (Permissions.SalesView,               [Full, Full, None, Full, None, Full, Full, None]),
+        // Допущение D91 (дополнение): Руководитель подразделения (начальник цеха) видит заказы покупателей — что и к какому сроку
+        // производить; цены и суммы — только с правом «Цены и суммы», у этой роли оно выдаётся отдельно.
+        (Permissions.SalesView,               [Full, Full, ReadOnly, Full, None, Full, Full, None]),
         (Permissions.SalesEdit,               [Full, Full, None, None, None, Full, None, None]),
         // Допущение D91: производственные заказы ведут Владелец, Администратор и Руководитель подразделения (начальник цеха);
         // кладовщики, Бухгалтер и Аудитор видят их. Плановая себестоимость видна только с правом «Цены и суммы».

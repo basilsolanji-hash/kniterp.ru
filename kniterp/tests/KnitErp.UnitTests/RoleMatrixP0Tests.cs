@@ -36,6 +36,10 @@ public class RoleMatrixP0Tests
     [InlineData(SystemRoles.Storekeeper, Permissions.PriceView, None)]
     [InlineData(SystemRoles.Accountant, Permissions.PriceView, Full)]
     [InlineData(SystemRoles.Auditor, Permissions.AuditLogView, Full)]
+    // Производство: начальник цеха видит продажи без цен (D91, дополнение)
+    [InlineData(SystemRoles.DepartmentHead, Permissions.SalesView, ReadOnly)]
+    [InlineData(SystemRoles.DepartmentHead, Permissions.SalesEdit, None)]
+    [InlineData(SystemRoles.DepartmentHead, Permissions.PriceView, ByGrant)]
     [InlineData(SystemRoles.Employee, Permissions.AuditLogView, OwnOnly)]
     public void Matrix_matches_specification(string role, string permission, PermissionLevel expected) =>
         Assert.Equal(expected, RoleMatrixP0.LevelOf(role, permission));
