@@ -2011,6 +2011,37 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeSchedule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ScheduleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ScheduleId");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "ValidFrom")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_employee_schedules_from");
+
+                    b.ToTable("hr_employee_schedules", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.EmploymentRecord", b =>
                 {
                     b.Property<long>("Id")
@@ -2269,6 +2300,213 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_hr_staffing_money", "[Salary] >= 0 AND [Allowance] >= 0");
 
                             t.HasCheckConstraint("ck_hr_staffing_rates", "[Rates] > 0");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.Timesheet", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("ClosedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("CorrectsTimesheetId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("DepartmentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Month")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("Version")
+                        .HasColumnType("tinyint");
+
+                    b.Property<short>("Year")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_hr_timesheets_org_id");
+
+                    b.HasIndex("ClosedByUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "CorrectsTimesheetId");
+
+                    b.HasIndex("OrganizationId", "DepartmentId", "Year", "Month", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_timesheets_period");
+
+                    b.ToTable("hr_timesheets", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_timesheets_closed_immutable");
+
+                            t.HasCheckConstraint("ck_hr_timesheets_closed", "([Status] = 2 AND [ClosedAtUtc] IS NOT NULL AND [ClosedByUserId] IS NOT NULL) OR ([Status] = 1 AND [ClosedAtUtc] IS NULL AND [ClosedByUserId] IS NULL)");
+
+                            t.HasCheckConstraint("ck_hr_timesheets_period", "[Month] BETWEEN 1 AND 12 AND [Year] BETWEEN 2000 AND 2100");
+
+                            t.HasCheckConstraint("ck_hr_timesheets_status", "[Status] IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_hr_timesheets_version", "([Version] = 0 AND [CorrectsTimesheetId] IS NULL) OR ([Version] > 0 AND [CorrectsTimesheetId] IS NOT NULL)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.TimesheetDay", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Hours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<bool>("IsManual")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal>("NightHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("OvertimeHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<long>("TimesheetId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "TimesheetId");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "Date")
+                        .HasDatabaseName("ix_hr_timesheet_days_employee");
+
+                    b.HasIndex("TimesheetId", "EmployeeId", "Date")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_timesheet_days");
+
+                    b.ToTable("hr_timesheet_days", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_timesheet_days_closed_immutable");
+
+                            t.HasCheckConstraint("ck_hr_timesheet_days_hours", "[Hours] >= 0 AND [NightHours] >= 0 AND [OvertimeHours] >= 0 AND [Hours] + [OvertimeHours] <= 24 AND [NightHours] <= [Hours] + [OvertimeHours]");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.WorkSchedule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateOnly?>("CycleStart")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<decimal>("NightHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("RestDays")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal>("ShiftHours")
+                        .HasPrecision(9, 2)
+                        .HasColumnType("decimal(9,2)");
+
+                    b.Property<bool>("Summarized")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("WorkDays")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_hr_work_schedules_org_id");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_work_schedules_name")
+                        .HasFilter("[IsArchived] = 0");
+
+                    b.ToTable("hr_work_schedules", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_hr_work_schedules_cycle", "[Kind] = 1 OR ([WorkDays] > 0 AND [RestDays] > 0 AND [CycleStart] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_hr_work_schedules_hours", "[ShiftHours] > 0 AND [ShiftHours] <= 24 AND [NightHours] >= 0 AND [NightHours] <= [ShiftHours]");
+
+                            t.HasCheckConstraint("ck_hr_work_schedules_kind", "[Kind] IN (1, 2)");
                         });
                 });
 
@@ -5573,6 +5811,31 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_hr_personal_data_employee");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeSchedule", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_schedules_employee");
+
+                    b.HasOne("KnitErp.Domain.Hr.WorkSchedule", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ScheduleId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_schedules_schedule");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.EmploymentRecord", b =>
                 {
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
@@ -5661,6 +5924,69 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_hr_staffing_position");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.Timesheet", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ClosedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Hr.Timesheet", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "CorrectsTimesheetId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_hr_timesheets_corrects");
+
+                    b.HasOne("KnitErp.Domain.Structure.Department", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DepartmentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_timesheets_department");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.TimesheetDay", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_timesheet_days_employee");
+
+                    b.HasOne("KnitErp.Domain.Hr.Timesheet", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "TimesheetId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_timesheet_days_timesheet");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.WorkSchedule", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Integrations.ApiIdempotencyRecord", b =>

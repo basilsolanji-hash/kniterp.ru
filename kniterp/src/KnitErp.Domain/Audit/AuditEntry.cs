@@ -143,6 +143,10 @@ public static class AuditActions
     public const string HrOrderPosted = "hr.order.posted";
     public const string HrOrderCancelled = "hr.order.cancelled";
     public const string StaffingChanged = "hr.staffing.changed";
+    public const string ScheduleChanged = "hr.schedule.changed";
+    public const string TimesheetCreated = "hr.timesheet.created";
+    public const string TimesheetDayChanged = "hr.timesheet.day_changed";
+    public const string TimesheetClosed = "hr.timesheet.closed";
     public const string CatalogCreated = "catalog.created";
     public const string CatalogChanged = "catalog.changed";
     public const string CatalogArchived = "catalog.archived";

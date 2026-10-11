@@ -59,6 +59,10 @@ public static class RoleMatrixP0
         // Допущение D205: кадровые приказы и штатное расписание — Владелец; Кадровик — см. HrRoleMatrix; Аудитор и Бухгалтер видят приказы.
         (Permissions.HrOrderCreate,           [Full, None, None, None, None, None, None, None]),
         (Permissions.HrOrderPost,             [Full, None, None, None, None, None, None, None]),
+        // Допущение D208: табель своего подразделения заполняет и закрывает Руководитель подразделения (мастер цеха);
+        // Сотрудник видит только свой табель (уровень «С»); Кадровик заполняет, но не закрывает — см. HrRoleMatrix.
+        (Permissions.TimesheetEdit,           [Full, None, Scoped, None, None, None, None, OwnOnly]),
+        (Permissions.TimesheetClose,          [Full, None, Scoped, None, None, None, None, None]),
         (Permissions.UserView,                [Full, Full, None, None, None, None, ReadOnly, None]),
         (Permissions.UserManage,              [Full, Full, None, None, None, None, None, None]),
         (Permissions.AdminGrant,              [Full, None, None, None, None, None, None, None]),
@@ -147,6 +151,7 @@ public static class HrRoleMatrix
         [Permissions.PersonalDataEdit] = Full,
         [Permissions.HrOrderCreate] = Full,
         [Permissions.HrOrderPost] = Full,
+        [Permissions.TimesheetEdit] = Full,
         [Permissions.AuditLogView] = OwnOnly,
     };
 

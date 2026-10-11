@@ -339,6 +339,24 @@ app.MapGet("/employees.xlsx", (KnitErp.Application.Structure.EmployeeExchangeSer
 app.MapGet("/employees-template.xlsx", (KnitErp.Application.Structure.EmployeeExchangeService exchange, CancellationToken ct) =>
     FileOrForbid(() => exchange.TemplateAsync(ct), "shablon-sotrudnikov.xlsx"));
 
+// Табель подразделения за месяц в Excel (D209): право и область — в сервисе.
+app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, KnitErp.Application.Hr.TimesheetService timesheets, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, content) = await timesheets.ExportAsync(department, year, month, ct);
+        return Results.File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 // Скан согласия на обработку ПДн (D200): право и журнал просмотра — в сервисе.
 app.MapGet("/employees/consent-scans/{id:long}", async (long id, KnitErp.Application.Hr.PersonalDataService personalData, HttpContext http, CancellationToken ct) =>
 {

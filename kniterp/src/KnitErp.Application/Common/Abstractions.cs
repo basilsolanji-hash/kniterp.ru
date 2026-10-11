@@ -123,6 +123,10 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.StaffingPosition> StaffingPositions { get; }
     DbSet<KnitErp.Domain.Hr.PersonnelOrder> PersonnelOrders { get; }
     DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory { get; }
+    DbSet<KnitErp.Domain.Hr.WorkSchedule> WorkSchedules { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules { get; }
+    DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets { get; }
+    DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

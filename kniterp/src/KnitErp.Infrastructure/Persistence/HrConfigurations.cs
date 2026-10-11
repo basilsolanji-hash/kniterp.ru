@@ -195,3 +195,98 @@ internal sealed class EmploymentRecordConfiguration : IEntityTypeConfiguration<E
         b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.EffectiveFrom }).HasDatabaseName("ix_hr_employment_history_employee");
     }
 }
+
+internal sealed class WorkScheduleConfiguration : IEntityTypeConfiguration<WorkSchedule>
+{
+    public void Configure(EntityTypeBuilder<WorkSchedule> b)
+    {
+        b.ToTable("hr_work_schedules", t =>
+        {
+            t.HasCheckConstraint("ck_hr_work_schedules_kind", "[Kind] IN (1, 2)");
+            t.HasCheckConstraint("ck_hr_work_schedules_hours", "[ShiftHours] > 0 AND [ShiftHours] <= 24 AND [NightHours] >= 0 AND [NightHours] <= [ShiftHours]");
+            t.HasCheckConstraint("ck_hr_work_schedules_cycle", "[Kind] = 1 OR ([WorkDays] > 0 AND [RestDays] > 0 AND [CycleStart] IS NOT NULL)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(WorkSchedule.NameMaxLength).IsRequired();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.ShiftHours).HasPrecision(9, 2);
+        b.Property(x => x.NightHours).HasPrecision(9, 2);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_hr_work_schedules_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique().HasFilter("[IsArchived] = 0").HasDatabaseName("ux_hr_work_schedules_name");
+    }
+}
+
+internal sealed class EmployeeScheduleConfiguration : IEntityTypeConfiguration<EmployeeSchedule>
+{
+    public void Configure(EntityTypeBuilder<EmployeeSchedule> b)
+    {
+        b.ToTable("hr_employee_schedules");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_employee_schedules_employee");
+        b.HasOne<WorkSchedule>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ScheduleId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_employee_schedules_schedule");
+        b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.ValidFrom }).IsUnique().HasDatabaseName("ux_hr_employee_schedules_from");
+    }
+}
+
+internal sealed class TimesheetConfiguration : IEntityTypeConfiguration<Timesheet>
+{
+    public void Configure(EntityTypeBuilder<Timesheet> b)
+    {
+        b.ToTable("hr_timesheets", t =>
+        {
+            t.HasCheckConstraint("ck_hr_timesheets_period", "[Month] BETWEEN 1 AND 12 AND [Year] BETWEEN 2000 AND 2100");
+            t.HasCheckConstraint("ck_hr_timesheets_status", "[Status] IN (1, 2)");
+            t.HasCheckConstraint("ck_hr_timesheets_closed",
+                "([Status] = 2 AND [ClosedAtUtc] IS NOT NULL AND [ClosedByUserId] IS NOT NULL) OR ([Status] = 1 AND [ClosedAtUtc] IS NULL AND [ClosedByUserId] IS NULL)");
+            t.HasCheckConstraint("ck_hr_timesheets_version", "([Version] = 0 AND [CorrectsTimesheetId] IS NULL) OR ([Version] > 0 AND [CorrectsTimesheetId] IS NOT NULL)");
+            t.HasTrigger("tr_hr_timesheets_closed_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.From);
+        b.Ignore(x => x.To);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<Department>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DepartmentId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_timesheets_department");
+        b.HasOne<Timesheet>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CorrectsTimesheetId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_timesheets_corrects");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ClosedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_hr_timesheets_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.DepartmentId, x.Year, x.Month, x.Version }).IsUnique().HasDatabaseName("ux_hr_timesheets_period");
+    }
+}
+
+internal sealed class TimesheetDayConfiguration : IEntityTypeConfiguration<TimesheetDay>
+{
+    public void Configure(EntityTypeBuilder<TimesheetDay> b)
+    {
+        b.ToTable("hr_timesheet_days", t =>
+        {
+            t.HasCheckConstraint("ck_hr_timesheet_days_hours",
+                "[Hours] >= 0 AND [NightHours] >= 0 AND [OvertimeHours] >= 0 AND [Hours] + [OvertimeHours] <= 24 AND [NightHours] <= [Hours] + [OvertimeHours]");
+            t.HasTrigger("tr_hr_timesheet_days_closed_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Code).HasMaxLength(3).IsRequired();
+        b.Property(x => x.Hours).HasPrecision(9, 2);
+        b.Property(x => x.NightHours).HasPrecision(9, 2);
+        b.Property(x => x.OvertimeHours).HasPrecision(9, 2);
+        b.HasOne<Timesheet>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.TimesheetId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_timesheet_days_timesheet");
+        b.HasOne<Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_timesheet_days_employee");
+        b.HasIndex(x => new { x.TimesheetId, x.EmployeeId, x.Date }).IsUnique().HasDatabaseName("ux_hr_timesheet_days");
+        b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.Date }).HasDatabaseName("ix_hr_timesheet_days_employee");
+    }
+}

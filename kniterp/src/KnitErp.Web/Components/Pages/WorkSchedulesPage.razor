@@ -1,0 +1,197 @@
+@page "/hr/schedules"
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@inject TimesheetService Timesheets
+
+<PageTitle>@L("Графики работы") — knitERP</PageTitle>
+
+@* D207: графики работы — пятидневка и сменные N/M; назначение сотруднику с даты. Без графика — пятидневка по 8 часов. *@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Графики работы")</h1>
+        <div class="row-actions"><a class="button secondary" href="hr/timesheet">@L("Табель")</a></div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <p class="muted">@L("Сотрудник без назначенного графика работает по пятидневке по 8 часов; накануне праздника день короче на час (ст. 95 ТК РФ).")</p>
+
+    @if (_data.CanEdit)
+    {
+        <div class="panel">
+            <h2>@L("Новый график")</h2>
+            <div class="grid">
+                <label>@L("Название") <input @bind="_name" maxlength="100" /></label>
+                <label>
+                    @L("Вид")
+                    <select @bind="_kind">
+                        <option value="@WorkScheduleKind.FiveDay">@L("Пятидневка")</option>
+                        <option value="@WorkScheduleKind.Shifts">@L("Сменный")</option>
+                    </select>
+                </label>
+                <label>@L("Часов в смене") <input type="number" step="0.5" min="0.5" max="24" @bind="_shiftHours" /></label>
+                <label>@L("Из них ночных") <input type="number" step="0.5" min="0" max="24" @bind="_nightHours" /></label>
+                @if (_kind == WorkScheduleKind.Shifts)
+                {
+                    <label>@L("Рабочих дней подряд") <input type="number" min="1" max="14" @bind="_workDays" /></label>
+                    <label>@L("Выходных дней подряд") <input type="number" min="1" max="14" @bind="_restDays" /></label>
+                    <label>@L("Первый день цикла") <input type="date" @bind="_cycleStart" /></label>
+                }
+                <label class="inline"><input type="checkbox" @bind="_summarized" /> @L("Суммированный учёт рабочего времени (ст. 104 ТК РФ)")</label>
+            </div>
+            <div class="actions"><button type="button" @onclick="CreateAsync" disabled="@_busy">@L("Добавить график")</button></div>
+        </div>
+    }
+
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("График")</th><th>@L("Режим")</th><th class="num">@L("Ночных")</th><th>@L("Учёт")</th></tr></thead>
+            <tbody>
+                @if (_data.Schedules.Count == 0)
+                {
+                    <tr><td colspan="4" class="muted">@L("Графиков пока нет.")</td></tr>
+                }
+                @foreach (var s in _data.Schedules)
+                {
+                    <tr><td>@s.Name</td><td>@s.Describe@(s.CycleStart is { } c ? ", " + L("с {0}", c.ToString("dd.MM.yyyy")) : "")</td><td class="num">@s.NightHours.ToString("0.##")</td>
+                        <td>@(s.Summarized ? L("суммированный") : L("подённый"))</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h2>@L("Графики сотрудников")</h2>
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Сотрудник")</th><th>@L("График")</th><th>@L("Назначить с даты")</th></tr></thead>
+            <tbody>
+                @foreach (var e in _data.Employees)
+                {
+                    <tr>
+                        <td>@e.FullName <span class="muted">@e.PersonnelNumber</span></td>
+                        <td>@(e.ScheduleName ?? L("пятидневка по 8 часов"))@(e.ValidFrom is { } f ? " " + L("с {0}", f.ToString("dd.MM.yyyy")) : "")</td>
+                        <td>
+                            @if (_data.Schedules.Count > 0)
+                            {
+                                <div class="row-actions">
+                                    <select @bind="_assign[e.EmployeeId]" aria-label="@L("График")">
+                                        <option value="0">@L("— выберите —")</option>
+                                        @foreach (var s in _data.Schedules)
+                                        {
+                                            <option value="@s.Id">@s.Name</option>
+                                        }
+                                    </select>
+                                    <input type="date" @bind="_assignFrom" aria-label="@L("Назначить с даты")" />
+                                    <button type="button" class="secondary" @onclick="() => AssignAsync(e)" disabled="@_busy">@L("Назначить")</button>
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private SchedulesDto? _data;
+    private string _name = string.Empty;
+    private WorkScheduleKind _kind = WorkScheduleKind.FiveDay;
+    private decimal _shiftHours = 8;
+    private decimal _nightHours;
+    private byte _workDays = 2;
+    private byte _restDays = 2;
+    private DateOnly? _cycleStart;
+    private bool _summarized;
+    private readonly Dictionary<long, long> _assign = new();
+    private DateOnly _assignFrom;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await ReloadAsync();
+            _assignFrom = _data!.Today;
+            _cycleStart = _data.Today;
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _data = await Timesheets.SchedulesAsync();
+        foreach (var e in _data.Employees)
+        {
+            _assign.TryAdd(e.EmployeeId, 0);
+        }
+    }
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        await Timesheets.SaveScheduleAsync(null, new WorkScheduleCommand(_name, _kind, _shiftHours, _nightHours, _workDays, _restDays, _cycleStart, _summarized), null);
+        _message = L("График добавлен.");
+        _name = string.Empty;
+    });
+
+    private Task AssignAsync(EmployeeScheduleDto e) => RunAsync(async () =>
+    {
+        if (_assign.GetValueOrDefault(e.EmployeeId) is not (> 0 and var scheduleId))
+        {
+            throw new KnitErp.Domain.Common.BusinessRuleException("hr.schedule.pick", "Выберите график.");
+        }
+
+        await Timesheets.AssignScheduleAsync(e.EmployeeId, scheduleId, _assignFrom);
+        _message = L("График назначен: {0}.", e.FullName);
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await ReloadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

@@ -203,6 +203,8 @@
             new("employees", "Сотрудники", a => a.HasOwnOnly(Permissions.EmployeeView)),
             new("hr/orders", "Кадровые приказы", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
             new("hr/staffing", "Штатное расписание", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
+            new("hr/timesheet", "Табель", a => a.HasOwnOnly(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
+            new("hr/schedules", "Графики работы", a => a.Has(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
         ]),
         new("reports", "Отчёты",
         [
