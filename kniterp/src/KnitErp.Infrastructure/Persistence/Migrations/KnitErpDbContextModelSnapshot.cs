@@ -3764,6 +3764,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long?>("ReleasedByUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<byte>("Route")
+                        .HasColumnType("tinyint");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -3834,6 +3837,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_production_orders_quantity", "[Quantity] > 0");
 
                             t.HasCheckConstraint("ck_production_orders_released", "([Status] = 1 AND [ReleasedByUserId] IS NULL) OR ([Status] IN (2, 3, 4, 5) AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL) OR [Status] = 9");
+
+                            t.HasCheckConstraint("ck_production_orders_route", "([Route] & 9) = 9 AND [Route] <= 31");
 
                             t.HasCheckConstraint("ck_production_orders_source", "([Source] = 1 AND [SalesOrderId] IS NULL) OR ([Source] = 2 AND [SalesOrderId] IS NOT NULL)");
 
@@ -4118,6 +4123,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
+                    b.Property<byte>("Route")
+                        .HasColumnType("tinyint");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -4153,6 +4161,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_tech_cards_activated", "([Status] = 1 AND [ActivatedByUserId] IS NULL) OR ([Status] <> 1 AND [ActivatedByUserId] IS NOT NULL AND [ActivatedAtUtc] IS NOT NULL) OR ([Status] = 9 AND [ActivatedByUserId] IS NULL)");
 
                             t.HasCheckConstraint("ck_tech_cards_output", "[OutputQuantity] > 0");
+
+                            t.HasCheckConstraint("ck_tech_cards_route", "([Route] & 9) = 9 AND [Route] <= 31");
 
                             t.HasCheckConstraint("ck_tech_cards_status", "[Status] IN (1, 2, 9)");
 

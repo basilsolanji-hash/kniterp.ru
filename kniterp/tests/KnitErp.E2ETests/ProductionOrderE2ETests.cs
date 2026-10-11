@@ -329,9 +329,27 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await page.GotoAsync("shop");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Терминал цеха" })).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByText("Исполнитель: Петрова А. С.")).ToBeVisibleAsync();
+        // Форма кода — обычный GET: работает и до подключения Blazor; неверный код — понятная ошибка.
+        await page.GotoAsync("shop?code=abc");
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("Код не распознан");
+        await page.GotoAsync("shop");
 
-        await page.GetByLabel("Код операции").FillAsync($"оп-{order}-1");
-        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Открыть", Exact = true }), page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" }));
+        // Код, введённый до подключения Blazor, теряется: вводим заново, пока не откроется операция.
+        var stageHeading = page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" });
+        for (var attempt = 0; attempt < 15 && !await stageHeading.IsVisibleAsync(); attempt++)
+        {
+            await page.GetByLabel("Код операции").FillAsync($"оп-{order}-1");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Открыть", Exact = true }).ClickAsync();
+            try
+            {
+                await stageHeading.WaitForAsync(new() { Timeout = 1500 });
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        await Assertions.Expect(stageHeading).ToBeVisibleAsync();
         await page.WaitForURLAsync(new Regex($@"/shop/op/{order}/1$"));
         await Assertions.Expect(page.Locator(".shop-big div").First).ToContainTextAsync("10");
 
@@ -463,6 +481,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await page.GotoAsync($"print/production-orders/{order}/route");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("^Маршрутный лист к производственному заказу") })).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator("td.qr img")).ToHaveCountAsync(5);
+        await Assertions.Expect(page.GetByText("Маршрут: Вязание → Сборка → ВТО → Контроль качества → Упаковка.")).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByText($"ОП-{order}-4", new() { Exact = true })).ToBeVisibleAsync();
         Assert.StartsWith("data:image/png;base64,", await page.Locator("td.qr img").First.GetAttributeAsync("src"));
     }

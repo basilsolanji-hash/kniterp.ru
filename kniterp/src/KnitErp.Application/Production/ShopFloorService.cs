@@ -69,6 +69,12 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         var order = await db.ProductionOrders.AsNoTracking()
                         .SingleOrDefaultAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Производственный заказ");
+        if (order.Status != ProductionOrderStatus.Draft && !order.RouteValue.Contains(stage))
+        {
+            // Этапа нет в маршруте изделия (D401): QR-кода на него на маршрутном листе нет.
+            throw new NotFoundException("Этап производства");
+        }
+
         var item = await db.Items.AsNoTracking().Where(i => i.Id == order.ItemId)
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Code, i.Name, u.Symbol, u.Precision }).SingleAsync(ct);
         var ops = await db.ProductionOperations.AsNoTracking()
@@ -168,8 +174,8 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         var tasks = new List<ShopTaskDto>();
         foreach (var o in orders)
         {
-            var flow = new ProductionFlow(o.Order.Quantity, ops[o.Order.Id].Select(x => x.Step), released.GetValueOrDefault(o.Order.Id));
-            tasks.AddRange(ProductionFlow.Stages.Where(s => flow.Available(s) > 0)
+            var flow = new ProductionFlow(o.Order.Quantity, ops[o.Order.Id].Select(x => x.Step), released.GetValueOrDefault(o.Order.Id), o.Order.RouteValue);
+            tasks.AddRange(flow.Route.Stages.Where(s => flow.Available(s) > 0)
                 .Select(s => new ShopTaskDto(o.Order.Id, o.Order.Number, o.Name, s, flow.Available(s), o.Symbol, o.Order.DueDate)));
         }
 

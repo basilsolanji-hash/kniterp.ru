@@ -87,6 +87,12 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
         var order = await db.ProductionOrders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == cmd.OrderId && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Производственный заказ");
         order.EnsureInWork();
+        if (!order.RouteValue.Contains(cmd.Stage))
+        {
+            throw new BusinessRuleException("production.stage.not_in_route",
+                $"Этапа «{ProductionFlow.StageName(cmd.Stage)}» нет в маршруте изделия: {order.RouteValue.Describe()}.");
+        }
+
         var unit = await db.Items.AsNoTracking().Where(i => i.Id == order.ItemId)
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision }).SingleAsync(ct);
         StockEntry.EnsurePrecision(new EntryItemDto(unit.Id, unit.Code, unit.Name, unit.Symbol, unit.Precision), cmd.Planned);

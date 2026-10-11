@@ -2813,7 +2813,6 @@
   "Выпуск изделия по техкарте: черновик → «Запустить» (версия техкарты и нормы фиксируются) → этапы и выпуск → закрытие. Отменить можно только заказ без движений.": "Mahsulotni texkarta bo‘yicha chiqarish: qoralama → «Ishga tushirish» (texkarta versiyasi va me’yorlar qayd etiladi) → bosqichlar va chiqarish → yopish. Faqat harakatsiz buyurtmani bekor qilish mumkin.",
   "Выпуск продукции": "Mahsulot chiqarish",
   "Выпустить": "Chiqarish",
-  "Выпустить можно не больше {0} — столько упаковано и ещё не выпущено.": "{0} dan ko‘p chiqarib bo‘lmaydi — shuncha qadoqlangan va hali chiqarilmagan.",
   "Выпустить на склад «{0}»?": "«{0}» omboriga chiqarilsinmi?",
   "Выпустить, {0}": "Chiqarish, {0}",
   "Выпущено": "Chiqarildi",
@@ -2974,7 +2973,6 @@
   "Укажите количество хотя бы одного материала.": "Kamida bitta materialning miqdorini ko‘rsating.",
   "Укажите количество числом, например 100.": "Miqdorni son bilan ko‘rsating, masalan 100.",
   "Укажите причину списания отходов.": "Chiqindilarni hisobdan chiqarish sababini ko‘rsating.",
-  "Укажите этап, на который возвращается переделка: вязание, сборка или ВТО.": "Qayta ishlash qaytariladigan bosqichni ko‘rsating: to‘qish, yig‘ish yoki NIO.",
   "Упаковано и не выпущено {0} — выпустите их на склад.": "{0} qadoqlangan, lekin chiqarilmagan — ularni omborga chiqaring.",
   "Фактическая на единицу": "Birlikka haqiqiy",
   "Фактическая себестоимость по выданной пряже: {0} ₽ (выпуска ещё нет).": "Berilgan ip bo‘yicha haqiqiy tannarx: {0} ₽ (hali chiqarish yo‘q).",
@@ -3432,5 +3430,12 @@
   "Файл договора — PDF, JPEG или PNG.": "Shartnoma fayli — PDF, JPEG yoki PNG.",
   "Файл договора — до 5 МБ.": "Shartnoma fayli — 5 MB gacha.",
   "Файл договора загружен.": "Shartnoma fayli yuklandi.",
-  "Файлы": "Fayllar"
+  "Файлы": "Fayllar",
+  "В маршруте обязательны вязание и контроль качества.": "Marshrutda to‘qish va sifat nazorati majburiy.",
+  "Выпустить можно не больше {0} — столько прошло последний этап маршрута и ещё не выпущено.": "{0} dan ortiq chiqarib bo‘lmaydi — marshrutning oxirgi bosqichidan shuncha o‘tdi va hali chiqarilmagan.",
+  "Маршрут": "Marshrut",
+  "Маршрут сохранён.": "Marshrut saqlandi.",
+  "Укажите этап маршрута до контроля качества, на который возвращается переделка.": "Qayta ishlash qaytariladigan sifat nazoratidan oldingi marshrut bosqichini ko‘rsating.",
+  "Этапа «{0}» нет в маршруте изделия: {1}.": "Buyum marshrutida «{0}» bosqichi yo‘q: {1}.",
+  "Этапы, которые проходит изделие. Вязание и контроль качества обязательны. При запуске производственного заказа маршрут фиксируется в нём.": "Buyum o‘tadigan bosqichlar. To‘qish va sifat nazorati majburiy. Ishlab chiqarish buyurtmasi ishga tushirilganda marshrut unda qayd etiladi."
 }

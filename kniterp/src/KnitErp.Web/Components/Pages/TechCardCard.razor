@@ -74,6 +74,28 @@ else
         }
     }
 
+    <h2 style="margin-top: 24px">@L("Маршрут")</h2>
+    var route = _card.Route ?? ProductionFlow.Stages;
+    @if (_card.CanEdit)
+    {
+        <fieldset class="inline-form" aria-label="@L("Маршрут")">
+            @foreach (var st in ProductionFlow.Stages)
+            {
+                var required = st is ProductionStage.Knitting or ProductionStage.QualityControl;
+                <label>
+                    <input type="checkbox" checked="@route.Contains(st)" disabled="@(required || _busy)"
+                           @onchange="e => ToggleStageAsync(st, e.Value is true)" aria-label="@L(ProductionFlow.StageName(st))" />
+                    @L(ProductionFlow.StageName(st))
+                </label>
+            }
+        </fieldset>
+        <p class="muted">@L("Этапы, которые проходит изделие. Вязание и контроль качества обязательны. При запуске производственного заказа маршрут фиксируется в нём.")</p>
+    }
+    else
+    {
+        <p>@string.Join(" → ", route.Select(x => L(ProductionFlow.StageName(x))))</p>
+    }
+
     <h2 style="margin-top: 24px">@L("Материалы ({0})", _card.Lines.Count)</h2>
 
     @if (_card.CanEdit)
@@ -298,6 +320,14 @@ else
     }, null);
 
     private Task RemoveLineAsync(TechCardLineDto line) => RunAsync(() => Cards.RemoveLineAsync(Id, line.ItemId, _card!.RowVersion), null);
+
+    /// <summary>Включить или исключить этап маршрута (D401); вязание и контроль качества не снимаются.</summary>
+    private Task ToggleStageAsync(ProductionStage stage, bool on) => RunAsync(async () =>
+    {
+        var current = (_card!.Route ?? ProductionFlow.Stages).ToList();
+        var next = on ? current.Append(stage).Distinct().ToList() : current.Where(x => x != stage).ToList();
+        await Cards.SetRouteAsync(Id, next, _card.RowVersion);
+    }, L("Маршрут сохранён."));
 
     private Task ActivateAsync() => RunAsync(() => Cards.ActivateAsync(Id, _card!.RowVersion), L("Техкарта введена в действие."));
 

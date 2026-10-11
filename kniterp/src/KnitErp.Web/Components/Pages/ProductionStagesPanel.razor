@@ -37,7 +37,7 @@
             <label>
                 @L("Этап")
                 <select @bind="_stage" aria-label="@L("Этап")">
-                    @foreach (var s in ProductionFlow.Stages)
+                    @foreach (var s in _progress.Stages.Select(x => x.Stage))
                     {
                         <option value="@s">@L(ProductionFlow.StageName(s))</option>
                     }
@@ -58,9 +58,10 @@
                 <label>
                     @L("Вернуть на этап")
                     <select @bind="_returnTo" aria-label="@L("Вернуть на этап")">
-                        <option value="@ProductionStage.Knitting">@L(ProductionFlow.StageName(ProductionStage.Knitting))</option>
-                        <option value="@ProductionStage.Assembly">@L(ProductionFlow.StageName(ProductionStage.Assembly))</option>
-                        <option value="@ProductionStage.Steaming">@L(ProductionFlow.StageName(ProductionStage.Steaming))</option>
+                        @foreach (var r in _progress.Stages.Select(x => x.Stage).Where(x => x < ProductionStage.QualityControl))
+                        {
+                            <option value="@r">@L(ProductionFlow.StageName(r))</option>
+                        }
                     </select>
                 </label>
             }

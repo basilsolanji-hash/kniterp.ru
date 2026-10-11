@@ -69,6 +69,11 @@ public sealed class ProductionOrder
     /// </summary>
     public long TechCardId { get; private set; }
 
+    /// <summary>Снимок маршрута техкарты при запуске (D401); у черновика — полный, действует маршрут текущей техкарты.</summary>
+    public byte Route { get; private set; } = ProductionRoute.FullMask;
+
+    public ProductionRoute RouteValue => ProductionRoute.From(Route);
+
     public ProductionOrderStatus Status { get; private set; }
     public string? Comment { get; private set; }
     public long CreatedByUserId { get; private set; }
@@ -131,6 +136,7 @@ public sealed class ProductionOrder
         }
 
         TechCardId = card.Id;
+        Route = card.Route;
         _materials.Clear();
         var waste = card.Lines.ToDictionary(l => l.ItemId, l => l.WastePercent);
         foreach (var (itemId, net, gross) in card.Requirement(Quantity, precisionOf))

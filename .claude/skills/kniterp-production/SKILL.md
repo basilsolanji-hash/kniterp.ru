@@ -49,8 +49,9 @@ description: Модуль «Производство» knitERP — произв�
 - Docker в облачной сессии: `dockerd` запускать фоновой командой (`run_in_background`), иначе он умирает вместе с командой; затем `docker start kniterp-sql`.
 
 ## Переводы
-Ключи интерфейса — в `src/KnitErp.Web/Localization/{be,kk,uz}.json`, новые — в конец файла: `python3 -I .claude/skills/kniterp-production/append_tr.py <файл с T = {ключ: (be, kk, uz)}> kniterp/src/KnitErp.Web/Localization`.
-Списки из домена, которые выводятся как `L(переменная)` (этапы, причины невыполнения), регистрируются в `TranslationCoverageTests.UsedKeys`.
+Словари `src/KnitErp.Web/Localization/{be,kk,uz}.json` — скриптом `kniterp-tests`: `python3 -I .claude/skills/kniterp-tests/translations.py add new.json`
+(новые ключи в конец) и `… remove "ключ"` (лишние, которые назвал тест). Списки из домена, которые выводятся как `L(переменная)`
+(этапы, причины невыполнения, тексты главного экрана), регистрируются в `TranslationCoverageTests.UsedKeys`.
 
 ## Общие контракты с другими модулями (сверять при слиянии)
 - `TaggedEntity`: 1–10 общие, 11–19 производство (`ProductionOrder = 11`), 20–29 кадры; CHECK тегов и обсуждений — `BETWEEN 1 AND 29` (D202).

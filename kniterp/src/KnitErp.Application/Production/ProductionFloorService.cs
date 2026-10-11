@@ -75,7 +75,7 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
             .ToList();
         var inWork = inWorkStatus(order);
         return new ProductionProgressDto(order.Id, order.Status, order.Quantity, unit.Symbol, unit.Precision,
-            ProductionFlow.Stages.Select(s => new ProductionStageDto(s, flow.Done(s), inWork ? flow.Available(s) : 0)).ToList(),
+            flow.Route.Stages.Select(s => new ProductionStageDto(s, flow.Done(s), inWork ? flow.Available(s) : 0)).ToList(),
             flow.Done(ProductionStage.QualityControl), flow.Defect, flow.Rework, flow.ReadyForOutput, flow.Released, history,
             inWork && ctx.Permissions.Has(Permissions.ProductionStageMark),
             inWork && ctx.Permissions.Has(Permissions.ProductionStageMark) ? await WorkingEmployeesAsync(ctx, ct) : null);
@@ -191,7 +191,7 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
 
     /// <summary>Поток заказа: отметки этапов и выпущенное количество.</summary>
     internal async Task<ProductionFlow> FlowAsync(ProductionOrder order, IEnumerable<ProductionOperation> ops, CancellationToken ct) =>
-        new(order.Quantity, ops.Select(o => o.Step), await ProductionLocks.ReleasedAsync(db, order, ct));
+        new(order.Quantity, ops.Select(o => o.Step), await ProductionLocks.ReleasedAsync(db, order, ct), order.RouteValue);
 }
 
 /// <summary>Общие для сервисов производства блокировка заказа и выпущенное количество.</summary>

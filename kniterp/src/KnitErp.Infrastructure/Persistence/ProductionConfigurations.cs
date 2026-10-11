@@ -24,6 +24,7 @@ internal sealed class ProductionOrderConfiguration : IEntityTypeConfiguration<Pr
             t.HasCheckConstraint("ck_production_orders_warehouses", "[WipWarehouseId] <> [OutputWarehouseId]");
             t.HasCheckConstraint("ck_production_orders_due", "[DueDate] IS NULL OR [DueDate] >= [OrderDate]");
             t.HasCheckConstraint("ck_production_orders_parent", "[ParentOrderId] IS NULL OR [ParentOrderId] <> [Id]");
+            t.HasCheckConstraint("ck_production_orders_route", "([Route] & 9) = 9 AND [Route] <= 31");
             // Запущен и дальше — с отметкой о запуске; черновик — без неё; отменённый — с причиной.
             t.HasCheckConstraint("ck_production_orders_released",
                 "([Status] = 1 AND [ReleasedByUserId] IS NULL) OR ([Status] IN (2, 3, 4, 5) AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL)"

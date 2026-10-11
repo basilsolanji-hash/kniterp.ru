@@ -116,12 +116,16 @@ public sealed class ProductionFlow
     private readonly decimal _orderQuantity;
     private readonly IReadOnlyList<ProductionStep> _steps;
 
-    public ProductionFlow(decimal orderQuantity, IEnumerable<ProductionStep> steps, decimal released)
+    public ProductionFlow(decimal orderQuantity, IEnumerable<ProductionStep> steps, decimal released, ProductionRoute? route = null)
     {
         _orderQuantity = orderQuantity;
         _steps = steps.ToList();
         Released = released;
+        Route = route ?? ProductionRoute.Full;
     }
+
+    /// <summary>Маршрут заказа (D401): этапы вне маршрута не отмечаются, «предыдущий» и «следующий» — по маршруту.</summary>
+    public ProductionRoute Route { get; }
 
     /// <summary>Выпущено на склад готовой продукции.</summary>
     public decimal Released { get; }
@@ -132,8 +136,8 @@ public sealed class ProductionFlow
     /// <summary>Отправлено на переделку — всего (для отчёта).</summary>
     public decimal Rework => _steps.Where(s => s.Kind == ProductionOperationKind.Rework).Sum(s => s.Quantity);
 
-    /// <summary>Упаковано и ещё не выпущено — столько можно выпустить.</summary>
-    public decimal ReadyForOutput => Done(ProductionStage.Packing) - Released;
+    /// <summary>Сделано на последнем этапе маршрута (упаковка или контроль качества) и ещё не выпущено — столько можно выпустить.</summary>
+    public decimal ReadyForOutput => Done(Route.Last) - Released;
 
     /// <summary>Сделано на этапе с учётом исправлений и возвратов на переделку (на контроле качества — годное).</summary>
     public decimal Done(ProductionStage stage)
@@ -148,22 +152,29 @@ public sealed class ProductionFlow
         return marked - _steps.Where(s => s.Kind == ProductionOperationKind.Rework && s.ReturnTo <= stage).Sum(s => s.Quantity);
     }
 
-    /// <summary>Сколько можно отметить на этапе сейчас.</summary>
-    public decimal Available(ProductionStage stage) => Math.Max(0, stage switch
+    /// <summary>Сколько можно отметить на этапе сейчас; этап вне маршрута — 0.</summary>
+    public decimal Available(ProductionStage stage)
     {
-        ProductionStage.Knitting => _orderQuantity + Defect - Done(ProductionStage.Knitting),
-        ProductionStage.QualityControl => Done(ProductionStage.Steaming) - Done(ProductionStage.QualityControl) - Defect,
-        ProductionStage.Packing => Done(ProductionStage.QualityControl) - Done(ProductionStage.Packing),
-        _ => Done(stage - 1) - Done(stage),
-    });
+        if (!Route.Contains(stage))
+        {
+            return 0;
+        }
+
+        var previous = Route.Previous(stage);
+        return Math.Max(0, previous switch
+        {
+            null => _orderQuantity + Defect - Done(stage),
+            _ when stage == ProductionStage.QualityControl => Done(previous.Value) - Done(stage) - Defect,
+            _ => Done(previous.Value) - Done(stage),
+        });
+    }
 
     /// <summary>Сколько сделанного на этапе уже ушло дальше — ниже этого исправление не опускает.</summary>
-    public decimal UsedDownstream(ProductionStage stage) => stage switch
+    public decimal UsedDownstream(ProductionStage stage) => Route.Next(stage) switch
     {
-        ProductionStage.Steaming => Done(ProductionStage.QualityControl) + Defect,
-        ProductionStage.QualityControl => Done(ProductionStage.Packing),
-        ProductionStage.Packing => Released,
-        _ => Done(stage + 1),
+        null => Released,
+        ProductionStage.QualityControl => Done(ProductionStage.QualityControl) + Defect,
+        { } next => Done(next),
     };
 
     /// <summary>Проверка записи перед сохранением; бросает понятную ошибку.</summary>
@@ -172,6 +183,11 @@ public sealed class ProductionFlow
         if (!Stages.Contains(step.Stage))
         {
             throw new BusinessRuleException("production.stage.unknown", "Выберите этап.");
+        }
+
+        if (!Route.Contains(step.Stage))
+        {
+            throw new BusinessRuleException("production.stage.not_in_route", $"Этапа «{StageName(step.Stage)}» нет в маршруте изделия: {Route.Describe()}.");
         }
 
         var qc = step.Stage == ProductionStage.QualityControl;
@@ -185,9 +201,9 @@ public sealed class ProductionFlow
                 }
 
                 if (step.Kind == ProductionOperationKind.Rework
-                    && step.ReturnTo is not (ProductionStage.Knitting or ProductionStage.Assembly or ProductionStage.Steaming))
+                    && (step.ReturnTo is not (ProductionStage.Knitting or ProductionStage.Assembly or ProductionStage.Steaming) || !Route.Contains(step.ReturnTo.Value)))
                 {
-                    throw new BusinessRuleException("production.stage.rework_target", "Укажите этап, на который возвращается переделка: вязание, сборка или ВТО.");
+                    throw new BusinessRuleException("production.stage.rework_target", "Укажите этап маршрута до контроля качества, на который возвращается переделка.");
                 }
 
                 if (step.Kind != ProductionOperationKind.Rework && step.ReturnTo is not null)

@@ -224,11 +224,11 @@ public sealed class ProductionMaterialService(
             var released = await ProductionLocks.ReleasedAsync(db, order, ct);
             var steps = await db.ProductionOperations.AsNoTracking()
                 .Where(o => o.OrganizationId == ctx.OrganizationId && o.ProductionOrderId == orderId).ToListAsync(ct);
-            var ready = new ProductionFlow(order.Quantity, steps.Select(o => o.Step), released).ReadyForOutput;
+            var ready = new ProductionFlow(order.Quantity, steps.Select(o => o.Step), released, order.RouteValue).ReadyForOutput;
             if (command.Quantity > ready)
             {
                 throw new BusinessRuleException("production.output.exceeds",
-                    $"Выпустить можно не больше {Quantities.Format(ready)} — столько упаковано и ещё не выпущено.");
+                    $"Выпустить можно не больше {Quantities.Format(ready)} — столько прошло последний этап маршрута и ещё не выпущено.");
             }
 
             foreach (var warehouseId in new[] { order.WipWarehouseId, order.OutputWarehouseId })

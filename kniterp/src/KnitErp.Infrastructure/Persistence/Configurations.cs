@@ -699,6 +699,8 @@ internal sealed class TechCardConfiguration : IEntityTypeConfiguration<KnitErp.D
             t.HasCheckConstraint("ck_tech_cards_status", "[Status] IN (1, 2, 9)");
             t.HasCheckConstraint("ck_tech_cards_output", "[OutputQuantity] > 0");
             t.HasCheckConstraint("ck_tech_cards_version", "[Version] >= 1");
+            // Маршрут изделия (D401): вязание и контроль качества обязательны, только пять этапов.
+            t.HasCheckConstraint("ck_tech_cards_route", "([Route] & 9) = 9 AND [Route] <= 31");
             t.HasCheckConstraint("ck_tech_cards_activated",
                 "([Status] = 1 AND [ActivatedByUserId] IS NULL) OR ([Status] <> 1 AND [ActivatedByUserId] IS NOT NULL AND [ActivatedAtUtc] IS NOT NULL)"
                 + " OR ([Status] = 9 AND [ActivatedByUserId] IS NULL)");

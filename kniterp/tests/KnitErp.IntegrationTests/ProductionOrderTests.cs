@@ -593,7 +593,7 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             Assert.True(report.InWork.First().Overdue);
             var doneRow = report.InWork.Single(r => r.Id == done);
             Assert.Equal((false, 9m, 1m, 0m, ProductionOrderStatus.PartiallyDone), (doneRow.Overdue, doneRow.Released, doneRow.Defect, doneRow.ReadyForOutput, doneRow.Status));
-            Assert.Equal(new[] { 10m, 10m, 10m, 9m, 9m }, doneRow.StageDone);
+            Assert.Equal(new decimal?[] { 10m, 10m, 10m, 9m, 9m }, doneRow.StageDone);
             var defect = Assert.Single(report.Defects);
             Assert.Equal(("Дыры", 1m, 1), (defect.Reason, defect.Quantity, defect.Orders));
             var yarn = report.Deviations.Single(d => d.OrderId == done && d.MaterialCode == "ПР-1");
@@ -1391,6 +1391,72 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
                       join st in db.SalesOrderStages.AsNoTracking() on o.StageId equals st.Id
                       where o.Id == salesOrder
                       select st.Name).SingleOrDefaultAsync();
+    }
+
+    [SqlFact]
+    public async Task Route_from_tech_card_skips_stages_and_is_fixed_on_release()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long card, draft, order;
+        var hatRoute = new[] { ProductionStage.Knitting, ProductionStage.Steaming, ProductionStage.QualityControl };
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Шапка: без сборки и без упаковки.
+            card = await s.TechCards.CreateAsync(f.Hat, 10, null);
+            await s.TechCards.SetLineAsync(card, f.Yarn, 1m, 0m, (await s.TechCards.GetAsync(card)).RowVersion);
+            Assert.Equal("production.route.invalid", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.TechCards.SetRouteAsync(card, [ProductionStage.Knitting, ProductionStage.Packing], (await s.TechCards.GetAsync(card)).RowVersion))).Code);
+            await s.TechCards.SetRouteAsync(card, hatRoute, (await s.TechCards.GetAsync(card)).RowVersion);
+            Assert.Equal(hatRoute, (await s.TechCards.GetAsync(card)).Route);
+            await s.TechCards.ActivateAsync(card, (await s.TechCards.GetAsync(card)).RowVersion);
+            await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.TechCards.SetRouteAsync(card, ProductionFlow.Stages.ToList(), (await s.TechCards.GetAsync(card)).RowVersion));
+
+            draft = await s.ProductionOrders.CreateAsync(Command(f, f.Hat, 2));
+            Assert.Equal(hatRoute, (await s.ProductionOrders.GetAsync(draft)).Route);
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Hat, 5));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            Assert.Equal(hatRoute, (await s.ProductionOrders.GetAsync(order)).Route);
+            Assert.Equal(hatRoute, (await s.Floor.ProgressAsync(order)).Stages.Select(x => x.Stage).ToArray());
+
+            Assert.Equal("production.stage.not_in_route", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.Assembly, 1)))).Code);
+            Assert.Equal("production.stage.not_in_route", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Assembly, 1, null)))).Code);
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Steaming, 5, null));
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            // На этапы вне маршрута QR-кода нет — терминал отвечает «не найдено».
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShopFloor.OperationAsync(order, ProductionStage.Assembly));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShopFloor.OperationAsync(order, ProductionStage.Packing));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(5, null, null));
+            // После вязания доступно ВТО (следующий этап маршрута), а не сборка.
+            Assert.Equal(5m, (await s.ShopFloor.OperationAsync(order, ProductionStage.Steaming)).Available);
+            Assert.DoesNotContain((await s.ShopFloor.MyDayAsync()).Tasks, t => t.OrderId == order && t.Stage == ProductionStage.Assembly);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.Steaming, 5));
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 5));
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 1m)));
+            // Последний этап — контроль качества: выпуск без упаковки.
+            await s.Materials.OutputAsync(order, new OutputCommand(5, Day, null, null));
+            Assert.Equal(ProductionOrderStatus.Done, (await s.ProductionOrders.GetAsync(order)).Status);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[production_orders] SET [Route] = 31 WHERE [Id] = {0}", order));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[tech_cards] SET [Route] = 1 WHERE [Id] = {0}", card));
+            // Черновик ещё можно менять: маршрут зафиксируется при запуске.
+            Assert.Equal(ProductionRoute.FullMask, await db.ProductionOrders.Where(o => o.Id == draft).Select(o => o.Route).SingleAsync());
+        }
     }
 
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
