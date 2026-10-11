@@ -16,8 +16,8 @@ public sealed class CatServiceRulesTests
         Assert.Equal("Услуги", ItemTypes.Name(ItemType.Service));
         Assert.False(ItemTypes.IsStocked(ItemType.Service));
         Assert.DoesNotContain(ItemType.Service, ItemTypes.Stocked);
-        Assert.Equal([ItemType.Service], ItemTypes.NotStocked);
-        Assert.All(ItemTypes.All.Where(t => t != ItemType.Service), t => Assert.True(ItemTypes.IsStocked(t)));
+        Assert.Equal([ItemType.Service, ItemType.Bundle], ItemTypes.NotStocked);
+        Assert.All(ItemTypes.All.Where(t => t is not (ItemType.Service or ItemType.Bundle)), t => Assert.True(ItemTypes.IsStocked(t)));
         Assert.Equal(ItemKind.Service, ItemTypes.KindOf(ItemType.Service));
         Assert.Equal(ItemKind.Goods, ItemTypes.KindOf(ItemType.Finished));
         Assert.Equal([ItemType.Service], ItemTypes.OfKind(ItemKind.Service));

@@ -50,7 +50,7 @@ public sealed record SalesOrderRowDto(
 public sealed record SalesOrderLineDto(
     long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Price, decimal? VatPercent,
     decimal? Amount, decimal? VatAmount, decimal Shipped, decimal Returned, decimal DiscountPercent = 0, decimal Stock = 0, decimal ReservedByOthers = 0,
-    bool Stocked = true)
+    bool Stocked = true, bool IsBundle = false)
 {
     public decimal Left => Math.Max(0, Quantity - Shipped + Returned);
     public decimal Available => Stock - ReservedByOthers;
@@ -246,6 +246,8 @@ public sealed class SalesService(
             .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
         var reservedByOthers = await Reservations.ByWarehouseItemAsync(db, ctx.OrganizationId, [order.WarehouseId], itemIds, order.Id, ct);
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
+        var bundles = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id) && i.Type == ItemType.Bundle).Select(i => i.Id)
+            .ToListAsync(ct); // D302 (сессия 4)
         var lines = order.Lines.Select(l =>
         {
             var item = items[l.ItemId];
@@ -253,7 +255,7 @@ public sealed class SalesService(
                 prices ? l.Price : null, l.VatPercent, prices ? l.Amount : null, prices ? l.VatAmount : null,
                 Moved(l.ItemId, StockOperationKind.Shipment), Moved(l.ItemId, StockOperationKind.CustomerReturn),
                 l.DiscountPercent, stock.GetValueOrDefault(l.ItemId), reservedByOthers.GetValueOrDefault((order.WarehouseId, l.ItemId)),
-                !services.Contains(l.ItemId));
+                !services.Contains(l.ItemId), bundles.Contains(l.ItemId));
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);
@@ -589,6 +591,15 @@ public sealed class SalesService(
         var moved = await MovedAsync(ctx, [orderId], ct);
         // D300 (сессия 4): строки-услуги со склада не отгружаются — они закрываются актом или УПД.
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
+        // D302 (сессия 4): отгрузка комплекта компонентами — запрос Р2 к сессии № 1; до неё не отгружаем, чтобы не потерять списание.
+        var lineIds = order.Lines.Select(l => l.ItemId).ToList();
+        var bundleCodes = await db.Items.AsNoTracking().Where(i => lineIds.Contains(i.Id) && i.Type == ItemType.Bundle).Select(i => i.Code).ToListAsync(ct);
+        if (bundleCodes.Count > 0)
+        {
+            throw new BusinessRuleException("sales.order.bundle_shipment",
+                $"В заказе комплекты ({string.Join(", ", bundleCodes)}): отгрузка комплекта его компонентами ещё не подключена. Пока замените комплект в заказе составом.");
+        }
+
         var lines = order.Lines.Where(l => !services.Contains(l.ItemId))
             .Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
         if (lines.Count == 0)

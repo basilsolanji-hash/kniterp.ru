@@ -5,6 +5,7 @@
 @using KnitErp.Domain.Common
 @inject NomenclatureService Nomenclature
 @inject ModificationService Modifications
+@inject BundleService Bundles
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -54,6 +55,10 @@ else
         {
             <dt>@L("Остаток на всех складах")</dt><dd>@Quantities.Format(_item.Stock) @_item.UnitSymbol
                 @if (_item.Details.MinStock is { } min && _item.Stock < min) { <span class="tag bad">@L("ниже неснижаемого {0}", Quantities.Format(min))</span> }</dd>
+        }
+        else if (_item.Type == ItemType.Bundle)
+        {
+            <dt>@L("Склад")</dt><dd>@L("комплект не хранится на складе: доступность и списание — по компонентам")</dd>
         }
         else
         {
@@ -151,6 +156,107 @@ else
             }
         </form>
     </div>
+
+    @if (_bundle is { } bundle)
+    {
+        <h2 style="margin-top: 20px">@L("Состав комплекта")</h2>
+        <p class="muted">@L("Комплект продаётся одной строкой, а на складе списываются его компоненты. Изменение состава не меняет проведённые документы.")</p>
+        <div class="totals" role="status">
+            <span>@L("Можно собрать:") <b>@Quantities.Format(bundle.TotalAvailable) @bundle.UnitSymbol</b></span>
+            @foreach (var w in bundle.Availability.Where(a => a.Available > 0))
+            {
+                <span>@w.Warehouse: <b>@Quantities.Format(w.Available)</b></span>
+            }
+        </div>
+        <div class="scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th>@L("Компонент")</th><th class="num">@L("В комплекте")</th><th class="num">@L("Доступно")</th>
+                        @if (bundle.CanSeePrices)
+                        {
+                            <th class="num opt">@L("Цена")</th><th class="num opt">@L("Себестоимость")</th>
+                        }
+                        @if (bundle.CanEdit)
+                        {
+                            <th></th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (bundle.Components.Count == 0)
+                    {
+                        <tr><td colspan="6" class="muted">@L("Состав не задан — добавьте компоненты.")</td></tr>
+                    }
+                    @foreach (var c in bundle.Components)
+                    {
+                        var row = c;
+                        <tr class="@(c.IsArchived ? "archived" : null)">
+                            <td><a href="catalog/items/@c.ItemId">@c.Code</a> @c.Name @if (c.IsArchived) { <span class="tag bad">@L("в архиве")</span> }</td>
+                            <td class="num">@Quantities.Format(c.Quantity) @c.UnitSymbol</td>
+                            <td class="num">@Quantities.Format(c.Available)</td>
+                            @if (bundle.CanSeePrices)
+                            {
+                                <td class="num">@(c.Price is { } p ? Amounts.Format(p) : "—")</td>
+                                <td class="num">@(c.UnitCost is { } uc ? Amounts.Format(uc) : "—")</td>
+                            }
+                            @if (bundle.CanEdit)
+                            {
+                                <td>
+                                    <div class="row-actions">
+                                        <button type="button" class="secondary" @onclick='() => RunAsync(() => Bundles.MoveComponentAsync(row.Id, -1), null)' disabled="@_busy" aria-label="@L("Выше")">↑</button>
+                                        <button type="button" class="secondary" @onclick='() => RunAsync(() => Bundles.MoveComponentAsync(row.Id, 1), null)' disabled="@_busy" aria-label="@L("Ниже")">↓</button>
+                                        <ConfirmButton Class="secondary" OnConfirm='() => RunAsync(() => Bundles.RemoveComponentAsync(row.Id, row.RowVersion), L("Компонент убран."))' Disabled="@_busy" Question='@L("Убрать из состава?")'>@L("Убрать")</ConfirmButton>
+                                    </div>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (bundle.Price is { } hint)
+        {
+            <p class="muted">
+                @if (hint.ComponentsTotal is { } total)
+                {
+                    @L("Сумма цен компонентов: {0}.", Amounts.Format(total))
+                    @if (hint.Discount is { } d && hint.DiscountPercent is { } dp)
+                    {
+                        @(" ")@(d >= 0 ? L("Скидка набора: {0} ({1}%).", Amounts.Format(d), dp.ToString("0.##")) : L("Комплект дороже суммы компонентов на {0}.", Amounts.Format(-d)))
+                    }
+                    else
+                    {
+                        @(" ")@L("Задайте цену комплекта в блоке «Цены».")
+                    }
+                }
+                else if (bundle.Components.Count > 0)
+                {
+                    @L("Не у всех компонентов задана основная цена — сумма не считается.")
+                }
+                @if (bundle.Cost is { } cost)
+                {
+                    @(" ")@L("Себестоимость по компонентам: {0}.", Amounts.Format(cost))
+                }
+            </p>
+        }
+        @if (bundle.CanEdit)
+        {
+            <form class="inline-form" @onsubmit="AddComponentAsync">
+                <label>@L("Компонент")
+                    <input @bind="_component" list="bundle-options" placeholder="@L("код или наименование")" size="28" />
+                    <datalist id="bundle-options">
+                        @foreach (var o in _componentOptions.Where(o => o.Id != Id))
+                        {
+                            <option value="@o.Code">@o.Name (@o.UnitSymbol)</option>
+                        }
+                    </datalist>
+                </label>
+                <label>@L("Количество в комплекте") <input @bind="_componentQty" inputmode="decimal" size="8" /></label>
+                <button type="submit" disabled="@_busy">@L("Добавить в состав")</button>
+            </form>
+        }
+    }
 
     @if (_item.CustomFields.Any(f => f.IsArchived))
     {
@@ -350,6 +456,10 @@ else
 
     private ItemCardDto? _item;
     private ItemVariantsDto? _variants;
+    private BundleDto? _bundle;
+    private IReadOnlyList<BundleComponentOptionDto> _componentOptions = [];
+    private string? _component;
+    private string? _componentQty = "1";
     private IReadOnlyList<ItemPhotoDto> _photos = [];
     private IReadOnlyList<CharacteristicDto> _characteristics = [];
     private Dictionary<long, string?> _axes = [];
@@ -420,7 +530,23 @@ else
         _photos = await Modifications.PhotosAsync(Id);
         _characteristics = await Modifications.CharacteristicsAsync(includeArchived: true);
         _values = _variants.Values.ToDictionary(v => v.CharacteristicId, v => (string?)v.Value);
+        _bundle = _item.Type == ItemType.Bundle ? await Bundles.GetAsync(Id) : null;
+        _componentOptions = _bundle?.CanEdit == true ? await Bundles.ComponentOptionsAsync() : [];
     }
+
+    /// <summary>D302: компонент по коду (или «код — наименование» из подсказки) и количество на один комплект.</summary>
+    private Task AddComponentAsync() => RunAsync(async () =>
+    {
+        var text = (_component ?? string.Empty).Trim();
+        var option = _componentOptions.FirstOrDefault(o => string.Equals(o.Code, text, StringComparison.OrdinalIgnoreCase))
+                     ?? _componentOptions.FirstOrDefault(o => string.Equals(o.Name, text, StringComparison.OrdinalIgnoreCase))
+                     ?? throw new BusinessRuleException("catalog.bundle.component_unknown", L("Выберите компонент из списка: товар или модификацию."));
+        var qty = Decimals.Parse(_componentQty, L("Количество в комплекте"))
+                  ?? throw new BusinessRuleException("catalog.bundle.quantity", L("Укажите количество компонента в комплекте."));
+        await Bundles.SetComponentAsync(Id, option.Id, qty);
+        _component = null;
+        _componentQty = "1";
+    }, L("Состав сохранён."));
 
     private Task CreateModificationsAsync() => RunAsync(async () =>
     {

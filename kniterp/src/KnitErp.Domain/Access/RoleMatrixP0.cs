@@ -74,6 +74,8 @@ public static class RoleMatrixP0
         // Допущение D65: продажи — так же, как закупки.
         (Permissions.SalesView,               [Full, Full, None, Full, None, Full, Full, None]),
         (Permissions.SalesEdit,               [Full, Full, None, None, None, Full, None, None]),
+        // Допущение D302 (каталог): состав комплектов меняют те, кто меняет справочники организации целиком.
+        (Permissions.BundleEdit,              [Full, Full, None, None, None, None, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();

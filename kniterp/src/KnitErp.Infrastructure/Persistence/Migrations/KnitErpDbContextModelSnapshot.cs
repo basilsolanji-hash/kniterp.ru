@@ -450,6 +450,58 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.BundleComponent", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BundleItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ComponentItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BundleItemId", "ComponentItemId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_bundle_components_pair");
+
+                    b.HasIndex("OrganizationId", "BundleItemId");
+
+                    b.HasIndex("OrganizationId", "ComponentItemId")
+                        .HasDatabaseName("ix_bundle_components_component");
+
+                    b.ToTable("bundle_components", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_bundle_components_types");
+
+                            t.HasCheckConstraint("ck_bundle_components_quantity", "[Quantity] > 0");
+
+                            t.HasCheckConstraint("ck_bundle_components_self", "[BundleItemId] <> [ComponentItemId]");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.Characteristic", b =>
                 {
                     b.Property<long>("Id")
@@ -689,11 +741,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");
 
+                            t.HasCheckConstraint("ck_items_bundle", "[Type] <> 11 OR ([MinStock] IS NULL AND [ParentItemId] IS NULL)");
+
                             t.HasCheckConstraint("ck_items_parent", "[ParentItemId] IS NULL OR [ParentItemId] <> [Id]");
 
                             t.HasCheckConstraint("ck_items_service", "[Type] <> 10 OR ([VatRateId] IS NOT NULL AND [WeightKg] IS NULL AND [VolumeM3] IS NULL AND [MinStock] IS NULL AND [ParentItemId] IS NULL)");
 
-                            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9, 10)");
+                            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9, 10, 11)");
 
                             t.HasCheckConstraint("ck_items_variant", "([ParentItemId] IS NULL AND [VariantKey] IS NULL) OR ([ParentItemId] IS NOT NULL AND [VariantKey] IS NOT NULL)");
                         });
@@ -4676,6 +4730,25 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.BundleComponent", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "BundleItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_bundle_components_bundle");
+
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ComponentItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_bundle_components_component");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.Characteristic", b =>

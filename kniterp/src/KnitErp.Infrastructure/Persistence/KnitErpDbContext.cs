@@ -24,6 +24,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<Characteristic> Characteristics => Set<Characteristic>();
     public DbSet<ItemCharacteristicValue> ItemCharacteristicValues => Set<ItemCharacteristicValue>();
     public DbSet<ItemPhoto> ItemPhotos => Set<ItemPhoto>();
+    public DbSet<BundleComponent> BundleComponents => Set<BundleComponent>();
     public DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations => Set<KnitErp.Domain.Finance.MoneyOperation>();
     public DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens => Set<KnitErp.Domain.Integrations.ApiToken>();
     public DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions => Set<KnitErp.Domain.Integrations.WebhookSubscription>();

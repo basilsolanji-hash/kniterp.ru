@@ -220,9 +220,9 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var oldUnit = item.UnitId;
         var oldVat = item.VatRateId;
         ServiceRules.EnsureVat(cmd.Type, cmd.VatRateId);
-        if (cmd.Type == ItemType.Service && item.Type != ItemType.Service)
+        if (cmd.Type != item.Type)
         {
-            await EnsureCanBecomeServiceAsync(ctx, item, ct);
+            await EnsureTypeChangeAsync(ctx, item, cmd.Type, ct);
         }
 
         var changes = item.Update(cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description);
@@ -256,21 +256,44 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
     }
 
     /// <summary>
-    /// D300: услугой может стать только позиция, которой не было на складе (нет движений и партий) и у которой нет модификаций;
-    /// иначе остаток, партии и старые документы указывали бы на «услугу на складе». Тот же запрет — триггер базы.
+    /// Смена типа (D300, D302). Услугой или комплектом может стать только позиция, которой не было на складе (нет движений и партий),
+    /// без модификаций и не входящая в комплекты; иначе остаток, партии и старые документы указывали бы на то, что на складе не
+    /// хранится. Комплект с составом перестаёт быть комплектом только после очистки состава. Те же запреты — триггеры базы.
     /// </summary>
-    private async Task EnsureCanBecomeServiceAsync(AccessContext ctx, Item item, CancellationToken ct)
+    private async Task EnsureTypeChangeAsync(AccessContext ctx, Item item, ItemType newType, CancellationToken ct)
     {
+        if (item.Type == ItemType.Bundle && await db.BundleComponents.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.BundleItemId == item.Id, ct))
+        {
+            throw new BusinessRuleException("catalog.bundle.has_components", $"У комплекта {item.Code} есть состав — сначала уберите компоненты.");
+        }
+
+        if (ItemTypes.IsStocked(newType) || !ItemTypes.IsStocked(item.Type))
+        {
+            return;
+        }
+
+        // Сообщения целиком для каждого типа — чтобы их можно было перевести (D60).
+        var service = newType == ItemType.Service;
         if (item.IsModification || await db.Items.AnyAsync(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == item.Id, ct))
         {
-            throw new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать услугой.");
+            throw service
+                ? new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать услугой.")
+                : new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать комплектом.");
+        }
+
+        if (await db.BundleComponents.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.ComponentItemId == item.Id, ct))
+        {
+            throw service
+                ? new BusinessRuleException("catalog.bundle.component_in_use", $"Позиция {item.Code} входит в комплекты — её нельзя сделать услугой.")
+                : new BusinessRuleException("catalog.bundle.component_in_use", $"Позиция {item.Code} входит в комплекты — её нельзя сделать комплектом.");
         }
 
         if (await db.StockMovements.AnyAsync(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == item.Id, ct)
             || await db.StockBatches.AnyAsync(b => b.OrganizationId == ctx.OrganizationId && b.ItemId == item.Id, ct))
         {
-            throw new BusinessRuleException("catalog.service.has_stock",
-                $"Позиция {item.Code} уже была на складе (есть движения или партии) — её нельзя сделать услугой. Заведите услугу отдельной позицией.");
+            throw service
+                ? new BusinessRuleException("catalog.service.has_stock", $"Позиция {item.Code} уже была на складе (есть движения или партии) — её нельзя сделать услугой. Заведите услугу отдельной позицией.")
+                : new BusinessRuleException("catalog.service.has_stock", $"Позиция {item.Code} уже была на складе (есть движения или партии) — её нельзя сделать комплектом. Заведите комплект отдельной позицией.");
         }
     }
 

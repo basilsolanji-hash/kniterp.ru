@@ -13,7 +13,7 @@ internal static class StockEntry
 
     /// <summary>
     /// Действующие позиции для ввода; фильтр и сортировка — до проекции, чтобы запрос переводился в SQL.
-    /// stockedOnly — только то, что хранится на складе (без услуг, D300): для выбора строк складских документов.
+    /// stockedOnly — только то, что хранится на складе (без услуг и комплектов, D300, D302): для выбора строк складских документов.
     /// </summary>
     public static IQueryable<EntryItemDto> ActiveItems(IKnitErpDbContext db, long organizationId, long? itemId = null, bool stockedOnly = false) =>
         db.Items.AsNoTracking().Where(i => i.OrganizationId == organizationId && !i.IsArchived && (itemId == null || i.Id == itemId))
@@ -33,12 +33,17 @@ internal static class StockEntry
             return;
         }
 
-        var codes = await db.Items.AsNoTracking()
+        var found = await db.Items.AsNoTracking()
             .Where(i => i.OrganizationId == organizationId && ids.Contains(i.Id) && ItemTypes.NotStocked.Contains(i.Type))
-            .OrderBy(i => i.Code).Select(i => i.Code).ToListAsync(ct);
-        if (codes.Count > 0)
+            .OrderBy(i => i.Code).Select(i => new { i.Code, i.Type }).ToListAsync(ct);
+        if (found.Any(i => i.Type == ItemType.Service))
         {
-            throw ServiceRules.NotStocked(codes);
+            throw ServiceRules.NotStocked(found.Where(i => i.Type == ItemType.Service).Select(i => i.Code));
+        }
+
+        if (found.Count > 0)
+        {
+            throw ServiceRules.BundleNotStocked(found.Select(i => i.Code)); // D302: комплект — компонентами
         }
     }
 
@@ -121,7 +126,7 @@ internal static class StockEntry
             }
             else if (notStocked.Contains(code))
             {
-                errors.Add($"Позиция {code} — услуга: на складе не хранится.");
+                errors.Add($"Позиция {code} — услуга или комплект: на складе не хранится.");
             }
 
             if (!Quantities.TryParse(qtyText, out var qty) || qty < 0 || (qty == 0 && !allowZero))

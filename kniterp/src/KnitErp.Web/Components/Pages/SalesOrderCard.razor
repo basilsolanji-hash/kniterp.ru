@@ -368,7 +368,7 @@ else
                         else
                         {
                             @* D300 (сессия 4): услуга не хранится на складе — остаток и «Доступно» не считаются. *@
-                            <td class="num muted" colspan="2">@L("услуга")</td>
+                            <td class="num muted" colspan="2">@(l.IsBundle ? L("комплект") : L("услуга"))</td>
                         }
                         @if (editable)
                         {

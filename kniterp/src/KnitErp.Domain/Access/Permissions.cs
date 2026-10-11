@@ -32,6 +32,9 @@ public static class Permissions
     public const string SalesView = "sales.document.view";
     public const string SalesEdit = "sales.document.edit";
 
+    /// <summary>D302 (сессия № 4): состав комплектов.</summary>
+    public const string BundleEdit = "catalog.bundle.edit";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -60,6 +63,7 @@ public static class Permissions
         [PurchaseEdit] = "Закупки: заказы поставщикам и оплаты",
         [SalesView] = "Продажи: просмотр",
         [SalesEdit] = "Продажи: заказы покупателей и оплаты",
+        [BundleEdit] = "Номенклатура: состав комплектов",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;

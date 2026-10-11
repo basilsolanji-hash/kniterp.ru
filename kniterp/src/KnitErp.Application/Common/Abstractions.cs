@@ -57,6 +57,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<Characteristic> Characteristics { get; }
     DbSet<ItemCharacteristicValue> ItemCharacteristicValues { get; }
     DbSet<ItemPhoto> ItemPhotos { get; }
+
+    /// <summary>Каталог (сессия № 4): состав комплектов (D302).</summary>
+    DbSet<BundleComponent> BundleComponents { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }

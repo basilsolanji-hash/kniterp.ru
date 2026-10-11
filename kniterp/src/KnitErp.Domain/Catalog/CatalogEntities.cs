@@ -112,6 +112,7 @@ public sealed class UnitOfMeasure
 /// <summary>
 /// Тип номенклатуры. Допущение D32: фиксированный список; числа хранятся в базе и закреплены CHECK.
 /// Service (D300) — услуга: продаётся и покупается, но не хранится на складе.
+/// Bundle (D302) — комплект: продаётся одной строкой, остаток и списание — по компонентам.
 /// </summary>
 public enum ItemType : byte
 {
@@ -123,13 +124,15 @@ public enum ItemType : byte
     Packaging = 6,
     Other = 9,
     Service = 10,
+    Bundle = 11,
 }
 
-/// <summary>Вид позиции для отбора «Товары / Услуги / Комплекты» (D300).</summary>
+/// <summary>Вид позиции для отбора «Товары / Услуги / Комплекты» (D300, D302).</summary>
 public enum ItemKind : byte
 {
     Goods = 1,
     Service = 2,
+    Bundle = 3,
 }
 
 public static class ItemTypes
@@ -137,7 +140,7 @@ public static class ItemTypes
     public static readonly IReadOnlyList<ItemType> All =
     [
         ItemType.RawMaterial, ItemType.Material, ItemType.Accessory, ItemType.SemiFinished, ItemType.Finished, ItemType.Packaging, ItemType.Other,
-        ItemType.Service,
+        ItemType.Service, ItemType.Bundle,
     ];
 
     /// <summary>Типы, которые хранятся на складе: у них есть остаток, движения и партии (D300).</summary>
@@ -146,11 +149,12 @@ public static class ItemTypes
     /// <summary>Типы, которых не бывает на складе (массив — для отбора в запросах к базе).</summary>
     public static readonly ItemType[] NotStocked = All.Where(t => !IsStocked(t)).ToArray();
 
-    public static bool IsStocked(ItemType type) => type is not ItemType.Service;
+    public static bool IsStocked(ItemType type) => type is not (ItemType.Service or ItemType.Bundle);
 
     public static ItemKind KindOf(ItemType type) => type switch
     {
         ItemType.Service => ItemKind.Service,
+        ItemType.Bundle => ItemKind.Bundle,
         _ => ItemKind.Goods,
     };
 
@@ -159,6 +163,7 @@ public static class ItemTypes
     public static string KindName(ItemKind kind) => kind switch
     {
         ItemKind.Service => "Услуги",
+        ItemKind.Bundle => "Комплекты",
         _ => "Товары",
     };
 
@@ -177,6 +182,7 @@ public static class ItemTypes
         ItemType.Packaging => "Упаковка",
         ItemType.Other => "Прочее",
         ItemType.Service => "Услуги",
+        ItemType.Bundle => "Комплекты",
         _ => type.ToString(),
     };
 
@@ -210,6 +216,11 @@ public static class ServiceRules
     public static BusinessRuleException NotStocked(IEnumerable<string> codes) =>
         new("item.service_not_stocked",
             $"Услуги не хранятся на складе и не проводятся складскими документами: {string.Join(", ", codes.Take(10))}.");
+
+    /// <summary>Комплект (D302) в складском документе — ошибка: на складе лежат его компоненты.</summary>
+    public static BusinessRuleException BundleNotStocked(IEnumerable<string> codes) =>
+        new("item.bundle_not_stocked",
+            $"Комплект не хранится на складе — в складском документе укажите его компоненты: {string.Join(", ", codes.Take(10))}.");
 }
 
 /// <summary>
@@ -282,6 +293,12 @@ public sealed class Item
             throw new BusinessRuleException("catalog.service.no_stock_fields", "У услуги нет веса, объёма и неснижаемого остатка — оставьте поля пустыми.");
         }
 
+        if (Type == ItemType.Bundle && d.MinStock is not null)
+        {
+            // D302: остаток комплекта считается по компонентам — неснижаемый остаток задаётся у компонентов.
+            throw new BusinessRuleException("catalog.bundle.no_min_stock", "У комплекта нет неснижаемого остатка — задайте его у компонентов.");
+        }
+
         static string? N(decimal? v) => v?.ToString(System.Globalization.CultureInfo.InvariantCulture);
         (string Field, string? Before, string? After)[] pairs =
         [
@@ -324,7 +341,7 @@ public sealed class Item
 
         if (!ItemTypes.IsStocked(parent.Type))
         {
-            throw new BusinessRuleException("catalog.variant.not_goods", "Модификации бывают только у товаров — у услуги их нет.");
+            throw new BusinessRuleException("catalog.variant.not_goods", "Модификации бывают только у товаров — у услуги и комплекта их нет.");
         }
 
         var item = Create(parent.OrganizationId, code, name, parent.Type, parent.UnitId, parent.Description, nowUtc);
@@ -381,11 +398,13 @@ public sealed class Item
         var before = (Code, Name, Type, UnitId, Description);
         Set(code, name, type, unitId, description);
         var changes = new List<FieldChange>();
-        if (Type == ItemType.Service && before.Type != ItemType.Service)
+        if (!ItemTypes.IsStocked(Type) && ItemTypes.IsStocked(before.Type))
         {
-            // D300: при переводе в услуги складские сведения очищаются (остаток и партии проверяет сервис и триггер базы).
+            // D300, D302: при переводе в услуги или комплекты складские сведения очищаются (остаток и партии проверяет сервис и
+            // триггер базы). У комплекта вес и объём остаются — для доставки.
             static string? N(decimal? v) => v?.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            foreach (var (field, value) in new[] { ("Вес, кг", WeightKg), ("Объём, м³", VolumeM3), ("Неснижаемый остаток", MinStock) })
+            var service = Type == ItemType.Service;
+            foreach (var (field, value) in new[] { ("Вес, кг", service ? WeightKg : null), ("Объём, м³", service ? VolumeM3 : null), ("Неснижаемый остаток", MinStock) })
             {
                 if (value is not null)
                 {
@@ -393,8 +412,8 @@ public sealed class Item
                 }
             }
 
-            WeightKg = null;
-            VolumeM3 = null;
+            WeightKg = service ? null : WeightKg;
+            VolumeM3 = service ? null : VolumeM3;
             MinStock = null;
         }
 

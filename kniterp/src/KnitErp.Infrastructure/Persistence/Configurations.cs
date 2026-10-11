@@ -371,7 +371,9 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
     {
         b.ToTable("items", t =>
         {
-            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9, 10)");
+            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9, 10, 11)");
+            // D302: комплект — без неснижаемого остатка и модификаций (остаток считается по компонентам).
+            t.HasCheckConstraint("ck_items_bundle", "[Type] <> 11 OR ([MinStock] IS NULL AND [ParentItemId] IS NULL)");
             // D300: услуга — со ставкой НДС, без веса, объёма, неснижаемого остатка и модификаций.
             t.HasTrigger("tr_items_service_without_stock");
             t.HasCheckConstraint("ck_items_service",
