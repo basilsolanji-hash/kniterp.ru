@@ -7,6 +7,7 @@ description: Как собрать knitERP и запустить его тест
 
 Рабочая папка — `kniterp/`. Окружение готовит `.claude/hooks/session-start.sh`: .NET 10, dev-сертификат HTTPS, SQL Server в Docker
 (`KNITERP_TEST_SQL`), пакеты e2e. Если переменной `KNITERP_TEST_SQL` нет, интеграционные тесты молча пропускаются (Skipped) — это не «зелёный» результат.
+Тесты падают с «A network-related or instance-specific error» (среда простаивала, docker остановился) — `bash .claude/skills/kniterp-tests/ensure-sql.sh`.
 
 ## Порядок проверки перед коммитом
 1. `dotnet build KnitErp.slnx` — предупреждения считаются ошибками (TreatWarningsAsErrors).
