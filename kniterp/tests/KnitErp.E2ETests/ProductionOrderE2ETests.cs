@@ -263,6 +263,26 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.Locator("section.discussion")).ToContainTextAsync("Нитки для манжет — с партии 12");
     }
 
+    /// <summary>D90 (дополнение): из карточки заказа покупателя — черновики производственных заказов одной кнопкой.</summary>
+    [SqlFact]
+    public async Task Production_orders_created_from_sales_order_card()
+    {
+        var sales = await app.CreateConfirmedSalesOrderAsync(12);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page);
+        await page.GotoAsync($"sales-orders/{sales}");
+        var panel = page.GetByRole(AriaRole.Region, new() { Name = "Производство" });
+        await Assertions.Expect(panel).ToContainTextAsync("12 шт");
+        await ClickUntilAsync(panel.GetByRole(AriaRole.Button, new() { Name = "Создать производственные заказы" }), panel.GetByRole(AriaRole.Button, new() { Name = "Да", Exact = true }));
+        await panel.GetByRole(AriaRole.Button, new() { Name = "Да", Exact = true }).ClickAsync();
+        await Assertions.Expect(panel.GetByRole(AriaRole.Status)).ToContainTextAsync("Созданы черновики: ПЗ-");
+        await Assertions.Expect(panel).ToContainTextAsync("Всё, что можно произвести, уже запланировано.");
+        await panel.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^ПЗ-") }).Last.ClickAsync();
+        await Assertions.Expect(page.Locator("h1 .tag")).ToHaveTextAsync("Черновик");
+        await Assertions.Expect(page.GetByText("Заказ покупателя ЗК-")).ToBeVisibleAsync();
+    }
+
     private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);
 
     private async Task LoginAsync(IPage page, string email)

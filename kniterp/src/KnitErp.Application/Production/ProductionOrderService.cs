@@ -68,6 +68,36 @@ public sealed record ProductionOrderOptions(
     IReadOnlyList<ProductionProductOptionDto> Products, IReadOnlyList<LookupWarehouseDto> Warehouses,
     IReadOnlyList<ProductionSalesOrderOptionDto> SalesOrders, long? DefaultWipWarehouseId);
 
+/// <summary>Производство по строке заказа покупателя: заказано, запланировано в производственных заказах (кроме отменённых), выпущено.</summary>
+public sealed record SalesProductionLineDto(
+    long ItemId, string Code, string Name, string UnitSymbol, decimal Ordered, decimal Planned, decimal Released, bool CanPlan, string? Hint)
+{
+    /// <summary>Сколько ещё не запланировано.</summary>
+    public decimal Remaining => Math.Max(0, Ordered - Planned);
+}
+
+public sealed record SalesProductionOrderDto(long Id, string Number, string ItemCode, decimal Quantity, decimal Released, ProductionOrderStatus Status)
+{
+    public string StatusName => ProductionOrder.StatusName(Status);
+}
+
+/// <summary>Производство по заказу покупателя (D90, дополнение): строки, производственные заказы и можно ли создать недостающие.</summary>
+public sealed record SalesProductionDto(
+    long SalesOrderId, IReadOnlyList<SalesProductionLineDto> Lines, IReadOnlyList<SalesProductionOrderDto> Orders, bool CanCreate, string? CreateHint);
+
+/// <summary>Коды подсказок производства по заказу покупателя.</summary>
+public static class SalesProductionHints
+{
+    public const string Purchased = "purchased";
+    public const string Archived = "archived";
+    public const string NoTechCard = "no_card";
+    public const string NotConfirmed = "not_confirmed";
+    public const string AllPlanned = "all_planned";
+}
+
+/// <summary>Итог создания: номера новых черновиков и коды пропущенных позиций (без техкарты, покупные, в архиве).</summary>
+public sealed record SalesProductionResultDto(IReadOnlyList<long> Created, IReadOnlyList<string> Numbers, IReadOnlyList<string> Skipped);
+
 public sealed record ProductionOrderListFilter(ProductionOrderStatus? Status = null, string? Search = null, long? SalesOrderId = null);
 
 /// <summary>
@@ -246,6 +276,100 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return order.Id;
+    }
+
+    /// <summary>Производство по заказу покупателя: по каждой позиции — заказано, запланировано, выпущено; производственные заказы.</summary>
+    public async Task<SalesProductionDto> ForSalesOrderAsync(long salesOrderId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionOrderView, ct);
+        var sales = await db.SalesOrders.AsNoTracking().Include(o => o.Lines)
+                        .SingleOrDefaultAsync(o => o.Id == salesOrderId && o.OrganizationId == ctx.OrganizationId, ct)
+                    ?? throw new NotFoundException("Заказ покупателя");
+        var orders = await db.ProductionOrders.AsNoTracking()
+            .Where(o => o.OrganizationId == ctx.OrganizationId && o.SalesOrderId == salesOrderId).OrderBy(o => o.Id).ToListAsync(ct);
+        var released = new Dictionary<long, decimal>();
+        foreach (var o in orders.Where(o => o.Status is not (ProductionOrderStatus.Draft or ProductionOrderStatus.Cancelled)))
+        {
+            released[o.Id] = await ProductionLocks.ReleasedAsync(db, o, ct);
+        }
+
+        var itemIds = sales.Lines.Select(l => l.ItemId).Distinct().ToList();
+        var items = await ItemsQuery(ctx, includeArchived: true, ids: itemIds).ToDictionaryAsync(i => i.Id, ct);
+        var cards = await db.TechCards.AsNoTracking()
+            .Where(c => c.OrganizationId == ctx.OrganizationId && c.Status == TechCardStatus.Active).Select(c => c.ItemId).ToListAsync(ct);
+        var lines = sales.Lines.GroupBy(l => l.ItemId).Select(g =>
+        {
+            var item = items[g.Key];
+            var mine = orders.Where(o => o.ItemId == g.Key && o.Status != ProductionOrderStatus.Cancelled).ToList();
+            var hasCard = cards.Contains(item.Id) || (item.ParentItemId is { } p && cards.Contains(p));
+            // Коды подсказок — текст выводит интерфейс на языке пользователя.
+            var hint = !TechCardService.ProductTypes.Contains(item.Type) ? SalesProductionHints.Purchased
+                : item.IsArchived ? SalesProductionHints.Archived
+                : !hasCard ? SalesProductionHints.NoTechCard
+                : null;
+            return new SalesProductionLineDto(item.Id, item.Code, item.Name, item.UnitSymbol, g.Sum(l => l.Quantity), mine.Sum(o => o.Quantity),
+                mine.Sum(o => released.GetValueOrDefault(o.Id)), hint is null, hint);
+        }).OrderBy(l => l.Code).ToList();
+        var view = orders.Select(o => new SalesProductionOrderDto(o.Id, o.Number, items.TryGetValue(o.ItemId, out var i) ? i.Code : "", o.Quantity,
+            released.GetValueOrDefault(o.Id), o.Status)).ToList();
+        string? createHint = sales.Status != KnitErp.Domain.Sales.SalesOrderStatus.Confirmed ? SalesProductionHints.NotConfirmed
+            : lines.All(l => !l.CanPlan || l.Remaining == 0) ? SalesProductionHints.AllPlanned
+            : null;
+        return new SalesProductionDto(salesOrderId, lines, view, ctx.Permissions.Has(Permissions.ProductionOrderEdit) && createHint is null, createHint);
+    }
+
+    /// <summary>
+    /// Черновики производственных заказов на незапланированный остаток каждой производимой позиции подтверждённого заказа покупателя
+    /// (D90, дополнение): источник — этот заказ, срок — дата отгрузки, склад готовой продукции — склад заказа покупателя, склад цеха —
+    /// «Цех (НЗП)». Под блокировкой заказа покупателя: двойное нажатие не создаст заказы дважды. Позиции без техкарты пропускаются с причиной.
+    /// </summary>
+    public async Task<SalesProductionResultDto> CreateForSalesOrderAsync(long salesOrderId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionOrderEdit, ct);
+        try
+        {
+            await using var tx = await db.BeginTransactionAsync(ct);
+            var sales = await db.SalesOrders.AsNoTracking()
+                            .SingleOrDefaultAsync(o => o.Id == salesOrderId && o.OrganizationId == ctx.OrganizationId, ct)
+                        ?? throw new NotFoundException("Заказ покупателя");
+            await db.LockAsync($"kniterp.production.sales.{salesOrderId}", ct);
+            var plan = await ForSalesOrderAsync(salesOrderId, ct);
+            if (plan.CreateHint == SalesProductionHints.NotConfirmed)
+            {
+                throw new BusinessRuleException("production.sales.not_confirmed", "Производство создаётся по подтверждённому заказу покупателя.");
+            }
+
+            if (plan.CreateHint == SalesProductionHints.AllPlanned)
+            {
+                throw new BusinessRuleException("production.sales.all_planned", "Всё, что можно произвести, уже запланировано.");
+            }
+
+            var wip = await db.Warehouses.AsNoTracking()
+                          .Where(w => w.OrganizationId == ctx.OrganizationId && !w.IsArchived && w.Name == DefaultWipWarehouseName)
+                          .Select(w => (long?)w.Id).FirstOrDefaultAsync(ct)
+                      ?? throw new BusinessRuleException("production.sales.no_wip",
+                          $"Нет склада «{DefaultWipWarehouseName}» — заведите его или создайте производственный заказ вручную.");
+            var org = await db.Organizations.AsNoTracking().SingleAsync(o => o.Id == ctx.OrganizationId, ct);
+            var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(clock.UtcNow, DateTimeKind.Utc),
+                TimeZoneInfo.FindSystemTimeZoneById(org.TimeZoneId)));
+            var due = sales.ShipDate is { } ship && ship >= today ? ship : (DateOnly?)null;
+            var created = new List<long>();
+            var skipped = plan.Lines.Where(l => !l.CanPlan).Select(l => l.Code).ToList();
+            foreach (var line in plan.Lines.Where(l => l.CanPlan && l.Remaining > 0))
+            {
+                created.Add(await CreateCoreAsync(new ProductionOrderCommand(line.ItemId, line.Remaining, today, due, ProductionSource.SalesOrder, salesOrderId,
+                    wip, sales.WarehouseId, $"По заказу покупателя {sales.Number}"), ct));
+            }
+
+            await tx.CommitAsync(ct);
+            var numbers = await db.ProductionOrders.AsNoTracking().Where(o => created.Contains(o.Id)).OrderBy(o => o.Id).Select(o => o.Number).ToListAsync(ct);
+            return new SalesProductionResultDto(created, numbers, skipped);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
     }
 
     /// <summary>Правка черновика: количество, сроки, источник, склады, комментарий. Изделие не меняется.</summary>
@@ -511,4 +635,25 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
     private void Audit(AccessContext ctx, string action, ProductionOrder order, string? before, string? after, string? reason) =>
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, action, nameof(ProductionOrder), order.Id.ToString(),
             before, after, reason is null ? order.Number : $"{order.Number}: {reason}", currentUser.CorrelationId));
+}
+
+/// <summary>
+/// Производство на карточке заказа покупателя (D90, дополнение): каждый вызов — со своим контекстом базы, как теги и обсуждения,
+/// чтобы не мешать операциям самой карточки (у вкладки один контекст). Права и правила — в <see cref="ProductionOrderService"/>.
+/// </summary>
+public sealed class SalesProductionService(IKnitErpDbContextFactory factory, ICurrentUser currentUser, IClock clock)
+{
+    public async Task<SalesProductionDto> ForSalesOrderAsync(long salesOrderId, CancellationToken ct = default)
+    {
+        await using var db = factory.Create();
+        return await Service(db).ForSalesOrderAsync(salesOrderId, ct);
+    }
+
+    public async Task<SalesProductionResultDto> CreateAsync(long salesOrderId, CancellationToken ct = default)
+    {
+        await using var db = factory.Create();
+        return await Service(db).CreateForSalesOrderAsync(salesOrderId, ct);
+    }
+
+    private ProductionOrderService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, currentUser, clock), currentUser, clock);
 }

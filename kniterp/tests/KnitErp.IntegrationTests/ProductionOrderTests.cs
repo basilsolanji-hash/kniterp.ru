@@ -664,6 +664,71 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D90 (дополнение): черновики по заказу покупателя одной кнопкой — остаток, срок и склады из заказа; повтор и гонка не дублируют.</summary>
+    [SqlFact]
+    public async Task Production_orders_from_sales_order_in_one_click()
+    {
+        var f = await SetUpAsync();
+        long sales;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            sales = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, f.Customer, f.Store, Day.AddDays(14), null, false, null));
+            await s.Sales.SetOrderLineAsync(sales, f.Sweater, 30, 2500m, 22m, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+            await s.Sales.SetOrderLineAsync(sales, f.Hat, 5, 900m, 22m, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+            await s.Sales.SetOrderLineAsync(sales, f.Buttons, 100, 10m, 22m, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+
+            var draft = await s.ProductionOrders.ForSalesOrderAsync(sales);
+            Assert.Equal((false, SalesProductionHints.NotConfirmed), (draft.CanCreate, draft.CreateHint));
+            await s.Sales.ConfirmOrderAsync(sales, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+
+            // Уже есть заказ на 10 свитеров — новый черновик только на остаток 20.
+            await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10) with { Source = ProductionSource.SalesOrder, SalesOrderId = sales });
+            var plan = await s.ProductionOrders.ForSalesOrderAsync(sales);
+            var lines = plan.Lines.ToDictionary(l => l.Code);
+            Assert.Equal((30m, 10m, 20m, true), (lines["СВ-1"].Ordered, lines["СВ-1"].Planned, lines["СВ-1"].Remaining, lines["СВ-1"].CanPlan));
+            Assert.Equal(SalesProductionHints.NoTechCard, lines["ША-1"].Hint);
+            Assert.Equal(SalesProductionHints.Purchased, lines["ФУ-1"].Hint);
+            Assert.True(plan.CanCreate);
+        }
+
+        // Двойное нажатие в двух вкладках: черновик создаст только одна.
+        var results = await Task.WhenAll(Enumerable.Range(0, 2).Select(async _ =>
+        {
+            var service = new SalesProductionService(host.Factory, new TestUser { UserId = f.Org.OwnerUserId, OrganizationId = f.Org.OrganizationId }, host.Clock);
+            try
+            {
+                return (await service.CreateAsync(sales)).Created.Count;
+            }
+            catch (BusinessRuleException ex) when (ex.Code == "production.sales.all_planned")
+            {
+                return -1;
+            }
+        }));
+        Assert.Equal(new[] { -1, 1 }, results.Order().ToArray());
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var plan = await s.ProductionOrders.ForSalesOrderAsync(sales);
+            Assert.Equal((false, SalesProductionHints.AllPlanned, 30m), (plan.CanCreate, plan.CreateHint, plan.Lines.Single(l => l.Code == "СВ-1").Planned));
+            var created = await s.ProductionOrders.GetAsync(plan.Orders.Last().Id);
+            Assert.Equal((ProductionOrderStatus.Draft, 20m, Day.AddDays(14), f.Store, f.Wip, ProductionSource.SalesOrder),
+                (created.Status, created.Quantity, created.DueDate!.Value, created.OutputWarehouseId, created.WipWarehouseId, created.Source));
+            Assert.Equal("production.sales.all_planned", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ProductionOrders.CreateForSalesOrderAsync(sales))).Code);
+        }
+
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            Assert.False((await s.ProductionOrders.ForSalesOrderAsync(sales)).CanCreate);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ProductionOrders.CreateForSalesOrderAsync(sales));
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ProductionOrders.ForSalesOrderAsync(sales));
+        }
+    }
+
     private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
         new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 
