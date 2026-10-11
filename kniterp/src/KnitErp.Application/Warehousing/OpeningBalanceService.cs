@@ -215,6 +215,19 @@ public sealed class OpeningBalanceService(
     /// </summary>
     public async Task ApproveAsync(long id, byte[] rowVersion, CancellationToken ct = default)
     {
+        try
+        {
+            await ApproveCoreAsync(id, rowVersion, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // отказ после doc.Approve не должен оставить «утверждённый» документ в контексте вкладки
+            throw;
+        }
+    }
+
+    private async Task ApproveCoreAsync(long id, byte[] rowVersion, CancellationToken ct)
+    {
         var (ctx, doc) = await LoadForApprovalAsync(id, rowVersion, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.AsOfDate, ct);
@@ -237,12 +250,15 @@ public sealed class OpeningBalanceService(
             throw new BusinessRuleException("stock.opening.archived_item", $"Позиции в архиве: {string.Join(", ", archived.Take(10))}.");
         }
 
+        var batchMoves = await StockBatchLedger.PlanOpeningAsync(db, ctx, doc, ct);
         doc.Approve(ctx.UserId, clock.UtcNow);
         foreach (var line in doc.Lines)
         {
             db.StockMovements.Add(StockMovement.Create(ctx.OrganizationId, doc.WarehouseId, line.ItemId, line.Quantity, doc.AsOfDate,
                 StockSource.OpeningBalance, doc.Id, clock.UtcNow));
         }
+
+        StockBatchLedger.Write(db, ctx.OrganizationId, doc.Id, doc.AsOfDate, batchMoves, StockSource.OpeningBalance, clock.UtcNow);
 
         Audit(ctx, AuditActions.StockDocumentApproved, doc, "На утверждении", "Утверждён", $"движений: {doc.Lines.Count}");
         await ClosedPeriod.SaveAsync(db, ct);

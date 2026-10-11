@@ -38,6 +38,9 @@ public sealed class InventoryCount
     public long? PostedByUserId { get; private set; }
     public DateTime? PostedAtUtc { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
+
+    /// <summary>Растёт при правке разбивки по партиям (D100): разбивка — отдельная таблица, а версия документа должна меняться.</summary>
+    public int BatchRevision { get; private set; }
     public IReadOnlyCollection<InventoryLine> Lines => _lines;
 
     public static InventoryCount Create(
@@ -91,6 +94,13 @@ public sealed class InventoryCount
     }
 
     /// <summary>Фактическое количество по позиции; null — ещё не пересчитано. Новая позиция получает учётное количество.</summary>
+    /// <summary>Разбивка по партиям изменилась (D100) — только у черновика.</summary>
+    public void MarkBatchesChanged()
+    {
+        EnsureDraft();
+        BatchRevision++;
+    }
+
     public void SetCounted(long itemId, decimal? counted, decimal bookIfNew)
     {
         EnsureDraft();

@@ -540,20 +540,9 @@ internal static class StockBatchLedger
                     .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
                 foreach (var line in auto)
                 {
-                    var inBatches = balances.Where(b => b.ItemId == line.ItemId && b.Sum > 0).OrderBy(b => b.BatchId).ToList();
-                    var withoutBatch = Math.Max(0, totals.GetValueOrDefault(line.ItemId) - balances.Where(b => b.ItemId == line.ItemId).Sum(b => b.Sum));
-                    var left = line.Quantity - Math.Min(line.Quantity, withoutBatch);
-                    foreach (var b in inBatches)
-                    {
-                        if (left <= 0)
-                        {
-                            break;
-                        }
-
-                        var take = Math.Min(left, b.Sum);
-                        allocations.Add((line.ItemId, b.BatchId, take));
-                        left -= take;
-                    }
+                    allocations.AddRange(AutoAllocate(line.Quantity, totals.GetValueOrDefault(line.ItemId),
+                            balances.Where(b => b.ItemId == line.ItemId).Select(b => (b.BatchId, b.Sum)))
+                        .Select(a => (line.ItemId, a.BatchId, a.Quantity)));
                 }
             }
         }
@@ -616,12 +605,148 @@ internal static class StockBatchLedger
         return deltas.Select(d => new Planned(d.WarehouseId, d.ItemId, d.BatchId, -d.Sum)).ToList();
     }
 
-    public static void Write(IKnitErpDbContext db, AccessContext ctx, StockDocument doc, IReadOnlyList<Planned> planned, StockSource source, DateTime nowUtc)
+    public static void Write(IKnitErpDbContext db, AccessContext ctx, StockDocument doc, IReadOnlyList<Planned> planned, StockSource source, DateTime nowUtc) =>
+        Write(db, ctx.OrganizationId, doc.Id, doc.DocumentDate, planned, source, nowUtc);
+
+    public static void Write(
+        IKnitErpDbContext db, long organizationId, long sourceId, DateOnly date, IReadOnlyList<Planned> planned, StockSource source, DateTime nowUtc)
     {
         foreach (var p in planned)
         {
-            db.StockBatchMovements.Add(StockBatchMovement.Create(ctx.OrganizationId, p.WarehouseId, p.ItemId, p.BatchId, p.Quantity, doc.DocumentDate, source,
-                doc.Id, nowUtc));
+            db.StockBatchMovements.Add(StockBatchMovement.Create(organizationId, p.WarehouseId, p.ItemId, p.BatchId, p.Quantity, date, source, sourceId,
+                nowUtc));
         }
+    }
+
+    /// <summary>
+    /// Расход без указания партии: сначала остаток «без партии» (общий − партии), затем партии по порядку заведения (самые старые первыми).
+    /// Возвращает, сколько списать с каждой партии; остаток сверх партий списывается «без партии».
+    /// </summary>
+    public static IEnumerable<(long BatchId, decimal Quantity)> AutoAllocate(decimal need, decimal total, IEnumerable<(long BatchId, decimal Sum)> balances)
+    {
+        var list = balances.ToList();
+        var withoutBatch = Math.Max(0, total - list.Sum(b => b.Sum));
+        var left = need - Math.Min(need, withoutBatch);
+        foreach (var b in list.Where(b => b.Sum > 0).OrderBy(b => b.BatchId))
+        {
+            if (left <= 0)
+            {
+                yield break;
+            }
+
+            var take = Math.Min(left, b.Sum);
+            yield return (b.BatchId, take);
+            left -= take;
+        }
+    }
+
+    /// <summary>Начальные остатки (D100): разбивка по партиям, если указана, равна количеству строки; партии получают приход.</summary>
+    public static async Task<IReadOnlyList<Planned>> PlanOpeningAsync(IKnitErpDbContext db, AccessContext ctx, OpeningBalance doc, CancellationToken ct)
+    {
+        var rows = await db.OpeningBalanceBatchLines.AsNoTracking().Where(r => r.DocumentId == doc.Id && r.OrganizationId == ctx.OrganizationId)
+            .ToListAsync(ct);
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var batchIds = rows.Select(r => r.BatchId).Distinct().ToList();
+        var batches = await db.StockBatches.AsNoTracking().Where(b => batchIds.Contains(b.Id)).ToDictionaryAsync(b => b.Id, ct);
+        var itemIds = rows.Select(r => r.ItemId).Concat(doc.Lines.Select(l => l.ItemId)).Distinct().ToList();
+        var codes = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, ct);
+        if (rows.FirstOrDefault(r => doc.Lines.All(l => l.ItemId != r.ItemId)) is { } stray)
+        {
+            throw new BusinessRuleException("stock.batch.stray", $"Разбивка по партии {batches[stray.BatchId].Number} — для позиции, которой нет в строках.");
+        }
+
+        foreach (var line in doc.Lines)
+        {
+            var sum = rows.Where(r => r.ItemId == line.ItemId).Sum(r => r.Quantity);
+            if (sum != 0 && sum != line.Quantity)
+            {
+                throw new BusinessRuleException("stock.batch.sum",
+                    $"{codes[line.ItemId]}: по партиям {Quantities.Format(sum)}, в строке {Quantities.Format(line.Quantity)} — разбивка должна сойтись.");
+            }
+        }
+
+        if (rows.FirstOrDefault(r => batches[r.BatchId].IsArchived) is { } archived)
+        {
+            throw new BusinessRuleException("catalog.archived", $"Партия {batches[archived.BatchId].Number} в архиве.");
+        }
+
+        return rows.Select(r => new Planned(doc.WarehouseId, r.ItemId, r.BatchId, r.Quantity)).ToList();
+    }
+
+    /// <summary>
+    /// Инвентаризация (D100). Позиция с фактом по партиям пересчитана по партиям полностью: разница по каждой партии = факт − учёт,
+    /// партия с остатком без факта списывается до нуля, сумма партий не больше факта позиции. Позиция без фактов по партиям:
+    /// недостача списывается как расход без партии (сначала «без партии», затем старые партии), излишек — «без партии».
+    /// </summary>
+    public static async Task<IReadOnlyList<Planned>> PlanInventoryAsync(
+        IKnitErpDbContext db, AccessContext ctx, InventoryCount doc, IReadOnlyDictionary<long, decimal> book, CancellationToken ct)
+    {
+        var counts = await db.InventoryBatchCounts.AsNoTracking().Where(c => c.DocumentId == doc.Id && c.OrganizationId == ctx.OrganizationId)
+            .ToListAsync(ct);
+        var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
+        var balances = await db.StockBatchMovements.AsNoTracking()
+            .Where(m => m.OrganizationId == ctx.OrganizationId && m.WarehouseId == doc.WarehouseId && itemIds.Contains(m.ItemId))
+            .GroupBy(m => new { m.ItemId, m.BatchId }).Select(g => new { g.Key.ItemId, g.Key.BatchId, Sum = g.Sum(m => m.Quantity) })
+            .ToListAsync(ct);
+        if (counts.Count == 0 && balances.All(b => b.Sum == 0))
+        {
+            return [];
+        }
+
+        var batchIds = counts.Select(c => c.BatchId).Distinct().ToList();
+        var batches = await db.StockBatches.AsNoTracking().Where(b => batchIds.Contains(b.Id)).ToDictionaryAsync(b => b.Id, ct);
+        var codes = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, ct);
+        if (counts.FirstOrDefault(c => !itemIds.Contains(c.ItemId)) is { } stray)
+        {
+            throw new BusinessRuleException("stock.batch.stray", $"Факт по партии {batches[stray.BatchId].Number} — для позиции, которой нет в строках.");
+        }
+
+        var planned = new List<Planned>();
+        foreach (var line in doc.Lines)
+        {
+            if (line.CountedQuantity is not { } counted)
+            {
+                continue; // непересчитанную позицию отклонит проведение
+            }
+
+            var itemCounts = counts.Where(c => c.ItemId == line.ItemId).ToList();
+            var itemBalances = balances.Where(b => b.ItemId == line.ItemId).ToList();
+            if (itemCounts.Count > 0)
+            {
+                var sum = itemCounts.Sum(c => c.CountedQuantity);
+                if (sum > counted)
+                {
+                    throw new BusinessRuleException("stock.batch.inventory_over",
+                        $"{codes[line.ItemId]}: по партиям {Quantities.Format(sum)} — больше факта позиции {Quantities.Format(counted)}.");
+                }
+
+                if (itemCounts.FirstOrDefault(c => c.CountedQuantity > 0 && batches[c.BatchId].IsArchived) is { } archived)
+                {
+                    throw new BusinessRuleException("catalog.archived", $"Партия {batches[archived.BatchId].Number} в архиве.");
+                }
+
+                foreach (var batchId in itemCounts.Select(c => c.BatchId).Union(itemBalances.Where(b => b.Sum != 0).Select(b => b.BatchId)))
+                {
+                    var diff = (itemCounts.FirstOrDefault(c => c.BatchId == batchId)?.CountedQuantity ?? 0)
+                               - (itemBalances.FirstOrDefault(b => b.BatchId == batchId)?.Sum ?? 0);
+                    if (diff != 0)
+                    {
+                        planned.Add(new(doc.WarehouseId, line.ItemId, batchId, diff));
+                    }
+                }
+            }
+            else if (counted < book.GetValueOrDefault(line.ItemId))
+            {
+                var total = book.GetValueOrDefault(line.ItemId);
+                planned.AddRange(AutoAllocate(total - counted, total, itemBalances.Select(b => (b.BatchId, b.Sum)))
+                    .Select(a => new Planned(doc.WarehouseId, line.ItemId, a.BatchId, -a.Quantity)));
+            }
+        }
+
+        return planned;
     }
 }

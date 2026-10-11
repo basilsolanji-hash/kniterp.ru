@@ -1427,6 +1427,50 @@ internal sealed class StockDocumentBatchLineConfiguration : IEntityTypeConfigura
     }
 }
 
+internal sealed class OpeningBalanceBatchLineConfiguration : IEntityTypeConfiguration<OpeningBalanceBatchLine>
+{
+    public void Configure(EntityTypeBuilder<OpeningBalanceBatchLine> b)
+    {
+        b.ToTable("opening_balance_batch_lines", t =>
+        {
+            t.HasCheckConstraint("ck_opening_balance_batch_lines_quantity", "[Quantity] > 0");
+            t.HasTrigger("tr_opening_balance_batch_lines_draft_only");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.HasOne<OpeningBalance>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DocumentId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_opening_balance_batch_lines_document");
+        b.HasOne<StockBatch>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId, x.BatchId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.ItemId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_opening_balance_batch_lines_batch");
+        b.HasIndex(x => new { x.DocumentId, x.ItemId, x.BatchId }).IsUnique().HasDatabaseName("ux_opening_balance_batch_lines_doc_item_batch");
+    }
+}
+
+internal sealed class InventoryBatchCountConfiguration : IEntityTypeConfiguration<InventoryBatchCount>
+{
+    public void Configure(EntityTypeBuilder<InventoryBatchCount> b)
+    {
+        b.ToTable("inventory_batch_counts", t =>
+        {
+            t.HasCheckConstraint("ck_inventory_batch_counts_quantity", "[CountedQuantity] >= 0");
+            t.HasTrigger("tr_inventory_batch_counts_draft_only");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.CountedQuantity).HasColumnType("decimal(18,6)");
+        b.HasOne<InventoryCount>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DocumentId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_inventory_batch_counts_document");
+        b.HasOne<StockBatch>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId, x.BatchId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.ItemId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_inventory_batch_counts_batch");
+        b.HasIndex(x => new { x.DocumentId, x.ItemId, x.BatchId }).IsUnique().HasDatabaseName("ux_inventory_batch_counts_doc_item_batch");
+    }
+}
+
 internal sealed class StockBatchMovementConfiguration : IEntityTypeConfiguration<StockBatchMovement>
 {
     public void Configure(EntityTypeBuilder<StockBatchMovement> b)
@@ -1435,7 +1479,7 @@ internal sealed class StockBatchMovementConfiguration : IEntityTypeConfiguration
         {
             t.HasTrigger("tr_stock_batch_movements_immutable");
             t.HasCheckConstraint("ck_stock_batch_movements_quantity", "[Quantity] <> 0");
-            t.HasCheckConstraint("ck_stock_batch_movements_source", "[Source] IN (2, 3)");
+            t.HasCheckConstraint("ck_stock_batch_movements_source", "[Source] IN (1, 2, 3, 4)");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();

@@ -2336,5 +2336,15 @@
   "Убрать партию {0}": "{0} partiyani olib tashlash",
   "Укажите партию (номер, цвет, крашение) для каждой позиции — сумма по партиям должна совпасть с количеством строки. Без разбивки товар поступит «без партии».": "Har bir pozitsiya uchun partiyani (raqam, rang, bo'yash) ko'rsating — partiyalar bo'yicha summa qator miqdoriga mos kelishi kerak. Taqsimotsiz tovar «partiyasiz» kirim qilinadi.",
   "Что введено": "Nima kiritildi",
-  "Штучная позиция пересчитывается через вес единицы из карточки номенклатуры, весовая — в места через вес места партии.": "Donali pozitsiya nomenklatura kartochkasidagi birlik og'irligi orqali, vaznli — partiya o'rni og'irligi orqali o'rinlarga qayta hisoblanadi."
+  "Штучная позиция пересчитывается через вес единицы из карточки номенклатуры, весовая — в места через вес места партии.": "Donali pozitsiya nomenklatura kartochkasidagi birlik og'irligi orqali, vaznli — partiya o'rni og'irligi orqali o'rinlarga qayta hisoblanadi.",
+  "{0}: по партиям {1} — больше факта позиции {2}.": "{0}: partiyalar bo'yicha {1} — pozitsiya faktidan {2} ko'p.",
+  "+ партия, которой нет в учёте": "+ hisobda yo'q partiya",
+  "без партии после проведения: {0}": "o'tkazilgandan keyin partiyasiz: {0}",
+  "Если указан факт хотя бы по одной партии позиции, позиция считается пересчитанной по партиям: партия без факта спишется до нуля, остаток сверх партий — «без партии». Без фактов по партиям недостача спишется сначала без партии, затем со старых партий.": "Agar pozitsiyaning kamida bitta partiyasi bo'yicha fakt ko'rsatilgan bo'lsa, pozitsiya partiyalar bo'yicha qayta sanalgan hisoblanadi: faktsiz partiya nolgacha hisobdan chiqariladi, partiyalardan ortiq qoldiq — «partiyasiz». Partiyalar bo'yicha faktlar bo'lmasa, kamomad avval partiyasiz, keyin eski partiyalardan hisobdan chiqariladi.",
+  "Заполнено партий: {0}.": "To'ldirilgan partiyalar: {0}.",
+  "Заполнить факт партий по учёту": "Partiyalar faktini hisob bo'yicha to'ldirish",
+  "Необязательно. Укажите, из каких партий (цвет, крашение) состоит остаток позиции, — сумма должна совпасть с количеством строки. Партии заводятся в разделе «Партии и вес».": "Majburiy emas. Pozitsiya qoldig'i qaysi partiyalardan (rang, bo'yash) iboratligini ko'rsating — summa qator miqdoriga mos kelishi kerak. Partiyalar «Partiyalar va og'irlik» bo'limida kiritiladi.",
+  "по партиям не пересчитано": "partiyalar bo'yicha qayta sanalmagan",
+  "Факт по партии {0}": "{0} partiya bo'yicha fakt",
+  "Факт по партии {0} — для позиции, которой нет в строках.": "{0} partiya bo'yicha fakt — qatorlarda yo'q pozitsiya uchun."
 }

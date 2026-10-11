@@ -261,12 +261,26 @@ public sealed class InventoryService(
     /// </summary>
     public async Task PostAsync(long id, byte[] rowVersion, CancellationToken ct = default)
     {
+        try
+        {
+            await PostCoreAsync(id, rowVersion, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // отказ после doc.Post не должен оставить «проведённую» инвентаризацию в контексте вкладки
+            throw;
+        }
+    }
+
+    private async Task PostCoreAsync(long id, byte[] rowVersion, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentPost, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.CountDate, ct);
         await db.LockWarehousesAsync([doc.WarehouseId], ct);
         var book = await BookAsync(ctx.OrganizationId, doc.WarehouseId, null, ct);
+        var batchMoves = await StockBatchLedger.PlanInventoryAsync(db, ctx, doc, book, ct);
         var differences = doc.Post(book, ctx.UserId, clock.UtcNow);
         foreach (var (itemId, difference) in differences)
         {
@@ -274,6 +288,7 @@ public sealed class InventoryService(
                 StockSource.Inventory, doc.Id, clock.UtcNow));
         }
 
+        StockBatchLedger.Write(db, ctx.OrganizationId, doc.Id, doc.CountDate, batchMoves, StockSource.Inventory, clock.UtcNow);
         Audit(ctx, AuditActions.StockDocumentPosted, doc, "Черновик", "Проведена",
             $"излишков: {differences.Count(d => d.Difference > 0)}, недостач: {differences.Count(d => d.Difference < 0)}");
         await ClosedPeriod.SaveAsync(db, ct);

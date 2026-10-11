@@ -177,6 +177,69 @@ public sealed class StockDocumentBatchLine
     }
 }
 
+/// <summary>Разбивка строки начальных остатков по партиям (D100): сумма по позиции равна количеству строки.</summary>
+public sealed class OpeningBalanceBatchLine
+{
+    private OpeningBalanceBatchLine()
+    {
+    }
+
+    public long Id { get; private set; }
+    public long OrganizationId { get; private set; }
+    public long DocumentId { get; private set; }
+    public long ItemId { get; private set; }
+    public long BatchId { get; private set; }
+    public decimal Quantity { get; private set; }
+
+    public static OpeningBalanceBatchLine Create(long organizationId, long documentId, long itemId, long batchId, decimal quantity)
+    {
+        var line = new OpeningBalanceBatchLine { OrganizationId = organizationId, DocumentId = documentId, ItemId = itemId, BatchId = batchId };
+        line.SetQuantity(quantity);
+        return line;
+    }
+
+    public void SetQuantity(decimal quantity)
+    {
+        Quantities.EnsurePositive(quantity);
+        Quantity = quantity;
+    }
+}
+
+/// <summary>
+/// Факт по партии в инвентаризации (D100). Если у позиции указан факт хотя бы по одной партии, позиция считается пересчитанной
+/// по партиям полностью: партия с учётным остатком без факта — недостача до нуля, остаток сверх суммы партий — «без партии».
+/// </summary>
+public sealed class InventoryBatchCount
+{
+    private InventoryBatchCount()
+    {
+    }
+
+    public long Id { get; private set; }
+    public long OrganizationId { get; private set; }
+    public long DocumentId { get; private set; }
+    public long ItemId { get; private set; }
+    public long BatchId { get; private set; }
+    public decimal CountedQuantity { get; private set; }
+
+    public static InventoryBatchCount Create(long organizationId, long documentId, long itemId, long batchId, decimal counted)
+    {
+        var line = new InventoryBatchCount { OrganizationId = organizationId, DocumentId = documentId, ItemId = itemId, BatchId = batchId };
+        line.SetCounted(counted);
+        return line;
+    }
+
+    public void SetCounted(decimal counted)
+    {
+        if (counted < 0)
+        {
+            throw new BusinessRuleException("stock.quantity.negative", "Количество не может быть отрицательным.");
+        }
+
+        CountedQuantity = counted;
+    }
+}
+
 /// <summary>
 /// Движение партийного регистра (D89): приход (+) или расход (−) партии на складе. Ведётся рядом с общим регистром
 /// <see cref="StockMovement"/> теми же документами и только на вставку (триггер). Остаток партии = сумма её движений;

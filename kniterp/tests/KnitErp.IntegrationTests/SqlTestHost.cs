@@ -189,7 +189,8 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Finance.AccountableService(db, guard, user, Clock),
             new KnitErp.Application.Finance.CashReportsService(db, guard),
             new KnitErp.Application.Integrations.IntegrationService(db, guard, user, Clock, new KnitErp.Application.Integrations.IntegrationSettings()),
-            new KnitErp.Application.Warehousing.StockBatchService(db, guard, user, Clock));
+            new KnitErp.Application.Warehousing.StockBatchService(db, guard, user, Clock),
+            new KnitErp.Application.Warehousing.StockBatchBreakdownService(db, guard));
     }
 
     private static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
@@ -274,7 +275,8 @@ public sealed record Services(
     KnitErp.Application.Finance.AccountableService Accountables,
     KnitErp.Application.Finance.CashReportsService CashReports,
     KnitErp.Application.Integrations.IntegrationService Integrations,
-    KnitErp.Application.Warehousing.StockBatchService Batches) : IAsyncDisposable
+    KnitErp.Application.Warehousing.StockBatchService Batches,
+    KnitErp.Application.Warehousing.StockBatchBreakdownService Breakdowns) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

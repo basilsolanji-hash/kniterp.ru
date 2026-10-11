@@ -3363,6 +3363,49 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("positions", "kniterp");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Warehousing.InventoryBatchCount", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BatchId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("CountedQuantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "DocumentId");
+
+                    b.HasIndex("DocumentId", "ItemId", "BatchId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_inventory_batch_counts_doc_item_batch");
+
+                    b.HasIndex("OrganizationId", "ItemId", "BatchId");
+
+                    b.ToTable("inventory_batch_counts", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_inventory_batch_counts_draft_only");
+
+                            t.HasCheckConstraint("ck_inventory_batch_counts_quantity", "[CountedQuantity] >= 0");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Warehousing.InventoryCount", b =>
                 {
                     b.Property<long>("Id")
@@ -3370,6 +3413,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("BatchRevision")
+                        .HasColumnType("int");
 
                     b.Property<string>("Comment")
                         .HasMaxLength(1000)
@@ -3484,6 +3530,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly>("AsOfDate")
                         .HasColumnType("date");
 
+                    b.Property<int>("BatchRevision")
+                        .HasColumnType("int");
+
                     b.Property<string>("Comment")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -3542,6 +3591,49 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_opening_balances_status", "[Status] IN (1, 2, 3, 9)");
                         });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Warehousing.OpeningBalanceBatchLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("BatchId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "DocumentId");
+
+                    b.HasIndex("DocumentId", "ItemId", "BatchId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_opening_balance_batch_lines_doc_item_batch");
+
+                    b.HasIndex("OrganizationId", "ItemId", "BatchId");
+
+                    b.ToTable("opening_balance_batch_lines", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_opening_balance_batch_lines_draft_only");
+
+                            t.HasCheckConstraint("ck_opening_balance_batch_lines_quantity", "[Quantity] > 0");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Warehousing.OpeningBalanceLine", b =>
@@ -3814,7 +3906,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_stock_batch_movements_quantity", "[Quantity] <> 0");
 
-                            t.HasCheckConstraint("ck_stock_batch_movements_source", "[Source] IN (2, 3)");
+                            t.HasCheckConstraint("ck_stock_batch_movements_source", "[Source] IN (1, 2, 3, 4)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -5314,6 +5406,25 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Warehousing.InventoryBatchCount", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Warehousing.InventoryCount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DocumentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_inventory_batch_counts_document");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.StockBatch", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ItemId", "BatchId")
+                        .HasPrincipalKey("OrganizationId", "ItemId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_inventory_batch_counts_batch");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Warehousing.InventoryCount", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -5383,6 +5494,25 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_opening_balances_warehouse");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Warehousing.OpeningBalanceBatchLine", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Warehousing.OpeningBalance", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DocumentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_opening_balance_batch_lines_document");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.StockBatch", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ItemId", "BatchId")
+                        .HasPrincipalKey("OrganizationId", "ItemId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_opening_balance_batch_lines_batch");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Warehousing.OpeningBalanceLine", b =>

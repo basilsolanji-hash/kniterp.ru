@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Web.Components.Shared
 @inject InventoryService Inventory
+@inject StockBatchBreakdownService Breakdowns
 
 <PageTitle>@(_doc?.Number ?? L("Инвентаризация")) — knitERP</PageTitle>
 
@@ -134,6 +135,85 @@ else
         </table>
     </div>
 
+    @if (_batches is { } bt && bt.Items.Any(i => i.Rows.Count > 0 || (bt.CanEdit && i.Options.Count > 0)) || _batches?.Movements.Count > 0)
+    {
+        var bt2 = _batches!;
+        @* D100: факт по партиям. Позиция с фактом хотя бы по одной партии пересчитана по партиям полностью. *@
+        <h2 style="margin-top: 24px">@L("Партии")</h2>
+        <p class="muted small">@L("Если указан факт хотя бы по одной партии позиции, позиция считается пересчитанной по партиям: партия без факта спишется до нуля, остаток сверх партий — «без партии». Без фактов по партиям недостача спишется сначала без партии, затем со старых партий.")</p>
+        @if (bt2.CanEdit)
+        {
+            <div class="actions"><button type="button" class="secondary" @onclick="FillBatchesAsync" disabled="@_busy">@L("Заполнить факт партий по учёту")</button></div>
+        }
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Позиция")</th><th>@L("Партия")</th><th class="num">@L("Учёт")</th><th class="num">@L("Факт")</th><th class="num">@L("Разница")</th></tr></thead>
+                <tbody>
+                    @foreach (var it in bt2.Items.Where(i => i.Rows.Count > 0 || (bt2.CanEdit && i.Options.Count > 0)))
+                    {
+                        <tr class="@(it.WithoutBatch < 0 ? "short" : null)">
+                            <td><strong>@it.Code</strong> <span class="muted small">@it.Name</span></td>
+                            <td class="muted">@(it.CountedByBatches ? L("без партии после проведения: {0}", Quantities.Format(it.WithoutBatch ?? 0)) : L("по партиям не пересчитано"))</td>
+                            <td></td>
+                            <td class="num"><strong>@(it.Counted is { } c ? Quantities.Format(c) + " " + it.UnitSymbol : "—")</strong></td>
+                            <td></td>
+                        </tr>
+                        @foreach (var r in it.Rows)
+                        {
+                            var row = r;
+                            var item = it;
+                            <tr>
+                                <td></td>
+                                <td>@r.Label</td>
+                                <td class="num">@Quantities.Format(r.Book)</td>
+                                <td class="num">
+                                    @if (bt2.CanEdit)
+                                    {
+                                        <input value="@(r.Counted is { } rc ? Quantities.Format(rc) : "")" inputmode="decimal" size="8" style="text-align: right"
+                                               aria-label="@L("Факт по партии {0}", r.Label)" disabled="@_busy" @onchange="e => SetBatchAsync(item, row.BatchId, e)" />
+                                    }
+                                    else
+                                    {
+                                        @(r.Counted is { } rc2 ? Quantities.Format(rc2) : "—")
+                                    }
+                                </td>
+                                <td class="num @(r.Difference(it.CountedByBatches) < 0 ? "neg" : null)">@(it.CountedByBatches ? Quantities.Format(r.Difference(true)) : "")</td>
+                            </tr>
+                        }
+                        @if (bt2.CanEdit && it.Options.Count > 0)
+                        {
+                            var item = it;
+                            <tr>
+                                <td></td>
+                                <td colspan="4">
+                                    <select aria-label="@L("Добавить партию")" disabled="@_busy" @onchange="e => AddBatchAsync(item, e)">
+                                        <option value="">@L("+ партия, которой нет в учёте")</option>
+                                        @foreach (var o in it.Options) { <option value="@o.Id">@o.Label</option> }
+                                    </select>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (bt2.Movements.Count > 0)
+        {
+            <h3>@L("Движения партий")</h3>
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Код")</th><th>@L("Партия")</th><th class="num">@L("Количество")</th></tr></thead>
+                    <tbody>
+                        @foreach (var m in bt2.Movements)
+                        {
+                            <tr><td>@m.ItemCode</td><td>@m.BatchLabel</td><td class="num @(m.Quantity < 0 ? "neg" : null)">@Quantities.Format(m.Quantity) @m.UnitSymbol</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+
     <div class="actions" style="margin-top: 16px">
         @if (_doc.CanPost)
         {
@@ -195,9 +275,35 @@ else
         }
     }
 
+    private InventoryBatchesDto? _batches;
+
+    private Task FillBatchesAsync() => RunAsync(async () =>
+    {
+        var n = await Breakdowns.FillInventoryBatchesAsync(Id, _batches!.RowVersion);
+        _message = L("Заполнено партий: {0}.", n);
+    }, null);
+
+    private Task SetBatchAsync(InventoryBatchItemDto item, long batchId, ChangeEventArgs e) => RunAsync(async () =>
+    {
+        var text = e.Value?.ToString();
+        decimal? counted = null;
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            counted = Quantities.TryParse(text, out var v) ? v : throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));
+        }
+
+        await Breakdowns.SetInventoryBatchAsync(Id, item.ItemId, batchId, counted, _batches!.RowVersion);
+    }, null);
+
+    private Task AddBatchAsync(InventoryBatchItemDto item, ChangeEventArgs e) =>
+        long.TryParse(e.Value?.ToString(), out var batchId)
+            ? RunAsync(() => Breakdowns.SetInventoryBatchAsync(Id, item.ItemId, batchId, 0m, _batches!.RowVersion), null)
+            : Task.CompletedTask;
+
     private async Task LoadAsync()
     {
         _doc = await Inventory.GetAsync(Id);
+        _batches = await Breakdowns.ForInventoryAsync(Id);
         _date = _doc.CountDate.ToDateTime(TimeOnly.MinValue);
         _comment = _doc.Comment;
     }

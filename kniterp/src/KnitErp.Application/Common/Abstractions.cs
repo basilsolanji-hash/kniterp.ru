@@ -105,6 +105,8 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<StockBatch> StockBatches { get; }
     DbSet<StockDocumentBatchLine> StockDocumentBatchLines { get; }
     DbSet<StockBatchMovement> StockBatchMovements { get; }
+    DbSet<OpeningBalanceBatchLine> OpeningBalanceBatchLines { get; }
+    DbSet<InventoryBatchCount> InventoryBatchCounts { get; }
     DbSet<InventoryCount> InventoryCounts { get; }
     DbSet<PeriodClosure> PeriodClosures { get; }
     DbSet<KnitErp.Domain.Workspace.UserToolData> UserToolData { get; }

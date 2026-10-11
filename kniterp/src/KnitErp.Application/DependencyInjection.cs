@@ -63,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<OpeningBalanceService>();
         services.AddScoped<StockDocumentService>();
         services.AddScoped<StockBatchService>();
+        services.AddScoped<StockBatchBreakdownService>();
         services.AddScoped<InventoryService>();
         services.AddScoped<PeriodService>();
         services.AddScoped<StockReportService>();

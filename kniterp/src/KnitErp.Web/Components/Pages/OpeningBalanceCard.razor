@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Web.Components.Shared
 @inject OpeningBalanceService Balances
+@inject StockBatchBreakdownService Breakdowns
 
 <PageTitle>@(_doc?.Number ?? L("Документ")) — knitERP</PageTitle>
 
@@ -114,6 +115,63 @@ else
         </table>
     </div>
 
+    @if (_batches is { } bt && bt.Items.Count > 0 && (bt.CanEdit || bt.Items.Any(i => i.Rows.Count > 0)))
+    {
+        @* D100: разбивка начальных остатков по партиям (цвет, крашение). *@
+        <h2 style="margin-top: 24px">@L("Партии")</h2>
+        <p class="muted small">@L("Необязательно. Укажите, из каких партий (цвет, крашение) состоит остаток позиции, — сумма должна совпасть с количеством строки. Партии заводятся в разделе «Партии и вес».")</p>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Позиция")</th><th>@L("Партия")</th><th class="num">@L("Количество")</th><th class="num">@L("Нетто, кг")</th>@if (bt.CanEdit) { <th></th> }</tr></thead>
+                <tbody>
+                    @foreach (var it in bt.Items.Where(i => bt.CanEdit || i.Rows.Count > 0))
+                    {
+                        <tr class="@(it.Matches ? null : "short")">
+                            <td><strong>@it.Code</strong> <span class="muted small">@it.Name</span></td>
+                            <td class="muted">@(it.Rows.Count == 0 ? L("без разбивки") : it.Matches ? L("разбито полностью") : L("по партиям {0} из {1}", Quantities.Format(it.Allocated), Quantities.Format(it.LineQuantity)))</td>
+                            <td class="num"><strong>@Quantities.Format(it.LineQuantity) @it.UnitSymbol</strong></td>
+                            <td class="num">@KgText(it.LineKg)</td>
+                            @if (bt.CanEdit) { <td></td> }
+                        </tr>
+                        @foreach (var r in it.Rows)
+                        {
+                            <tr>
+                                <td></td><td>@r.BatchLabel</td><td class="num">@Quantities.Format(r.Quantity)</td><td class="num">@KgText(r.NetKg)</td>
+                                @if (bt.CanEdit)
+                                {
+                                    <td><button type="button" class="secondary" @onclick="() => RemoveBatchAsync(r)" disabled="@_busy" aria-label="@L("Убрать партию {0}", r.BatchLabel)">@L("Убрать")</button></td>
+                                }
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (bt.CanEdit)
+        {
+            var selected = bt.Items.FirstOrDefault(i => i.ItemId == _bItemId);
+            <form class="inline-form" @onsubmit="AddBatchAsync">
+                <label>
+                    @L("Позиция")
+                    <select @bind="_bItemId">
+                        <option value="">—</option>
+                        @foreach (var it in bt.Items) { <option value="@it.ItemId">@it.Code — @it.Name</option> }
+                    </select>
+                </label>
+                <label>
+                    @L("Партия")
+                    <select @bind="_bBatchId">
+                        <option value="">—</option>
+                        @foreach (var o in selected?.Options ?? []) { <option value="@o.Id">@o.Label</option> }
+                    </select>
+                </label>
+                <label>@L("Количество") <input @bind="_bQty" inputmode="decimal" size="10" placeholder="@(selected is null ? "" : Quantities.Format(selected.LineQuantity - selected.Allocated))" /></label>
+                <button type="submit" disabled="@(_busy || _bItemId is null)">@L("Добавить партию")</button>
+                <a class="button secondary" href="stock-batches">@L("Новая партия")</a>
+            </form>
+        }
+    }
+
     <div class="actions" style="margin-top: 16px">
         @if (_doc.CanEdit)
         {
@@ -179,7 +237,32 @@ else
         }
     }
 
-    private async Task LoadAsync() => _doc = await Balances.GetAsync(Id);
+    private DocumentBatchesDto? _batches;
+    private long? _bItemId;
+    private long? _bBatchId;
+    private string? _bQty;
+
+    private async Task LoadAsync()
+    {
+        _doc = await Balances.GetAsync(Id);
+        _batches = await Breakdowns.ForOpeningAsync(Id);
+    }
+
+    private static string KgText(decimal? kg) => kg is { } v ? v.ToString("#,0.###") : "—";
+
+    private Task AddBatchAsync() => RunAsync(async () =>
+    {
+        var item = _batches!.Items.FirstOrDefault(i => i.ItemId == _bItemId)
+                   ?? throw new BusinessRuleException("stock.batch.item", L("Выберите позицию."));
+        var batchId = _bBatchId ?? throw new BusinessRuleException("stock.batch.required", L("Выберите партию."));
+        var qty = string.IsNullOrWhiteSpace(_bQty) ? item.LineQuantity - item.Allocated
+            : Quantities.TryParse(_bQty, out var q) ? q : throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));
+        await Breakdowns.SetOpeningBatchAsync(Id, item.ItemId, batchId, qty, _batches.RowVersion);
+        _bQty = null;
+        _bBatchId = null;
+    }, L("Партия добавлена."));
+
+    private Task RemoveBatchAsync(DocumentBatchRowDto r) => RunAsync(() => Breakdowns.RemoveOpeningBatchAsync(Id, r.Id, _batches!.RowVersion), null);
 
     private Task AddLineAsync() => RunAsync(async () =>
     {

@@ -47,6 +47,9 @@ public sealed class OpeningBalance
     public string? ReturnReason { get; private set; }
 
     public byte[] RowVersion { get; private set; } = [];
+
+    /// <summary>Растёт при правке разбивки по партиям (D100): разбивка — отдельная таблица, а версия документа должна меняться.</summary>
+    public int BatchRevision { get; private set; }
     public IReadOnlyCollection<OpeningBalanceLine> Lines => _lines;
 
     public static OpeningBalance Create(
@@ -70,6 +73,13 @@ public sealed class OpeningBalance
     }
 
     /// <summary>Строка по позиции: новая или замена количества. Одна позиция — одна строка.</summary>
+    /// <summary>Разбивка по партиям изменилась (D100) — только у черновика.</summary>
+    public void MarkBatchesChanged()
+    {
+        EnsureDraft();
+        BatchRevision++;
+    }
+
     public void SetLine(long itemId, decimal quantity)
     {
         EnsureDraft();
