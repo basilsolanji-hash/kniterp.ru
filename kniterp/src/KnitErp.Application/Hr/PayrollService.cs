@@ -242,6 +242,14 @@ public sealed class PayrollService(
             throw new ConcurrencyConflictException();
         }
 
+        // Табели могли измениться после расчёта (исправительный табель, новое закрытие) — тогда суммы уже не те (D212).
+        var (closed, changedAt) = await timesheets.StateAsync(ctx.OrganizationId, run.From, run.To, ct);
+        if (closed && run.TimesheetsClosed && changedAt > run.CalculatedAtUtc || !closed && run.TimesheetsClosed)
+        {
+            db.DiscardChanges();
+            throw new BusinessRuleException("hr.payroll.stale", "Табели месяца изменились после расчёта: пересчитайте и утвердите снова.");
+        }
+
         try
         {
             run.Approve(ctx.UserId, clock.UtcNow);
@@ -292,7 +300,9 @@ public sealed class PayrollService(
                            from p in db.Positions.AsNoTracking()
                            where d.Id == employee.DepartmentId && p.Id == employee.PositionId
                            select new { Department = d.Name, Position = p.Name }).SingleAsync(ct);
-        var (days, _) = await timesheets.DaysAsync(ctx.OrganizationId, run.From, run.To, ct);
+        // Утверждённый листок — по тем версиям табелей, по которым считали; черновик — по последним.
+        var (days, _) = await timesheets.DaysAsync(ctx.OrganizationId, run.From, run.To, ct,
+            run.Status == PayrollStatus.Approved ? run.CalculatedAtUtc : null);
         var worked = days.Where(d => d.EmployeeId == employeeId && TimesheetCodes.IsWorked(d.Code)).ToList();
         var orgName = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.FullName).SingleAsync(ct);
         if (!own)

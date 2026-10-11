@@ -68,7 +68,8 @@ public sealed class StaffingService(IKnitErpDbContext db, IAccessGuard guard, IC
         db.StaffingPositions.Add(row);
         await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
-        Audit(ctx, row.Id, null, $"{rates:0.##} ст., оклад {salary:0.##}", "добавлена строка");
+        // В журнал — без сумм: журнал читают шире, чем заработок (оклад одной ставки — это оклад конкретного человека).
+        Audit(ctx, row.Id, null, $"{rates:0.##} ст.", "добавлена строка");
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return row.Id;
@@ -79,6 +80,8 @@ public sealed class StaffingService(IKnitErpDbContext db, IAccessGuard guard, IC
         CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.HrOrderPost, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await StaffingRules.LockAsync(db, ctx.OrganizationId, ct);
         var row = await LoadAsync(ctx, id, rowVersion, ct);
         var occupied = (await StaffingRules.OccupancyAsync(db, ctx.OrganizationId, ct)).GetValueOrDefault((row.DepartmentId, row.PositionId));
         if (rates < occupied)
@@ -89,11 +92,14 @@ public sealed class StaffingService(IKnitErpDbContext db, IAccessGuard guard, IC
         var (before, after) = row.Change(rates, salary, allowance, validFrom);
         Audit(ctx, id, before, after, "изменена строка");
         await db.SaveOrConflictAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task ArchiveAsync(long id, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.HrOrderPost, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await StaffingRules.LockAsync(db, ctx.OrganizationId, ct);
         var row = await LoadAsync(ctx, id, rowVersion, ct);
         var occupied = (await StaffingRules.OccupancyAsync(db, ctx.OrganizationId, ct)).GetValueOrDefault((row.DepartmentId, row.PositionId));
         if (occupied > 0)
@@ -104,6 +110,7 @@ public sealed class StaffingService(IKnitErpDbContext db, IAccessGuard guard, IC
         row.Archive();
         Audit(ctx, id, null, null, "строка в архиве");
         await db.SaveOrConflictAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     private async Task<AccessContext> DemandViewAsync(CancellationToken ct)
@@ -140,6 +147,36 @@ public sealed class StaffingService(IKnitErpDbContext db, IAccessGuard guard, IC
 /// <summary>Проверка штата при приёме и переводе (D203).</summary>
 internal static class StaffingRules
 {
+    /// <summary>Блокировка штата организации до конца транзакции: проверка вакансии и запись назначения не перемежаются.</summary>
+    public static Task LockAsync(IKnitErpDbContext db, long organizationId, CancellationToken ct) =>
+        db.LockAsync($"kniterp.hr.staffing.{organizationId}", ct);
+
+    /// <summary>
+    /// Проверка уже записанного (в той же транзакции) состояния: по каждой затронутой должности занято не больше штата.
+    /// Нужна массовым операциям (импорт), где вакансию по строкам не проверить заранее.
+    /// </summary>
+    public static async Task EnsureWithinAsync(IKnitErpDbContext db, long organizationId, IEnumerable<(long DepartmentId, long PositionId)> affected,
+        CancellationToken ct)
+    {
+        var lines = await db.StaffingPositions.AsNoTracking().Where(s => s.OrganizationId == organizationId && !s.IsArchived).ToListAsync(ct);
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        var occupancy = await OccupancyAsync(db, organizationId, ct);
+        foreach (var key in affected.Distinct())
+        {
+            var line = lines.FirstOrDefault(s => s.DepartmentId == key.DepartmentId && s.PositionId == key.PositionId)
+                       ?? throw new BusinessRuleException("hr.staffing.no_position", "Этой должности нет в штатном расписании подразделения.");
+            var occupied = occupancy.GetValueOrDefault(key);
+            if (occupied > line.Rates)
+            {
+                throw new BusinessRuleException("hr.staffing.over", $"Сверх штата: по штату {line.Rates:0.##} ст., занято {occupied:0.##}.");
+            }
+        }
+    }
+
     /// <summary>Занятые ставки по (подразделение, должность): ставка из последнего приёма или перевода; без истории — 1 ставка.</summary>
     public static async Task<Dictionary<(long DepartmentId, long PositionId), decimal>> OccupancyAsync(
         IKnitErpDbContext db, long organizationId, CancellationToken ct, long? exceptEmployeeId = null)

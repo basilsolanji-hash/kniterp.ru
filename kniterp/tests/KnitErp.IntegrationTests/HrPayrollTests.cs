@@ -154,6 +154,65 @@ public sealed class HrRiskTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     }
 
     [SqlFact]
+    public async Task Import_cannot_hire_over_staffing_and_staffing_audit_has_no_salaries()
+    {
+        var org = await host.CreateOrganizationAsync();
+        long dep, pos;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            dep = await s.Structure.CreateDepartmentAsync("Цех импорта", null);
+            pos = await s.Structure.CreatePositionAsync("Вязальщица импорта");
+        }
+
+        await using (var hr = host.Hr(org.OwnerUserId, org.OrganizationId))
+        {
+            await hr.Staffing.AddAsync(dep, pos, 1m, 41234m, 0m, new DateOnly(2026, 10, 1));
+        }
+
+        IReadOnlyList<IReadOnlyList<string>> rows =
+        [
+            ["И-1", "Первая", "Анна", "", "Цех импорта", "Вязальщица импорта", "01.10.2026"],
+            ["И-2", "Вторая", "Анна", "", "Цех импорта", "Вязальщица импорта", "01.10.2026"],
+        ];
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            var file = new MemoryStream(SqlTestHost.Spreadsheet.Write(
+                [new Application.Common.SheetData("Сотрудники", Application.Structure.EmployeeExchangeService.Columns, rows)]));
+            var plan = await s.EmployeeExchange.PreviewAsync(file);
+            Assert.Equal("hr.staffing.over", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.EmployeeExchange.ApplyAsync(plan.Rows))).Code);
+        }
+
+        await using var db = host.NewDb();
+        Assert.False(await db.Employees.AnyAsync(e => e.OrganizationId == org.OrganizationId)); // загрузка откатилась целиком
+        var audit = await db.AuditEntries.Where(a => a.OrganizationId == org.OrganizationId && a.Action == AuditActions.StaffingChanged).ToListAsync();
+        Assert.NotEmpty(audit);
+        Assert.All(audit, a => Assert.DoesNotContain("41234", (a.Before ?? "") + a.After + a.Reason));
+    }
+
+    [SqlFact]
+    public async Task Payroll_cannot_be_approved_after_timesheet_correction()
+    {
+        var org = await host.CreateOrganizationAsync();
+        var (dep, _, _) = await host.HireAsync(org, hiredOn: new DateOnly(2026, 11, 1));
+        var saved = host.Clock.UtcNow;
+        try
+        {
+            await using var hr = host.Hr(org.OwnerUserId, org.OrganizationId);
+            var ts = await hr.Timesheets.CreateAsync(dep, 2026, 12);
+            await hr.Timesheets.CloseAsync(ts, (await hr.Timesheets.GetAsync(dep, 2026, 12)).RowVersion!);
+            await hr.Payroll.CalculateAsync(2026, 12);
+            host.Clock.UtcNow = saved.AddMinutes(5);
+            await hr.Timesheets.CorrectAsync(ts); // исправительный табель после расчёта
+            Assert.Equal("hr.payroll.stale", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await hr.Payroll.ApproveAsync((await hr.Payroll.GetAsync(2026, 12)).Id!.Value, (await hr.Payroll.GetAsync(2026, 12)).RowVersion!))).Code);
+        }
+        finally
+        {
+            host.Clock.UtcNow = saved;
+        }
+    }
+
+    [SqlFact]
     public async Task Tag_and_discussion_constraints_reserve_ranges_for_all_modules()
     {
         // D202: 1–10 — общие объекты, 11–19 — производство, 20–29 — «Сотрудники»; модули не переписывают ограничение друг друга.

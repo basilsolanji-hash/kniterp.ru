@@ -2774,5 +2774,7 @@
   "Утвердить расчёт можно только по закрытым табелям: закройте табели и пересчитайте.": "Hisobni faqat yopilgan tabellar bo'yicha tasdiqlash mumkin: tabellarni yoping va qayta hisoblang.",
   "Утверждён расчёт заработка": "Ish haqi hisobi tasdiqlandi",
   "Цена, руб.": "Narx, rubl",
-  "шт": "dona"
+  "шт": "dona",
+  "История назначений": "Tayinlashlar tarixi",
+  "Табели месяца изменились после расчёта: пересчитайте и утвердите снова.": "Oy tabellari hisobdan keyin o'zgardi: qayta hisoblang va qayta tasdiqlang."
 }

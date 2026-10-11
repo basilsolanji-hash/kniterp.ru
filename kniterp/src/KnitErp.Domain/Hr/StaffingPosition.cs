@@ -72,5 +72,6 @@ public sealed class StaffingPosition
     /// <summary>Хватает ли ставок: занято + новая ≤ штат.</summary>
     public bool Fits(decimal occupied, decimal rate) => occupied + rate <= Rates;
 
-    private string Describe() => Rates == 0 ? string.Empty : $"{Rates:0.##} ст., оклад {Salary:0.##}, надбавка {Allowance:0.##}, с {ValidFrom:dd.MM.yyyy}";
+    /// <summary>Описание для журнала аудита — без сумм оклада и надбавки (их видят только с правом на заработок или приказы).</summary>
+    private string Describe() => Rates == 0 ? string.Empty : $"{Rates:0.##} ст., с {ValidFrom:dd.MM.yyyy}";
 }

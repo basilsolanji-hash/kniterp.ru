@@ -143,9 +143,10 @@ public sealed class EmployeeService(
         var employee = Employee.Hire(ctx.OrganizationId, cmd.PersonnelNumber, cmd.LastName, cmd.FirstName, cmd.MiddleName,
             cmd.DepartmentId, cmd.PositionId, cmd.HiredOn);
         await EnsureNumberFreeAsync(ctx, employee.PersonnelNumber, null, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await Hr.StaffingRules.LockAsync(db, ctx.OrganizationId, ct);
         await Hr.StaffingRules.EnsureVacancyAsync(db, ctx.OrganizationId, cmd.DepartmentId, cmd.PositionId, 1m, null, ct); // D203
         db.Employees.Add(employee);
-        await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.EmployeeHired, employee.Id, null, $"{employee.PersonnelNumber} {employee.FullName}", null);
         await db.SaveChangesAsync(ct);
@@ -158,8 +159,10 @@ public sealed class EmployeeService(
         var ctx = await guard.DemandAsync(Permissions.EmployeeEdit, ct);
         var employee = await LoadForEditAsync(ctx, id, rowVersion, ct);
         await RequireAssignableAsync(ctx, cmd.DepartmentId, cmd.PositionId, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
         if (cmd.DepartmentId != employee.DepartmentId || cmd.PositionId != employee.PositionId)
         {
+            await Hr.StaffingRules.LockAsync(db, ctx.OrganizationId, ct);
             await Hr.StaffingRules.EnsureVacancyAsync(db, ctx.OrganizationId, cmd.DepartmentId, cmd.PositionId, 1m, id, ct); // D203
         }
 
@@ -173,6 +176,7 @@ public sealed class EmployeeService(
         }
 
         await SaveAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     /// <summary>Дата рождения и согласие показывать день рождения коллегам (D83). Согласие даёт сам сотрудник — кадровик его отмечает.</summary>

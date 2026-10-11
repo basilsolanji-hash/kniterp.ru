@@ -202,6 +202,45 @@ public sealed class HrOrdersTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     }
 
     [SqlFact]
+    public async Task Employment_history_on_card_hides_salary_and_order_links_without_rights()
+    {
+        var org = await host.CreateOrganizationAsync();
+        var other = await host.CreateOrganizationAsync();
+        var (knitting, sewing, knitter, seamstress) = await StructureAsync(org);
+        long employeeId;
+        await using (var hr = host.Hr(org.OwnerUserId, org.OrganizationId))
+        {
+            employeeId = (await hr.Orders.GetAsync(await PostedAsync(hr, Hire("0601", knitting, knitter)))).Values.EmployeeId!.Value;
+            await PostedAsync(hr, new PersonnelOrderValues(PersonnelOrderKind.Transfer, OrderDay, OrderDay.AddDays(3), employeeId,
+                DepartmentId: sewing, PositionId: seamstress, Rate: 1m, Salary: 47000m));
+            var history = await hr.Orders.HistoryAsync(employeeId);
+            Assert.Equal([PersonnelOrderKind.Hire, PersonnelOrderKind.Transfer], history.Select(h => h.Kind));
+            Assert.Equal((45000m, 47000m), (history[0].Salary, history[1].Salary));
+            Assert.All(history, h => Assert.NotNull(h.OrderId));
+        }
+
+        var storekeeper = await host.InviteActiveAsync(org, SystemRoles.Storekeeper);
+        await using (var hr = host.Hr(storekeeper, org.OrganizationId))
+        {
+            var history = await hr.Orders.HistoryAsync(employeeId);
+            Assert.Equal(2, history.Count);
+            Assert.All(history, h => Assert.Null(h.Salary));
+            Assert.All(history, h => Assert.Null(h.OrderId));
+        }
+
+        var worker = await host.InviteActiveAsync(org, SystemRoles.Employee, employeeId: employeeId);
+        await using (var hr = host.Hr(worker, org.OrganizationId))
+        {
+            Assert.Equal(47000m, (await hr.Orders.HistoryAsync(employeeId))[1].Salary); // свой оклад сотрудник видит
+        }
+
+        await using (var hr = host.Hr(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => hr.Orders.HistoryAsync(employeeId));
+        }
+    }
+
+    [SqlFact]
     public async Task Existing_organizations_have_hr_officer_role()
     {
         var org = await host.CreateOrganizationAsync();

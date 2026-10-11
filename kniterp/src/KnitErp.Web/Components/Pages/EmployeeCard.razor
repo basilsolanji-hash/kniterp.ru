@@ -6,6 +6,7 @@
 @using KnitErp.Web.Components.Shared
 @inject EmployeeService Employees
 @inject PersonalDataService PersonalData
+@inject PersonnelOrderService Orders
 
 <PageTitle>@(_employee?.FullName ?? L("Сотрудник")) — knitERP</PageTitle>
 
@@ -67,6 +68,42 @@ else
     }
 
     <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.Employee" EntityId="e.Id" />
+
+    @if (_history is { Count: > 0 })
+    {
+        <h2>@L("История назначений")</h2>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Дата")</th><th>@L("Событие")</th><th>@L("Подразделение и должность")</th><th class="num opt">@L("Ставка")</th>
+                    @if (_history.Any(h => h.Salary is not null)) { <th class="num opt">@L("Оклад")</th> }</tr></thead>
+                <tbody>
+                    @foreach (var h in _history)
+                    {
+                        <tr>
+                            <td>@h.EffectiveFrom.ToString("dd.MM.yyyy")@(h.EffectiveTo is { } to ? " – " + to.ToString("dd.MM.yyyy") : "")</td>
+                            <td>
+                                @if (h.OrderId is { } oid)
+                                {
+                                    <a href="hr/orders/@oid">@L(h.KindName) № @h.OrderNumber</a>
+                                }
+                                else
+                                {
+                                    @L(h.KindName)
+                                }
+                                @if (h.Note is not null)
+                                {
+                                    <div class="muted">@h.Note</div>
+                                }
+                            </td>
+                            <td>@h.Department, @h.Position</td>
+                            <td class="num">@h.Rate.ToString("0.##")</td>
+                            @if (_history.Any(x => x.Salary is not null)) { <td class="num">@h.Salary?.ToString("N2")</td> }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 
     @if (_summary.CanViewPersonalData)
     {
@@ -164,6 +201,7 @@ else
     private EmployeeRowDto? _employee;
     private ConsentSummaryDto? _summary;
     private PersonalDataDto? _pd;
+    private IReadOnlyList<EmploymentRecordDto>? _history;
     private PersonalDataForm _form = new();
     private DateOnly? _consentGiven;
     private DateOnly? _consentUntil;
@@ -180,6 +218,7 @@ else
         {
             _employee = await Employees.GetAsync(Id);
             _summary = await PersonalData.SummaryAsync(Id);
+            _history = await Orders.HistoryAsync(Id);
         }
         catch (AccessDeniedException ex)
         {

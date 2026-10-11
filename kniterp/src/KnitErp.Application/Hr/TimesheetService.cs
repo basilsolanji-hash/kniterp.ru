@@ -371,9 +371,10 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
     }
 
     /// <summary>Дни последних версий табелей за период — для расчёта заработка; Closed — все ли версии закрыты.</summary>
-    internal async Task<(List<TimesheetDay> Days, bool Closed)> DaysAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct)
+    internal async Task<(List<TimesheetDay> Days, bool Closed)> DaysAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct,
+        DateTime? asOfUtc = null)
     {
-        var latest = await LatestVersionsAsync(organizationId, from, to, ct);
+        var latest = await LatestVersionsAsync(organizationId, from, to, ct, asOfUtc);
         var ids = latest.Select(t => t.Id).ToList();
         var days = await db.TimesheetDays.AsNoTracking().Where(d => ids.Contains(d.TimesheetId) && d.Date >= from && d.Date <= to).ToListAsync(ct);
         return (days, latest.Count > 0 && latest.All(t => t.Status == TimesheetStatus.Closed));
@@ -408,12 +409,22 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
         return result;
     }
 
-    private async Task<List<Timesheet>> LatestVersionsAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct)
+    /// <summary>Последние версии табелей за период: метка последнего изменения (создание или закрытие) — для проверки расчёта (D212).</summary>
+    internal async Task<(bool Closed, DateTime? ChangedAtUtc)> StateAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        var latest = await LatestVersionsAsync(organizationId, from, to, ct);
+        return (latest.Count > 0 && latest.All(t => t.Status == TimesheetStatus.Closed),
+            latest.Count == 0 ? null : latest.Max(t => t.ClosedAtUtc is { } c && c > t.CreatedAtUtc ? c : t.CreatedAtUtc));
+    }
+
+    /// <param name="asOfUtc">Версии, созданные не позже этого момента (для утверждённого расчёта); null — самые последние.</param>
+    private async Task<List<Timesheet>> LatestVersionsAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct, DateTime? asOfUtc = null)
     {
         var fromKey = from.Year * 12 + from.Month;
         var toKey = to.Year * 12 + to.Month;
         var all = await db.Timesheets.AsNoTracking()
-            .Where(t => t.OrganizationId == organizationId && t.Year * 12 + t.Month >= fromKey && t.Year * 12 + t.Month <= toKey).ToListAsync(ct);
+            .Where(t => t.OrganizationId == organizationId && t.Year * 12 + t.Month >= fromKey && t.Year * 12 + t.Month <= toKey
+                        && (asOfUtc == null || t.CreatedAtUtc <= asOfUtc)).ToListAsync(ct);
         return all.GroupBy(t => (t.DepartmentId, t.Year, t.Month)).Select(g => g.MaxBy(t => t.Version)!).ToList();
     }
 

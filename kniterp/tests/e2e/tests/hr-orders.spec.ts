@@ -44,6 +44,12 @@ test('штат на одну ставку: первый приказ о приё
     if (number.startsWith('P')) {
       await expect(page.getByRole('status')).toContainText('Приказ проведён');
       await expect(page.getByRole('link', { name: new RegExp(lastName) })).toBeVisible();
+      // Карточка сотрудника показывает историю назначений со ссылкой на приказ (D214).
+      await page.getByRole('link', { name: new RegExp(lastName) }).click();
+      await page.waitForURL(/\/employees\/\d+$/);
+      await page.waitForLoadState('networkidle');
+      await expect(page.getByRole('heading', { name: 'История назначений' })).toBeVisible();
+      await expect(page.getByRole('link', { name: /Приём на работу №/ })).toBeVisible();
     } else {
       await expect(page.getByRole('alert')).toContainText('Сверх штата');
     }

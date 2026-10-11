@@ -36,6 +36,14 @@ public sealed record PersonnelOrderPrintDto(
     string? FromDepartment, string? FromPosition, string? ToDepartment, string? ToPosition, decimal? Rate, decimal? Salary, byte? TrialMonths,
     LeaveKind? LeaveKind, int? LeaveDays, DismissalGround? Ground, DateOnly? HiredOn, string? Basis, string? DirectorName, string? DirectorPosition);
 
+/// <summary>Строка истории назначений для карточки сотрудника. Оклад — только тем, кто видит приказы или заработок.</summary>
+public sealed record EmploymentRecordDto(
+    long? OrderId, string? OrderNumber, PersonnelOrderKind Kind, DateOnly EffectiveFrom, DateOnly? EffectiveTo, string Department, string Position,
+    decimal Rate, decimal? Salary, string? Note)
+{
+    public string KindName => PersonnelOrder.KindName(Kind);
+}
+
 public sealed record PersonnelOrderFilter(PersonnelOrderKind? Kind = null, PersonnelOrderStatus? Status = null, long? EmployeeId = null);
 
 /// <summary>
@@ -77,6 +85,43 @@ public sealed class PersonnelOrderService(
                               : (e.MiddleName == null ? e.LastName + " " + e.FirstName : e.LastName + " " + e.FirstName + " " + e.MiddleName),
                           e == null ? o.PersonnelNumber : e.PersonnelNumber))
             .Take(500).ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// История назначений сотрудника (D214): видна тем, кто видит карточку (область подразделений или своя). Ссылка на приказ — только
+    /// с правом на приказы; оклад — с правом на приказы или заработок.
+    /// </summary>
+    public async Task<IReadOnlyList<EmploymentRecordDto>> HistoryAsync(long employeeId, CancellationToken ct = default)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        var employee = await db.Employees.AsNoTracking().SingleOrDefaultAsync(e => e.Id == employeeId && e.OrganizationId == ctx.OrganizationId, ct)
+                       ?? throw new NotFoundException("Сотрудник");
+        if (ctx.Permissions.Has(Permissions.EmployeeView))
+        {
+            var visible = await Structure.StructureScope.VisibleDepartmentsAsync(db, ctx, Permissions.EmployeeView, ct);
+            if (visible is not null && !visible.Contains(employee.DepartmentId))
+            {
+                throw new NotFoundException("Сотрудник");
+            }
+        }
+        else if (!(ctx.Permissions.HasOwnOnly(Permissions.EmployeeView) && employee.UserId == ctx.UserId))
+        {
+            throw new NotFoundException("Сотрудник");
+        }
+
+        var orders = ctx.Permissions.Has(Permissions.HrOrderCreate) || ctx.Permissions.Has(Permissions.HrOrderPost);
+        var salary = orders || ctx.Permissions.Has(Permissions.PayrollView)
+                     || (ctx.Permissions.HasOwnOnly(Permissions.PayrollView) && employee.UserId == ctx.UserId);
+        var rows = await (from h in db.EmploymentHistory.AsNoTracking()
+                          join d in db.Departments.AsNoTracking() on h.DepartmentId equals d.Id
+                          join p in db.Positions.AsNoTracking() on h.PositionId equals p.Id
+                          join o in db.PersonnelOrders.AsNoTracking() on h.OrderId equals o.Id into os
+                          from o in os.DefaultIfEmpty()
+                          where h.OrganizationId == ctx.OrganizationId && h.EmployeeId == employeeId
+                          orderby h.EffectiveFrom, h.Id
+                          select new { h, Department = d.Name, Position = p.Name, Number = o == null ? null : o.Number }).ToListAsync(ct);
+        return rows.Select(r => new EmploymentRecordDto(orders ? r.h.OrderId : null, r.Number, r.h.Kind, r.h.EffectiveFrom, r.h.EffectiveTo, r.Department,
+            r.Position, r.h.Rate, salary ? r.h.Salary : null, r.h.Note)).ToList();
     }
 
     public async Task<PersonnelOrderOptionsDto> OptionsAsync(CancellationToken ct = default)
