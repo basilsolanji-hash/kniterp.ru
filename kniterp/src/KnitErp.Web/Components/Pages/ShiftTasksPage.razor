@@ -68,6 +68,10 @@ else
                            Question='@L("Скопировать действующие задания {0} на {1}?", _board.Date.AddDays(-1).ToString("dd.MM.yyyy"), _board.Date.ToString("dd.MM.yyyy"))'>
                 @L("Повторить задания прошлого дня")
             </ConfirmButton>
+            <ConfirmButton Class="secondary" OnConfirm="CarryOverAsync" Disabled="@_busy"
+                           Question='@L("Перенести недовыполненный остаток заданий {0} на {1}?", _board.Date.AddDays(-1).ToString("dd.MM.yyyy"), _board.Date.ToString("dd.MM.yyyy"))'>
+                @L("Перенести недовыполненное")
+            </ConfirmButton>
         </p>
         <h2>@L("Назначить задание")</h2>
         <form class="inline-form" @onsubmit="AssignAsync">
@@ -82,7 +86,7 @@ else
                 </select>
             </label>
             <label>@L("Заказ")
-                <select @bind="_order" aria-label="@L("Заказ")">
+                <select @bind="_order" @bind:after="OrderChanged" aria-label="@L("Заказ")">
                     <option value="">@L("— выберите —")</option>
                     @foreach (var o in _board.Orders)
                     {
@@ -91,14 +95,24 @@ else
                 </select>
             </label>
             <label>@L("Этап")
-                <select @bind="_stage" aria-label="@L("Этап")">
-                    @foreach (var s in ProductionFlow.Stages)
+                <select @bind="_stage" @bind:after="StageChanged" aria-label="@L("Этап")">
+                    @if (SelectedOrder?.Stages is { } stages)
                     {
-                        <option value="@s">@L(ProductionFlow.StageName(s))</option>
+                        @foreach (var st in stages)
+                        {
+                            <option value="@st.Stage">@L(st.StageName) (@L("свободно {0} {1}", Quantities.Format(st.Available), st.UnitSymbol))</option>
+                        }
+                    }
+                    else
+                    {
+                        @foreach (var st in ProductionFlow.Stages)
+                        {
+                            <option value="@st">@L(ProductionFlow.StageName(st))</option>
+                        }
                     }
                 </select>
             </label>
-            <label>@L("План на смену") <input @bind="_plannedText" inputmode="decimal" size="6" aria-label="@L("План на смену")" /></label>
+            <label>@L("План на смену") <input @bind="_plannedText" @bind:event="oninput" inputmode="decimal" size="6" aria-label="@L("План на смену")" /></label>
             <label>@L("Комментарий") <input @bind="_comment" maxlength="300" aria-label="@L("Комментарий")" /></label>
             <button type="submit" disabled="@_busy">@L("Назначить")</button>
             </fieldset>
@@ -166,6 +180,33 @@ else
         _plannedText = string.Empty;
         _comment = null;
         return L("Задание назначено.");
+    });
+
+    private ShiftOrderOptionDto? SelectedOrder => long.TryParse(_order, out var id) ? _board?.Orders.FirstOrDefault(o => o.Id == id) : null;
+
+    /// <summary>D413: после выбора заказа — первый этап маршрута, где есть свободное количество, и план = свободно.</summary>
+    private void OrderChanged()
+    {
+        if (SelectedOrder?.Stages is { Count: > 0 } stages)
+        {
+            _stage = (stages.FirstOrDefault(st => st.Available > 0) ?? stages[0]).Stage;
+            StageChanged();
+        }
+    }
+
+    private void StageChanged()
+    {
+        var available = SelectedOrder?.Stages?.FirstOrDefault(st => st.Stage == _stage)?.Available ?? 0;
+        _plannedText = available > 0 ? Quantities.Format(available) : string.Empty;
+    }
+
+    /// <summary>D413: недовыполненный остаток вчерашних заданий — тем же сотрудникам, без пересчёта вручную.</summary>
+    private Task CarryOverAsync() => RunAsync(async () =>
+    {
+        var result = await Shifts.CopyAsync(_board!.Date.AddDays(-1), _board.Date, remainderOnly: true);
+        return result.Skipped == 0
+            ? L("Перенесено заданий: {0}.", result.Created)
+            : L("Перенесено заданий: {0}; пропущено: {1} (выполнено, сотрудник не работает, заказ не в работе или задание уже есть).", result.Created, result.Skipped);
     });
 
     /// <summary>Задания прошлого дня — на выбранную дату (D408): мастер меняет только то, что отличается.</summary>

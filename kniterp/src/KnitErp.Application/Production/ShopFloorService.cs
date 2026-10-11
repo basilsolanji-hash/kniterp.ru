@@ -23,7 +23,8 @@ public sealed record ShopOperationDto(
     long OrderId, string OrderNumber, string ItemCode, string ItemName, ProductionStage Stage, string Code,
     decimal OrderQuantity, decimal Done, decimal Available, decimal MyToday, string UnitSymbol, byte Precision, DateOnly? DueDate,
     DateOnly Today, string? EmployeeName, bool CanMark, ShopHint Hint,
-    IReadOnlyList<ProductionStage>? ReworkStages = null, IReadOnlyList<ShiftEmployeeOptionDto>? Culprits = null)
+    IReadOnlyList<ProductionStage>? ReworkStages = null, IReadOnlyList<ShiftEmployeeOptionDto>? Culprits = null,
+    decimal? MyTaskRemaining = null, IReadOnlyList<string>? DefectReasons = null, IReadOnlyList<string>? ReworkReasons = null)
 {
     public string StageName => ProductionFlow.StageName(Stage);
 
@@ -110,16 +111,23 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
 
         if (rework is not null && ctx.Permissions.Has(Permissions.ProductionDefectCulprit))
         {
-            culprits = (await db.Employees.AsNoTracking()
-                    .Where(e => e.OrganizationId == ctx.OrganizationId && e.Status == EmploymentStatus.Working)
-                    .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
-                    .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName, e.PersonnelNumber }).ToListAsync(ct))
-                .Select(e => new ShiftEmployeeOptionDto(e.Id, ShortName(e.LastName, e.FirstName, e.MiddleName), e.PersonnelNumber)).ToList();
+            culprits = await ProductionFloorService.CulpritOptionsAsync(db, ctx.OrganizationId, ops, ct);
+        }
+
+        // D413: остаток своего сменного задания на этот заказ и этап — кнопка «По заданию» вместо подсчёта в уме.
+        decimal? taskRemaining = null;
+        if (employee is not null && hint == ShopHint.None && stage != ProductionStage.QualityControl)
+        {
+            var left = (await ShiftTaskService.ListAsync(db, ctx.OrganizationId, today, employee.Id, ct))
+                .Where(t => !t.IsCancelled && t.OrderId == orderId && t.Stage == stage).Sum(t => Math.Max(0, t.Planned - t.Fact));
+            taskRemaining = left > 0 ? Math.Min(left, available) : null;
         }
 
         return new ShopOperationDto(order.Id, order.Number, item.Code, item.Name, stage, ShopFloorCode.Text(order.Id, stage),
             order.Quantity, flow.Done(stage), available, mine, item.Symbol, item.Precision, order.DueDate, today,
-            employee?.ShortName, hint == ShopHint.None, hint, rework, culprits);
+            employee?.ShortName, hint == ShopHint.None, hint, rework, culprits, taskRemaining,
+            rework is null ? null : await ProductionFloorService.FrequentReasonsAsync(db, ctx.OrganizationId, ProductionOperationKind.Defect, clock.UtcNow, ct),
+            rework is null ? null : await ProductionFloorService.FrequentReasonsAsync(db, ctx.OrganizationId, ProductionOperationKind.Rework, clock.UtcNow, ct));
     }
 
     /// <summary>Отметка «сделано» от имени своего сотрудника. Частично — меньше доступного; причина — из списка.</summary>
@@ -218,13 +226,11 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
                             orderby p.DueDate, p.Id
                             select new { Order = p, i.Name, u.Symbol })
             .Take(MaxTaskOrders).ToListAsync(ct);
-        var ids = orders.Select(o => o.Order.Id).ToList();
-        var ops = await ProductionSteps.SummedAsync(db, ctx.OrganizationId, ids, ct);
-        var released = await ReleasedAsync(ctx, ids, ct);
+        var flows = await FlowsAsync(db, ctx.OrganizationId, orders.Select(o => o.Order).ToList(), ct);
         var tasks = new List<ShopTaskDto>();
         foreach (var o in orders)
         {
-            var flow = new ProductionFlow(o.Order.Quantity, ops[o.Order.Id], released.GetValueOrDefault(o.Order.Id), o.Order.RouteValue);
+            var flow = flows[o.Order.Id];
             tasks.AddRange(flow.Route.Stages.Where(s => flow.Available(s) > 0)
                 .Select(s => new ShopTaskDto(o.Order.Id, o.Order.Number, o.Name, s, flow.Available(s), o.Symbol, o.Order.DueDate)));
         }
@@ -300,9 +306,10 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
 
     private static DateTime Local(DateTime utc, TimeZoneInfo zone) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), zone);
 
-    private async Task<Dictionary<long, decimal>> ReleasedAsync(AccessContext ctx, List<long> ids, CancellationToken ct) =>
+    /// <summary>Выпущено по каждому заказу (проведённые документы выпуска) — для потока многих заказов одним запросом.</summary>
+    internal static async Task<Dictionary<long, decimal>> ReleasedAsync(IKnitErpDbContext db, long organizationId, List<long> ids, CancellationToken ct) =>
         await (from link in db.ProductionOrderDocuments.AsNoTracking()
-               where link.OrganizationId == ctx.OrganizationId && ids.Contains(link.ProductionOrderId) && link.Purpose == ProductionDocumentPurpose.Output
+               where link.OrganizationId == organizationId && ids.Contains(link.ProductionOrderId) && link.Purpose == ProductionDocumentPurpose.Output
                join d in db.StockDocuments.AsNoTracking() on link.StockDocumentId equals d.Id
                where d.Status == KnitErp.Domain.Warehousing.StockDocumentStatus.Posted
                join p in db.ProductionOrders.AsNoTracking() on link.ProductionOrderId equals p.Id
@@ -310,4 +317,14 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
                where l.ItemId == p.ItemId
                group l.Quantity by link.ProductionOrderId into g
                select new { g.Key, Sum = g.Sum() }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+
+    /// <summary>Поток этапов многих заказов: суммы отметок из SQL и выпущенное — без загрузки истории.</summary>
+    internal static async Task<Dictionary<long, ProductionFlow>> FlowsAsync(IKnitErpDbContext db, long organizationId,
+        IReadOnlyCollection<ProductionOrder> orders, CancellationToken ct)
+    {
+        var ids = orders.Select(o => o.Id).ToList();
+        var ops = await ProductionSteps.SummedAsync(db, organizationId, ids, ct);
+        var released = await ReleasedAsync(db, organizationId, ids, ct);
+        return orders.ToDictionary(o => o.Id, o => new ProductionFlow(o.Quantity, ops[o.Id], released.GetValueOrDefault(o.Id), o.RouteValue));
+    }
 }

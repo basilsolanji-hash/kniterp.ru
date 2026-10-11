@@ -21,9 +21,16 @@ public sealed record ShiftTaskDto(
     public bool Done => Fact >= Planned;
 }
 
-public sealed record ShiftEmployeeOptionDto(long Id, string Name, string PersonnelNumber);
+/// <summary>Сотрудник для выбора; WorkedOnOrder — отмечал работу по этому заказу (в списке виновника брака — первым, D413).</summary>
+public sealed record ShiftEmployeeOptionDto(long Id, string Name, string PersonnelNumber, bool WorkedOnOrder = false);
 
-public sealed record ShiftOrderOptionDto(long Id, string Number, string ItemName);
+/// <summary>Заказ для назначения: этапы маршрута со свободным количеством — план подставляется сам (D413).</summary>
+public sealed record ShiftOrderOptionDto(long Id, string Number, string ItemName, IReadOnlyList<ShiftStageOptionDto>? Stages = null);
+
+public sealed record ShiftStageOptionDto(ProductionStage Stage, decimal Available, string UnitSymbol)
+{
+    public string StageName => ProductionFlow.StageName(Stage);
+}
 
 /// <summary>Сменные задания на дату для мастера: задания с фактом, кого и на какие заказы можно назначить.</summary>
 public sealed record ShiftBoardDto(
@@ -58,12 +65,16 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
                     .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
                     .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName, e.PersonnelNumber }).ToListAsync(ct))
                 .Select(e => new ShiftEmployeeOptionDto(e.Id, ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName), e.PersonnelNumber)).ToList();
-            orders = await (from p in db.ProductionOrders.AsNoTracking()
-                            where p.OrganizationId == ctx.OrganizationId
-                                  && (p.Status == ProductionOrderStatus.Released || p.Status == ProductionOrderStatus.PartiallyDone)
-                            join i in db.Items.AsNoTracking() on p.ItemId equals i.Id
-                            orderby p.DueDate, p.Id
-                            select new ShiftOrderOptionDto(p.Id, p.Number, i.Name)).Take(ShopFloorService.MaxTaskOrders).ToListAsync(ct);
+            var inWork = await (from p in db.ProductionOrders.AsNoTracking()
+                                where p.OrganizationId == ctx.OrganizationId
+                                      && (p.Status == ProductionOrderStatus.Released || p.Status == ProductionOrderStatus.PartiallyDone)
+                                join i in db.Items.AsNoTracking() on p.ItemId equals i.Id
+                                join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
+                                orderby p.DueDate, p.Id
+                                select new { Order = p, i.Name, u.Symbol }).Take(ShopFloorService.MaxTaskOrders).ToListAsync(ct);
+            var flows = await ShopFloorService.FlowsAsync(db, ctx.OrganizationId, inWork.Select(o => o.Order).ToList(), ct);
+            orders = inWork.Select(o => new ShiftOrderOptionDto(o.Order.Id, o.Order.Number, o.Name,
+                flows[o.Order.Id].Route.Stages.Select(st => new ShiftStageOptionDto(st, flows[o.Order.Id].Available(st), o.Symbol)).ToList())).ToList();
         }
 
         return new ShiftBoardDto(day, today, tasks, canAssign, employees, orders);
@@ -126,7 +137,11 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
     /// с тем же количеством и комментарием. Пропускаются сотрудники, которые не работают, заказы не в работе, этапы вне маршрута
     /// и задания, которые на новую дату уже есть. Всё — одной транзакцией под блокировкой организации и даты.
     /// </summary>
-    public async Task<ShiftCopyResult> CopyAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
+    /// <summary>
+    /// Копия заданий дня <paramref name="from"/> на <paramref name="to"/>. <paramref name="remainderOnly"/> — перенос недовыполненного (D413):
+    /// план = план − факт исходного задания; выполненные задания не переносятся (считаются пропущенными).
+    /// </summary>
+    public async Task<ShiftCopyResult> CopyAsync(DateOnly from, DateOnly to, CancellationToken ct = default, bool remainderOnly = false)
     {
         var ctx = await guard.DemandAsync(Permissions.ProductionOrderEdit, ct);
         var today = await ShopFloorService.TodayAsync(db, ctx, clock, ct);
@@ -158,25 +173,30 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
                         && (o.Status == ProductionOrderStatus.Released || o.Status == ProductionOrderStatus.PartiallyDone))
             .ToDictionaryAsync(o => o.Id, o => o.Route, ct);
 
+        var facts = remainderOnly
+            ? (await ListAsync(db, ctx.OrganizationId, from, null, ct)).ToDictionary(t => t.Id, t => t.Fact)
+            : [];
         var created = new List<ShiftTask>();
         var skipped = 0;
         foreach (var t in source)
         {
-            if (!working.Contains(t.EmployeeId) || !routes.TryGetValue(t.ProductionOrderId, out var route)
+            var planned = remainderOnly ? t.PlannedQuantity - facts.GetValueOrDefault(t.Id) : t.PlannedQuantity;
+            if (planned <= 0 || !working.Contains(t.EmployeeId) || !routes.TryGetValue(t.ProductionOrderId, out var route)
                 || !ProductionRoute.From(route).Contains(t.Stage) || !existing.Add((t.EmployeeId, t.ProductionOrderId, t.Stage)))
             {
                 skipped++;
                 continue;
             }
 
-            created.Add(ShiftTask.Create(ctx.OrganizationId, to, t.EmployeeId, t.ProductionOrderId, t.Stage, t.PlannedQuantity, t.Comment, ctx.UserId, clock.UtcNow));
+            created.Add(ShiftTask.Create(ctx.OrganizationId, to, t.EmployeeId, t.ProductionOrderId, t.Stage, planned, t.Comment, ctx.UserId, clock.UtcNow));
         }
 
         db.ShiftTasks.AddRange(created);
         await db.SaveChangesAsync(ct);
         foreach (var task in created)
         {
-            Audit(ctx, AuditActions.ProductionShiftTaskAssigned, task, null, $"{to:dd.MM.yyyy}: копия задания смены {from:dd.MM.yyyy}");
+            Audit(ctx, AuditActions.ProductionShiftTaskAssigned, task, null,
+                $"{to:dd.MM.yyyy}: {(remainderOnly ? "перенос недовыполненного" : "копия задания")} смены {from:dd.MM.yyyy}");
         }
 
         await db.SaveChangesAsync(ct);

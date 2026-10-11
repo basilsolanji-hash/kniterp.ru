@@ -34,9 +34,11 @@
     @if (_progress.CanMark)
     {
         <form class="inline-form" @onsubmit="RecordAsync">
+            @* Количество подставляется сразу (D413): до подключения Blazor ввод не принимается, иначе набранное заменится подставленным. *@
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
             <label>
                 @L("Этап")
-                <select @bind="_stage" aria-label="@L("Этап")">
+                <select @bind="_stage" aria-label="@L("Этап")" @bind:after="StageChanged">
                     @foreach (var s in _progress.Stages.Select(x => x.Stage))
                     {
                         <option value="@s">@L(ProductionFlow.StageName(s))</option>
@@ -45,14 +47,14 @@
             </label>
             <label>
                 @L("Отметка")
-                <select @bind="_kind" aria-label="@L("Отметка")">
+                <select @bind="_kind" @bind:after="KindChanged" aria-label="@L("Отметка")">
                     @foreach (var k in KindsFor(_stage))
                     {
                         <option value="@k">@L(ProductionFlow.KindName(k))</option>
                     }
                 </select>
             </label>
-            <label>@L("Количество") <input @bind="_quantityText" inputmode="decimal" size="8" aria-label="@L("Количество")" /></label>
+            <label>@L("Количество") <input @bind="_quantityText" @bind:event="oninput" inputmode="decimal" size="8" aria-label="@L("Количество")" /></label>
             @if (_kind == ProductionOperationKind.Rework)
             {
                 <label>
@@ -71,17 +73,33 @@
                     @L("Виновник брака")
                     <select @bind="_culprit" aria-label="@L("Виновник брака")">
                         <option value="">@L("— не указан —")</option>
-                        @foreach (var e in people)
+                        @foreach (var group in people.GroupBy(x => x.WorkedOnOrder).OrderByDescending(g => g.Key))
                         {
-                            <option value="@e.Id">@e.Name (@e.PersonnelNumber)</option>
+                            <optgroup label="@(group.Key ? L("Работали по заказу") : L("Остальные сотрудники"))">
+                                @foreach (var e in group)
+                                {
+                                    <option value="@e.Id">@e.Name (@e.PersonnelNumber)</option>
+                                }
+                            </optgroup>
                         }
                     </select>
                 </label>
             }
             <label>@(_kind is ProductionOperationKind.Correction or ProductionOperationKind.Defect ? L("Причина") : L("Комментарий"))
-                <input @bind="_reason" maxlength="@ProductionOperation.ReasonMaxLength" size="24" aria-label="@L("Причина или комментарий")" /></label>
+                <input @bind="_reason" maxlength="@ProductionOperation.ReasonMaxLength" size="24" aria-label="@L("Причина или комментарий")"
+                       list="@(ReasonHints is { Count: > 0 } ? $"stage-reasons-{OrderId}" : null)" /></label>
+            @if (ReasonHints is { Count: > 0 } hints)
+            {
+                <datalist id="stage-reasons-@OrderId">
+                    @foreach (var h in hints)
+                    {
+                        <option value="@h"></option>
+                    }
+                </datalist>
+            }
             <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата")" /></label>
             <button type="submit" disabled="@_busy">@L("Отметить")</button>
+            </fieldset>
         </form>
         <p class="muted">@L("Исправление уменьшает сделанное на этапе — укажите, на сколько. Переделка возвращает изделия на выбранный этап, брак списывается с причиной.")</p>
     }
@@ -152,6 +170,58 @@
     public EventCallback OnChanged { get; set; }
 
     private ProductionProgressDto? _progress => Progress;
+    private ProductionProgressDto? _prefilledFor;
+
+    private IReadOnlyList<string>? ReasonHints => _kind switch
+    {
+        ProductionOperationKind.Defect => _progress?.DefectReasons,
+        ProductionOperationKind.Rework => _progress?.ReworkReasons,
+        _ => null,
+    };
+
+    /// <summary>
+    /// D413: после загрузки и после каждой отметки — этап, где есть что отмечать (текущий, если на нём ещё есть), и количество «сколько можно».
+    /// Набранное пользователем не затирается: подстановка — только в пустое поле и только для «Сделано».
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (_progress is null || ReferenceEquals(_progress, _prefilledFor))
+        {
+            return;
+        }
+
+        _prefilledFor = _progress;
+        if (_quantityText.Length > 0 || _kind != ProductionOperationKind.Done)
+        {
+            return;
+        }
+
+        var current = _progress.Stages.FirstOrDefault(x => x.Stage == _stage);
+        if (current is null || current.Available <= 0)
+        {
+            _stage = (_progress.Stages.FirstOrDefault(x => x.Available > 0) ?? current ?? _progress.Stages.FirstOrDefault())?.Stage ?? _stage;
+        }
+
+        Prefill();
+    }
+
+    private void StageChanged()
+    {
+        if (!KindsFor(_stage).Contains(_kind))
+        {
+            _kind = ProductionOperationKind.Done;
+        }
+
+        Prefill();
+    }
+
+    private void KindChanged() => Prefill();
+
+    private void Prefill()
+    {
+        var available = _progress?.Stages.FirstOrDefault(x => x.Stage == _stage)?.Available ?? 0;
+        _quantityText = _kind == ProductionOperationKind.Done && available > 0 ? Quantities.Format(available) : string.Empty;
+    }
     private bool _busy;
     private string? _message;
     private bool _messageIsError;
