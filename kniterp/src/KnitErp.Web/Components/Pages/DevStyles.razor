@@ -1,0 +1,32 @@
+@*
+    Стили модуля «Разработка» (D706): доска по стадиям и карточка модели. Компактно (D114); на телефоне 390 px — без горизонтальной
+    прокрутки страницы: колонки доски идут одна под другой, вкладки карточки переносятся на новую строку.
+*@
+<style>
+    .dev-switch { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+    .dev-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; }
+    .dev-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-width: 0; }
+    .dev-col h2 { font-size: 13px; margin: 0 0 6px; display: flex; justify-content: space-between; gap: 6px; }
+    .dev-col ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .dev-cardlet { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--surface); overflow-wrap: anywhere; }
+    .dev-cardlet a { font-weight: 600; text-decoration: none; }
+    .dev-cardlet .meta { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 8px; }
+    .dev-cardlet.late { border-left: 3px solid var(--bad-text); }
+    .dev-tabs { flex-wrap: wrap; }
+    .dev-stage-path { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 10px; padding: 0; list-style: none; font-size: 12px; }
+    .dev-stage-path li { padding: 2px 8px; border-radius: 999px; background: var(--line); color: var(--text-2); }
+    .dev-stage-path li.done { background: var(--ok-bg); color: var(--ok-text); }
+    .dev-stage-path li.current { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+    .dev-stage-path li.off { opacity: .45; text-decoration: line-through; }
+    .dev-files { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+    .dev-files li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; overflow-wrap: anywhere; }
+    .dev-thumb { max-width: 160px; max-height: 120px; border-radius: 6px; border: 1px solid var(--line); display: block; }
+    .dev-tasks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    .dev-tasks li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+    .dev-tasks li.now { border-left: 3px solid var(--accent); }
+    .dev-placeholder { color: var(--muted); }
+    .late-text { color: var(--bad-text); }
+    @@media (max-width: 899px) {
+        .dev-board { grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
+    }
+</style>

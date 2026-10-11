@@ -147,6 +147,13 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
     DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings { get; }
 
+    // Модуль «Разработка» (D700–D799).
+    DbSet<KnitErp.Domain.Development.DevModel> DevModels { get; }
+    DbSet<KnitErp.Domain.Development.DevModelStageEntry> DevModelStages { get; }
+    DbSet<KnitErp.Domain.Development.DevStageSetting> DevStageSettings { get; }
+    DbSet<KnitErp.Domain.Development.DevFile> DevFiles { get; }
+    DbSet<KnitErp.Domain.Development.DevLookup> DevLookups { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);

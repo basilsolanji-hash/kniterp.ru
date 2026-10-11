@@ -33,6 +33,11 @@ public enum TaggedEntity : byte
     ProductionOrder = 11,
     // 11–19 — производство и другие модули; 20–29 — модуль «Сотрудники» (D202).
     Employee = 20,
+
+    // 40–49 — модуль «Разработка» (D700).
+    DevModel = 40,
+    DevSample = 41,
+    DevPattern = 42,
 }
 
 public static class TagColors
@@ -79,6 +84,9 @@ public static class TagColors
         TaggedEntity.ExpenseReport => "Авансовые отчёты",
         TaggedEntity.ProductionOrder => "Производственные заказы",
         TaggedEntity.Employee => "Сотрудники",
+        TaggedEntity.DevModel => "Модели в разработке",
+        TaggedEntity.DevSample => "Образцы",
+        TaggedEntity.DevPattern => "Рисунки",
         _ => entity.ToString(),
     };
 }

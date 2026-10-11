@@ -121,6 +121,13 @@ public static class ObjectDirectory
                         e.Position, $"employees/{e.Id}")).ToList();
             }
 
+            case TaggedEntity.DevModel when has(Permissions.DevView):
+                // D700: номер, название и стадия модели — без себестоимости и цены.
+                return (await db.DevModels.AsNoTracking().Where(m => m.OrganizationId == org && ids.Contains(m.Id))
+                        .Select(m => new { m.Id, m.Number, m.Name, m.Stage }).ToListAsync(ct))
+                    .Select(m => new TaggedObjectDto(entity, m.Id, $"{m.Number} — {m.Name}", KnitErp.Domain.Development.DevStages.Name(m.Stage),
+                        $"dev/models/{m.Id}")).ToList();
+
             default:
                 return [];
         }
