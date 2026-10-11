@@ -230,7 +230,7 @@ public sealed class StockDocumentService(
     public async Task<IReadOnlyList<EntryItemDto>> ListItemsForEntryAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
-        return await StockEntry.ActiveItems(db, ctx.OrganizationId).ToListAsync(ct);
+        return await StockEntry.ActiveItems(db, ctx.OrganizationId, stockedOnly: true).ToListAsync(ct);
     }
 
     public async Task<long> CreateAsync(StockOperationKind kind, StockDocumentHeader header, CancellationToken ct = default)
@@ -269,6 +269,8 @@ public sealed class StockDocumentService(
             StockEntry.EnsurePrecision(items.GetValueOrDefault(itemId) ?? throw new NotFoundException("Номенклатура"), quantity);
         }
 
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, ids, ct); // D300 (сессия 4)
+
         await using var tx = await db.BeginTransactionAsync(ct);
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, StockDocument.NumberPrefix(kind), ct);
         var doc = StockDocument.Create(ctx.OrganizationId, number, kind, header, ctx.UserId, clock.UtcNow);
@@ -301,6 +303,7 @@ public sealed class StockDocumentService(
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
         var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, [itemId], ct); // D300 (сессия 4)
         StockEntry.EnsurePrecision(item, quantity);
         var before = doc.Lines.FirstOrDefault(l => l.ItemId == itemId)?.Quantity;
         doc.SetLine(itemId, quantity);
@@ -385,6 +388,7 @@ public sealed class StockDocumentService(
             throw new BusinessRuleException("stock.document.archived_item", $"Позиции в архиве: {string.Join(", ", archived.Take(10))}.");
         }
 
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
         var requiresComment = doc.ReasonId is { } rid
                               && await db.OperationReasons.AsNoTracking().Where(r => r.Id == rid).Select(r => r.RequiresComment).SingleAsync(ct);
         // Аудит 10.10.2026 (п. 2): проверка лимита возврата и проведение — под блокировкой заказа до конца транзакции,

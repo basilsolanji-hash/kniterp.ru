@@ -49,13 +49,14 @@ public sealed record SalesOrderRowDto(
 /// </summary>
 public sealed record SalesOrderLineDto(
     long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Price, decimal? VatPercent,
-    decimal? Amount, decimal? VatAmount, decimal Shipped, decimal Returned, decimal DiscountPercent = 0, decimal Stock = 0, decimal ReservedByOthers = 0)
+    decimal? Amount, decimal? VatAmount, decimal Shipped, decimal Returned, decimal DiscountPercent = 0, decimal Stock = 0, decimal ReservedByOthers = 0,
+    bool Stocked = true)
 {
     public decimal Left => Math.Max(0, Quantity - Shipped + Returned);
     public decimal Available => Stock - ReservedByOthers;
 
-    /// <summary>Не хватает для отгрузки оставшегося — подсветка в строке.</summary>
-    public bool Short => Left > 0 && Available < Left;
+    /// <summary>Не хватает для отгрузки оставшегося — подсветка в строке. Услуга (D300) со склада не отгружается — ей не «не хватает».</summary>
+    public bool Short => Stocked && Left > 0 && Available < Left;
 }
 
 public sealed record SalesLinkedDocumentDto(long Id, string Number, StockOperationKind Kind, DateOnly Date, StockDocumentStatus Status)
@@ -244,13 +245,15 @@ public sealed class SalesService(
             .Where(m => m.OrganizationId == ctx.OrganizationId && m.WarehouseId == order.WarehouseId && itemIds.Contains(m.ItemId))
             .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
         var reservedByOthers = await Reservations.ByWarehouseItemAsync(db, ctx.OrganizationId, [order.WarehouseId], itemIds, order.Id, ct);
+        var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
         var lines = order.Lines.Select(l =>
         {
             var item = items[l.ItemId];
             return new SalesOrderLineDto(l.ItemId, item.Code, item.Name, item.Symbol, item.Precision, l.Quantity,
                 prices ? l.Price : null, l.VatPercent, prices ? l.Amount : null, prices ? l.VatAmount : null,
                 Moved(l.ItemId, StockOperationKind.Shipment), Moved(l.ItemId, StockOperationKind.CustomerReturn),
-                l.DiscountPercent, stock.GetValueOrDefault(l.ItemId), reservedByOthers.GetValueOrDefault((order.WarehouseId, l.ItemId)));
+                l.DiscountPercent, stock.GetValueOrDefault(l.ItemId), reservedByOthers.GetValueOrDefault((order.WarehouseId, l.ItemId)),
+                !services.Contains(l.ItemId));
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);
@@ -584,10 +587,15 @@ public sealed class SalesService(
         var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
         var order = await LoadOrderAsync(ctx, orderId, ct);
         var moved = await MovedAsync(ctx, [orderId], ct);
-        var lines = order.Lines.Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
+        // D300 (сессия 4): строки-услуги со склада не отгружаются — они закрываются актом или УПД.
+        var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
+        var lines = order.Lines.Where(l => !services.Contains(l.ItemId))
+            .Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
         if (lines.Count == 0)
         {
-            throw new BusinessRuleException("sales.order.shipped", "По заказу всё уже отгружено.");
+            throw services.Count == order.Lines.Count
+                ? new BusinessRuleException("sales.order.services_only", "В заказе только услуги — со склада отгружать нечего, они закрываются актом или УПД.")
+                : new BusinessRuleException("sales.order.shipped", "По заказу всё уже отгружено.");
         }
 
         var reason = await DefaultReasonAsync(ctx, StockOperationKind.Shipment, "Продажа покупателю", ct);
@@ -602,7 +610,9 @@ public sealed class SalesService(
         var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
         var order = await LoadOrderAsync(ctx, orderId, ct);
         var moved = await MovedAsync(ctx, [orderId], ct);
-        var lines = order.Lines.Select(l => (l.ItemId, Quantity: Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
+        var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct); // D300 (сессия 4)
+        var lines = order.Lines.Where(l => !services.Contains(l.ItemId))
+            .Select(l => (l.ItemId, Quantity: Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
         if (lines.Count == 0)
         {
             throw new BusinessRuleException("sales.order.nothing_shipped", "По заказу ещё ничего не отгружено — возвращать нечего.");

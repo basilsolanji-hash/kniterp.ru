@@ -685,14 +685,20 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("items", "kniterp", t =>
                         {
+                            t.HasTrigger("tr_items_service_without_stock");
+
                             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");
 
                             t.HasCheckConstraint("ck_items_parent", "[ParentItemId] IS NULL OR [ParentItemId] <> [Id]");
 
-                            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9)");
+                            t.HasCheckConstraint("ck_items_service", "[Type] <> 10 OR ([VatRateId] IS NOT NULL AND [WeightKg] IS NULL AND [VolumeM3] IS NULL AND [MinStock] IS NULL AND [ParentItemId] IS NULL)");
+
+                            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9, 10)");
 
                             t.HasCheckConstraint("ck_items_variant", "([ParentItemId] IS NULL AND [VariantKey] IS NULL) OR ([ParentItemId] IS NOT NULL AND [VariantKey] IS NOT NULL)");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.ItemBarcode", b =>
@@ -4036,8 +4042,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("stock_batches", "kniterp", t =>
                         {
+                            t.HasTrigger("tr_stock_batches_stocked_items");
+
                             t.HasCheckConstraint("ck_stock_batches_package_weight", "[PackageWeightKg] IS NULL OR [PackageWeightKg] > 0");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Warehousing.StockBatchMovement", b =>
@@ -4374,6 +4384,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasTrigger("tr_stock_movements_closed_period");
 
                             t.HasTrigger("tr_stock_movements_immutable");
+
+                            t.HasTrigger("tr_stock_movements_stocked_items");
 
                             t.HasCheckConstraint("ck_stock_movements_quantity", "[Quantity] <> 0");
 

@@ -124,7 +124,7 @@ public sealed class InventoryService(
     public async Task<IReadOnlyList<EntryItemDto>> ListItemsForEntryAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
-        return await StockEntry.ActiveItems(db, ctx.OrganizationId).ToListAsync(ct);
+        return await StockEntry.ActiveItems(db, ctx.OrganizationId, stockedOnly: true).ToListAsync(ct);
     }
 
     /// <summary>Новая инвентаризация сразу заполняется по учёту — кладовщику остаётся внести факт.</summary>
@@ -178,6 +178,7 @@ public sealed class InventoryService(
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
         var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct);
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, [itemId], ct); // D300 (сессия 4)
         var existing = doc.Lines.FirstOrDefault(l => l.ItemId == itemId);
         if (item is null && existing is null)
         {
@@ -278,6 +279,7 @@ public sealed class InventoryService(
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.CountDate, ct);
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, doc.Lines.Select(l => l.ItemId), ct); // D300 (сессия 4)
         await db.LockWarehousesAsync([doc.WarehouseId], ct);
         var book = await BookAsync(ctx.OrganizationId, doc.WarehouseId, null, ct);
         var batchMoves = await StockBatchLedger.PlanInventoryAsync(db, ctx, doc, book, ct);

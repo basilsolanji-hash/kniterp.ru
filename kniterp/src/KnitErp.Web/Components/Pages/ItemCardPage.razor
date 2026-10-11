@@ -50,8 +50,16 @@ else
         <dt>@L("Код")</dt><dd>@_item.Code</dd>
         <dt>@L("Группа")</dt><dd>@(_item.GroupPath ?? L("без группы"))</dd>
         <dt>@L("Единица")</dt><dd>@_item.UnitSymbol</dd>
-        <dt>@L("Остаток на всех складах")</dt><dd>@Quantities.Format(_item.Stock) @_item.UnitSymbol
-            @if (_item.Details.MinStock is { } min && _item.Stock < min) { <span class="tag bad">@L("ниже неснижаемого {0}", Quantities.Format(min))</span> }</dd>
+        @if (_item.IsStocked)
+        {
+            <dt>@L("Остаток на всех складах")</dt><dd>@Quantities.Format(_item.Stock) @_item.UnitSymbol
+                @if (_item.Details.MinStock is { } min && _item.Stock < min) { <span class="tag bad">@L("ниже неснижаемого {0}", Quantities.Format(min))</span> }</dd>
+        }
+        else
+        {
+            <dt>@L("Склад")</dt><dd>@L("не хранится на складе: продаётся и покупается, закрывается актом или УПД")</dd>
+        }
+        <dt>@L("Предмет расчёта (чек)")</dt><dd>@(_item.IsStocked ? L("товар") : L("услуга"))</dd>
         @if (_item.Description is not null)
         {
             <dt>@L("Описание")</dt><dd>@_item.Description</dd>
@@ -75,21 +83,24 @@ else
                     </select>
                 </label>
                 <label>@L("Артикул") <input @bind="_form.Article" maxlength="@ItemDetailRules.ArticleMaxLength" disabled="@(!editable)" /></label>
-                <label>@L("Страна происхождения (код ОКСМ)")
-                    <input @bind="_form.Country" list="countries" maxlength="3" inputmode="numeric" placeholder="643" disabled="@(!editable)" />
-                    <datalist id="countries">
-                        @foreach (var c in ItemDetailRules.CommonCountries)
-                        {
-                            <option value="@c.Code">@c.Name</option>
-                        }
-                    </datalist>
-                </label>
-                <label>@L("Страна — краткое наименование") <input @bind="_form.CountryName" maxlength="@ItemDetailRules.CountryNameMaxLength" placeholder="@L("подставится по коду")" disabled="@(!editable)" /></label>
-                <label>@L("Номер декларации на товары") <input @bind="_form.Declaration" maxlength="@ItemDetailRules.DeclarationMaxLength" placeholder="10702010/101026/0012345" disabled="@(!editable)" /></label>
-                <label>@L("Код ТН ВЭД ЕАЭС") <input @bind="_form.TnVed" maxlength="13" inputmode="numeric" disabled="@(!editable)" /></label>
-                <label>@L("Вес, кг (на единицу)") <input @bind="_form.Weight" inputmode="decimal" disabled="@(!editable)" /></label>
-                <label>@L("Объём, м³ (на единицу)") <input @bind="_form.Volume" inputmode="decimal" disabled="@(!editable)" /></label>
-                <label>@L("Неснижаемый остаток") <input @bind="_form.MinStock" inputmode="decimal" disabled="@(!editable)" /></label>
+                @if (_item.IsStocked)
+                {
+                    <label>@L("Страна происхождения (код ОКСМ)")
+                        <input @bind="_form.Country" list="countries" maxlength="3" inputmode="numeric" placeholder="643" disabled="@(!editable)" />
+                        <datalist id="countries">
+                            @foreach (var c in ItemDetailRules.CommonCountries)
+                            {
+                                <option value="@c.Code">@c.Name</option>
+                            }
+                        </datalist>
+                    </label>
+                    <label>@L("Страна — краткое наименование") <input @bind="_form.CountryName" maxlength="@ItemDetailRules.CountryNameMaxLength" placeholder="@L("подставится по коду")" disabled="@(!editable)" /></label>
+                    <label>@L("Номер декларации на товары") <input @bind="_form.Declaration" maxlength="@ItemDetailRules.DeclarationMaxLength" placeholder="10702010/101026/0012345" disabled="@(!editable)" /></label>
+                    <label>@L("Код ТН ВЭД ЕАЭС") <input @bind="_form.TnVed" maxlength="13" inputmode="numeric" disabled="@(!editable)" /></label>
+                    <label>@L("Вес, кг (на единицу)") <input @bind="_form.Weight" inputmode="decimal" disabled="@(!editable)" /></label>
+                    <label>@L("Объём, м³ (на единицу)") <input @bind="_form.Volume" inputmode="decimal" disabled="@(!editable)" /></label>
+                    <label>@L("Неснижаемый остаток") <input @bind="_form.MinStock" inputmode="decimal" disabled="@(!editable)" /></label>
+                }
                 @if (_item.CanSeePrices)
                 {
                     <label>@L("Закупочная цена, без НДС") <input @bind="_form.PurchasePrice" inputmode="decimal" disabled="@(!editable)" /></label>
@@ -182,7 +193,7 @@ else
                 @L("Тип")
                 <select @bind="_barcodeType">
                     <option value="">@L("определить по коду")</option>
-                    @foreach (var t in Enum.GetValues<BarcodeType>())
+                    @foreach (var t in Enum.GetValues<BarcodeType>().Where(t => _item.IsStocked || t != BarcodeType.Gtin))
                     {
                         <option value="@t">@ItemBarcode.TypeName(t)</option>
                     }
@@ -266,7 +277,7 @@ else
         </form>
     }
 
-    @if (_variants is { Parent: null } variants)
+    @if (_variants is { Parent: null } variants && _item.IsStocked)
     {
         <h2 style="margin-top: 20px">@L("Модификации")</h2>
         <p class="muted">@L("Цвет, размер и другие характеристики. Каждая модификация — отдельная позиция со своим кодом, остатком, штрихкодом и ценой: в документах и отчётах она выбирается как обычная позиция.")</p>

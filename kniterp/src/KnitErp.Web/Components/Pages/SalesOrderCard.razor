@@ -360,8 +360,16 @@ else
                             <td class="num">@Quantities.Format(l.Returned)</td>
                             <td class="num">@(l.Left > 0 ? Quantities.Format(l.Left) : "—")</td>
                         }
-                        <td class="num">@Quantities.Format(l.Stock)</td>
-                        <td class="num @(l.Short ? "cell-short" : null)" title="@(l.ReservedByOthers > 0 ? L("в резерве других заказов: {0}", Quantities.Format(l.ReservedByOthers)) : null)">@Quantities.Format(l.Available)</td>
+                        @if (l.Stocked)
+                        {
+                            <td class="num">@Quantities.Format(l.Stock)</td>
+                            <td class="num @(l.Short ? "cell-short" : null)" title="@(l.ReservedByOthers > 0 ? L("в резерве других заказов: {0}", Quantities.Format(l.ReservedByOthers)) : null)">@Quantities.Format(l.Available)</td>
+                        }
+                        else
+                        {
+                            @* D300 (сессия 4): услуга не хранится на складе — остаток и «Доступно» не считаются. *@
+                            <td class="num muted" colspan="2">@L("услуга")</td>
+                        }
                         @if (editable)
                         {
                             <td>

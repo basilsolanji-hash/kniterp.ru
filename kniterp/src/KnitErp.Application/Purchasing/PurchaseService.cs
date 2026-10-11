@@ -379,10 +379,15 @@ public sealed class PurchaseService(
         var ctx = await guard.DemandAsync(Permissions.PurchaseView, ct);
         var order = await LoadOrderAsync(ctx, orderId, ct);
         var moved = await MovedAsync(ctx, [orderId], ct);
-        var lines = order.Lines.Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
+        // D300 (сессия 4): строки-услуги на склад не поступают — они закрываются актом или УПД поставщика.
+        var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
+        var lines = order.Lines.Where(l => !services.Contains(l.ItemId))
+            .Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
         if (lines.Count == 0)
         {
-            throw new BusinessRuleException("purchase.order.received", "По заказу всё уже поступило.");
+            throw services.Count == order.Lines.Count
+                ? new BusinessRuleException("purchase.order.services_only", "В заказе только услуги — на склад поступать нечему.")
+                : new BusinessRuleException("purchase.order.received", "По заказу всё уже поступило.");
         }
 
         var reason = await DefaultReasonAsync(ctx, StockOperationKind.Receipt, "Закупка у поставщика", ct);
@@ -397,7 +402,9 @@ public sealed class PurchaseService(
         var ctx = await guard.DemandAsync(Permissions.PurchaseView, ct);
         var order = await LoadOrderAsync(ctx, orderId, ct);
         var moved = await MovedAsync(ctx, [orderId], ct);
-        var lines = order.Lines.Select(l => (l.ItemId, Quantity: Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
+        var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct); // D300 (сессия 4)
+        var lines = order.Lines.Where(l => !services.Contains(l.ItemId))
+            .Select(l => (l.ItemId, Quantity: Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
         if (lines.Count == 0)
         {
             throw new BusinessRuleException("purchase.order.nothing_received", "По заказу ещё ничего не поступило — возвращать нечего.");

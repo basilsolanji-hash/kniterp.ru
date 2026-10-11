@@ -19,8 +19,13 @@ public sealed record ItemDto(
     public string TypeName => ItemTypes.Name(Type);
 }
 
-/// <summary>GroupId — группа с подгруппами (D79), 0 — позиции без группы. Search — по коду, названию, артикулу и штрихкоду.</summary>
-public sealed record ItemFilter(ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null);
+/// <summary>
+/// GroupId — группа с подгруппами (D79), 0 — позиции без группы. Search — по коду, названию, артикулу и штрихкоду.
+/// Kind — «Товары / Услуги» (D300).
+/// </summary>
+public sealed record ItemFilter(
+    ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null,
+    ItemKind? Kind = null);
 
 public sealed record ItemListDto(IReadOnlyList<ItemDto> Items, int Total, bool CanEdit, bool CanArchive);
 
@@ -107,6 +112,12 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             query = query.Where(i => i.Type == type);
         }
 
+        if (filter.Kind is { } kind)
+        {
+            var kindTypes = ItemTypes.OfKind(kind).ToArray();
+            query = query.Where(i => kindTypes.Contains(i.Type));
+        }
+
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var s = filter.Search.Trim();
@@ -176,6 +187,7 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await RequireActiveUnitAsync(ctx, cmd.UnitId, ct);
         var item = Item.Create(ctx.OrganizationId, cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description, clock.UtcNow);
         await RequireActiveVatRateAsync(ctx, cmd.VatRateId, ct);
+        ServiceRules.EnsureVat(item.Type, cmd.VatRateId);
         item.SetVatRate(cmd.VatRateId);
         if (cmd.GroupId is { } gid)
         {
@@ -207,6 +219,12 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await RequireActiveUnitAsync(ctx, cmd.UnitId, ct);
         var oldUnit = item.UnitId;
         var oldVat = item.VatRateId;
+        ServiceRules.EnsureVat(cmd.Type, cmd.VatRateId);
+        if (cmd.Type == ItemType.Service && item.Type != ItemType.Service)
+        {
+            await EnsureCanBecomeServiceAsync(ctx, item, ct);
+        }
+
         var changes = item.Update(cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description);
         if (cmd.VatRateId != oldVat)
         {
@@ -235,6 +253,25 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>
+    /// D300: услугой может стать только позиция, которой не было на складе (нет движений и партий) и у которой нет модификаций;
+    /// иначе остаток, партии и старые документы указывали бы на «услугу на складе». Тот же запрет — триггер базы.
+    /// </summary>
+    private async Task EnsureCanBecomeServiceAsync(AccessContext ctx, Item item, CancellationToken ct)
+    {
+        if (item.IsModification || await db.Items.AnyAsync(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == item.Id, ct))
+        {
+            throw new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать услугой.");
+        }
+
+        if (await db.StockMovements.AnyAsync(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == item.Id, ct)
+            || await db.StockBatches.AnyAsync(b => b.OrganizationId == ctx.OrganizationId && b.ItemId == item.Id, ct))
+        {
+            throw new BusinessRuleException("catalog.service.has_stock",
+                $"Позиция {item.Code} уже была на складе (есть движения или партии) — её нельзя сделать услугой. Заведите услугу отдельной позицией.");
+        }
     }
 
     /// <summary>Ставка НДС своей организации и не в архиве (чужая — «не найдено»).</summary>

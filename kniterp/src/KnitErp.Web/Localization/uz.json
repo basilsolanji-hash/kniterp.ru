@@ -2459,5 +2459,22 @@
   "Упомянуть коллегу": "Hamkasbni eslatish",
   "Упомянуть можно не больше {0} коллег.": "{0} tadan ortiq hamkasbni eslatib bo'lmaydi.",
   "Этот объект нельзя обсуждать.": "Bu obyektni muhokama qilib bo'lmaydi.",
-  "Пользователь работает и в другой организации: пароль и вход он восстанавливает сам — «Забыли пароль» или аварийная процедура.": "Foydalanuvchi boshqa tashkilotda ham ishlaydi: parol va kirishni o'zi tiklaydi — «Parolni unutdingizmi» yoki favqulodda tartib."
+  "Пользователь работает и в другой организации: пароль и вход он восстанавливает сам — «Забыли пароль» или аварийная процедура.": "Foydalanuvchi boshqa tashkilotda ham ishlaydi: parol va kirishni o'zi tiklaydi — «Parolni unutdingizmi» yoki favqulodda tartib.",
+  "В заказе только услуги — на склад поступать нечему.": "Buyurtmada faqat xizmatlar bor — omborga kirim qiladigan narsa yo‘q.",
+  "В заказе только услуги — со склада отгружать нечего, они закрываются актом или УПД.": "Buyurtmada faqat xizmatlar bor — ombordan jo‘natadigan narsa yo‘q, ular dalolatnoma yoki UPD bilan yopiladi.",
+  "Модификации бывают только у товаров — у услуги их нет.": "Modifikatsiyalar faqat tovarlarda bo‘ladi — xizmatda ular yo‘q.",
+  "Позицию с модификациями (или модификацию) нельзя сделать услугой.": "Modifikatsiyali pozitsiyani (yoki modifikatsiyani) xizmatga aylantirib bo‘lmaydi.",
+  "Позиция {0} уже была на складе (есть движения или партии) — её нельзя сделать услугой. Заведите услугу отдельной позицией.": "{0} pozitsiya omborda bo‘lgan (harakatlar yoki partiyalar bor) — uni xizmatga aylantirib bo‘lmaydi. Xizmatni alohida pozitsiya sifatida yarating.",
+  "Предмет расчёта (чек)": "Hisob-kitob predmeti (chek)",
+  "Ставка НДС (обязательна для услуги)": "QQS stavkasi (xizmat uchun majburiy)",
+  "Тип модификации — как у основной позиции; меняйте тип основной позиции.": "Modifikatsiya turi — asosiy pozitsiyadagidek; asosiy pozitsiya turini o‘zgartiring.",
+  "Все виды": "Barcha turlar",
+  "Товары": "Tovarlar",
+  "товар": "tovar",
+  "У услуги нет веса, объёма и неснижаемого остатка — оставьте поля пустыми.": "Xizmatning og‘irligi, hajmi va kamaymaydigan qoldig‘i yo‘q — maydonlarni bo‘sh qoldiring.",
+  "У услуги нет кода маркировки GTIN — добавьте EAN-13 или Code 128.": "Xizmatda GTIN markirovka kodi yo‘q — EAN-13 yoki Code 128 qo‘shing.",
+  "У услуги ставка НДС обязательна — выберите её (или «Без НДС»).": "Xizmatda QQS stavkasi majburiy — uni tanlang (yoki «QQSsiz»).",
+  "Услуги": "Xizmatlar",
+  "не хранится на складе: продаётся и покупается, закрывается актом или УПД": "omborda saqlanmaydi: sotiladi va sotib olinadi, dalolatnoma yoki UPD bilan yopiladi",
+  "услуга": "xizmat"
 }

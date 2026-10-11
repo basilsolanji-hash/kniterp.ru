@@ -584,6 +584,11 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
         {
             throw new BusinessRuleException("catalog.archived", $"Позиция {item.Code} в архиве.");
         }
+
+        if (!ItemTypes.IsStocked(item.Type))
+        {
+            throw ServiceRules.NotStocked([item.Code]); // D300 (сессия 4): у услуги нет партий
+        }
     }
 
     private async Task RequireSupplierAsync(AccessContext ctx, long? supplierId, CancellationToken ct)

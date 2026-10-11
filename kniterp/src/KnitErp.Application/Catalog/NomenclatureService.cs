@@ -29,6 +29,9 @@ public sealed record ItemCardDto(
     IReadOnlyList<CustomValueDto> CustomFields, decimal Stock, bool CanEdit, bool CanSeePrices, byte[] RowVersion)
 {
     public string TypeName => ItemTypes.Name(Type);
+
+    /// <summary>Хранится на складе: у услуги (D300) нет остатка, партий, веса, объёма и неснижаемого остатка.</summary>
+    public bool IsStocked => ItemTypes.IsStocked(Type);
 }
 
 public sealed record UserCatalogDto(long Id, string Name, bool IsArchived, int Entries, byte[] RowVersion);
@@ -216,6 +219,13 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         if (item.IsArchived)
         {
             throw new BusinessRuleException("catalog.archived", "Позиция в архиве.");
+        }
+
+        var trimmedCode = (code ?? string.Empty).Trim().Replace(" ", string.Empty, StringComparison.Ordinal);
+        if (item.Type == ItemType.Service && (type ?? ItemBarcode.Detect(trimmedCode)) == BarcodeType.Gtin)
+        {
+            // D300: GTIN-14 — код для маркировки товара; у услуги его не бывает.
+            throw new BusinessRuleException("catalog.service.gtin", "У услуги нет кода маркировки GTIN — добавьте EAN-13 или Code 128.");
         }
 
         if (await db.ItemBarcodes.CountAsync(b => b.ItemId == itemId, ct) >= ItemBarcode.MaxPerItem)
