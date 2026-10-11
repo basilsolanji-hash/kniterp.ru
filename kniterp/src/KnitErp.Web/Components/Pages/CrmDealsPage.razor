@@ -1,0 +1,400 @@
+@page "/crm/deals"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject CrmDealService Deals
+@inject KnitErp.Application.Tagging.TagService TagLookup
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Сделки") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Сделки")</h1>
+        <div class="actions">
+            @if (_options.CanEdit && !_creating)
+            {
+                <button type="button" @onclick="() => _creating = true" disabled="@_busy">@L("Новая сделка")</button>
+            }
+            <a class="button secondary" href="crm/leads">@L("Лиды")</a>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+
+    @if (_creating)
+    {
+        <div class="panel">
+            <h2>@L("Новая сделка")</h2>
+            <form @onsubmit="CreateAsync">
+                <div class="grid">
+                    <label class="wide">@L("Название") <input @bind="_title" maxlength="@CrmDeal.TitleMaxLength" required placeholder="@L("Свитера для сети магазинов")" /></label>
+                    <label>
+                        @L("Покупатель")
+                        <input @bind="_customerSearch" @bind:after="SearchCustomersAsync" placeholder="@L("Название или ИНН")" aria-label="@L("Поиск покупателя")" />
+                    </label>
+                    <label>
+                        @L("Найденные")
+                        <select @bind="_customer" required>
+                            <option value="">—</option>
+                            @foreach (var c in _customers)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Воронка")
+                        <select @bind="_newPipeline">
+                            @foreach (var p in _options.Pipelines)
+                            {
+                                <option value="@p.Id">@p.Name</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_options.CanSeeAmounts)
+                    {
+                        <label>@L("Сумма") <input inputmode="decimal" @bind="_amount" /></label>
+                    }
+                    <label>@L("Плановое закрытие") <input type="date" @bind="_closeDate" /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Создать")</button>
+                    <button type="button" class="secondary" @onclick="() => _creating = false">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
+    }
+
+    <form class="inline-form" @onsubmit="ReloadAsync">
+        <label>
+            @L("Воронка")
+            <select @bind="_pipeline" @bind:after="ReloadAsync">
+                @foreach (var p in _options.Pipelines)
+                {
+                    <option value="@p.Id">@p.Name</option>
+                }
+            </select>
+        </label>
+        <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
+        @if (_options.CanAll)
+        {
+            <label>
+                @L("Ответственный")
+                <select @bind="_responsible">
+                    <option value="">@L("Все")</option>
+                    @foreach (var u in _options.Users)
+                    {
+                        <option value="@u.Id">@u.Name</option>
+                    }
+                </select>
+            </label>
+        }
+        <label>
+            @L("Источник")
+            <select @bind="_source">
+                <option value="">@L("Все")</option>
+                @foreach (var s in _options.Sources)
+                {
+                    <option value="@s.Id">@s.Name</option>
+                }
+            </select>
+        </label>
+        <label>@L("Закрытие с") <input type="date" @bind="_from" /></label>
+        <label>@L("по") <input type="date" @bind="_to" /></label>
+        <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, название, покупатель")" /></label>
+        @if (_options.CanAll)
+        {
+            <label class="inline"><input type="checkbox" @bind="_mine" /> @L("Только мои")</label>
+        }
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    <div class="crm-tabs" role="group" aria-label="@L("Вид")">
+        <button type="button" aria-pressed="@(_view == "board" ? "true" : "false")" @onclick='() => SwitchAsync("board")'>@L("Канбан")</button>
+        <button type="button" aria-pressed="@(_view == "table" ? "true" : "false")" @onclick='() => SwitchAsync("table")'>@L("Таблица")</button>
+    </div>
+
+    @if (_view == "board" && _board is not null)
+    {
+        <div class="crm-board" aria-label="@L("Канбан сделок")">
+            @for (var i = 0; i < _board.Columns.Count; i++)
+            {
+                var col = _board.Columns[i];
+                var prev = i > 0 ? _board.Columns[i - 1].Stage : null;
+                var next = i + 1 < _board.Columns.Count ? _board.Columns[i + 1].Stage : null;
+                <section class="crm-col @(_dropStage == col.Stage.Id ? "drop" : null)" aria-label="@col.Stage.Name"
+                         @ondragover="() => _dropStage = col.Stage.Id" @ondragover:preventDefault="true" @ondrop="() => DropAsync(col.Stage)">
+                    <div class="crm-col-head">
+                        <span class="stage stage-@col.Stage.Color">@col.Stage.Name</span>
+                        <span class="crm-col-sum">@col.Count@(col.Total is { } t ? $" · {Amounts.Format(t)}" : "")</span>
+                    </div>
+                    @if (col.Weighted is { } w && !col.Stage.IsFinal && col.Count > 0)
+                    {
+                        <div class="crm-col-sum">@L("с учётом вероятности {0} %: {1}", col.Stage.Probability, Amounts.Format(w))</div>
+                    }
+                    <ul class="crm-cards">
+                        @foreach (var d in col.Deals)
+                        {
+                            <li class="crm-card" draggable="@(_board.CanEdit ? "true" : "false")" @ondragstart="() => _drag = d" @key="d.Id">
+                                <a class="crm-title" href="crm/deals/@d.Id">@d.Title</a>
+                                <div class="crm-meta">
+                                    <span>@d.Number</span><span>@d.Counterparty</span>
+                                    @if (d.Amount is { } a)
+                                    {
+                                        <span>@Amounts.Format(a) @d.CurrencyCode</span>
+                                    }
+                                    @if (d.ExpectedCloseDate is { } cd)
+                                    {
+                                        <span class="@(cd < Today && d.Outcome == CrmDealOutcome.Open ? "warn-text" : null)">@cd.ToString("dd.MM.yyyy")</span>
+                                    }
+                                    <span>@d.Responsible</span>
+                                </div>
+                                <TagDots Tags="@_tagMap.GetValueOrDefault(d.Id)" />
+                                @if (_board.CanEdit)
+                                {
+                                    <div class="crm-move">
+                                        <button type="button" class="secondary" disabled="@(_busy || prev is null || prev.Kind == CrmStageKind.Lost)"
+                                                aria-label="@L("Сделку {0} — на этап левее", d.Number)" title="@L("На этап левее")"
+                                                @onclick="() => MoveAsync(d, prev!)">←</button>
+                                        <button type="button" class="secondary" disabled="@(_busy || next is null || next.Kind == CrmStageKind.Lost)"
+                                                aria-label="@L("Сделку {0} — на этап правее", d.Number)" title="@L("На этап правее")"
+                                                @onclick="() => MoveAsync(d, next!)">→</button>
+                                    </div>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    @if (col.Count > col.Deals.Count)
+                    {
+                        <p class="crm-more">@L("Ещё {0} — в таблице", col.Count - col.Deals.Count)</p>
+                    }
+                </section>
+            }
+        </div>
+        <p class="muted small">@L("Перетащите карточку на другой этап или нажмите «←» и «→». Проигрыш — в карточке сделки, с причиной.")</p>
+    }
+    else if (_view == "table" && _page is not null)
+    {
+        <div class="scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th>@L("Номер")</th><th>@L("Сделка")</th><th>@L("Покупатель")</th><th>@L("Этап")</th>
+                        @if (_options.CanSeeAmounts)
+                        {
+                            <th class="num">@L("Сумма")</th>
+                        }
+                        <th class="num opt">@L("Вероятность")</th><th class="opt">@L("Закрытие")</th><th>@L("Ответственный")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_page.Rows.Count == 0)
+                    {
+                        <tr><td colspan="8" class="muted">@L("Сделок нет.")</td></tr>
+                    }
+                    @foreach (var d in _page.Rows)
+                    {
+                        <tr>
+                            <td><a href="crm/deals/@d.Id">@d.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(d.Id)" /></td>
+                            <td>@d.Title</td>
+                            <td>@d.Counterparty</td>
+                            <td><span class="stage stage-@d.StageColor">@d.Stage</span></td>
+                            @if (_options.CanSeeAmounts)
+                            {
+                                <td class="num">@(d.Amount is { } a ? $"{Amounts.Format(a)} {d.CurrencyCode}" : "—")</td>
+                            }
+                            <td class="num">@d.Probability %</td>
+                            <td>@(d.ExpectedCloseDate?.ToString("dd.MM.yyyy") ?? "—")</td>
+                            <td>@d.Responsible</td>
+                        </tr>
+                    }
+                </tbody>
+                @if (_options.CanSeeAmounts && _page.Rows.Count > 0)
+                {
+                    <tfoot><tr><td colspan="4"><b>@L("Итого на странице")</b></td><td class="num"><b>@Amounts.Format(_page.Rows.Sum(r => r.Amount ?? 0))</b></td><td colspan="3"></td></tr></tfoot>
+                }
+            </table>
+        </div>
+        <CrmPager Total="_page.Total" Page="_page.Page" PageSize="_page.PageSize" Shown="_page.Rows.Count" PageChanged="PageAsync" Busy="_busy" />
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? ViewQuery { get; set; }
+
+    private CrmOptionsDto? _options;
+    private CrmBoardDto? _board;
+    private CrmPage<CrmDealRowDto>? _page;
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>> _tagMap = new Dictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>>();
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto> _customers = [];
+    private CrmDealCardDto? _drag;
+    private long? _dropStage;
+    private bool _busy;
+    private bool _creating;
+    private string? _denied;
+    private string? _error;
+    private string _view = "board";
+    private string _pipeline = string.Empty;
+    private long? _tagId;
+    private string _responsible = string.Empty;
+    private string _source = string.Empty;
+    private DateTime? _from;
+    private DateTime? _to;
+    private string? _search;
+    private bool _mine;
+    private int _pageNo;
+    private string? _title;
+    private string? _customerSearch;
+    private string _customer = string.Empty;
+    private string _newPipeline = string.Empty;
+    private string? _amount;
+    private DateTime? _closeDate;
+
+    private DateOnly Today => DateOnly.FromDateTime(TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _view = ViewQuery == "table" ? "table" : "board";
+            _options = await Deals.OptionsAsync();
+            _pipeline = _options.Pipelines.FirstOrDefault()?.Id.ToString() ?? "";
+            _newPipeline = _pipeline;
+            _customers = await Deals.CounterpartiesAsync(null);
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private CrmDealFilter Filter() => new(long.TryParse(_pipeline, out var p) ? p : null, long.TryParse(_responsible, out var r) ? r : null,
+        long.TryParse(_source, out var s) ? s : null, _tagId, _from is { } f ? DateOnly.FromDateTime(f) : null, _to is { } t ? DateOnly.FromDateTime(t) : null,
+        _mine, null, _search, _pageNo);
+
+    private async Task LoadAsync()
+    {
+        if (_view == "board")
+        {
+            _board = await Deals.BoardAsync(Filter());
+            _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.CrmDeal, _board.Columns.SelectMany(c => c.Deals).Select(d => d.Id).ToList());
+        }
+        else
+        {
+            _page = await Deals.ListAsync(Filter());
+            _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.CrmDeal, _page.Rows.Select(d => d.Id).ToList());
+        }
+    }
+
+    private Task ReloadAsync()
+    {
+        _pageNo = 0;
+        return RunAsync(LoadAsync);
+    }
+
+    private Task SwitchAsync(string view)
+    {
+        _view = view;
+        return ReloadAsync();
+    }
+
+    private Task PageAsync(int page)
+    {
+        _pageNo = page;
+        return RunAsync(LoadAsync);
+    }
+
+    private Task TagChangedAsync(long? tagId)
+    {
+        _tagId = tagId;
+        return ReloadAsync();
+    }
+
+    private Task SearchCustomersAsync() => RunAsync(async () =>
+    {
+        _customers = await Deals.CounterpartiesAsync(_customerSearch);
+        _customer = _customers.FirstOrDefault()?.Id.ToString() ?? "";
+    });
+
+    private Task MoveAsync(CrmDealCardDto deal, CrmStageDto stage) => RunAsync(async () =>
+    {
+        await Deals.MoveAsync(deal.Id, stage.Id, deal.RowVersion);
+        await LoadAsync();
+    });
+
+    /// <summary>Перетаскивание: на «проигрыш» — только из карточки сделки, где указывается причина.</summary>
+    private Task DropAsync(CrmStageDto stage)
+    {
+        var deal = _drag;
+        _drag = null;
+        _dropStage = null;
+        if (deal is null || deal.StageId == stage.Id)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (stage.Kind == CrmStageKind.Lost)
+        {
+            Navigation.NavigateTo($"crm/deals/{deal.Id}?lose=1");
+            return Task.CompletedTask;
+        }
+
+        return MoveAsync(deal, stage);
+    }
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        var customer = long.TryParse(_customer, out var c) ? c : throw new BusinessRuleException("crm.deal.customer", L("Выберите покупателя."));
+        var id = await Deals.CreateAsync(new CrmDealValues(_title, customer, null, KnitErp.Domain.Catalog.Decimals.Parse(_amount, L("Сумма")) ?? 0, null,
+            _closeDate is { } d ? DateOnly.FromDateTime(d) : null), long.TryParse(_newPipeline, out var p) ? p : null);
+        Navigation.NavigateTo($"crm/deals/{id}");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+            try
+            {
+                await LoadAsync();
+            }
+            catch (Exception reload) when (UiErrors.IsUserFacing(reload))
+            {
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

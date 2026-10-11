@@ -1,0 +1,267 @@
+@page "/crm/settings"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject CrmSettingsService Settings
+
+<PageTitle>@L("Настройки CRM") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Настройки CRM")</h1>
+    <p class="muted small">@L("Воронки и их этапы, источники обращений, причины отказа. Ничего не удаляется — уходит в архив; сделки и лиды сохраняют ссылки.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <h2>@L("Воронки")</h2>
+    @if (_data.CanEdit)
+    {
+        <form class="inline-form" @onsubmit="CreatePipelineAsync">
+            <label>@L("Новая воронка") <input @bind="_pipelineName" maxlength="@CrmPipeline.NameMaxLength" required placeholder="@L("Маркетплейсы")" /></label>
+            <button type="submit" disabled="@_busy">@L("Добавить")</button>
+        </form>
+    }
+
+    @foreach (var p in _data.Pipelines)
+    {
+        <section class="panel" aria-label="@p.Name">
+            <div class="page-head">
+                <h3>@p.Name @if (p.IsArchived) { <span class="tag">@L("архив")</span> }</h3>
+                @if (_data.CanEdit)
+                {
+                    <div class="actions">
+                        @if (p.IsArchived)
+                        {
+                            <button type="button" class="secondary" @onclick='() => RunAsync(() => Settings.RestorePipelineAsync(p.Id, p.RowVersion), L("Воронка снова действует."))' disabled="@_busy">@L("Вернуть")</button>
+                        }
+                        else
+                        {
+                            <ConfirmButton Class="secondary" OnConfirm="() => RunAsync(() => Settings.ArchivePipelineAsync(p.Id, p.RowVersion), null)" Disabled="@_busy" Question='@L("Отправить воронку в архив?")'>@L("В архив")</ConfirmButton>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Этап")</th><th class="num">@L("Вероятность")</th><th>@L("Вид")</th><th class="num">@L("Сделок")</th>@if (_data.CanEdit) { <th></th> }</tr></thead>
+                    <tbody>
+                        @foreach (var s in p.Stages)
+                        {
+                            <tr class="@(s.IsArchived ? "archived" : null)" @key="s.Id">
+                                @if (_edit?.Id == s.Id)
+                                {
+                                    <td>
+                                        <input @bind="_editName" maxlength="@CrmStage.NameMaxLength" aria-label="@L("Название")" />
+                                        <select @bind="_editColor" aria-label="@L("Цвет")">
+                                            @foreach (var c in CrmStage.Colors)
+                                            {
+                                                <option value="@c">@StageChip.ColorName(c)</option>
+                                            }
+                                        </select>
+                                    </td>
+                                    <td class="num"><input type="number" min="0" max="100" @bind="_editProbability" disabled="@s.IsFinal" aria-label="@L("Вероятность")" /></td>
+                                    <td>@KindName(s.Kind)</td>
+                                    <td class="num">@s.Deals</td>
+                                    <td>
+                                        <button type="button" @onclick="SaveStageAsync" disabled="@_busy">@L("Сохранить")</button>
+                                        <button type="button" class="secondary" @onclick="() => _edit = null">@L("Отмена")</button>
+                                    </td>
+                                }
+                                else
+                                {
+                                    <td><span class="stage stage-@s.Color">@s.Name</span> @if (s.IsArchived) { <span class="tag">@L("архив")</span> }</td>
+                                    <td class="num">@s.Probability %</td>
+                                    <td>@KindName(s.Kind)</td>
+                                    <td class="num">@s.Deals</td>
+                                    @if (_data.CanEdit)
+                                    {
+                                        <td>
+                                            @if (!s.IsArchived)
+                                            {
+                                                @if (!s.IsFinal)
+                                                {
+                                                    <button type="button" class="secondary icon" @onclick="() => RunAsync(() => Settings.MoveStageAsync(s.Id, -1), null)" disabled="@_busy" aria-label="@L("Левее: {0}", s.Name)">↑</button>
+                                                    <button type="button" class="secondary icon" @onclick="() => RunAsync(() => Settings.MoveStageAsync(s.Id, 1), null)" disabled="@_busy" aria-label="@L("Правее: {0}", s.Name)">↓</button>
+                                                }
+                                                <button type="button" class="secondary" @onclick="() => StartEdit(s)" disabled="@_busy">@L("Изменить")</button>
+                                                @if (!s.IsFinal)
+                                                {
+                                                    <ConfirmButton Class="secondary" OnConfirm="() => RunAsync(() => Settings.ArchiveStageAsync(s.Id, s.RowVersion), null)" Disabled="@_busy" Question='@L("Отправить в архив?")'>@L("В архив")</ConfirmButton>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="secondary" @onclick="() => RunAsync(() => Settings.RestoreStageAsync(s.Id, s.RowVersion), null)" disabled="@_busy">@L("Вернуть")</button>
+                                            }
+                                        </td>
+                                    }
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (_data.CanEdit && !p.IsArchived)
+            {
+                <form class="inline-form" @onsubmit="() => CreateStageAsync(p.Id)">
+                    <label>@L("Новый этап") <input @bind="_stageName" maxlength="@CrmStage.NameMaxLength" placeholder="@L("Пробная партия")" /></label>
+                    <label>
+                        @L("Цвет")
+                        <select @bind="_stageColor">
+                            @foreach (var c in CrmStage.Colors)
+                            {
+                                <option value="@c">@StageChip.ColorName(c)</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Вероятность, %") <input type="number" min="0" max="100" @bind="_stageProbability" /></label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить этап")</button>
+                </form>
+            }
+        </section>
+    }
+
+    <div class="dash-cols">
+        @RefList(L("Источники обращений"), CrmReferenceKind.Source, _data.Sources)
+        @RefList(L("Причины отказа и проигрыша"), CrmReferenceKind.LossReason, _data.LossReasons)
+    </div>
+}
+
+@code {
+    private CrmSettingsDto? _data;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private string? _pipelineName;
+    private string? _stageName;
+    private string _stageColor = "blue";
+    private int _stageProbability = 50;
+    private CrmStageDto? _edit;
+    private string? _editName;
+    private string _editColor = "gray";
+    private int _editProbability;
+    private readonly Dictionary<CrmReferenceKind, string?> _newRef = [];
+
+    private RenderFragment RefList(string title, CrmReferenceKind kind, IReadOnlyList<CrmReferenceDto> items) => __builder =>
+    {
+        <section aria-label="@title">
+            <h2>@title</h2>
+            <ul>
+                @foreach (var r in items)
+                {
+                    <li class="@(r.IsArchived ? "archived" : null)" @key="r.Id">
+                        @r.Name @if (r.IsArchived) { <span class="tag">@L("архив")</span> }
+                        @if (_data!.CanEdit)
+                        {
+                            <button type="button" class="secondary" @onclick="() => RunAsync(() => Settings.SetReferenceArchivedAsync(r.Id, !r.IsArchived, r.RowVersion), null)"
+                                    disabled="@_busy">@(r.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                        }
+                    </li>
+                }
+            </ul>
+            @if (_data!.CanEdit)
+            {
+                <form class="inline-form" @onsubmit="() => CreateRefAsync(kind)">
+                    <label>@L("Добавить") <input value="@_newRef.GetValueOrDefault(kind)" @onchange="e => _newRef[kind] = e.Value?.ToString()" maxlength="@CrmReference.NameMaxLength" aria-label="@title" /></label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
+                </form>
+            }
+        </section>
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Settings.GetAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private static string KindName(CrmStageKind kind) => kind switch
+    {
+        CrmStageKind.Won => L("Выигрыш"),
+        CrmStageKind.Lost => L("Проигрыш"),
+        _ => L("Рабочий"),
+    };
+
+    private void StartEdit(CrmStageDto s)
+    {
+        _edit = s;
+        _editName = s.Name;
+        _editColor = s.Color;
+        _editProbability = s.Probability;
+    }
+
+    private Task CreatePipelineAsync() => RunAsync(async () =>
+    {
+        await Settings.CreatePipelineAsync(_pipelineName);
+        _pipelineName = null;
+    }, L("Воронка добавлена — с готовыми этапами, их можно переименовать."));
+
+    private Task CreateStageAsync(long pipelineId) => RunAsync(async () =>
+    {
+        await Settings.CreateStageAsync(pipelineId, _stageName, _stageColor, _stageProbability);
+        _stageName = null;
+    }, L("Этап добавлен."));
+
+    private Task SaveStageAsync() => RunAsync(async () =>
+    {
+        await Settings.UpdateStageAsync(_edit!.Id, _editName, _editColor, _editProbability, _edit.RowVersion);
+        _edit = null;
+    }, L("Этап сохранён."));
+
+    private Task CreateRefAsync(CrmReferenceKind kind) => RunAsync(async () =>
+    {
+        await Settings.CreateReferenceAsync(kind, _newRef.GetValueOrDefault(kind));
+        _newRef[kind] = null;
+    }, null);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _data = await Settings.GetAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

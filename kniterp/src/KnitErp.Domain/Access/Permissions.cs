@@ -49,6 +49,21 @@ public static class Permissions
     /// <summary>D306 (сессия № 4): массовая переоценка. Через API не выдаётся.</summary>
     public const string PriceEdit = "catalog.price.edit";
 
+    /// <summary>D600 (CRM): свои лиды, сделки и контакты — где пользователь ответственный или наблюдатель.</summary>
+    public const string CrmView = "crm.view";
+
+    /// <summary>D600 (CRM): создавать и менять свои лиды, сделки, контакты, активности.</summary>
+    public const string CrmEdit = "crm.edit";
+
+    /// <summary>D600 (CRM): все лиды и сделки организации, переназначение ответственного, объединение дубликатов.</summary>
+    public const string CrmAll = "crm.all";
+
+    /// <summary>D600 (CRM): воронки, этапы, источники, причины отказа, план продаж.</summary>
+    public const string CrmSettings = "crm.settings";
+
+    /// <summary>D600 (CRM): выгрузка в Excel (персональные данные контактов).</summary>
+    public const string CrmExport = "crm.export";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -90,6 +105,11 @@ public static class Permissions
         [ProductionMaterialMove] = "Производство: выдача, возврат и списание материалов, выпуск",
         [BundleEdit] = "Номенклатура: состав комплектов",
         [PriceEdit] = "Цены: переоценка",
+        [CrmView] = "CRM: свои лиды, сделки и контакты",
+        [CrmEdit] = "CRM: создание и изменение своих лидов, сделок и контактов",
+        [CrmAll] = "CRM: все лиды и сделки, переназначение ответственного",
+        [CrmSettings] = "CRM: воронки, этапы, справочники и план",
+        [CrmExport] = "CRM: выгрузка в Excel",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;
@@ -100,13 +120,14 @@ public static class Permissions
 
     /// <summary>Группы прав для редактора ролей (D112), в порядке разделов меню.</summary>
     public static readonly IReadOnlyList<string> Groups =
-        ["Продажи", "Закупки", "Склад", "Деньги и цены", "Справочники", "Производство", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
+        ["Продажи", "Закупки", "CRM", "Склад", "Деньги и цены", "Справочники", "Производство", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
 
     /// <summary>Группа права по его коду — так новые права модулей (производство, кадры) сами попадают в свой раздел.</summary>
     public static string GroupOf(string code) => code.Split('.')[0] switch
     {
         "sales" => "Продажи",
         "purchase" => "Закупки",
+        "crm" => "CRM",
         "warehouse" or "period" => "Склад",
         "finance" or "money" => "Деньги и цены",
         "catalog" => "Справочники",

@@ -1,0 +1,43 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+
+@* D605: подсказка «похожие» при вводе лида или контакта — что совпало и где; телефон и почта не показываются. *@
+@if (Items.Count > 0)
+{
+    <div class="crm-dups" role="status">
+        <b>@L("Похоже, этот клиент уже есть:")</b>
+        <ul>
+            @foreach (var d in Items)
+            {
+                <li>
+                    @KindName(d.Kind): <a href="@d.Href">@d.Title</a>
+                    @if (d.LeadStatus is { } st)
+                    {
+                        <span class="tag">@L(CrmLead.StatusName(st))</span>
+                    }
+                    @if (d.Subtitle is not null)
+                    {
+                        <span class="muted"> @d.Subtitle</span>
+                    }
+                    <span class="muted small">— @Matched(d)</span>
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public IReadOnlyList<CrmDuplicateDto> Items { get; set; } = [];
+
+    private static string KindName(CrmDuplicateKind kind) => kind switch
+    {
+        CrmDuplicateKind.Lead => L("Лид"),
+        CrmDuplicateKind.Contact => L("Контакт"),
+        _ => L("Контрагент"),
+    };
+
+    private static string Matched(CrmDuplicateDto d) =>
+        string.Join(", ", new[] { d.ByPhone ? L("совпал телефон") : null, d.ByEmail ? L("совпала почта") : null, d.ByInn ? L("совпал ИНН") : null }
+            .Where(x => x is not null));
+}

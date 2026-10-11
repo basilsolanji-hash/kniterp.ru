@@ -1,0 +1,548 @@
+@page "/crm/deals/{Id:long}"
+@using KnitErp.Application.Crm
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Crm
+@using KnitErp.Domain.Tagging
+@inject CrmDealService Deals
+@inject NavigationManager Navigation
+
+<PageTitle>@(_deal?.Number ?? L("Сделка")) — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound is not null)
+{
+    <div class="error" role="alert">@_notFound</div>
+    <p><a href="crm/deals">@L("К списку сделок")</a></p>
+}
+else if (_deal is null || _options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var v = _deal.Values;
+    var open = _deal.Outcome == CrmDealOutcome.Open;
+    var canEdit = _deal.CanEdit && open;
+    var currentIndex = _deal.Stages.ToList().FindIndex(s => s.Id == _deal.StageId);
+    <p class="muted small"><a href="crm/deals">@L("Сделки")</a> · @_deal.Pipeline</p>
+    <div class="page-head">
+        <h1>@_deal.Number @v.Title</h1>
+        <span class="tag @OutcomeClass(_deal.Outcome)">@L(_deal.OutcomeName)</span>
+    </div>
+    <TagPicker Entity="TaggedEntity.CrmDeal" EntityId="Id" ReadOnly="@(!_deal.CanEdit)" />
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <ol class="crm-ribbon" aria-label="@L("Этапы сделки")">
+        @for (var i = 0; i < _deal.Stages.Count; i++)
+        {
+            var s = _deal.Stages[i];
+            var current = s.Id == _deal.StageId;
+            <li>
+                <button type="button" class="@(current ? "current" : i < currentIndex && s.Kind == CrmStageKind.Open ? "passed" : null)"
+                        aria-current="@(current ? "step" : null)" disabled="@(_busy || current || !_deal.CanEdit || s.IsArchived)"
+                        @onclick="() => StageClickAsync(s)">@s.Name</button>
+            </li>
+        }
+    </ol>
+
+    @if (_loseOpen)
+    {
+        <div class="panel">
+            <h2>@L("Сделка проиграна")</h2>
+            <form @onsubmit="LoseAsync">
+                <div class="grid">
+                    <label>
+                        @L("Причина")
+                        <select @bind="_lossReason" required>
+                            <option value="">—</option>
+                            @foreach (var r in _options.LossReasons)
+                            {
+                                <option value="@r.Id">@r.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="wide">@L("Комментарий") <input @bind="_lossComment" maxlength="@CrmDeal.CommentMaxLength" /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Закрыть проигрышем")</button>
+                    <button type="button" class="secondary" @onclick="() => _loseOpen = false">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
+    }
+
+    <div class="crm-summary">
+        <div><span>@L("Покупатель")</span><a href="counterparties/@v.CounterpartyId">@_deal.Counterparty</a></div>
+        <div><span>@L("Контакт")</span>@if (v.ContactId is { } cid) { <a href="crm/contacts/@cid">@_deal.Contact</a> } else { <span>—</span> }</div>
+        <div><span>@L("Сумма")</span><span>@(_deal.Amount is { } a ? $"{Amounts.Format(a)} {v.CurrencyCode}" : "—")</span></div>
+        <div><span>@L("Вероятность")</span><span>@_deal.Probability %</span></div>
+        <div><span>@L("Ответственный")</span><span>@_deal.Responsible</span></div>
+        <div><span>@L("Источник")</span><span>@(_deal.Source ?? "—")</span></div>
+        @if (_deal.LeadId is { } lid)
+        {
+            <div><span>@L("Из лида")</span><a href="crm/leads/@lid">@_deal.LeadNumber</a></div>
+        }
+        @if (_deal.LossReason is not null)
+        {
+            <div><span>@L("Причина проигрыша")</span><span>@_deal.LossReason@(_deal.LossComment is null ? "" : $" — {_deal.LossComment}")</span></div>
+        }
+    </div>
+
+    <h2>@L("Заказы покупателя")</h2>
+    @if (_deal.Orders.Count == 0 && _deal.HiddenOrders == 0)
+    {
+        <p class="muted small">@L("Заказов по сделке пока нет. Подтверждённый заказ переведёт сделку в «Выиграна».")</p>
+    }
+    else if (_deal.HiddenOrders > 0)
+    {
+        <p class="muted small">@L("Заказов по сделке: {0}. Чтобы видеть их, нужно право «Продажи: просмотр».", _deal.HiddenOrders)</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th></tr></thead>
+                <tbody>
+                    @foreach (var o in _deal.Orders)
+                    {
+                        <tr>
+                            <td><a href="sales-orders/@o.Id">@o.Number</a> <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
+                            <td><span class="tag @SalesOrdersPage.StatusClass(o.Status)">@L(o.StatusName)</span></td>
+                            <td><StageChip Stage="o.Stage" /></td>
+                            <td class="num">@Amounts.Format(o.Total)</td>
+                            <td class="num">@Amounts.Format(o.Paid)</td>
+                            <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    @if (_deal.CanCreateOrder)
+    {
+        @if (_warehouses is null)
+        {
+            <button type="button" @onclick="OpenOrderAsync" disabled="@_busy">@L("Создать заказ")</button>
+        }
+        else
+        {
+            <form class="inline-form" @onsubmit="CreateOrderAsync" aria-label="@L("Создать заказ")">
+                <label>
+                    @L("Склад отгрузки")
+                    <select @bind="_warehouse" required>
+                        @foreach (var w in _warehouses)
+                        {
+                            <option value="@w.Id">@w.Name</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit" disabled="@_busy">@L("Создать черновик заказа")</button>
+                <button type="button" class="secondary" @onclick="() => _warehouses = null">@L("Отмена")</button>
+            </form>
+        }
+    }
+
+    <h2>@L("Позиции")</h2>
+    @if (_deal.Lines.Count == 0)
+    {
+        <p class="muted small">@L("Позиции каталога необязательны: из них «Создать заказ» составит строки заказа, а сумма сделки посчитается сама.")</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Позиция")</th><th class="num">@L("Количество")</th><th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th>@if (canEdit) { <th></th> }</tr></thead>
+                <tbody>
+                    @foreach (var l in _deal.Lines)
+                    {
+                        <tr>
+                            <td>@l.Code — @l.Name</td>
+                            <td class="num">@Quantities.Format(l.Quantity) @l.UnitSymbol</td>
+                            <td class="num">@Amounts.Format(l.Price)</td>
+                            <td class="num">@Amounts.Format(l.Amount)</td>
+                            @if (canEdit)
+                            {
+                                <td><button type="button" class="secondary" @onclick="() => RemoveLineAsync(l.ItemId)" disabled="@_busy" aria-label="@L("Убрать {0}", l.Code)">×</button></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    @if (canEdit && _options.CanSeeAmounts)
+    {
+        <form class="inline-form" @onsubmit="AddLineAsync" aria-label="@L("Добавить позицию")">
+            <label>@L("Поиск позиции") <input @bind="_itemSearch" @bind:after="SearchItemsAsync" placeholder="@L("Код, название, артикул")" /></label>
+            <label>
+                @L("Позиция")
+                <select @bind="_item" @bind:after="ItemChanged" aria-label="@L("Позиция каталога")">
+                    <option value="">—</option>
+                    @foreach (var i in _items)
+                    {
+                        <option value="@i.Id">@i.Code — @i.Name</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Количество") <input inputmode="decimal" @bind="_qty" /></label>
+            <label>@L("Цена") <input inputmode="decimal" @bind="_price" /></label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
+        </form>
+    }
+
+    <div class="panel">
+        <h2>@L("Данные сделки")</h2>
+        <form @onsubmit="SaveAsync">
+            <fieldset disabled="@(!canEdit)">
+                <div class="grid">
+                    <label class="wide">@L("Название") <input @bind="_f.Title" maxlength="@CrmDeal.TitleMaxLength" required /></label>
+                    <label>
+                        @L("Контакт")
+                        <select @bind="_f.Contact">
+                            <option value="">—</option>
+                            @foreach (var c in _contacts)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_options.CanSeeAmounts)
+                    {
+                        <label>@L("Сумма") <input inputmode="decimal" @bind="_f.Amount" disabled="@(_deal.Lines.Count > 0)" /></label>
+                        <label>
+                            @L("Валюта")
+                            <select @bind="_f.Currency">
+                                @foreach (var c in _options.Currencies)
+                                {
+                                    <option value="@c">@c</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <label>@L("Плановое закрытие") <input type="date" @bind="_f.Close" /></label>
+                    <label>
+                        @L("Источник")
+                        <select @bind="_f.Source">
+                            <option value="">—</option>
+                            @foreach (var s in _options.Sources)
+                            {
+                                <option value="@s.Id">@s.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Канал продаж")
+                        <select @bind="_f.Channel">
+                            <option value="">—</option>
+                            @foreach (var c in _options.Channels)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Проект")
+                        <select @bind="_f.Project">
+                            <option value="">—</option>
+                            @foreach (var p in _options.Projects)
+                            {
+                                <option value="@p.Id">@p.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Вероятность, %") <input type="number" min="0" max="100" step="1" @bind="_f.Probability" /></label>
+                </div>
+                @if (canEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </fieldset>
+        </form>
+    </div>
+
+    <h2>@L("Участники")</h2>
+    <p>
+        @L("Ответственный:") <b>@_deal.Responsible</b>
+        @if (_deal.Participants.Count > 0)
+        {
+            <span> · @L("наблюдатели:") </span>
+            @foreach (var p in _deal.Participants)
+            {
+                <span class="tag">
+                    @p.Name
+                    @if (_deal.CanEdit)
+                    {
+                        <button type="button" class="tag-x" @onclick="() => RemoveParticipantAsync(p.Id)" disabled="@_busy" aria-label="@L("Убрать наблюдателя {0}", p.Name)">×</button>
+                    }
+                </span>
+            }
+        }
+    </p>
+    @if (_deal.CanEdit)
+    {
+        <form class="inline-form" @onsubmit="AddParticipantAsync">
+            <label>
+                @L("Наблюдатель")
+                <select @bind="_participant">
+                    <option value="">—</option>
+                    @foreach (var u in _options.Users.Where(u => u.Id != v.ResponsibleUserId && _deal.Participants.All(p => p.Id != u.Id)))
+                    {
+                        <option value="@u.Id">@u.Name</option>
+                    }
+                </select>
+            </label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Добавить наблюдателя")</button>
+        </form>
+    }
+    @if (_deal.CanAll && _deal.CanEdit)
+    {
+        <form class="inline-form" @onsubmit="ReassignAsync">
+            <label>
+                @L("Новый ответственный")
+                <select @bind="_reassign">
+                    @foreach (var u in _options.Users)
+                    {
+                        <option value="@u.Id">@u.Name</option>
+                    }
+                </select>
+            </label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Переназначить")</button>
+        </form>
+    }
+
+    <details class="panel">
+        <summary>@L("История этапов") (@_deal.History.Count)</summary>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Когда")</th><th>@L("Переход")</th><th class="num">@L("Дней на этапе")</th><th>@L("Кто")</th></tr></thead>
+                <tbody>
+                    @foreach (var h in _deal.History)
+                    {
+                        <tr>
+                            <td>@TimeZones.ToLocal(h.AtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</td>
+                            <td>@(h.From is null ? L("создана на этапе «{0}»", h.To) : $"{h.From} → {h.To}")</td>
+                            <td class="num">@(h.From is null ? "—" : h.DaysInStage.ToString("0.#"))</td>
+                            <td>@h.By</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </details>
+
+    <Discussion Target="TaggedEntity.CrmDeal" TargetId="Id" />
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "lose")]
+    public int? LoseQuery { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private CrmDealDto? _deal;
+    private CrmOptionsDto? _options;
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto> _contacts = [];
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto>? _warehouses;
+    private IReadOnlyList<CrmItemOptionDto> _items = [];
+    private DealForm _f = new();
+    private bool _busy;
+    private bool _loseOpen;
+    private string? _denied;
+    private string? _notFound;
+    private string? _message;
+    private bool _isError;
+    private string _lossReason = string.Empty;
+    private string? _lossComment;
+    private string _warehouse = string.Empty;
+    private string? _itemSearch;
+    private string _item = string.Empty;
+    private string? _qty;
+    private string? _price;
+    private string _participant = string.Empty;
+    private string _reassign = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _options ??= await Deals.OptionsAsync();
+            await LoadAsync();
+            _loseOpen = LoseQuery == 1 && _deal!.CanEdit && _deal.Outcome == CrmDealOutcome.Open;
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException ex)
+        {
+            _notFound = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _deal = await Deals.GetAsync(Id);
+        _contacts = await Deals.ContactsOfAsync(_deal.Values.CounterpartyId);
+        var v = _deal.Values;
+        _f = new DealForm
+        {
+            Title = v.Title, Contact = v.ContactId?.ToString() ?? "", Amount = Amounts.Input(v.Amount), Currency = v.CurrencyCode ?? "RUB",
+            Close = v.ExpectedCloseDate?.ToDateTime(TimeOnly.MinValue), Source = v.SourceId?.ToString() ?? "", Channel = v.ChannelId?.ToString() ?? "",
+            Project = v.ProjectId?.ToString() ?? "", Probability = _deal.Probability,
+        };
+        _reassign = v.ResponsibleUserId?.ToString() ?? "";
+    }
+
+    private Task StageClickAsync(CrmStageDto stage)
+    {
+        if (stage.Kind == CrmStageKind.Lost)
+        {
+            _loseOpen = true;
+            return Task.CompletedTask;
+        }
+
+        return RunAsync(() => Deals.MoveAsync(Id, stage.Id, _deal!.RowVersion), L("Сделка на этапе «{0}».", stage.Name));
+    }
+
+    private Task LoseAsync() => RunAsync(async () =>
+    {
+        var reason = long.TryParse(_lossReason, out var r) ? r : throw new BusinessRuleException("crm.deal.loss_reason", L("Укажите причину проигрыша."));
+        var lost = _deal!.Stages.Single(s => s.Kind == CrmStageKind.Lost);
+        await Deals.MoveAsync(Id, lost.Id, _deal.RowVersion, reason, _lossComment);
+        _loseOpen = false;
+    }, L("Сделка закрыта проигрышем."));
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var v = _deal!.Values;
+        await Deals.UpdateAsync(Id, new CrmDealValues(_f.Title, v.CounterpartyId, Long(_f.Contact),
+            KnitErp.Domain.Catalog.Decimals.Parse(_f.Amount, L("Сумма")) ?? 0, _f.Currency, _f.Close is { } c ? DateOnly.FromDateTime(c) : null,
+            null, Long(_f.Project), Long(_f.Channel), Long(_f.Source)), _deal.RowVersion);
+        if (_f.Probability != _deal.Probability)
+        {
+            await Deals.SetProbabilityAsync(Id, _f.Probability, (await Deals.GetAsync(Id)).RowVersion);
+        }
+    }, L("Сделка сохранена."));
+
+    private Task OpenOrderAsync() => RunAsync(async () =>
+    {
+        _warehouses = await Deals.WarehousesAsync();
+        _warehouse = _warehouses.FirstOrDefault()?.Id.ToString() ?? "";
+    }, null, reload: false);
+
+    private Task CreateOrderAsync() => RunAsync(async () =>
+    {
+        var warehouse = Long(_warehouse) ?? throw new BusinessRuleException("crm.deal.warehouse", L("Выберите склад отгрузки."));
+        var order = await Deals.CreateOrderAsync(Id, warehouse);
+        Navigation.NavigateTo($"sales-orders/{order}");
+    }, null, reload: false);
+
+    private Task SearchItemsAsync() => RunAsync(async () =>
+    {
+        _items = await Deals.ItemsAsync(_itemSearch);
+        _item = _items.FirstOrDefault()?.Id.ToString() ?? "";
+        ItemChanged();
+    }, null, reload: false);
+
+    private void ItemChanged()
+    {
+        if (_items.FirstOrDefault(i => i.Id.ToString() == _item) is { Price: { } p })
+        {
+            _price = Amounts.Input(p);
+        }
+    }
+
+    private Task AddLineAsync() => RunAsync(async () =>
+    {
+        var item = Long(_item) ?? throw new BusinessRuleException("crm.deal.item", L("Выберите позицию каталога."));
+        var qty = KnitErp.Domain.Catalog.Decimals.Parse(_qty, L("Количество")) ?? throw new BusinessRuleException("crm.deal.quantity", L("Укажите количество."));
+        await Deals.SetLineAsync(Id, item, qty, KnitErp.Domain.Catalog.Decimals.Parse(_price, L("Цена")) ?? 0, _deal!.RowVersion);
+        _qty = null;
+    }, L("Позиция добавлена."));
+
+    private Task RemoveLineAsync(long itemId) => RunAsync(() => Deals.RemoveLineAsync(Id, itemId, _deal!.RowVersion), null);
+
+    private Task AddParticipantAsync() => RunAsync(async () =>
+    {
+        if (Long(_participant) is { } user)
+        {
+            await Deals.AddParticipantAsync(Id, user, _deal!.RowVersion);
+            _participant = "";
+        }
+    }, null);
+
+    private Task RemoveParticipantAsync(long userId) => RunAsync(() => Deals.RemoveParticipantAsync(Id, userId, _deal!.RowVersion), null);
+
+    private Task ReassignAsync() => RunAsync(async () =>
+    {
+        if (Long(_reassign) is { } user && user != _deal!.Values.ResponsibleUserId)
+        {
+            await Deals.ReassignAsync(Id, user, _deal.RowVersion);
+        }
+    }, L("Ответственный изменён."));
+
+    private static long? Long(string? value) => long.TryParse(value, out var v) ? v : null;
+
+    public static string OutcomeClass(CrmDealOutcome outcome) => outcome switch
+    {
+        CrmDealOutcome.Won => "ok",
+        CrmDealOutcome.Lost => "bad",
+        _ => "",
+    };
+
+    /// <summary>Одна операция за раз, затем свежие данные: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? success, bool reload = true)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+            if (reload)
+            {
+                await LoadAsync();
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class DealForm
+    {
+        public string? Title { get; set; }
+        public string Contact { get; set; } = "";
+        public string? Amount { get; set; }
+        public string Currency { get; set; } = "RUB";
+        public DateTime? Close { get; set; }
+        public string Source { get; set; } = "";
+        public string Channel { get; set; } = "";
+        public string Project { get; set; } = "";
+        public int Probability { get; set; }
+    }
+}

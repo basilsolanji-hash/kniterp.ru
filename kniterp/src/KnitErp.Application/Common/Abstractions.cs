@@ -147,6 +147,16 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
     DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings { get; }
 
+    // CRM (D600–D699).
+    DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines { get; }
+    DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages { get; }
+    DbSet<KnitErp.Domain.Crm.CrmReference> CrmReferences { get; }
+    DbSet<KnitErp.Domain.Crm.CrmLead> CrmLeads { get; }
+    DbSet<KnitErp.Domain.Crm.CrmContact> CrmContacts { get; }
+    DbSet<KnitErp.Domain.Crm.CrmDeal> CrmDeals { get; }
+    DbSet<KnitErp.Domain.Crm.CrmDealStageHistory> CrmDealStageHistory { get; }
+    DbSet<KnitErp.Domain.Crm.CrmDealOrder> CrmDealOrders { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);

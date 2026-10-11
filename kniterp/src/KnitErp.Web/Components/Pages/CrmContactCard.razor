@@ -1,0 +1,202 @@
+@page "/crm/contacts/{Id:long}"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@using KnitErp.Domain.Tagging
+@inject CrmContactService Contacts
+@inject CrmDealService Deals
+
+<PageTitle>@(_contact?.Values.FullName ?? L("Контакт")) — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound is not null)
+{
+    <div class="error" role="alert">@_notFound</div>
+    <p><a href="crm/contacts">@L("К списку контактов")</a></p>
+}
+else if (_contact is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var v = _contact.Values;
+    var canEdit = _contact.CanEdit && !_contact.IsArchived;
+    <p class="muted small"><a href="crm/contacts">@L("Контакты")</a></p>
+    <div class="page-head">
+        <h1>@v.FullName @if (_contact.IsArchived) { <span class="tag">@L("архив")</span> }</h1>
+        @if (_contact.CanEdit)
+        {
+            <button type="button" class="secondary" @onclick="ToggleArchiveAsync" disabled="@_busy">@(_contact.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
+        }
+    </div>
+    <TagPicker Entity="TaggedEntity.CrmContact" EntityId="Id" ReadOnly="@(!_contact.CanEdit)" />
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="crm-summary">
+        <div><span>@L("Компания")</span>@if (v.CounterpartyId is { } cp) { <a href="counterparties/@cp">@_contact.Counterparty</a> } else { <span>—</span> }</div>
+        <div><span>@L("Телефон")</span>@if (v.Phone is { } p) { <a href="tel:@p">@CrmText.FormatPhone(p)</a> } else { <span>—</span> }</div>
+        <div><span>@L("Почта")</span>@if (v.Email is { } e) { <a href="mailto:@e">@e</a> } else { <span>—</span> }</div>
+        <div><span>@L("Ответственный")</span><span>@_contact.Responsible</span></div>
+    </div>
+
+    <div class="panel">
+        <h2>@L("Данные контакта")</h2>
+        <form @onsubmit="SaveAsync">
+            <fieldset disabled="@(!canEdit)">
+                <div class="grid">
+                    <label>@L("ФИО") <input @bind="_f.Name" maxlength="@CrmContact.NameMaxLength" required /></label>
+                    <label>@L("Должность") <input @bind="_f.Position" maxlength="@CrmContact.PositionMaxLength" /></label>
+                    <label>@L("Телефон") <input type="tel" @bind="_f.Phone" maxlength="@CrmText.PhoneMaxLength" placeholder="+7 900 000-00-01" /></label>
+                    <label>@L("Почта") <input type="email" @bind="_f.Email" maxlength="@CrmText.EmailMaxLength" /></label>
+                    <label>@L("Мессенджер") <input @bind="_f.Messenger" maxlength="@CrmText.MessengerMaxLength" /></label>
+                    <label>@L("Компания") <input @bind="_companySearch" @bind:after="SearchCompaniesAsync" placeholder="@L("Название или ИНН")" aria-label="@L("Поиск компании")" /></label>
+                    <label>
+                        @L("Основная компания")
+                        <select @bind="_f.Company">
+                            <option value="">—</option>
+                            @foreach (var c in _companies)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="wide">@L("Комментарий") <textarea rows="2" @bind="_f.Comment" maxlength="@CrmContact.CommentMaxLength"></textarea></label>
+                </div>
+                @if (canEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </fieldset>
+        </form>
+    </div>
+
+    <h2>@L("Сделки")</h2>
+    @if (_contact.Deals.Count == 0)
+    {
+        <p class="muted small">@L("Сделок с этим контактом нет.")</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Сделка")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th>@L("Ответственный")</th></tr></thead>
+                <tbody>
+                    @foreach (var d in _contact.Deals)
+                    {
+                        <tr>
+                            <td><a href="crm/deals/@d.Id">@d.Number</a> @d.Title</td>
+                            <td><span class="stage stage-@d.StageColor">@d.Stage</span></td>
+                            <td class="num">@(d.Amount is { } a ? $"{Amounts.Format(a)} {d.CurrencyCode}" : "—")</td>
+                            <td>@d.Responsible</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <Discussion Target="TaggedEntity.CrmContact" TargetId="Id" />
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private CrmContactDto? _contact;
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto> _companies = [];
+    private ContactForm _f = new();
+    private bool _busy;
+    private string? _denied;
+    private string? _notFound;
+    private string? _message;
+    private bool _isError;
+    private string? _companySearch;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException ex)
+        {
+            _notFound = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _contact = await Contacts.GetAsync(Id);
+        var v = _contact.Values;
+        _f = new ContactForm
+        {
+            Name = v.FullName, Position = v.Position, Phone = v.Phone, Email = v.Email, Messenger = v.Messenger, Comment = v.Comment,
+            Company = v.CounterpartyId?.ToString() ?? "",
+        };
+        _companies = v.CounterpartyId is { } cp && _contact.Counterparty is { } name ? [new(cp, name)] : [];
+    }
+
+    private Task SearchCompaniesAsync() => RunAsync(async () =>
+    {
+        _companies = await Deals.CounterpartiesAsync(_companySearch);
+        _f.Company = _companies.FirstOrDefault()?.Id.ToString() ?? "";
+    }, null, reload: false);
+
+    private Task SaveAsync() => RunAsync(() => Contacts.UpdateAsync(Id, new CrmContactValues(_f.Name, _f.Position, long.TryParse(_f.Company, out var c) ? c : null,
+        _f.Phone, _f.Email, _f.Messenger, _f.Comment), _contact!.RowVersion), L("Контакт сохранён."));
+
+    private Task ToggleArchiveAsync() => RunAsync(() => Contacts.SetArchivedAsync(Id, !_contact!.IsArchived, _contact.RowVersion), null);
+
+    private async Task RunAsync(Func<Task> action, string? success, bool reload = true)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+            if (reload)
+            {
+                await LoadAsync();
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class ContactForm
+    {
+        public string? Name { get; set; }
+        public string? Position { get; set; }
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public string? Messenger { get; set; }
+        public string? Comment { get; set; }
+        public string Company { get; set; } = "";
+    }
+}

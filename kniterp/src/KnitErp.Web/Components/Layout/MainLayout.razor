@@ -175,12 +175,17 @@
         ]),
         new("crm", "CRM",
         [
+            // D600 (CRM): лиды, сделки, контакты и настройки воронок.
+            new("crm/deals", "Сделки", a => a.Has(Permissions.CrmView)),
+            new("crm/leads", "Лиды", a => a.Has(Permissions.CrmView)),
+            new("crm/contacts", "Контакты", a => a.Has(Permissions.CrmView)),
             new("counterparties", "Контрагенты", a => a.Has(Permissions.CatalogView)),
             new("counterparties?role=customer", "Покупатели", a => a.Has(Permissions.CatalogView)),
             new("counterparties?role=supplier", "Поставщики", a => a.Has(Permissions.CatalogView)),
             Soon("contracts", "Договоры"),
             Soon("calls", "Звонки"),
             Soon("discounts", "Скидки"),
+            new("crm/settings", "Настройки CRM", a => a.Has(Permissions.CrmView)),
             new("learn/crm", "Обучение", a => true),
         ]),
         new("warehouse", "Склад",

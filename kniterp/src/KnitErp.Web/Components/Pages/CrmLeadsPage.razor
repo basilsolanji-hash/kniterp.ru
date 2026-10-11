@@ -1,0 +1,237 @@
+@page "/crm/leads"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject CrmLeadService Leads
+@inject KnitErp.Application.Tagging.TagService TagLookup
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Лиды") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_page is null || _options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Лиды")</h1>
+        <a class="button secondary" href="crm/deals">@L("Сделки")</a>
+    </div>
+    <p class="muted small">@L("Первые обращения: заявка с сайта, звонок, сообщение в мессенджере. Проверенный лид квалифицируйте — появятся контакт, контрагент и сделка.")</p>
+
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+
+    @if (_options.CanEdit)
+    {
+        <form class="inline-form" @onsubmit="CreateAsync" aria-label="@L("Быстрый ввод лида")">
+            <label>@L("Что нужно клиенту") <input @bind="_title" maxlength="@CrmLead.TitleMaxLength" required placeholder="@L("300 свитеров к Новому году")" /></label>
+            <label>@L("Контактное лицо") <input @bind="_contact" maxlength="@CrmLead.NameMaxLength" /></label>
+            <label>@L("Телефон") <input type="tel" @bind="_phone" @bind:after="CheckDuplicatesAsync" placeholder="+7 900 000-00-01" maxlength="@CrmText.PhoneMaxLength" /></label>
+            <label>@L("Почта") <input type="email" @bind="_email" @bind:after="CheckDuplicatesAsync" maxlength="@CrmText.EmailMaxLength" /></label>
+            <label>@L("Компания") <input @bind="_company" maxlength="@CrmLead.NameMaxLength" /></label>
+            <label>
+                @L("Источник")
+                <select @bind="_source">
+                    <option value="">—</option>
+                    @foreach (var s in _options.Sources)
+                    {
+                        <option value="@s.Id">@s.Name</option>
+                    }
+                </select>
+            </label>
+            @if (_options.CanSeeAmounts)
+            {
+                <label>@L("Ожидаемая сумма") <input inputmode="decimal" @bind="_amount" /></label>
+            }
+            <button type="submit" disabled="@_busy">@L("Добавить лид")</button>
+        </form>
+        <CrmDuplicates Items="_duplicates" />
+    }
+
+    <form class="inline-form" @onsubmit="ReloadAsync">
+        <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
+        <label>
+            @L("Статус")
+            <select @bind="_status">
+                <option value="open">@L("Открытые")</option>
+                <option value="">@L("Все")</option>
+                @foreach (var st in Statuses)
+                {
+                    <option value="@((byte)st)">@L(CrmLead.StatusName(st))</option>
+                }
+            </select>
+        </label>
+        <label>
+            @L("Источник")
+            <select @bind="_filterSource">
+                <option value="">@L("Все")</option>
+                @foreach (var s in _options.Sources)
+                {
+                    <option value="@s.Id">@s.Name</option>
+                }
+            </select>
+        </label>
+        <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, название, компания, телефон")" /></label>
+        @if (_options.CanAll)
+        {
+            <label class="inline"><input type="checkbox" @bind="_mine" /> @L("Только мои")</label>
+        }
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead>
+                <tr>
+                    <th>@L("Номер")</th><th>@L("Лид")</th><th>@L("Статус")</th><th class="opt">@L("Контакт")</th><th class="opt">@L("Компания")</th>
+                    <th class="opt">@L("Источник")</th><th>@L("Ответственный")</th>
+                    @if (_options.CanSeeAmounts)
+                    {
+                        <th class="num">@L("Сумма")</th>
+                    }
+                    <th class="opt">@L("Создан")</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_page.Rows.Count == 0)
+                {
+                    <tr><td colspan="9" class="muted">@L("Лидов нет.")</td></tr>
+                }
+                @foreach (var l in _page.Rows)
+                {
+                    <tr class="@(l.Status == CrmLeadStatus.Rejected ? "archived" : null)">
+                        <td><a href="crm/leads/@l.Id">@l.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(l.Id)" /></td>
+                        <td>@l.Title</td>
+                        <td><span class="tag @StatusClass(l.Status)">@L(l.StatusName)</span></td>
+                        <td>@(l.ContactName ?? "—")</td>
+                        <td>@(l.CompanyName ?? "—")</td>
+                        <td>@(l.Source ?? "—")</td>
+                        <td>@l.Responsible</td>
+                        @if (_options.CanSeeAmounts)
+                        {
+                            <td class="num">@(l.ExpectedAmount is { } a ? $"{Amounts.Format(a)} {l.CurrencyCode}" : "—")</td>
+                        }
+                        <td>@TimeZones.ToLocal(l.CreatedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <CrmPager Total="_page.Total" Page="_page.Page" PageSize="_page.PageSize" Shown="_page.Rows.Count" PageChanged="PageAsync" Busy="_busy" />
+}
+
+@code {
+    private static readonly CrmLeadStatus[] Statuses = [CrmLeadStatus.New, CrmLeadStatus.InWork, CrmLeadStatus.Qualified, CrmLeadStatus.Rejected];
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private CrmPage<CrmLeadRowDto>? _page;
+    private CrmOptionsDto? _options;
+    private IReadOnlyList<CrmDuplicateDto> _duplicates = [];
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>> _tagMap = new Dictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>>();
+    private bool _busy;
+    private string? _denied;
+    private string? _error;
+    private long? _tagId;
+    private string _status = "open";
+    private string _filterSource = string.Empty;
+    private string? _search;
+    private bool _mine;
+    private int _pageNo;
+    private string? _title;
+    private string? _contact;
+    private string? _phone;
+    private string? _email;
+    private string? _company;
+    private string _source = string.Empty;
+    private string? _amount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _options = await Leads.OptionsAsync();
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _page = await Leads.ListAsync(new CrmLeadFilter(
+            byte.TryParse(_status, out var st) ? (CrmLeadStatus)st : null, _search, null, long.TryParse(_filterSource, out var src) ? src : null,
+            _mine, _tagId, _status == "open", _pageNo));
+        _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.CrmLead, _page.Rows.Select(r => r.Id).ToList());
+    }
+
+    private Task ReloadAsync()
+    {
+        _pageNo = 0;
+        return RunAsync(LoadAsync);
+    }
+
+    private Task PageAsync(int page)
+    {
+        _pageNo = page;
+        return RunAsync(LoadAsync);
+    }
+
+    private Task TagChangedAsync(long? tagId)
+    {
+        _tagId = tagId;
+        return ReloadAsync();
+    }
+
+    private Task CheckDuplicatesAsync() => RunAsync(async () => _duplicates = await Leads.DuplicatesAsync(_phone, _email, null));
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        var amount = KnitErp.Domain.Catalog.Decimals.Parse(_amount, L("Ожидаемая сумма"));
+        var id = await Leads.CreateAsync(new CrmLeadValues(_title, long.TryParse(_source, out var s) ? s : null, ContactName: _contact, Phone: _phone,
+            Email: _email, CompanyName: _company, ExpectedAmount: amount));
+        Navigation.NavigateTo($"crm/leads/{id}");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public static string StatusClass(CrmLeadStatus status) => status switch
+    {
+        CrmLeadStatus.Qualified => "ok",
+        CrmLeadStatus.Rejected => "bad",
+        CrmLeadStatus.InWork => "",
+        _ => "warn",
+    };
+}
