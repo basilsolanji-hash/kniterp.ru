@@ -434,6 +434,53 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D96: требование-накладная (М-11) на выдачу и накладная (МХ-18) на выпуск; цены — только с правом, отходы не печатаются.</summary>
+    [SqlFact]
+    public async Task Requisition_and_output_note_print_with_okei_and_prices_by_permission()
+    {
+        var f = await SetUpAsync();
+        long order, issue, waste, output;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            issue = await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 3.3m), (f.Buttons, 50m)));
+            var reason = (await s.Materials.MaterialsAsync(order)).WasteReasons.Single(r => r.Name == "Брак").Id;
+            waste = await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Waste, null, (f.Yarn, 0.1m)) with { ReasonId = reason, Comment = "обрезки" });
+            foreach (var stage in ProductionFlow.Stages)
+            {
+                await s.Floor.RecordAsync(order, Mark(stage, 10));
+            }
+
+            output = (await s.Materials.OutputAsync(order, new OutputCommand(10, Day, null, null))).OutputDocumentId;
+
+            var m11 = await s.ProductionPrint.DocumentAsync(issue);
+            Assert.Equal(("М-11", "0315006", "ТРЕБОВАНИЕ-НАКЛАДНАЯ", "Склад пряжи", "Цех (НЗП)"), (m11.Form, m11.Okud, m11.Title, m11.Sender, m11.Receiver));
+            var yarn = m11.Lines.Single(l => l.Code == "ПР-1");
+            Assert.Equal(("166", 3.3m, 1000m, 3300m), (yarn.UnitCode, yarn.Quantity, yarn.Price!.Value, yarn.Amount!.Value));
+            Assert.Equal(3550m, m11.Total); // 3 300 + 50 × 5
+            var mx18 = await s.ProductionPrint.DocumentAsync(output);
+            Assert.Equal(("МХ-18", "0335018", "Склад готовой продукции", 10m), (mx18.Form, mx18.Okud, mx18.Receiver, mx18.Lines.Single().Quantity));
+            Assert.Equal("796", mx18.Lines.Single().UnitCode);
+            Assert.Equal(354.6m, mx18.Lines.Single().Price); // плановая себестоимость единицы: (3,296 × 1 000 + 50 × 5) / 10
+            Assert.Equal("production.print.purpose", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ProductionPrint.DocumentAsync(waste))).Code);
+        }
+
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            var m11 = await s.ProductionPrint.DocumentAsync(issue);
+            Assert.False(m11.PricesVisible);
+            Assert.All(m11.Lines, l => Assert.Null(l.Price));
+            Assert.Null(m11.Total);
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ProductionPrint.DocumentAsync(issue));
+        }
+    }
+
     private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
         new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 

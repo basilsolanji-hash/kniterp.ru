@@ -103,7 +103,7 @@
     {
         <div class="scroll">
             <table>
-                <thead><tr><th>@L("Документ")</th><th>@L("Дата")</th><th>@L("Операция")</th><th>@L("Статус")</th></tr></thead>
+                <thead><tr><th>@L("Документ")</th><th>@L("Дата")</th><th>@L("Операция")</th><th>@L("Статус")</th><th></th></tr></thead>
                 <tbody>
                     @foreach (var d in _data.Documents)
                     {
@@ -112,6 +112,12 @@
                             <td>@d.DocumentDate.ToString("dd.MM.yyyy")</td>
                             <td>@L(d.PurposeName)</td>
                             <td>@L(d.StatusName)</td>
+                            <td>
+                                @if (d.Purpose is ProductionDocumentPurpose.Issue or ProductionDocumentPurpose.Return or ProductionDocumentPurpose.Output)
+                                {
+                                    <a href="print/production/@d.Id?order=@OrderId" target="_blank" aria-label="@L("Печать {0}", d.Number)">@L("Печать")</a>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
