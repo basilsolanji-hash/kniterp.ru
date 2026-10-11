@@ -897,6 +897,16 @@
             :root[data-density="large"] :is(th, td) { padding: 8px 12px; }
             :root[data-density="large"] .side a { padding: 9px 12px; }
         }
+        .assistant-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+        .assistant-head img { width: 43px; height: 64px; object-fit: cover; object-position: 50% 0; border-radius: 8px; background: var(--field);
+            transform-origin: 50% 97.222%; animation: knit-idle 4.8s ease-in-out infinite; }
+        @@keyframes knit-idle { 0%, 100% { transform: rotate(0) scale(1); } 25% { transform: rotate(.18deg) scale(1.003); } 50% { transform: rotate(0) scale(1.006); } 75% { transform: rotate(-.18deg) scale(1.003); } }
+        @@media (prefers-reduced-motion: reduce) { .assistant-head img { animation: none; } }
+        .chat-who { margin-bottom: 2px; }
+        /* D116: персонаж помощника — не мешает панели инструментов и печати. */
+        knit-assistant { --knit-right: 16px; --knit-bottom: 16px; --knit-z: 60; --knit-accent: var(--accent); }
+        body:has(.drawer.open) knit-assistant, body:has(.float-win) knit-assistant { display: none; }
+        @@media print { knit-assistant { display: none; } }
     </style>
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>
@@ -916,6 +926,7 @@
     <Routes @rendermode="PageRenderMode" />
     <script src="_framework/blazor.web.js"></script>
     <script src="js/kniterp.js"></script>
+    <script src="knit-mascot/web/knit-assistant.js"></script>
     <script src="js/intro.js"></script>
 </body>
 </html>

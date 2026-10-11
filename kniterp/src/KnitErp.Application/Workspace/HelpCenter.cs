@@ -170,6 +170,9 @@ public static class HelpCenter
 
     public static IReadOnlyList<string> Categories => Articles.Select(a => a.Category).Distinct().ToList();
 
+    /// <summary>Справка по программе и отраслевая база знаний (D116) — для поиска, помощника и панели «Справка».</summary>
+    public static IReadOnlyList<HelpArticle> All => [.. Articles, .. IndustryKnowledge.Articles];
+
     /// <summary>Подсказка по текущему экрану: статья, чей адрес раздела совпадает с началом пути.</summary>
     public static HelpArticle? ForRoute(string? route)
     {
@@ -197,7 +200,7 @@ public static class HelpCenter
         }
 
         var translated = language is not null && language.LanguageCode != UiLanguages.Default;
-        return Articles
+        return All
             .Select(a => (Article: a, Title: translated ? a.Title + "\n" + language!.Translate(a.Title) : a.Title,
                 Text: translated ? a.Text + "\n" + string.Join("\n", a.Body.Select(language!.Translate)) : a.Text))
             .Select(x => (x.Article, Score: words.Sum(w =>
