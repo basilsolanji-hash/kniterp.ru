@@ -63,6 +63,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<ItemPriceHistory> ItemPriceHistory { get; }
     DbSet<PriceRevaluation> PriceRevaluations { get; }
     DbSet<ItemPack> ItemPacks { get; }
+    DbSet<ItemSupplier> ItemSuppliers { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }
@@ -144,6 +145,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates { get; }
     DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns { get; }
     DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
+    DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
@@ -177,6 +179,9 @@ public interface ISpreadsheetFormat
 {
     /// <summary>Строки первого листа как текст, вместе с заголовком. Плохой файл — BusinessRuleException.</summary>
     IReadOnlyList<IReadOnlyList<string>> ReadFirstSheet(Stream stream, int maxRows);
+
+    /// <summary>Строки листа по названию (без учёта регистра); листа нет — null (D308, сессия 4).</summary>
+    IReadOnlyList<IReadOnlyList<string>>? ReadNamedSheet(Stream stream, string sheetName, int maxRows);
 
     byte[] Write(IReadOnlyList<SheetData> sheets);
 }

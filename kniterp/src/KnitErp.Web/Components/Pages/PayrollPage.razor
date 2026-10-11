@@ -75,9 +75,17 @@ else
             }
             @if (d.Status == PayrollStatus.Approved && CurrentAccess.Has(Permissions.PayrollCalculate))
             {
-                <a class="button secondary" href="hr/payroll/@d.Id/zup.xml">@L("Выгрузить в 1С: ЗУП")</a>
+                <a class="button secondary" href="hr/payroll/@d.Id/zup.xml" download data-enhance-nav="false">@L("Выгрузить в 1С: ЗУП")</a>
             }
         </div>
+        @if (d.OutputChanged)
+        {
+            <div class="flash error" role="alert">
+                @(d.Status == PayrollStatus.Approved
+                    ? L("Выработка месяца изменилась после утверждения: утверждённые суммы не меняются — недоплата начислится перерасчётом в следующем расчёте, о переплате расчёт предупредит.")
+                    : L("Выработка месяца изменилась после расчёта: пересчитайте перед утверждением."))
+            </div>
+        }
 
         @if (d.Id is null)
         {

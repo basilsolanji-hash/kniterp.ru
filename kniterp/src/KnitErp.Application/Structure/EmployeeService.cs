@@ -201,6 +201,11 @@ public sealed class EmployeeService(
     public async Task SetOnLeaveAsync(long id, bool onLeave, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.EmployeeEdit, ct);
+        if ((await Hr.HrSettingsService.ForOrganizationAsync(db, ctx.OrganizationId, ct)).LeaveOnlyByOrder) // D216
+        {
+            throw new BusinessRuleException("hr.leave.order_only", "В организации отпуск оформляется только приказом Т-6 — статус меняется по приказу.");
+        }
+
         var employee = await LoadForEditAsync(ctx, id, rowVersion, ct);
         var change = employee.SetOnLeave(onLeave);
         Audit(ctx, AuditActions.EmployeeChanged, id, change.Before, change.After, "Статус занятости");

@@ -1,0 +1,35 @@
+{
+  "cookies": [
+    {
+      "name": ".AspNetCore.Antiforgery.gfayPZOrCAs",
+      "value": "CfDJ8Djx8vyc_DpKnohNPvt7L9NxBP9RiIMftoNYgcoqmlS5tShvSTR2Q9b8Iq6C95OnL44otSe0rFp42e1K7dt2GKbeHpvRpl1egKqTGJ76tXA1AsBzrwCNeacpsqzpHsLta8i5zZF5zv7JaBzTk10AtGM",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Strict"
+    },
+    {
+      "name": "knitERP.session",
+      "value": "CfDJ8Djx8vyc_DpKnohNPvt7L9MLM1GPiVlBei7WM2WlYKQFl-6rTS-gtLpVl7_q-6mdLnNEy6PVCOP5C4LCo1Dl0T54am7EuybycnLSA-cq_L32y-_obRzGdEJmZKRKL1noMyQtVgve_fN6_PzhXiLgCFyNl4pmuPvLNigOOtxRF8TRK1wJRwq8nSBZ4l6Wf_SL8kOBJTAFsc7hAhqr1LUMyVwW_esQQAwqdpg3jfMY9ya6kmkFU9ik7FyAFVrW8I-CR0Gi7pfU6739Xr98lB1ZJ5BIGbPimB8MONzdltT9YHQJBZavTaEWSq6kbKkLqAbpLUbPipi-jk6_b3D-KVwpfw5R8KVJBryB6OQwyk9xvHdXG4uRmip6VJc9xM2n-VGuupOLMGBfVI8BjnhwvblFy4bkDuN-ZzGpudiv_reIHhIWxiwwoUojdXzrEh7XacXOUouhlgxLUy7MsKPOyRJ-I8iA64KqTnU_iSjEnyQOoBBlopL7NPztr4eObQkqt98_wSdW9Lv5BrRJzoUy2_LrFpbsk3YGZTvT3IFHVfSGrknEp-HcLnLRlIOrGPCtMm10ThtFjIYZfX32yFf_YI5V7XSsg-4QRoHZdnoPwirWXtVXbyDV4fHamexRcD0Y0lpekiUZf57_CS7GY3m9GQBFMhI",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://127.0.0.1:5199",
+      "localStorage": [
+        {
+          "name": "kniterp-intro-day",
+          "value": "2026-10-11"
+        }
+      ]
+    }
+  ]
+}

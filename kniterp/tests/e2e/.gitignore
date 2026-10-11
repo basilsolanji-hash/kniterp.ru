@@ -1,5 +1,0 @@
-node_modules/
-.auth/
-.server.pid
-test-results/
-playwright-report/

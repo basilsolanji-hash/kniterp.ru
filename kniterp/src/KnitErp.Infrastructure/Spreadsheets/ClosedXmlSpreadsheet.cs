@@ -17,7 +17,12 @@ public sealed class ClosedXmlSpreadsheet : ISpreadsheetFormat
     public const int MaxZipEntries = 1000;
     public const long MaxCells = 400_000;
 
-    public IReadOnlyList<IReadOnlyList<string>> ReadFirstSheet(Stream stream, int maxRows)
+    public IReadOnlyList<IReadOnlyList<string>> ReadFirstSheet(Stream stream, int maxRows) => ReadSheet(stream, maxRows, null)!;
+
+    /// <summary>Лист по названию (D308: «Состав комплектов»); листа нет — null. Те же ограничения размера, что у первого листа.</summary>
+    public IReadOnlyList<IReadOnlyList<string>>? ReadNamedSheet(Stream stream, string sheetName, int maxRows) => ReadSheet(stream, maxRows, sheetName);
+
+    private IReadOnlyList<IReadOnlyList<string>>? ReadSheet(Stream stream, int maxRows, string? sheetName)
     {
         if (!stream.CanSeek)
         {
@@ -41,7 +46,14 @@ public sealed class ClosedXmlSpreadsheet : ISpreadsheetFormat
 
         using (workbook)
         {
-            var sheet = workbook.Worksheets.FirstOrDefault()
+            if (sheetName is not null && !workbook.Worksheets.Any(w => string.Equals(w.Name, sheetName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            var sheet = (sheetName is null
+                            ? workbook.Worksheets.FirstOrDefault()
+                            : workbook.Worksheets.First(w => string.Equals(w.Name, sheetName, StringComparison.OrdinalIgnoreCase)))
                         ?? throw new BusinessRuleException("import.file_empty", "В файле нет листов.");
             var used = sheet.RangeUsed();
             if (used is null)

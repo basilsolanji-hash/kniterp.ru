@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.AddScoped<KnitErp.Application.Hr.TimesheetService>();
         services.AddScoped<KnitErp.Application.Hr.LeaveStatusSync>();
         services.AddScoped<KnitErp.Application.Hr.PayrollService>();
+        services.AddScoped<KnitErp.Application.Hr.HrSettingsService>();
         services.AddScoped<KnitErp.Application.Hr.PayrollEnterpriseDataExport>();
         // Граница с производством: настоящая выработка регистрируется модулем производства и заменяет заглушку.
         services.TryAddScoped<KnitErp.Application.Hr.IWorkOutputSource, KnitErp.Application.Hr.EmptyWorkOutputSource>();
@@ -56,6 +57,7 @@ public static class DependencyInjection
         services.AddScoped<Production.ProductionScoreService>();
         // Производство на главном экране (контракт D111 базовой ветки).
         services.AddScoped<Workspace.IProductionDashboardSource, Production.ProductionDashboardSource>();
+        services.AddScoped<Workspace.IShiftStaffingSource, Hr.ShiftStaffingSource>(); // D221: «смена сегодня» на главном
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();
@@ -71,6 +73,7 @@ public static class DependencyInjection
         services.AddScoped<Catalog.RevaluationService>(); // D306 (сессия 4)
         services.AddScoped<Catalog.PackService>(); // D307 (сессия 4)
         services.AddScoped<Catalog.CatalogQueryService>(); // D307 (сессия 4)
+        services.AddScoped<Catalog.ItemSupplierService>(); // D309 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
         services.AddScoped<Finance.SettlementStatementService>();

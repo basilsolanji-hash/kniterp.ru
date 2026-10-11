@@ -159,6 +159,24 @@ else
                     </tbody>
                 </table>
             </div>
+            @if (_plan.Bundles.Count > 0)
+            {
+                <h3>@L("Состав комплектов")</h3>
+                <div class="scroll" style="max-height: 240px; overflow-y: auto">
+                    <table>
+                        <thead><tr><th>@L("Строка")</th><th>@L("Комплект")</th><th>@L("Компонент")</th><th class="num">@L("Количество")</th><th>@L("Ошибки")</th></tr></thead>
+                        <tbody>
+                            @foreach (var b in _plan.Bundles.OrderBy(b => b.Errors.Count == 0).ThenBy(b => b.RowNumber).Take(500))
+                            {
+                                <tr>
+                                    <td>@b.RowNumber</td><td>@b.BundleCode</td><td>@b.ComponentCode</td><td class="num">@b.QuantityText</td>
+                                    <td>@if (b.Errors.Count > 0) { <span class="tag bad">@string.Join(" ", b.Errors)</span> }</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
             <div class="actions">
                 @if (_plan.CanApply)
                 {
@@ -456,9 +474,11 @@ else
 
     private Task ApplyImportAsync() => RunAsync(async () =>
     {
-        var result = await Exchange.ApplyAsync(_plan!.Rows);
+        var result = await Exchange.ApplyAsync(_plan!.Rows, _plan.Bundles);
         _plan = null;
-        _flash = L("Загружено: создано {0}, обновлено {1}.", result.Created, result.Updated);
+        _flash = result.Bundles > 0
+            ? L("Загружено: создано {0}, обновлено {1}, составов комплектов {2}.", result.Created, result.Updated, result.Bundles)
+            : L("Загружено: создано {0}, обновлено {1}.", result.Created, result.Updated);
     }, null);
 
     private static string ActionText(ImportAction a) => a switch
