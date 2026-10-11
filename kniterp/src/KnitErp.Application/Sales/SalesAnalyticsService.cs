@@ -152,8 +152,11 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
         }).ToList();
     }
 
-    /// <summary>Себестоимость единицы на дату: закупки по заказам до даты включительно и действующие техкарты.</summary>
-    private async Task<IReadOnlyDictionary<long, (decimal Cost, CostSource Source)>> CostsAsync(
+    /// <summary>
+    /// Себестоимость единицы на дату: закупки по заказам до даты включительно и действующие техкарты.
+    /// internal — D302 (сессия 4): та же оценка для себестоимости комплекта по компонентам (BundleService).
+    /// </summary>
+    internal async Task<IReadOnlyDictionary<long, (decimal Cost, CostSource Source)>> CostsAsync(
         AccessContext ctx, DateOnly asOf, IReadOnlyList<long> itemIds, CancellationToken ct)
     {
         var cards = await db.TechCards.AsNoTracking().Include(c => c.Lines)

@@ -116,7 +116,7 @@ else
                 @foreach (var c in _list.Counterparties)
                 {
                     <tr class="@(c.IsArchived ? "archived" : null)">
-                        <td>@c.Name<TagDots Tags="@_tagMap.GetValueOrDefault(c.Id)" /> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }@if (c.Comment is not null) { <div class="muted">@c.Comment</div> }</td>
+                        <td><a href="counterparties/@c.Id">@c.Name</a><TagDots Tags="@_tagMap.GetValueOrDefault(c.Id)" /> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }@if (c.Comment is not null) { <div class="muted">@c.Comment</div> }</td>
                         <td>@if (c.Inn is not null) { <span class="muted">@c.Country.TaxIdName </span>@c.Inn } else { <span>—</span> }@if (c.Kpp is not null) { <span class="muted"> / @c.Kpp</span> }@if (c.CountryCode != _orgCountry) { <div class="muted">@c.Country.Name</div> }</td>
                         <td>@L(c.RolesText)</td>
                         @if (_list.CanEdit || _list.CanArchive)
@@ -191,6 +191,10 @@ else
     [SupplyParameterFromQuery(Name = "role")]
     public string? RoleQuery { get; set; }
 
+    /// <summary>D500: «Изменить» из карточки контрагента — ?edit={id} сразу открывает форму.</summary>
+    [SupplyParameterFromQuery(Name = "edit")]
+    public long? EditQuery { get; set; }
+
     private string? _appliedRole;
 
     protected override async Task OnParametersSetAsync()
@@ -208,6 +212,10 @@ else
             if (NewQuery == "1" && _mode != Mode.Create)
             {
                 OpenCreate();
+            }
+            else if (EditQuery is { } editId && _list!.CanEdit && _list.Counterparties.FirstOrDefault(c => c.Id == editId && !c.IsArchived) is { } target)
+            {
+                OpenEdit(target);
             }
         }
         catch (AccessDeniedException ex)

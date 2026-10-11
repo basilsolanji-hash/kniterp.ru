@@ -24,6 +24,10 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<Characteristic> Characteristics => Set<Characteristic>();
     public DbSet<ItemCharacteristicValue> ItemCharacteristicValues => Set<ItemCharacteristicValue>();
     public DbSet<ItemPhoto> ItemPhotos => Set<ItemPhoto>();
+    public DbSet<BundleComponent> BundleComponents => Set<BundleComponent>();
+    public DbSet<ItemPriceHistory> ItemPriceHistory => Set<ItemPriceHistory>();
+    public DbSet<PriceRevaluation> PriceRevaluations => Set<PriceRevaluation>();
+    public DbSet<ItemPack> ItemPacks => Set<ItemPack>();
     public DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations => Set<KnitErp.Domain.Finance.MoneyOperation>();
     public DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens => Set<KnitErp.Domain.Integrations.ApiToken>();
     public DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions => Set<KnitErp.Domain.Integrations.WebhookSubscription>();
@@ -45,6 +49,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<Warehouse> Warehouses => Set<Warehouse>();
     public DbSet<Counterparty> Counterparties => Set<Counterparty>();
+    public DbSet<CounterpartyContract> CounterpartyContracts => Set<CounterpartyContract>();
+    public DbSet<CounterpartyContractFile> CounterpartyContractFiles => Set<CounterpartyContractFile>();
     public DbSet<VatRate> VatRates => Set<VatRate>();
     public DbSet<KnitErp.Domain.Production.TechCard> TechCards => Set<KnitErp.Domain.Production.TechCard>();
     public DbSet<KnitErp.Domain.Production.ProductionOrder> ProductionOrders => Set<KnitErp.Domain.Production.ProductionOrder>();

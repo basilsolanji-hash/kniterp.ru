@@ -106,7 +106,7 @@ public sealed class OpeningBalanceService(
     public async Task<IReadOnlyList<EntryItemDto>> ListItemsForEntryAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.OpeningBalanceCreate, ct);
-        return await ActiveItems(ctx).ToListAsync(ct);
+        return await StockEntry.ActiveItems(db, ctx.OrganizationId, stockedOnly: true).ToListAsync(ct);
     }
 
     public async Task<long> CreateAsync(long warehouseId, DateOnly asOfDate, string? comment, CancellationToken ct = default)
@@ -141,6 +141,7 @@ public sealed class OpeningBalanceService(
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
         var item = await ActiveItems(ctx, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, [itemId], ct); // D300 (сессия 4)
         StockEntry.EnsurePrecision(item, quantity);
         var before = doc.Lines.FirstOrDefault(l => l.ItemId == itemId)?.Quantity;
         doc.SetLine(itemId, quantity);
@@ -245,6 +246,7 @@ public sealed class OpeningBalanceService(
         }
 
         var archived = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id) && i.IsArchived).Select(i => i.Code).ToListAsync(ct);
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
         if (archived.Count > 0)
         {
             throw new BusinessRuleException("stock.opening.archived_item", $"Позиции в архиве: {string.Join(", ", archived.Take(10))}.");

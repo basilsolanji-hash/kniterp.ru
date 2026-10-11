@@ -19,8 +19,13 @@ public sealed record ItemDto(
     public string TypeName => ItemTypes.Name(Type);
 }
 
-/// <summary>GroupId — группа с подгруппами (D79), 0 — позиции без группы. Search — по коду, названию, артикулу и штрихкоду.</summary>
-public sealed record ItemFilter(ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null);
+/// <summary>
+/// GroupId — группа с подгруппами (D79), 0 — позиции без группы. Search — по коду, названию, артикулу и штрихкоду.
+/// Kind — «Товары / Услуги» (D300).
+/// </summary>
+public sealed record ItemFilter(
+    ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null,
+    ItemKind? Kind = null);
 
 public sealed record ItemListDto(IReadOnlyList<ItemDto> Items, int Total, bool CanEdit, bool CanArchive);
 
@@ -107,6 +112,12 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             query = query.Where(i => i.Type == type);
         }
 
+        if (filter.Kind is { } kind)
+        {
+            var kindTypes = ItemTypes.OfKind(kind).ToArray();
+            query = query.Where(i => kindTypes.Contains(i.Type));
+        }
+
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var s = filter.Search.Trim();
@@ -176,6 +187,7 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await RequireActiveUnitAsync(ctx, cmd.UnitId, ct);
         var item = Item.Create(ctx.OrganizationId, cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description, clock.UtcNow);
         await RequireActiveVatRateAsync(ctx, cmd.VatRateId, ct);
+        ServiceRules.EnsureVat(item.Type, cmd.VatRateId);
         item.SetVatRate(cmd.VatRateId);
         if (cmd.GroupId is { } gid)
         {
@@ -207,6 +219,18 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await RequireActiveUnitAsync(ctx, cmd.UnitId, ct);
         var oldUnit = item.UnitId;
         var oldVat = item.VatRateId;
+        ServiceRules.EnsureVat(cmd.Type, cmd.VatRateId);
+        if (cmd.Type != item.Type)
+        {
+            await EnsureTypeChangeAsync(ctx, item, cmd.Type, ct);
+        }
+
+        if (cmd.UnitId != item.UnitId && await db.ItemPacks.AnyAsync(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == id, ct))
+        {
+            // D307: коэффициенты упаковок заданы в основной единице — при её смене они потеряли бы смысл.
+            throw new BusinessRuleException("catalog.pack.unit_change", "У позиции есть упаковки: их коэффициенты заданы в основной единице. Уберите упаковки, затем меняйте единицу.");
+        }
+
         var changes = item.Update(cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description);
         if (cmd.VatRateId != oldVat)
         {
@@ -235,6 +259,55 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>
+    /// Смена типа (D300, D302). Услугой или комплектом может стать только позиция, которой не было на складе (нет движений и партий),
+    /// без модификаций и не входящая в комплекты; иначе остаток, партии и старые документы указывали бы на то, что на складе не
+    /// хранится. Комплект с составом перестаёт быть комплектом только после очистки состава. Те же запреты — триггеры базы.
+    /// </summary>
+    private async Task EnsureTypeChangeAsync(AccessContext ctx, Item item, ItemType newType, CancellationToken ct)
+    {
+        if (item.Type == ItemType.Bundle && await db.BundleComponents.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.BundleItemId == item.Id, ct))
+        {
+            throw new BusinessRuleException("catalog.bundle.has_components", $"У комплекта {item.Code} есть состав — сначала уберите компоненты.");
+        }
+
+        if (ItemTypes.IsStocked(newType) || !ItemTypes.IsStocked(item.Type))
+        {
+            return;
+        }
+
+        // Сообщения целиком для каждого типа — чтобы их можно было перевести (D60).
+        var service = newType == ItemType.Service;
+        if (item.IsModification || await db.Items.AnyAsync(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == item.Id, ct))
+        {
+            throw service
+                ? new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать услугой.")
+                : new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать комплектом.");
+        }
+
+        if (await db.ItemPacks.AnyAsync(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == item.Id, ct))
+        {
+            throw service
+                ? new BusinessRuleException("catalog.pack.exists", $"У позиции {item.Code} есть упаковки — уберите их, затем делайте услугой.")
+                : new BusinessRuleException("catalog.pack.exists", $"У позиции {item.Code} есть упаковки — уберите их, затем делайте комплектом.");
+        }
+
+        if (await db.BundleComponents.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.ComponentItemId == item.Id, ct))
+        {
+            throw service
+                ? new BusinessRuleException("catalog.bundle.component_in_use", $"Позиция {item.Code} входит в комплекты — её нельзя сделать услугой.")
+                : new BusinessRuleException("catalog.bundle.component_in_use", $"Позиция {item.Code} входит в комплекты — её нельзя сделать комплектом.");
+        }
+
+        if (await db.StockMovements.AnyAsync(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == item.Id, ct)
+            || await db.StockBatches.AnyAsync(b => b.OrganizationId == ctx.OrganizationId && b.ItemId == item.Id, ct))
+        {
+            throw service
+                ? new BusinessRuleException("catalog.service.has_stock", $"Позиция {item.Code} уже была на складе (есть движения или партии) — её нельзя сделать услугой. Заведите услугу отдельной позицией.")
+                : new BusinessRuleException("catalog.service.has_stock", $"Позиция {item.Code} уже была на складе (есть движения или партии) — её нельзя сделать комплектом. Заведите комплект отдельной позицией.");
+        }
     }
 
     /// <summary>Ставка НДС своей организации и не в архиве (чужая — «не найдено»).</summary>

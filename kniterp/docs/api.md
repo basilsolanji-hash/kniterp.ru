@@ -123,3 +123,31 @@ def valid(secret: str, ts: str, body: bytes, header: str) -> bool:
 ## Настройки сервера
 - `Webhooks__Disabled=true` — не запускать отправку вебхуков на этом экземпляре.
 - `Webhooks__AllowPrivateNetworks=true` — только для тестового стенда; на рабочем сервере не включать.
+
+## Каталог для обмена (D307, сессия № 4)
+
+| Метод | Путь | Право |
+|---|---|---|
+| GET | `/api/v1/catalog/items?search=&type=&kind=&groupId=&tagId=&includeArchived=` | просмотр справочников |
+| GET | `/api/v1/items/{id}/availability` | просмотр справочников |
+| GET | `/api/v1/items/{id}/packs` | просмотр справочников |
+| GET | `/api/v1/barcodes/{code}` | просмотр справочников |
+
+`catalog/items` — те же поля, что `items`, плюс:
+- `kind` — вид позиции: `Goods`, `Service`, `Bundle`;
+- `paymentSubject` — признак предмета расчёта: `GOOD`, `EXCISABLE_GOOD`, `SERVICE`;
+- `isMarked`, `trackingType` — маркировка, коды как в МойСклад: `NOT_TRACKED`, `LP_CLOTHES`, `LP_LINENS`, `SHOES`, `OTP`;
+- `gtin` — GTIN-14;
+- `minPrice` — минимальная цена, только с правом «Цены и суммы»;
+- `packs` — упаковки `[{ unitId, unit, factor, barcode }]`;
+- `components` — состав комплекта `[{ itemId, code, quantity }]`, у других видов — null.
+
+`availability`:
+- у товара `stocked = true`, `total` = остаток − резерв подтверждённых заказов по складам, которые видит токен;
+- у комплекта `stocked = false`, `total` — сколько наборов можно собрать из компонентов;
+- у услуги `stocked = false`, `total = 0`.
+
+`barcodes/{code}` — позиция по штрихкоду позиции или упаковки и `quantity` в основных единицах (у упаковки — её коэффициент).
+Если штрихкод не найден — 404.
+
+Право «Цены: переоценка» (`catalog.price.edit`) через API не выдаётся.

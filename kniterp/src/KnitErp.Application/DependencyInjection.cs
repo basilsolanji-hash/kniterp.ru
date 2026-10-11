@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddScoped<CatalogService>();
         services.AddScoped<WarehouseService>();
         services.AddScoped<CounterpartyService>();
+        services.AddScoped<CounterpartyCardService>();
         services.AddScoped<OperationReasonService>();
         services.AddScoped<ItemExchangeService>();
         services.AddScoped<CounterpartyExchangeService>();
@@ -65,6 +66,11 @@ public static class DependencyInjection
         services.AddScoped<Organizations.LegalEntityService>();
         services.AddScoped<Catalog.NomenclatureService>();
         services.AddScoped<Catalog.ModificationService>();
+        services.AddScoped<Catalog.BundleService>(); // D302 (сессия 4)
+        services.AddScoped<Catalog.ItemTradeService>(); // D305 (сессия 4)
+        services.AddScoped<Catalog.RevaluationService>(); // D306 (сессия 4)
+        services.AddScoped<Catalog.PackService>(); // D307 (сессия 4)
+        services.AddScoped<Catalog.CatalogQueryService>(); // D307 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
         services.AddScoped<Finance.SettlementStatementService>();

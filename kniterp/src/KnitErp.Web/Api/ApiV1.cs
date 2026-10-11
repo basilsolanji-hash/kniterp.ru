@@ -331,6 +331,8 @@ public static class ApiV1
 
         api.MapGet("/webhook-events", () => ApiResult.Ok(WebhookEvents.All.Select(e => new { e.Event, e.Title })))
             .WithSummary("Типы событий для вебхуков");
+
+        api.MapCatalogApi(); // D307 (сессия 4): каталог — отдельным файлом ApiCatalog.cs
     }
 
     private static Page<T> Paged<T>(IReadOnlyList<T> all, int? offset, int? limit)

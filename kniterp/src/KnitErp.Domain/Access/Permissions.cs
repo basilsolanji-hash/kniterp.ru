@@ -43,6 +43,12 @@ public static class Permissions
     public const string ProductionStageMark = "production.stage.mark";
     public const string ProductionMaterialMove = "production.material.move";
 
+    /// <summary>D302 (сессия № 4): состав комплектов.</summary>
+    public const string BundleEdit = "catalog.bundle.edit";
+
+    /// <summary>D306 (сессия № 4): массовая переоценка. Через API не выдаётся.</summary>
+    public const string PriceEdit = "catalog.price.edit";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -82,6 +88,8 @@ public static class Permissions
         [ProductionOrderEdit] = "Производство: заказы — создание, запуск и отмена",
         [ProductionStageMark] = "Производство: отметка этапов и контроль качества",
         [ProductionMaterialMove] = "Производство: выдача, возврат и списание материалов, выпуск",
+        [BundleEdit] = "Номенклатура: состав комплектов",
+        [PriceEdit] = "Цены: переоценка",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;

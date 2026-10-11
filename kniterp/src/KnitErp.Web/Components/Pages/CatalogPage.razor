@@ -24,6 +24,10 @@ else
         <h1>@L("Номенклатура")</h1>
         <div class="actions">
             <a class="button secondary" href="catalog/settings">@L("Группы, цены, доп. поля, справочники")</a>
+            @if (CurrentAccess.Has(Permissions.PriceEdit) && CurrentAccess.Has(Permissions.PriceView))
+            {
+                <a class="button secondary" href="catalog/revaluation">@L("Массовая переоценка")</a>
+            }
             @if (_list.CanEdit && _mode == Mode.None)
             {
                 <button type="button" @onclick="OpenCreate" disabled="@_busy">@L("Добавить позицию")</button>
@@ -46,7 +50,7 @@ else
                     <label>@L("Наименование") <InputText @bind-Value="_form.Name" maxlength="300" required /></label>
                     <label>
                         @L("Тип")
-                        <InputSelect @bind-Value="_form.Type">
+                        <InputSelect @bind-Value="_form.Type" @bind-Value:after="TypeChanged">
                             @foreach (var t in ItemTypes.All)
                             {
                                 <option value="@t">@L(ItemTypes.Name(t))</option>
@@ -64,7 +68,7 @@ else
                         </InputSelect>
                     </label>
                     <label>
-                        @L("Ставка НДС")
+                        @(_form.Type == ItemType.Service ? L("Ставка НДС (обязательна для услуги)") : L("Ставка НДС"))
                         <InputSelect @bind-Value="_form.VatRateId">
                             <option value="">@L("не указана")</option>
                             @foreach (var r in _vatRates)
@@ -183,6 +187,15 @@ else
     <div>
     <form class="inline-form" @onsubmit="ReloadAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
+        <label>
+            @L("Вид")
+            <select @bind="_kindFilter">
+                <option value="">@L("Все виды")</option>
+                <option value="@((byte)ItemKind.Goods)">@L("Товары")</option>
+                <option value="@((byte)ItemKind.Service)">@L("Услуги")</option>
+                <option value="@((byte)ItemKind.Bundle)">@L("Комплекты")</option>
+            </select>
+        </label>
         <label>
             @L("Тип")
             <select @bind="_typeFilter">
@@ -304,6 +317,7 @@ else
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
     private bool _flashIsError;
     private string _typeFilter = string.Empty;
+    private string _kindFilter = string.Empty;
     private string _search = string.Empty;
     private bool _includeArchived;
     private long? _groupId;
@@ -333,7 +347,8 @@ else
     private async Task LoadAsync()
     {
         ItemType? type = byte.TryParse(_typeFilter, out var t) ? (ItemType)t : null;
-        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, GroupId: _groupId, TagId: _tagId));
+        ItemKind? kind = byte.TryParse(_kindFilter, out var k) ? (ItemKind)k : null;
+        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, GroupId: _groupId, TagId: _tagId, Kind: kind));
         await LoadTagsAsync();
         _groups = await Nomenclature.GroupsAsync();
         _units = await Catalog.ListUnitsAsync(_includeArchived);
@@ -362,6 +377,26 @@ else
             GroupId = _groupId is > 0 ? _groupId : null,
         };
         _mode = Mode.Create;
+    }
+
+    /// <summary>D300: у новой услуги единица по умолчанию — «усл. ед» (ОКЕИ 876), если единица не выбрана вручную.</summary>
+    private void TypeChanged()
+    {
+        if (_mode != Mode.Create)
+        {
+            return;
+        }
+
+        var piece = _units.FirstOrDefault(u => u.Code == "796")?.Id;
+        var service = _units.FirstOrDefault(u => u.Code == ServiceRules.ServiceUnitCode)?.Id;
+        if (_form.Type == ItemType.Service && service is { } s && (_form.UnitId == 0 || _form.UnitId == piece))
+        {
+            _form.UnitId = s;
+        }
+        else if (_form.Type != ItemType.Service && piece is { } p && _form.UnitId == service)
+        {
+            _form.UnitId = p;
+        }
     }
 
     private void OpenEdit(ItemDto i)

@@ -20,6 +20,17 @@ public static class UiLanguages
         new("be", "be-BY", "Беларуская"),
     ];
 
+    /// <summary>
+    /// Порядок кнопок выбора языка — по алфавиту самоназваний: кириллица (Қ — как К), затем латиница.
+    /// <see cref="All"/> не трогаем: первый элемент — язык по умолчанию.
+    /// </summary>
+    public static readonly IReadOnlyList<UiLanguage> Menu =
+        All.OrderBy(l => IsLatin(l.NativeName) ? 1 : 0)
+            .ThenBy(l => l.NativeName.Replace('Қ', 'К').Replace('қ', 'к'), StringComparer.Ordinal)
+            .ToList();
+
+    private static bool IsLatin(string name) => name.Length > 0 && name[0] < '\u0400';
+
     public static UiLanguage? Find(string? code) =>
         All.FirstOrDefault(l => string.Equals(l.Code, code?.Trim(), StringComparison.OrdinalIgnoreCase));
 }

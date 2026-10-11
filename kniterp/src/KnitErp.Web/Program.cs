@@ -404,6 +404,25 @@ app.MapGet("/employees/consent-scans/{id:long}", async (long id, KnitErp.Applica
     }
 });
 
+// Скан договора контрагента (D500): право, своя организация и журнал просмотра — в сервисе; отдаётся вложением.
+app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.Application.Catalog.CounterpartyCardService cards, HttpContext http, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, contentType, content) = await cards.GetFileAsync(id, ct);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(content, contentType, fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 app.MapGet("/opening-balances/template.xlsx", (OpeningBalanceService balances, CancellationToken ct) =>
     FileOrForbid(() => balances.LinesTemplateAsync(ct), "shablon-nachalnyh-ostatkov.xlsx"));
 app.MapGet("/stock-documents/template.xlsx", (StockDocumentService documents, CancellationToken ct) =>
