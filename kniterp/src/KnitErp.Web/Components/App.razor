@@ -505,6 +505,32 @@
         td.neg, td.late { color: var(--bad); }
         td.late { font-weight: 600; }
         .small { font-size: 12px; }
+        /* D111: производство на главном экране — воронка этапов, готовность заказов, смена. */
+        .prod-box h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .prod-box h2 > a { margin-left: auto; font-weight: 400; }
+        .prod-funnel { list-style: none; margin: 0 0 10px; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; counter-reset: step; }
+        .prod-funnel li { position: relative; min-width: 0; }
+        .prod-step { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field);
+            color: var(--text); text-decoration: none; height: 100%; box-sizing: border-box; }
+        .prod-step:hover { border-color: var(--accent); }
+        .prod-step b { font-size: 22px; line-height: 1.1; }
+        .prod-step .stage { align-self: flex-start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .prod-late { font-size: 12px; color: var(--bad); }
+        .prod-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+        .prod-col { min-width: 0; }
+        .prod-orders { list-style: none; margin: 8px 0 0; padding: 0; }
+        .prod-orders a { display: grid; grid-template-columns: minmax(0, 1fr) 90px 40px auto; align-items: center; gap: 8px; padding: 6px 2px;
+            border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; }
+        .prod-orders li:last-child a { border-bottom: 0; }
+        .prod-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .prod-bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+        .prod-bar span { display: block; height: 100%; background: var(--accent); }
+        .prod-pct { text-align: right; font-variant-numeric: tabular-nums; }
+        .prod-shift { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); text-decoration: none; }
+        .prod-shift b { font-size: 20px; }
+        .neg { color: var(--bad); }
+        @@media (max-width: 599px) { .prod-funnel { grid-template-columns: 1fr 1fr; } .prod-orders a { grid-template-columns: minmax(0, 1fr) 60px 36px; } .prod-orders a > :last-child:not(.prod-pct) { display: none; } }
         .attention { list-style: none; margin: 0; padding: 0; }
         .attention li a { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; }
         .attention li:last-child a { border-bottom: 0; }

@@ -2473,5 +2473,19 @@
   "Правило сохранено.": "Qoida saqlandi.",
   "Производство завершено": "Ishlab chiqarish yakunlandi",
   "Производство начато": "Ishlab chiqarish boshlandi",
-  "Этап для события «{0}»": "«{0}» hodisasi uchun bosqich"
+  "Этап для события «{0}»": "«{0}» hodisasi uchun bosqich",
+  "в работе": "ishda",
+  "все на месте": "hammasi joyida",
+  "выпуск сегодня, {0}": "bugungi ishlab chiqarish, {0}",
+  "Готовность {0}": "Tayyorligi {0}",
+  "Готовность заказов по операциям, выпуск за день и смена появятся здесь, когда в программе начнут вести производственные заказы и табель.": "Operatsiyalar bo'yicha buyurtmalar tayyorligi, kunlik ishlab chiqarish va smena dasturda ishlab chiqarish buyurtmalari va tabel yuritila boshlaganda shu yerda paydo bo'ladi.",
+  "заказов": "buyurtma",
+  "Заказы покупателей по этапам производства": "Ishlab chiqarish bosqichlari bo'yicha xaridorlar buyurtmalari",
+  "не вышли: {0}": "chiqmaganlar: {0}",
+  "проверьте": "tekshiring",
+  "с опозданием": "kechikish bilan",
+  "Смена сегодня": "Bugungi smena",
+  "срок отгрузки прошёл: {0}": "jo'natish muddati o'tdi: {0}",
+  "срочно": "shoshilinch",
+  "Этапы и автосмена": "Bosqichlar va avtoalmashtirish"
 }
