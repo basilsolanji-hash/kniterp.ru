@@ -2548,5 +2548,9 @@
   "Создать на основе": "Asosida yaratish",
   "Создать роль": "Rol yaratish",
   "Сохранено. Права действуют сразу.": "Saqlandi. Huquqlar darhol amal qiladi.",
-  "Пользователь ещё не вошёл или заблокирован — права начнут действовать, когда он войдёт в программу.": "Foydalanuvchi hali kirmagan yoki bloklangan — huquqlar u dasturga kirganda amal qila boshlaydi."
+  "Пользователь ещё не вошёл или заблокирован — права начнут действовать, когда он войдёт в программу.": "Foydalanuvchi hali kirmagan yoki bloklangan — huquqlar u dasturga kirganda amal qila boshlaydi.",
+  "Размер интерфейса": "Interfeys o'lchami",
+  "Компактно": "Ixcham",
+  "Обычно": "Odatiy",
+  "Крупно": "Yirik"
 }
