@@ -1,0 +1,87 @@
+@page "/print/staffing"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using System.Globalization
+@using KnitErp.Application.Hr
+@inject StaffingService Staffing
+
+@*
+    Штатное расписание — унифицированная форма № Т-3 (ОКУД 0301017), постановление Госкомстата России от 05.01.2004 № 1.
+    Российская форма — печатается по-русски (D68).
+*@
+<PageTitle>Штатное расписание Т-3 — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 landscape; margin: 10mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="hr/staffing">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet landscape"><p>@_error</p></div>
+}
+else if (_data is null)
+{
+    <div class="sheet landscape"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var d = _data;
+    <div class="sheet landscape">
+        <div class="small" style="text-align: right">
+            Унифицированная форма № Т-3<br />
+            Утверждена постановлением Госкомстата России от 05.01.2004 № 1
+        </div>
+        <table class="plain">
+            <tr><td></td><td style="width: 120px; text-align: right">Форма по ОКУД</td><td class="code">0301017</td></tr>
+            <tr><td><b>@d.Organization</b><div class="small">наименование организации</div></td><td style="text-align: right">по ОКПО</td><td class="code"></td></tr>
+        </table>
+        <table style="width: auto; margin: 10px 0 10px auto">
+            <tr><th>Номер документа</th><th>Дата составления</th></tr>
+            <tr><td></td><td>@d.Today.ToString("dd.MM.yyyy")</td></tr>
+        </table>
+        <h1 style="text-align: center">ШТАТНОЕ РАСПИСАНИЕ</h1>
+        <p style="text-align: center">на период с @d.Today.ToString("dd.MM.yyyy")</p>
+        <p>Штат в количестве @d.TotalRates.ToString("0.##", Ru) единиц с месячным фондом оплаты труда @d.TotalFund.ToString("N2", Ru) руб.</p>
+        <table>
+            <tr>
+                <th rowspan="2">Структурное подразделение</th><th rowspan="2">Должность (специальность, профессия), разряд, класс (категория) квалификации</th>
+                <th rowspan="2">Количество штатных единиц</th><th rowspan="2">Тарифная ставка (оклад) и пр., руб.</th><th>Надбавки, руб.</th>
+                <th rowspan="2">Всего, руб. (гр. 5 + гр. 6) × гр. 4</th><th rowspan="2">Примечание</th>
+            </tr>
+            <tr><th></th></tr>
+            <tr><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>10</th><th>11</th></tr>
+            @foreach (var r in d.Rows)
+            {
+                <tr>
+                    <td>@r.DepartmentName</td><td>@r.PositionName</td><td class="num">@r.Rates.ToString("0.##", Ru)</td>
+                    <td class="num">@r.Salary.ToString("N2", Ru)</td><td class="num">@r.Allowance.ToString("N2", Ru)</td>
+                    <td class="num">@r.MonthlyFund.ToString("N2", Ru)</td><td></td>
+                </tr>
+            }
+            <tr><td colspan="2"><b>Итого</b></td><td class="num"><b>@d.TotalRates.ToString("0.##", Ru)</b></td><td></td><td></td><td class="num"><b>@d.TotalFund.ToString("N2", Ru)</b></td><td></td></tr>
+        </table>
+        <div class="sign">
+            <div>Руководитель кадровой службы <span class="line"></span> <span class="line"></span></div>
+            <div>Главный бухгалтер <span class="line"></span> <span class="line"></span></div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private StaffingDto? _data;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Staffing.GetAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

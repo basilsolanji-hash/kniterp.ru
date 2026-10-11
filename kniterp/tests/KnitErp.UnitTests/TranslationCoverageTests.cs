@@ -94,6 +94,12 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Workspace.SupportTicketStatus>().Select(KnitErp.Domain.Workspace.SupportTicket.StatusName));
         keys.UnionWith(new[] { (true, true), (true, false), (false, true) }.Select(r => KnitErp.Domain.Catalog.Counterparty.RolesText(r.Item1, r.Item2)));
         keys.UnionWith(SystemRoles.Ordered.Select(SystemRoles.NameOf));
+
+        // Модуль «Сотрудники» (D200–D299): виды и статусы приказов, виды отпусков, основания увольнения.
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.PersonnelOrderKind>().Select(KnitErp.Domain.Hr.PersonnelOrder.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.PersonnelOrderStatus>().Select(KnitErp.Domain.Hr.PersonnelOrder.StatusName));
+        keys.UnionWith(KnitErp.Domain.Hr.LeaveKinds.All.Select(KnitErp.Domain.Hr.LeaveKinds.Name));
+        keys.UnionWith(KnitErp.Domain.Hr.DismissalGrounds.All.Select(g => g.Title));
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.Select(c => c.Name));
         keys.UnionWith(["без НДС", "ещё не действует", "Без роли", "Вся организация"]);

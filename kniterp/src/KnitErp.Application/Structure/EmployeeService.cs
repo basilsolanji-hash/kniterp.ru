@@ -143,6 +143,7 @@ public sealed class EmployeeService(
         var employee = Employee.Hire(ctx.OrganizationId, cmd.PersonnelNumber, cmd.LastName, cmd.FirstName, cmd.MiddleName,
             cmd.DepartmentId, cmd.PositionId, cmd.HiredOn);
         await EnsureNumberFreeAsync(ctx, employee.PersonnelNumber, null, ct);
+        await Hr.StaffingRules.EnsureVacancyAsync(db, ctx.OrganizationId, cmd.DepartmentId, cmd.PositionId, 1m, null, ct); // D203
         db.Employees.Add(employee);
         await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
@@ -157,6 +158,11 @@ public sealed class EmployeeService(
         var ctx = await guard.DemandAsync(Permissions.EmployeeEdit, ct);
         var employee = await LoadForEditAsync(ctx, id, rowVersion, ct);
         await RequireAssignableAsync(ctx, cmd.DepartmentId, cmd.PositionId, ct);
+        if (cmd.DepartmentId != employee.DepartmentId || cmd.PositionId != employee.PositionId)
+        {
+            await Hr.StaffingRules.EnsureVacancyAsync(db, ctx.OrganizationId, cmd.DepartmentId, cmd.PositionId, 1m, id, ct); // D203
+        }
+
         var names = await NamesAsync(ctx, employee.DepartmentId, employee.PositionId, cmd.DepartmentId, cmd.PositionId, ct);
         var changes = employee.Update(cmd.PersonnelNumber, cmd.LastName, cmd.FirstName, cmd.MiddleName, cmd.DepartmentId, cmd.PositionId);
         await EnsureNumberFreeAsync(ctx, employee.PersonnelNumber, id, ct);

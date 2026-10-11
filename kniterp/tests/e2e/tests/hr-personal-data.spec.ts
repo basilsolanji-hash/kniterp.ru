@@ -18,6 +18,13 @@ test('кадровик принимает сотрудника, заполняе
   await page.getByRole('button', { name: 'Добавить' }).nth(1).click();
   await expect(page.getByText(position).filter({ visible: true }).first()).toBeVisible();
 
+  // Если в организации уже есть штатное расписание (D203), принять можно только на должность из штата.
+  await openPage(page, '/hr/staffing');
+  await page.getByLabel('Подразделение').selectOption({ label: department });
+  await page.getByLabel('Должность').selectOption({ label: position });
+  await page.getByRole('button', { name: 'Добавить в штат' }).click();
+  await expect(page.getByRole('status')).toContainText('Строка добавлена');
+
   await openPage(page, '/employees');
   await page.getByRole('button', { name: 'Принять сотрудника' }).click();
   await page.getByLabel('Табельный номер').fill(`E${stamp}`);

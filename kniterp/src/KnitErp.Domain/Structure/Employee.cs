@@ -127,6 +127,31 @@ public sealed class Employee
         return before == after ? null : new FieldChange("Дата рождения", before, after);
     }
 
+    /// <summary>Перевод по приказу Т-5 (D204): новое подразделение и (или) должность.</summary>
+    public IReadOnlyList<FieldChange> Transfer(long departmentId, long positionId)
+    {
+        EnsureNotDismissed();
+        if (departmentId == DepartmentId && positionId == PositionId)
+        {
+            throw new BusinessRuleException("hr.employee.transfer_same", "Перевод не меняет ни подразделение, ни должность.");
+        }
+
+        var changes = new List<FieldChange>();
+        if (departmentId != DepartmentId)
+        {
+            changes.Add(new FieldChange(nameof(DepartmentId), DepartmentId.ToString(), departmentId.ToString()));
+            DepartmentId = departmentId;
+        }
+
+        if (positionId != PositionId)
+        {
+            changes.Add(new FieldChange(nameof(PositionId), PositionId.ToString(), positionId.ToString()));
+            PositionId = positionId;
+        }
+
+        return changes;
+    }
+
     public FieldChange SetOnLeave(bool onLeave)
     {
         EnsureNotDismissed();

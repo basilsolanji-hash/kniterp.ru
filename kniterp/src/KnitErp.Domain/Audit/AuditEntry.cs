@@ -138,6 +138,11 @@ public static class AuditActions
     public const string ConsentChanged = "hr.consent.changed";
     public const string ConsentScanAdded = "hr.consent.scan_added";
     public const string ConsentScanViewed = "hr.consent.scan_viewed";
+    public const string HrOrderCreated = "hr.order.created";
+    public const string HrOrderChanged = "hr.order.changed";
+    public const string HrOrderPosted = "hr.order.posted";
+    public const string HrOrderCancelled = "hr.order.cancelled";
+    public const string StaffingChanged = "hr.staffing.changed";
     public const string CatalogCreated = "catalog.created";
     public const string CatalogChanged = "catalog.changed";
     public const string CatalogArchived = "catalog.archived";

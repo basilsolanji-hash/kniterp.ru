@@ -120,6 +120,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     // Модуль «Сотрудники» (D200–D299).
     DbSet<KnitErp.Domain.Hr.EmployeePersonalData> EmployeePersonalData { get; }
     DbSet<KnitErp.Domain.Hr.ConsentScan> ConsentScans { get; }
+    DbSet<KnitErp.Domain.Hr.StaffingPosition> StaffingPositions { get; }
+    DbSet<KnitErp.Domain.Hr.PersonnelOrder> PersonnelOrders { get; }
+    DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

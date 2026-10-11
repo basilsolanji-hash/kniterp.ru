@@ -1,0 +1,111 @@
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+
+@* Поля кадрового приказа: общие (даты, основание) и по виду — Т-1, Т-5, Т-6, Т-8 (D204). *@
+<div class="grid">
+    <label>
+        @L("Вид приказа")
+        <select @bind="Model.Kind" disabled="@KindLocked">
+            @foreach (var k in Enum.GetValues<PersonnelOrderKind>())
+            {
+                <option value="@k">@PersonnelOrder.FormName(k) — @L(PersonnelOrder.KindName(k))</option>
+            }
+        </select>
+    </label>
+    <label>@L("Дата приказа") <InputDate @bind-Value="Model.OrderDate" required /></label>
+    <label>@(Model.Kind switch { PersonnelOrderKind.Hire => L("Дата приёма"), PersonnelOrderKind.Transfer => L("Дата перевода"), PersonnelOrderKind.Leave => L("Первый день отпуска"), _ => L("Дата увольнения") })
+        <InputDate @bind-Value="Model.EffectiveFrom" required /></label>
+
+    @if (Model.Kind == PersonnelOrderKind.Hire)
+    {
+        <label>@L("Табельный номер") <InputText @bind-Value="Model.PersonnelNumber" maxlength="20" required /></label>
+        <label>@L("Фамилия") <InputText @bind-Value="Model.LastName" maxlength="100" required /></label>
+        <label>@L("Имя") <InputText @bind-Value="Model.FirstName" maxlength="100" required /></label>
+        <label>@L("Отчество") <InputText @bind-Value="Model.MiddleName" maxlength="100" /></label>
+    }
+    else
+    {
+        <label>
+            @L("Сотрудник")
+            <InputSelect @bind-Value="Model.EmployeeId" required>
+                <option value="0">@L("— выберите —")</option>
+                @foreach (var e in Options.Employees)
+                {
+                    <option value="@e.Id">@e.Name</option>
+                }
+            </InputSelect>
+        </label>
+    }
+
+    @if (Model.Kind is PersonnelOrderKind.Hire or PersonnelOrderKind.Transfer)
+    {
+        <label>
+            @L("Подразделение")
+            <InputSelect @bind-Value="Model.DepartmentId" required>
+                <option value="0">@L("— выберите —")</option>
+                @foreach (var d in Options.Departments)
+                {
+                    <option value="@d.Id">@d.Name</option>
+                }
+            </InputSelect>
+        </label>
+        <label>
+            @L("Должность")
+            <InputSelect @bind-Value="Model.PositionId" required>
+                <option value="0">@L("— выберите —")</option>
+                @foreach (var p in Options.Positions)
+                {
+                    <option value="@p.Id">@p.Name</option>
+                }
+            </InputSelect>
+        </label>
+        <label>@L("Ставка") <InputNumber @bind-Value="Model.Rate" step="0.01" min="0.01" max="1.5" /></label>
+        <label>@L("Оклад (тарифная ставка), руб.") <InputNumber @bind-Value="Model.Salary" step="0.01" min="0" /></label>
+    }
+
+    @if (Model.Kind == PersonnelOrderKind.Hire)
+    {
+        <label>@L("Испытание, месяцев (0 — без испытания)") <InputNumber @bind-Value="Model.TrialMonths" min="0" max="6" /></label>
+    }
+
+    @if (Model.Kind == PersonnelOrderKind.Leave)
+    {
+        <label>
+            @L("Вид отпуска")
+            <InputSelect @bind-Value="Model.LeaveKind">
+                @foreach (var k in LeaveKinds.All)
+                {
+                    <option value="@k">@L(LeaveKinds.Name(k))</option>
+                }
+            </InputSelect>
+        </label>
+        <label>@L("Последний день отпуска") <InputDate @bind-Value="Model.EffectiveTo" required /></label>
+    }
+
+    @if (Model.Kind == PersonnelOrderKind.Dismissal)
+    {
+        <label>
+            @L("Основание по ТК РФ")
+            <InputSelect @bind-Value="Model.DismissalGround" required>
+                <option value="">@L("— выберите —")</option>
+                @foreach (var g in DismissalGrounds.All)
+                {
+                    <option value="@g.Code">@g.Article — @L(g.Title)</option>
+                }
+            </InputSelect>
+        </label>
+    }
+
+    <label>@L("Основание (документ)") <InputText @bind-Value="Model.Basis" maxlength="500" placeholder="@L("Например: заявление, трудовой договор от … № …")" /></label>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public PersonnelOrderFormModel Model { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public PersonnelOrderOptionsDto Options { get; set; } = default!;
+
+    [Parameter]
+    public bool KindLocked { get; set; }
+}

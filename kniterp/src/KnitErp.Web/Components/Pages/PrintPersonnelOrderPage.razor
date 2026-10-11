@@ -1,0 +1,143 @@
+@page "/print/hr-order/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using System.Globalization
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@inject PersonnelOrderService Orders
+
+@*
+    Приказы по формам постановления Госкомстата России от 05.01.2004 № 1: Т-1 (ОКУД 0301001) о приёме, Т-5 (0301004) о переводе,
+    Т-6 (0301005) об отпуске, Т-8 (0301006) о прекращении трудового договора. Российские формы — печатаются по-русски (D68).
+    Черновик печатается с отметкой «ЧЕРНОВИК».
+*@
+<PageTitle>@(_doc is null ? "Приказ" : $"{PersonnelOrder.FormName(_doc.Kind)} № {_doc.Number}") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 10mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="hr/orders/@Id">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_doc is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var d = _doc;
+    <div class="sheet portrait">
+        @if (d.Status != PersonnelOrderStatus.Posted)
+        {
+            <div class="stamp">@(d.Status == PersonnelOrderStatus.Draft ? "ЧЕРНОВИК" : "АННУЛИРОВАН")</div>
+        }
+        <div class="small" style="text-align: right">
+            Унифицированная форма № @PersonnelOrder.FormName(d.Kind)<br />
+            Утверждена постановлением Госкомстата России от 05.01.2004 № 1
+        </div>
+        <table class="plain">
+            <tr><td></td><td style="width: 120px; text-align: right">Форма по ОКУД</td><td class="code">@Okud(d.Kind)</td></tr>
+            <tr><td><b>@d.Organization</b><div class="small">наименование организации</div></td><td style="text-align: right">по ОКПО</td><td class="code">@d.Okpo</td></tr>
+        </table>
+        <table style="width: auto; margin: 10px 0 10px auto">
+            <tr><th>Номер документа</th><th>Дата составления</th></tr>
+            <tr><td>@d.Number</td><td>@d.OrderDate.ToString("dd.MM.yyyy")</td></tr>
+        </table>
+        <h1 style="text-align: center">ПРИКАЗ<br /><span style="font-size: 12px; font-weight: 400">(распоряжение)</span></h1>
+        <p style="text-align: center">@Title(d.Kind)</p>
+
+        @switch (d.Kind)
+        {
+            case PersonnelOrderKind.Hire:
+                <table class="plain fields">
+                    <tr><td style="width: 200px">Принять на работу с</td><td class="fill">@d.EffectiveFrom.ToString("dd.MM.yyyy")</td></tr>
+                    <tr><td>Фамилия, имя, отчество</td><td class="fill">@d.EmployeeName</td><td style="width: 90px">Табельный номер</td><td class="code">@d.PersonnelNumber</td></tr>
+                    <tr><td>в</td><td class="fill" colspan="3">@d.ToDepartment<div class="small">структурное подразделение</div></td></tr>
+                    <tr><td></td><td class="fill" colspan="3">@d.ToPosition<div class="small">должность (специальность, профессия), разряд, класс (категория) квалификации</div></td></tr>
+                    <tr><td>условия приёма на работу, характер работы</td><td class="fill" colspan="3">@(d.Rate is { } r && r != 1m ? $"на {r.ToString("0.##", Ru)} ставки" : "основное место работы, полная ставка")</td></tr>
+                    <tr><td>с тарифной ставкой (окладом)</td><td class="fill" colspan="3">@(d.Salary is { } s ? $"{s.ToString("N2", Ru)} руб." : "")</td></tr>
+                    <tr><td>с испытанием на срок</td><td class="fill" colspan="3">@(d.TrialMonths is { } t ? $"{t} мес." : "без испытания")</td></tr>
+                    <tr><td>Основание</td><td class="fill" colspan="3">@d.Basis</td></tr>
+                </table>
+                break;
+            case PersonnelOrderKind.Transfer:
+                <table class="plain fields">
+                    <tr><td style="width: 200px">Перевести на другую работу с</td><td class="fill">@d.EffectiveFrom.ToString("dd.MM.yyyy")</td></tr>
+                    <tr><td>Фамилия, имя, отчество</td><td class="fill">@d.EmployeeName</td><td style="width: 90px">Табельный номер</td><td class="code">@d.PersonnelNumber</td></tr>
+                </table>
+                <table style="margin-top: 8px">
+                    <tr><th></th><th>Прежнее место работы</th><th>Новое место работы</th></tr>
+                    <tr><td>Структурное подразделение</td><td>@d.FromDepartment</td><td>@d.ToDepartment</td></tr>
+                    <tr><td>Должность (специальность, профессия)</td><td>@d.FromPosition</td><td>@d.ToPosition</td></tr>
+                    <tr><td>Тарифная ставка (оклад), руб.</td><td></td><td>@(d.Salary is { } s2 ? s2.ToString("N2", Ru) : "")</td></tr>
+                </table>
+                <table class="plain fields"><tr><td style="width: 200px">Основание</td><td class="fill">@d.Basis</td></tr></table>
+                break;
+            case PersonnelOrderKind.Leave:
+                <table class="plain fields">
+                    <tr><td style="width: 200px">Предоставить отпуск</td><td class="fill">@d.EmployeeName</td><td style="width: 90px">Табельный номер</td><td class="code">@d.PersonnelNumber</td></tr>
+                    <tr><td></td><td class="fill" colspan="3">@d.ToDepartment @d.ToPosition</td></tr>
+                    <tr><td>вид отпуска</td><td class="fill" colspan="3">@(d.LeaveKind is { } lk ? LeaveKinds.Name(lk) : "")</td></tr>
+                    <tr><td>на</td><td class="fill" colspan="3">@d.LeaveDays календарных дней</td></tr>
+                    <tr><td>с</td><td class="fill" colspan="3">@d.EffectiveFrom.ToString("dd.MM.yyyy") по @d.EffectiveTo?.ToString("dd.MM.yyyy")</td></tr>
+                    <tr><td>Основание</td><td class="fill" colspan="3">@d.Basis</td></tr>
+                </table>
+                break;
+            case PersonnelOrderKind.Dismissal:
+                <table class="plain fields">
+                    <tr><td style="width: 200px">Прекратить действие трудового договора от</td><td class="fill">@d.HiredOn?.ToString("dd.MM.yyyy")</td></tr>
+                    <tr><td>уволить</td><td class="fill">@d.EffectiveFrom.ToString("dd.MM.yyyy")</td></tr>
+                    <tr><td>Фамилия, имя, отчество</td><td class="fill">@d.EmployeeName</td><td style="width: 90px">Табельный номер</td><td class="code">@d.PersonnelNumber</td></tr>
+                    <tr><td></td><td class="fill" colspan="3">@d.ToDepartment @d.ToPosition</td></tr>
+                    <tr><td>Основание прекращения (расторжения) трудового договора (увольнения)</td><td class="fill" colspan="3">@d.Ground?.Wording</td></tr>
+                    <tr><td>Документ, номер, дата</td><td class="fill" colspan="3">@d.Basis</td></tr>
+                </table>
+                break;
+        }
+
+        <div class="sign">
+            <div>Руководитель организации <span class="line"></span> @d.DirectorPosition <span class="line"></span> @d.DirectorName</div>
+            <div>С приказом (распоряжением) работник ознакомлен <span class="line"></span> «___» __________ 20__ г.</div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private PersonnelOrderPrintDto? _doc;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await Orders.PrintAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+
+    private static string Okud(PersonnelOrderKind kind) => kind switch
+    {
+        PersonnelOrderKind.Hire => "0301001",
+        PersonnelOrderKind.Transfer => "0301004",
+        PersonnelOrderKind.Leave => "0301005",
+        _ => "0301006",
+    };
+
+    private static string Title(PersonnelOrderKind kind) => kind switch
+    {
+        PersonnelOrderKind.Hire => "о приёме работника на работу",
+        PersonnelOrderKind.Transfer => "о переводе работника на другую работу",
+        PersonnelOrderKind.Leave => "о предоставлении отпуска работнику",
+        _ => "о прекращении (расторжении) трудового договора с работником (увольнении)",
+    };
+}

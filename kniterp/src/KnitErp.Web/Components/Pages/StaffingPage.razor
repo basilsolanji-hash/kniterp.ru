@@ -1,0 +1,239 @@
+@page "/hr/staffing"
+@using System.Globalization
+@using KnitErp.Application.Hr
+
+<PageTitle>@L("Штатное расписание") — knitERP</PageTitle>
+@inject StaffingService Staffing
+
+@* D203: штатное расписание Т-3; приём и перевод сверх штата запрещены, пока в организации есть хотя бы одна строка. *@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Штатное расписание")</h1>
+        <div class="row-actions">
+            <a class="button secondary" href="print/staffing" target="_blank" rel="noopener">@L("Печать Т-3")</a>
+            <a class="button secondary" href="hr/orders">@L("Кадровые приказы")</a>
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_data.Rows.Count == 0)
+    {
+        <p class="muted">@L("Штатное расписание пусто — приём и перевод штатом не ограничиваются. Добавьте строки, чтобы система не давала принять сверх штата.")</p>
+    }
+
+    @if (_data.CanEdit)
+    {
+        <form class="inline-form" @onsubmit="AddAsync">
+            <label>
+                @L("Подразделение")
+                <select @bind="_department">
+                    <option value="0">@L("— выберите —")</option>
+                    @foreach (var d in _data.Departments)
+                    {
+                        <option value="@d.Id">@d.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Должность")
+                <select @bind="_position">
+                    <option value="0">@L("— выберите —")</option>
+                    @foreach (var p in _data.Positions)
+                    {
+                        <option value="@p.Id">@p.Name</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Ставок") <input type="number" step="0.25" min="0.25" @bind="_rates" /></label>
+            <label>@L("Оклад, руб.") <input type="number" step="0.01" min="0" @bind="_salary" /></label>
+            <label>@L("Надбавка, руб.") <input type="number" step="0.01" min="0" @bind="_allowance" /></label>
+            <button type="submit" disabled="@_busy">@L("Добавить в штат")</button>
+        </form>
+    }
+
+    <div class="scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>@L("Подразделение")</th><th>@L("Должность")</th><th class="num">@L("Ставок")</th><th class="num">@L("Занято")</th>
+                    <th class="num">@L("Вакантно")</th><th class="num opt">@L("Оклад")</th><th class="num opt">@L("Надбавка")</th><th class="num">@L("Фонд в месяц")</th>
+                    @if (_data.CanEdit)
+                    {
+                        <th></th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _data.Rows)
+                {
+                    <tr>
+                        <td>@r.DepartmentName</td>
+                        <td>@r.PositionName</td>
+                        <td class="num">
+                            @if (_edit == r.Id)
+                            {
+                                <input type="number" step="0.25" min="0.25" @bind="_editRates" style="width: 6em" aria-label="@L("Ставок")" />
+                            }
+                            else
+                            {
+                                @r.Rates.ToString("0.##", Ru)
+                            }
+                        </td>
+                        <td class="num">@r.Occupied.ToString("0.##", Ru)</td>
+                        <td class="num @(r.Vacant > 0 ? "" : "muted")">@r.Vacant.ToString("0.##", Ru)</td>
+                        <td class="num">
+                            @if (_edit == r.Id)
+                            {
+                                <input type="number" step="0.01" min="0" @bind="_editSalary" style="width: 8em" aria-label="@L("Оклад")" />
+                            }
+                            else
+                            {
+                                @r.Salary.ToString("N2", Ru)
+                            }
+                        </td>
+                        <td class="num">
+                            @if (_edit == r.Id)
+                            {
+                                <input type="number" step="0.01" min="0" @bind="_editAllowance" style="width: 8em" aria-label="@L("Надбавка")" />
+                            }
+                            else
+                            {
+                                @r.Allowance.ToString("N2", Ru)
+                            }
+                        </td>
+                        <td class="num">@r.MonthlyFund.ToString("N2", Ru)</td>
+                        @if (_data.CanEdit)
+                        {
+                            <td>
+                                <div class="row-actions">
+                                    @if (_edit == r.Id)
+                                    {
+                                        <button type="button" @onclick="() => SaveAsync(r)" disabled="@_busy">@L("Сохранить")</button>
+                                        <button type="button" class="secondary" @onclick="() => _edit = null" disabled="@_busy">@L("Отмена")</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="secondary" @onclick="() => StartEdit(r)" disabled="@_busy">@L("Изменить")</button>
+                                        <button type="button" class="secondary" @onclick="() => ArchiveAsync(r)" disabled="@_busy">@L("Убрать из штата")</button>
+                                    }
+                                </div>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+            @if (_data.Rows.Count > 0)
+            {
+                <tfoot><tr><th colspan="2">@L("Итого")</th><th class="num">@_data.TotalRates.ToString("0.##", Ru)</th><th colspan="4"></th><th class="num">@_data.TotalFund.ToString("N2", Ru)</th>@if (_data.CanEdit) { <th></th> }</tr></tfoot>
+            }
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private StaffingDto? _data;
+    private long _department;
+    private long _position;
+    private decimal _rates = 1m;
+    private decimal _salary;
+    private decimal _allowance;
+    private long? _edit;
+    private decimal _editRates;
+    private decimal _editSalary;
+    private decimal _editAllowance;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Staffing.GetAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private void StartEdit(StaffingRowDto r)
+    {
+        _edit = r.Id;
+        _editRates = r.Rates;
+        _editSalary = r.Salary;
+        _editAllowance = r.Allowance;
+    }
+
+    private Task AddAsync() => RunAsync(async () =>
+    {
+        if (_department == 0 || _position == 0)
+        {
+            throw new KnitErp.Domain.Common.BusinessRuleException("hr.order.assignment", "Укажите подразделение и должность.");
+        }
+
+        await Staffing.AddAsync(_department, _position, _rates, _salary, _allowance, _data!.Today);
+        _message = L("Строка добавлена в штатное расписание.");
+        _department = _position = 0;
+    });
+
+    private Task SaveAsync(StaffingRowDto r) => RunAsync(async () =>
+    {
+        await Staffing.ChangeAsync(r.Id, _editRates, _editSalary, _editAllowance, _data!.Today, r.RowVersion);
+        _edit = null;
+        _message = L("Штатное расписание сохранено.");
+    });
+
+    private Task ArchiveAsync(StaffingRowDto r) => RunAsync(async () =>
+    {
+        await Staffing.ArchiveAsync(r.Id, r.RowVersion);
+        _message = L("Строка убрана из штата.");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _data = await Staffing.GetAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

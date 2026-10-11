@@ -197,6 +197,13 @@
         [
             new("tech-cards", "Техкарты", a => a.Has(Permissions.CatalogView)),
         ]),
+        // Модуль «Сотрудники» (D200–D299).
+        new("hr", "Кадры",
+        [
+            new("employees", "Сотрудники", a => a.HasOwnOnly(Permissions.EmployeeView)),
+            new("hr/orders", "Кадровые приказы", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
+            new("hr/staffing", "Штатное расписание", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
+        ]),
         new("reports", "Отчёты",
         [
             new("reports/movements", "Движения", a => a.Has(Permissions.WarehouseReportView)),
@@ -219,7 +226,6 @@
             new("units", "Единицы измерения", a => a.Has(Permissions.CatalogView)),
             new("vat-rates", "Ставки НДС", a => a.Has(Permissions.CatalogView)),
             new("structure", "Структура", a => a.Has(Permissions.DepartmentView)),
-            new("employees", "Сотрудники", a => a.HasOwnOnly(Permissions.EmployeeView)),
         ]),
         new("settings", "Настройки",
         [

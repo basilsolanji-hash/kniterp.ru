@@ -9,10 +9,13 @@ using Microsoft.EntityFrameworkCore;
 namespace KnitErp.IntegrationTests;
 
 /// <summary>Сервисы модуля «Сотрудники» от имени пользователя — отдельно от общего набора, чтобы не мешать другим модулям.</summary>
-public sealed class HrServices(KnitErpDbContext db, PersonalDataService personalData) : IAsyncDisposable
+public sealed class HrServices(KnitErpDbContext db, PersonalDataService personalData, StaffingService staffing, PersonnelOrderService orders)
+    : IAsyncDisposable
 {
     public KnitErpDbContext Db { get; } = db;
     public PersonalDataService PersonalData { get; } = personalData;
+    public StaffingService Staffing { get; } = staffing;
+    public PersonnelOrderService Orders { get; } = orders;
 
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }
@@ -28,7 +31,9 @@ public static class HrTestKit
         var db = host.NewDb();
         var user = new TestUser { UserId = userId, OrganizationId = organizationId };
         var guard = new AccessGuard(db, user, host.Clock);
-        return new HrServices(db, new PersonalDataService(db, guard, user, host.Clock));
+        var access = new UserAccessService(db, guard, user, host.Clock);
+        return new HrServices(db, new PersonalDataService(db, guard, user, host.Clock), new StaffingService(db, guard, user, host.Clock),
+            new PersonnelOrderService(db, guard, access, user, host.Clock));
     }
 
     public static async Task<CreatedOrganization> CreateOrganizationAsync(this SqlTestHost host)

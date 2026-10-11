@@ -1,0 +1,189 @@
+@page "/hr/orders"
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@using KnitErp.Web.Components.Shared
+@inject PersonnelOrderService Orders
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Кадровые приказы") — knitERP</PageTitle>
+
+@* D204: приказы Т-1, Т-5, Т-6, Т-8 — черновик → проведён; проведённый не меняется, исправление новым приказом. *@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Кадровые приказы")</h1>
+        <div class="row-actions">
+            <a class="button secondary" href="hr/staffing">@L("Штатное расписание")</a>
+            @if (CurrentAccess.Has(KnitErp.Domain.Access.Permissions.HrOrderCreate) && _form is null)
+            {
+                <button type="button" @onclick="OpenNewAsync" disabled="@_busy">@L("Новый приказ")</button>
+            }
+        </div>
+    </div>
+
+    @if (_form is not null && _options is not null)
+    {
+        <div class="panel">
+            <h2>@L("Новый приказ")</h2>
+            <EditForm Model="_form" OnValidSubmit="CreateAsync" FormName="new-order">
+                <PersonnelOrderForm Model="_form" Options="_options" />
+                @if (_error is not null)
+                {
+                    <div class="error" role="alert">@_error</div>
+                }
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Создать черновик")</button>
+                    <button type="button" class="secondary" @onclick="() => _form = null" disabled="@_busy">@L("Отмена")</button>
+                </div>
+            </EditForm>
+        </div>
+    }
+
+    <form class="inline-form" @onsubmit="ReloadAsync">
+        <label>
+            @L("Вид")
+            <select @bind="_kind">
+                <option value="">@L("Все")</option>
+                @foreach (var k in Enum.GetValues<PersonnelOrderKind>())
+                {
+                    <option value="@((byte)k)">@PersonnelOrder.FormName(k) — @L(PersonnelOrder.KindName(k))</option>
+                }
+            </select>
+        </label>
+        <label>
+            @L("Статус")
+            <select @bind="_status">
+                <option value="">@L("Все")</option>
+                @foreach (var st in Enum.GetValues<PersonnelOrderStatus>())
+                {
+                    <option value="@((byte)st)">@L(PersonnelOrder.StatusName(st))</option>
+                }
+            </select>
+        </label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
+    </form>
+
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Номер")</th><th>@L("Дата")</th><th>@L("Вид")</th><th>@L("Сотрудник")</th><th class="opt">@L("Действует с")</th><th>@L("Статус")</th></tr></thead>
+            <tbody>
+                @if (_rows.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Приказов пока нет.")</td></tr>
+                }
+                @foreach (var r in _rows)
+                {
+                    <tr class="@(r.Status == PersonnelOrderStatus.Cancelled ? "archived" : null)">
+                        <td><a href="hr/orders/@r.Id">@r.Number</a></td>
+                        <td>@r.OrderDate.ToString("dd.MM.yyyy")</td>
+                        <td>@r.FormName — @L(r.KindName)</td>
+                        <td>@r.EmployeeName <span class="muted">@r.PersonnelNumber</span></td>
+                        <td>@r.EffectiveFrom.ToString("dd.MM.yyyy")@(r.EffectiveTo is { } to ? $" – {to:dd.MM.yyyy}" : "")</td>
+                        <td><span class="tag @(r.Status == PersonnelOrderStatus.Posted ? "ok" : r.Status == PersonnelOrderStatus.Draft ? "warn" : "")">@L(r.StatusName)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<PersonnelOrderRowDto>? _rows;
+    private PersonnelOrderOptionsDto? _options;
+    private PersonnelOrderFormModel? _form;
+    private string _kind = string.Empty;
+    private string _status = string.Empty;
+    private bool _busy;
+    private string? _denied;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _rows = await Orders.ListAsync(new PersonnelOrderFilter());
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _rows = await Orders.ListAsync(new PersonnelOrderFilter(
+                byte.TryParse(_kind, out var k) ? (PersonnelOrderKind)k : null, byte.TryParse(_status, out var s) ? (PersonnelOrderStatus)s : null));
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OpenNewAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _options = await Orders.OptionsAsync();
+            _form = new PersonnelOrderFormModel { OrderDate = _options.Today, EffectiveFrom = _options.Today };
+            _error = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_busy || _form is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var id = await Orders.CreateAsync(_form.ToValues());
+            Navigation.NavigateTo($"hr/orders/{id}");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
