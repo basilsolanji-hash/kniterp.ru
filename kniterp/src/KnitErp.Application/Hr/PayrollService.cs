@@ -26,6 +26,15 @@ public sealed record PayrollDto(
     public decimal Total => Employees.Sum(e => e.Total);
 }
 
+/// <summary>
+/// Готовность месяца к расчёту (D225): подразделений с сотрудниками, из них с закрытым табелем, с открытым и без табеля; операций
+/// производства без расценки; может ли пользователь закрыть все табели сам.
+/// </summary>
+public sealed record MonthReadinessDto(int Departments, int Closed, int Open, int Missing, int OperationsWithoutRate, bool CanCloseTimesheets)
+{
+    public bool Ready => Departments > 0 && Closed == Departments && OperationsWithoutRate == 0;
+}
+
 /// <summary>Итог расчёта: число сотрудников, сумма и предупреждения (нет расценки, нет табеля).</summary>
 public sealed record PayrollCalculationDto(long RunId, int Employees, decimal Total, IReadOnlyList<string> Warnings);
 
@@ -101,6 +110,128 @@ public sealed class PayrollService(
             .OrderBy(o => o.HasRate).ThenBy(o => o.OperationId).ThenBy(o => o.ItemId).ToList();
     }
 
+    /// <summary>Столбцы Excel-шаблона расценок (D225).</summary>
+    public static readonly IReadOnlyList<string> RateColumns =
+        ["Код операции", "Операция", "Код изделия (пусто — любое)", "Изделие", "Единица", "Цена, руб.", "Действует с"];
+
+    /// <summary>
+    /// D225: Excel-шаблон расценок, уже заполненный операциями производства за 3 месяца без действующей расценки — остаётся вписать цену.
+    /// Дата начала — первое число окна выработки (с неё начисляется сдельная оплата по этим операциям).
+    /// </summary>
+    public async Task<byte[]> RatesTemplateAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.PayrollCalculate, ct);
+        var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, tz));
+        var validFrom = new DateOnly(today.Year, today.Month, 1).AddMonths(-2);
+        var missing = (await OperationsAsync(ct)).Where(o => !o.HasRate).ToList();
+        var itemIds = missing.Where(o => o.ItemId != null).Select(o => o.ItemId!.Value).Distinct().ToList();
+        var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && itemIds.Contains(i.Id))
+            .ToDictionaryAsync(i => i.Id, i => new { i.Code, i.Name }, ct);
+        var rows = missing.Select(o => (IReadOnlyList<string>)
+        [
+            o.OperationId.ToString(System.Globalization.CultureInfo.InvariantCulture), o.OperationName,
+            o.ItemId is { } id && items.TryGetValue(id, out var it) ? it.Code : "", o.ItemId is { } id2 && items.TryGetValue(id2, out var it2) ? it2.Name : "",
+            o.Unit, "", validFrom.ToString("dd.MM.yyyy", System.Globalization.CultureInfo.InvariantCulture),
+        ]).ToList();
+        return spreadsheet.Write([new SheetData("Расценки", RateColumns, rows)]);
+    }
+
+    /// <summary>
+    /// D225: загрузка расценок из Excel. Строки без цены пропускаются; файл проверяется целиком — при любой ошибке не загружается ничего
+    /// (ошибки по номерам строк). Каждая расценка — в журнал, как при вводе формой.
+    /// </summary>
+    public async Task<int> ImportRatesAsync(Stream file, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.PayrollCalculate, ct);
+        var sheet = spreadsheet.ReadFirstSheet(file, 2001);
+        if (sheet.Count == 0 || !sheet[0].Take(RateColumns.Count).Select(h => h.Trim()).SequenceEqual(RateColumns))
+        {
+            throw new BusinessRuleException("hr.rate.import_header", "Это не шаблон расценок: скачайте шаблон и заполните его.");
+        }
+
+        var codes = await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId)
+            .Select(i => new { i.Id, i.Code }).ToListAsync(ct);
+        var byCode = codes.GroupBy(i => i.Code, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First().Id, StringComparer.OrdinalIgnoreCase);
+        var existing = await db.PieceRates.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId)
+            .Select(r => new { r.OperationId, r.ItemId, r.ValidFrom }).ToListAsync(ct);
+        var taken = existing.Select(r => (r.OperationId, r.ItemId, r.ValidFrom)).ToHashSet();
+        var rates = new List<PieceRate>();
+        var errors = new List<string>();
+        for (var i = 1; i < sheet.Count; i++)
+        {
+            var row = sheet[i];
+            string Cell(int c) => c < row.Count ? row[c].Trim() : "";
+            if (Cell(5).Length == 0)
+            {
+                continue; // цену не вписали — строка остаётся на потом
+            }
+
+            var line = i + 1;
+            try
+            {
+                if (!long.TryParse(Cell(0), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var operation))
+                {
+                    throw new BusinessRuleException("hr.rate.import_operation", "код операции — целое число.");
+                }
+
+                long? itemId = null;
+                if (Cell(2).Length > 0)
+                {
+                    itemId = byCode.TryGetValue(Cell(2), out var found) ? found
+                        : throw new BusinessRuleException("hr.rate.import_item", $"нет изделия с кодом «{Cell(2)}».");
+                }
+
+                if (!decimal.TryParse(Cell(5).Replace(',', '.').Replace(" ", ""), System.Globalization.NumberStyles.Number,
+                        System.Globalization.CultureInfo.InvariantCulture, out var price))
+                {
+                    throw new BusinessRuleException("hr.rate.import_price", "цена — число.");
+                }
+
+                if (!DateOnly.TryParseExact(Cell(6), ["dd.MM.yyyy", "yyyy-MM-dd", "d.M.yyyy"], System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var validFrom))
+                {
+                    throw new BusinessRuleException("hr.rate.import_date", "дата — в виде ДД.ММ.ГГГГ.");
+                }
+
+                var rate = PieceRate.Create(ctx.OrganizationId, operation, Cell(1), itemId, Cell(4), price, validFrom, ctx.UserId, clock.UtcNow);
+                if (!taken.Add((rate.OperationId, rate.ItemId, rate.ValidFrom)))
+                {
+                    throw new BusinessRuleException("hr.rate.duplicate", "расценка на эту операцию с этой даты уже есть.");
+                }
+
+                rates.Add(rate);
+            }
+            catch (BusinessRuleException ex)
+            {
+                errors.Add($"Строка {line}: {ex.Message}");
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new BusinessRuleException("hr.rate.import_errors", string.Join("; ", errors.Take(20)) + (errors.Count > 20 ? $"; … ещё ошибок: {errors.Count - 20}" : ""));
+        }
+
+        if (rates.Count == 0)
+        {
+            throw new BusinessRuleException("hr.rate.import_empty", "В файле нет строк с ценой.");
+        }
+
+        await using var tx = await db.BeginTransactionAsync(ct);
+        db.PieceRates.AddRange(rates);
+        await db.SaveChangesAsync(ct);
+        foreach (var rate in rates)
+        {
+            db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.PieceRateAdded, nameof(PieceRate), rate.Id.ToString(),
+                null, $"{rate.OperationName}: {rate.Price:0.####} руб./{rate.Unit} с {rate.ValidFrom:dd.MM.yyyy}", "загрузка из Excel", currentUser.CorrelationId));
+        }
+
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return rates.Count;
+    }
+
     public async Task<long> AddRateAsync(PieceRateCommand cmd, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.PayrollCalculate, ct);
@@ -119,6 +250,27 @@ public sealed class PayrollService(
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return rate.Id;
+    }
+
+    /// <summary>D225: сводка готовности месяца для страницы заработка — без имён и сумм, только счётчики.</summary>
+    public async Task<MonthReadinessDto> ReadinessAsync(int year, int month, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.PayrollView, ct);
+        var org = ctx.OrganizationId;
+        var from = new DateOnly(year, month, 1);
+        var to = from.AddMonths(1).AddDays(-1);
+        var staffed = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == org && e.HiredOn <= to && (e.DismissedOn == null || e.DismissedOn >= from))
+            .Select(e => e.DepartmentId).Distinct().ToListAsync(ct);
+        var sheets = (await db.Timesheets.AsNoTracking().Where(t => t.OrganizationId == org && t.Year == year && t.Month == month)
+                .Select(t => new { t.DepartmentId, t.Version, t.Status }).ToListAsync(ct))
+            .GroupBy(t => t.DepartmentId).ToDictionary(g => g.Key, g => g.MaxBy(t => t.Version)!.Status);
+        var closed = staffed.Count(d => sheets.GetValueOrDefault(d) == TimesheetStatus.Closed);
+        var open = staffed.Count(d => sheets.GetValueOrDefault(d) == TimesheetStatus.Open);
+        var rates = await db.PieceRates.AsNoTracking().Where(r => r.OrganizationId == org && r.ValidFrom <= to).ToListAsync(ct);
+        var withoutRate = (await output.OutputAsync(org, from, to, ct)).Where(o => o.Quantity > 0)
+            .GroupBy(o => (o.OperationId, o.ItemId, Unit: PieceRate.NormalizeUnit(o.Unit)))
+            .Count(g => g.Any(o => PieceRate.Find(rates, o.OperationId, o.ItemId, o.Date) is not { } r || PieceRate.NormalizeUnit(r.Unit) != g.Key.Unit));
+        return new MonthReadinessDto(staffed.Count, closed, open, staffed.Count - closed - open, withoutRate, ctx.Permissions.Has(Permissions.TimesheetClose));
     }
 
     public async Task<PayrollDto> GetAsync(int year, int month, CancellationToken ct = default)

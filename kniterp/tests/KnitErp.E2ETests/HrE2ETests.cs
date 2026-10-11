@@ -285,6 +285,53 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         }
     });
 
+    /// <summary>D225: меньше ручного ввода — график подразделения, номер и оклад в приказе, все табели, готовность месяца, шаблон расценок.</summary>
+    [SqlFact]
+    public Task Automation_fills_number_salary_schedule_and_batches_timesheets() => RunAsync("hr-automation", false, async page =>
+    {
+        var (department, position) = await StructureAsync(page, "Цех автоматики", "Мотальщица");
+        await OpenAsync(page, "hr/staffing");
+        await page.GetByLabel("Подразделение").SelectOptionAsync(new SelectOptionValue { Label = department });
+        await page.GetByLabel("Должность").SelectOptionAsync(new SelectOptionValue { Label = position });
+        await page.GetByLabel("Оклад, руб.").FillAsync("43500");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить в штат" }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Строка добавлена");
+
+        var schedule = $"5/2 автоматики {Stamp}";
+        await OpenAsync(page, "hr/schedules");
+        await page.GetByLabel("Название").FillAsync(schedule);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить график" }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("График добавлен");
+        await page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(Regex.Escape(department)) }).GetByLabel("График по умолчанию")
+            .SelectOptionAsync(new SelectOptionValue { Label = schedule });
+        await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("График по умолчанию задан");
+        await ShotAsync(page, "1-grafik-podrazdeleniya");
+
+        await OpenAsync(page, "hr/orders");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Новый приказ" }).ClickAsync();
+        Assert.Matches(@"^\d+$", await page.GetByLabel("Табельный номер").InputValueAsync()); // номер подставлен
+        await page.GetByLabel("Подразделение").SelectOptionAsync(new SelectOptionValue { Label = department });
+        await page.GetByLabel("Должность").SelectOptionAsync(new SelectOptionValue { Label = position });
+        await Expect(page.GetByLabel("Оклад (тарифная ставка), руб.")).ToHaveValueAsync(new Regex(@"^43500([.,]0+)?$"));
+        await Expect(page.GetByText("Оклад подставлен из штатного расписания")).ToBeVisibleAsync();
+        await ShotAsync(page, "2-prikaz-nomer-i-oklad");
+
+        await OpenAsync(page, "hr/timesheet");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Составить табели всех подразделений" }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Табели за месяц");
+        await ShotAsync(page, "3-vse-tabeli");
+
+        await OpenAsync(page, "hr/payroll");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Готовность месяца" })).ToBeVisibleAsync();
+        await Expect(page.GetByText("Табели закрыты:")).ToBeVisibleAsync();
+        await ShotAsync(page, "4-gotovnost-mesyaca");
+
+        await OpenAsync(page, "hr/piece-rates");
+        await ShotAsync(page, "5-rascenki-iz-excel");
+        var download = await page.RunAndWaitForDownloadAsync(() => page.GetByRole(AriaRole.Link, new() { Name = "Скачать шаблон" }).ClickAsync());
+        Assert.EndsWith(".xlsx", download.SuggestedFilename);
+    });
+
     /// <summary>D221: блок «Смена сегодня» на главном — неявка видна по имени (в выходной — выход сверх графика), ссылка ведёт в табель.</summary>
     [SqlFact]
     public async Task Dashboard_shows_shift_today_and_links_to_timesheet()
@@ -336,6 +383,19 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
     });
 
     private static ILocatorAssertions Expect(ILocator locator) => Assertions.Expect(locator);
+
+    /// <summary>Снимок экрана для показа владельцу — только если задан KNITERP_E2E_SHOTS (в CI не пишется).</summary>
+    private static async Task ShotAsync(IPage page, string name)
+    {
+        var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_SHOTS");
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(dir);
+        await page.ScreenshotAsync(new() { Path = Path.Combine(dir, name + ".png"), FullPage = true });
+    }
 
     /// <summary>Вкладка Владельца; при падении — снимок и текст страницы в KNITERP_E2E_ARTIFACTS (по умолчанию временная папка).</summary>
     private async Task RunAsync(string name, bool phone, Func<IPage, Task> scenario)

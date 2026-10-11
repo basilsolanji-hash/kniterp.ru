@@ -2363,6 +2363,34 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.DepartmentSchedule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("DepartmentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ScheduleId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "DepartmentId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_department_schedules_department");
+
+                    b.HasIndex("OrganizationId", "ScheduleId");
+
+                    b.ToTable("hr_department_schedules", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>
                 {
                     b.Property<long>("Id")
@@ -7222,6 +7250,31 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_hr_consent_scans_employee");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.DepartmentSchedule", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Department", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DepartmentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_department_schedules_department");
+
+                    b.HasOne("KnitErp.Domain.Hr.WorkSchedule", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ScheduleId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_department_schedules_schedule");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>

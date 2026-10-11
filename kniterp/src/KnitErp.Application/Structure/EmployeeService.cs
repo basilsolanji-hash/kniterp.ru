@@ -40,7 +40,8 @@ public sealed record EmployeeCommand(
 
 public sealed record LookupDto(long Id, string Name);
 
-public sealed record EmployeeOptionsDto(IReadOnlyList<LookupDto> Departments, IReadOnlyList<LookupDto> Positions);
+/// <param name="NextPersonnelNumber">Следующий свободный табельный номер (D225, сессия «Сотрудники»).</param>
+public sealed record EmployeeOptionsDto(IReadOnlyList<LookupDto> Departments, IReadOnlyList<LookupDto> Positions, string NextPersonnelNumber = "0001");
 
 /// <summary>Сотрудники организации. Область данных: вся организация, свои подразделения или только своя карточка.</summary>
 public sealed class EmployeeService(
@@ -122,7 +123,9 @@ public sealed class EmployeeService(
         var positions = await db.Positions.AsNoTracking()
             .Where(p => p.OrganizationId == ctx.OrganizationId && !p.IsArchived)
             .OrderBy(p => p.Name).Select(p => new LookupDto(p.Id, p.Name)).ToListAsync(ct);
-        return new EmployeeOptionsDto(departments.Where(d => visible is null || visible.Contains(d.Id)).ToList(), positions);
+        var numbers = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId).Select(e => e.PersonnelNumber).ToListAsync(ct);
+        return new EmployeeOptionsDto(departments.Where(d => visible is null || visible.Contains(d.Id)).ToList(), positions,
+            KnitErp.Domain.Hr.PersonnelNumbers.Next(numbers));
     }
 
     /// <summary>Сотрудники без учётной записи — для формы приглашения пользователя.</summary>

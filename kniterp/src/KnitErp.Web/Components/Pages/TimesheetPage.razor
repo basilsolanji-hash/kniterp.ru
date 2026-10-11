@@ -64,6 +64,22 @@ else
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
+    @if (CurrentAccess.Has(Permissions.TimesheetEdit) || CurrentAccess.Has(Permissions.TimesheetClose))
+    {
+        @* D225: все подразделения месяца одной кнопкой — в пределах прав; ручные дни сохраняются. *@
+        <div class="row-actions" style="margin: 8px 0">
+            <span class="muted small">@L("Все подразделения за {0}:", _month.ToString("MM.yyyy"))</span>
+            @if (CurrentAccess.Has(Permissions.TimesheetEdit))
+            {
+                <button type="button" class="secondary" @onclick="CreateAllAsync" disabled="@_busy">@L("Составить табели всех подразделений")</button>
+            }
+            @if (CurrentAccess.Has(Permissions.TimesheetClose))
+            {
+                <button type="button" class="secondary" @onclick="CloseAllAsync" disabled="@_busy">@L("Закрыть все табели")</button>
+            }
+        </div>
+    }
+
     @if (_message is not null)
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
@@ -270,6 +286,18 @@ else
         _message = L("Табель составлен по графикам работы и приказам об отпусках.");
     });
 
+    private Task CreateAllAsync() => RunAsync(async () =>
+    {
+        var r = await Timesheets.CreateAllAsync(_month.Year, _month.Month);
+        _message = L("Табели за месяц: составлено {0}, обновлено {1}, закрытых не трогали: {2}.", r.Created, r.Refilled, r.Skipped);
+    }, forDepartment: false); // D225: для всех подразделений выбирать подразделение не нужно
+
+    private Task CloseAllAsync() => RunAsync(async () =>
+    {
+        var r = await Timesheets.CloseAllAsync(_month.Year, _month.Month);
+        _message = L("Закрыто табелей: {0}.", r.Closed);
+    }, forDepartment: false);
+
     private Task RefillAsync() => RunAsync(async () =>
     {
         await Timesheets.RefillAsync(_grid!.Id!.Value, _grid.RowVersion!);
@@ -306,9 +334,9 @@ else
     });
 
     /// <summary>Одна операция за раз, затем свежий табель: у вкладки один DbContext.</summary>
-    private async Task RunAsync(Func<Task> action, bool reload = true)
+    private async Task RunAsync(Func<Task> action, bool reload = true, bool forDepartment = true)
     {
-        if (_busy || _department == 0)
+        if (_busy || (forDepartment && _department == 0))
         {
             return;
         }
@@ -329,7 +357,7 @@ else
         {
             try
             {
-                if (reload)
+                if (reload && _department != 0)
                 {
                     _grid = await Timesheets.GetAsync(_department, _month.Year, _month.Month);
                 }

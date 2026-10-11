@@ -39,10 +39,11 @@ public static class HrTestKit
         var user = new TestUser { UserId = userId, OrganizationId = organizationId };
         var guard = new AccessGuard(db, user, host.Clock);
         var access = new UserAccessService(db, guard, user, host.Clock);
-        var timesheets = new TimesheetService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet);
+        var workOutput = output ?? new EmptyWorkOutputSource();
+        var timesheets = new TimesheetService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet, workOutput);
         return new HrServices(db, new PersonalDataService(db, guard, user, host.Clock), new StaffingService(db, guard, user, host.Clock),
-            new PersonnelOrderService(db, guard, access, user, host.Clock), timesheets,
-            new PayrollService(db, guard, user, host.Clock, timesheets, output ?? new EmptyWorkOutputSource(), SqlTestHost.Spreadsheet),
+            new PersonnelOrderService(db, guard, access, user, host.Clock, timesheets), timesheets,
+            new PayrollService(db, guard, user, host.Clock, timesheets, workOutput, SqlTestHost.Spreadsheet),
             new PayrollEnterpriseDataExport(db, guard, user, host.Clock), new LeaveStatusSync(db, host.Clock))
         {
             Settings = new HrSettingsService(db, guard, user, host.Clock),

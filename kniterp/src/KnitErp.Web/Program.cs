@@ -364,6 +364,9 @@ app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, Kn
 });
 
 // Расчёт заработка месяца в Excel для сверки (D216): право и журнал — в сервисе.
+// Шаблон сдельных расценок, заполненный операциями производства без расценки (D225): право — в сервисе.
+app.MapGet("/hr/piece-rates-template.xlsx", (KnitErp.Application.Hr.PayrollService payroll, CancellationToken ct) =>
+    FileOrForbid(() => payroll.RatesTemplateAsync(ct), "shablon-rascenok.xlsx"));
 app.MapGet("/hr/payroll.xlsx", async (int year, int month, KnitErp.Application.Hr.PayrollService payroll, CancellationToken ct) =>
 {
     try

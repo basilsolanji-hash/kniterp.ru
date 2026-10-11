@@ -173,6 +173,27 @@ public sealed class EmployeeSchedule
         new() { OrganizationId = organizationId, EmployeeId = employeeId, ScheduleId = scheduleId, ValidFrom = validFrom };
 }
 
+/// <summary>
+/// График подразделения по умолчанию (D225): проведённый приказ о приёме или переводе в подразделение назначает сотруднику этот график
+/// с даты приказа — отдельный шаг назначения не нужен. Одна запись на подразделение; снять — удалить запись (это настройка, не документ).
+/// </summary>
+public sealed class DepartmentSchedule
+{
+    private DepartmentSchedule()
+    {
+    }
+
+    public long Id { get; private set; }
+    public long OrganizationId { get; private set; }
+    public long DepartmentId { get; private set; }
+    public long ScheduleId { get; private set; }
+
+    public static DepartmentSchedule Create(long organizationId, long departmentId, long scheduleId) =>
+        new() { OrganizationId = organizationId, DepartmentId = departmentId, ScheduleId = scheduleId };
+
+    public void Change(long scheduleId) => ScheduleId = scheduleId;
+}
+
 public enum TimesheetStatus : byte
 {
     Open = 1,
