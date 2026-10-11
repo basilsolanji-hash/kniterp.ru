@@ -47,14 +47,23 @@ jobs:
       KNITERP_TEST_SQL: "Server=localhost,1433;User Id=sa;Password=Ci_Only_Pa55w0rd!;TrustServerCertificate=true;Encrypt=false"
 
     steps:
-      - uses: actions/checkout@v4
+      # Сторонние действия закреплены по SHA коммита, а не по тегу: тег можно перевесить на чужой код (D109).
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "10.0.x"
 
-      - name: Restore
-        run: dotnet restore KnitErp.slnx
+      # Только версии и хеши пакетов из packages.lock.json: подмена пакета или «плавающая» версия — ошибка сборки.
+      - name: Restore (locked)
+        run: dotnet restore KnitErp.slnx --locked-mode
+
+      - name: Vulnerable packages
+        run: |
+          dotnet list KnitErp.slnx package --vulnerable --include-transitive 2>&1 | tee ../vulnerable.txt
+          if grep -qE '\b(High|Critical)\b' ../vulnerable.txt; then echo '::error title=NuGet::Пакеты с уязвимостями High/Critical'; exit 1; fi
 
       - name: Build
         run: dotnet build KnitErp.slnx --no-restore -c Release
@@ -92,7 +101,7 @@ jobs:
 
       - name: Upload migration script
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: kniterp-migrations-sql
           path: migrations/kniterp-migrations.sql

@@ -1,0 +1,18 @@
+# D109: еженедельно — обновления с исправлениями уязвимостей для пакетов NuGet knitERP, действий GitHub и базовых образов Docker.
+# Dependabot только предлагает изменения (pull request); в рабочую ветку они попадают после проверки CI и решения владельца.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /kniterp
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      microsoft:
+        patterns: ["Microsoft.*", "System.*"]
+        update-types: [patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+  - package-ecosystem: docker
+    directory: /kniterp/deploy/beget
+    schedule: { interval: weekly, day: monday }

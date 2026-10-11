@@ -3,7 +3,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
 WORKDIR /src
 COPY . .
-RUN dotnet publish src/KnitErp.Web -c Release -o /app --nologo
+# D109: пакеты — только точные версии и хеши из packages.lock.json.
+RUN dotnet restore src/KnitErp.Web --locked-mode && dotnet publish src/KnitErp.Web -c Release -o /app --nologo --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 # Коммит исходников в метаданных образа (аудит 10.10.2026, п. 9): docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}'.
