@@ -171,7 +171,8 @@ public sealed class DashboardTests(SqlTestHost host) : IClassFixture<SqlTestHost
         await s.Personal.SaveDashboardLayoutAsync(new DashboardLayout(
             [DashboardBlocks.Reference, "hack", DashboardBlocks.Kpi], [DashboardBlocks.Kpi, DashboardBlocks.Money, DashboardBlocks.Attention, "hack"]));
         var data = await s.Dashboard.GetAsync(refresh: true);
-        Assert.Equal(DashboardBlocks.Reference, data.Layout!.Order[0]);
+        // Блок, которого не было в сохранённой настройке (быстрые действия, D108), встаёт на своё место по умолчанию — наверх.
+        Assert.Equal([DashboardBlocks.Actions, DashboardBlocks.Reference], data.Layout!.Order.Take(2));
         Assert.DoesNotContain("hack", data.Layout.Order);
         Assert.Equal([DashboardBlocks.Kpi, DashboardBlocks.Money, DashboardBlocks.Attention], data.Layout.Hidden);
         Assert.Null(data.Finance!.Accounts);
@@ -182,6 +183,11 @@ public sealed class DashboardTests(SqlTestHost host) : IClassFixture<SqlTestHost
         {
             Assert.Empty((await senior.Personal.GetDashboardLayoutAsync()).Hidden);
         }
+
+        // Быстрые действия: свой набор и порядок; неизвестные отбрасываются; без настройки — набор по умолчанию.
+        Assert.Equal(DashboardActions.Default, data.Layout.ActionKeys);
+        var saved = await s.Personal.SaveDashboardLayoutAsync(new DashboardLayout(DashboardBlocks.DefaultOrder, [], ["write-off", "hack", "sales-order", "write-off"]));
+        Assert.Equal(["write-off", "sales-order"], saved.ActionKeys);
 
         Assert.Empty((await s.Personal.ResetDashboardLayoutAsync()).Hidden);
         Assert.NotNull((await s.Dashboard.GetAsync(refresh: true)).Finance!.Accounts);

@@ -108,6 +108,11 @@ else
 }
 
 @code {
+
+    /// <summary>D108: «?new=…» с главного экрана — сразу открыть форму создания.</summary>
+    [SupplyParameterFromQuery(Name = "new")]
+    public string? NewQuery { get; set; }
+
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
@@ -139,6 +144,10 @@ else
         {
             _visibleWarehouses = await Documents.ListVisibleWarehousesAsync();
             _rows = await Inventory.ListAsync(Filter);
+            if (NewQuery == "1")
+            {
+                await OpenCreateAsync();
+            }
         }
         catch (AccessDeniedException ex)
         {

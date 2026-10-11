@@ -238,6 +238,11 @@ else
 }
 
 @code {
+
+    /// <summary>D108: «?new=…» с главного экрана — сразу открыть форму создания.</summary>
+    [SupplyParameterFromQuery(Name = "new")]
+    public string? NewQuery { get; set; }
+
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
@@ -292,6 +297,14 @@ else
         try
         {
             await LoadAsync();
+            if (NewQuery is "in" or "out")
+            {
+                await OpenFormAsync();
+                if (_form is not null)
+                {
+                    _form.Kind = NewQuery == "in" ? MoneyOperationKind.Income : MoneyOperationKind.Expense;
+                }
+            }
         }
         catch (AccessDeniedException ex)
         {
