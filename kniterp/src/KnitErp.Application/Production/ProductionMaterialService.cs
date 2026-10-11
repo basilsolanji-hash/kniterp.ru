@@ -29,6 +29,15 @@ public sealed record ProductionMaterialsDto(
 
 public sealed record MaterialLineCommand(long ItemId, decimal Quantity);
 
+/// <summary>Выпуск: количество изделий и расход материалов по факту (null — по норме, см. <see cref="ProductionMaterialService.ProposeConsumptionAsync"/>).</summary>
+public sealed record OutputCommand(decimal Quantity, DateOnly DocumentDate, IReadOnlyList<MaterialLineCommand>? Consumption, string? Comment);
+
+/// <summary>Предложенный расход материала на выпуск: по норме без отхода, не больше остатка заказа в цехе.</summary>
+public sealed record ConsumptionProposalDto(long ItemId, string Code, string Name, string UnitSymbol, decimal Remaining, decimal Proposed);
+
+/// <summary>Итог выпуска: документы и предупреждения баланса после него.</summary>
+public sealed record OutputResultDto(long OutputDocumentId, long? ConsumptionDocumentId, IReadOnlyList<string> Warnings);
+
 /// <summary>
 /// Движение материалов по заказу: выдача (со склада <c>WarehouseId</c> в цех), возврат (из цеха на склад <c>WarehouseId</c>)
 /// или отходы (списание из цеха с причиной <c>ReasonId</c>).
@@ -49,6 +58,8 @@ public sealed class ProductionMaterialService(
     public const string IssueReasonName = "Выдача в производство";
     public const string ReturnReasonName = "Возврат из производства";
     public const string WasteReasonName = "Отходы производства";
+    public const string ConsumptionReasonName = "Расход в производство";
+    public const string OutputReasonName = "Выпуск из производства";
 
     public async Task<ProductionMaterialsDto> MaterialsAsync(long orderId, CancellationToken ct = default)
     {
@@ -75,7 +86,7 @@ public sealed class ProductionMaterialService(
 
             if (l.DeviationPercent is { } d && Math.Abs(d) > MaterialBalance.TolerancePercent)
             {
-                warnings.Add($"{l.Code}: расход с отходами {(d > 0 ? "больше" : "меньше")} нормы на {Math.Abs(d):0.##}% — допуск {MaterialBalance.TolerancePercent:0.##}%.");
+                warnings.Add($"{l.Code}: расход с отходами {(d > 0 ? "больше" : "меньше")} нормы на {Quantities.Format(Math.Abs(d))}% — допуск {Quantities.Format(MaterialBalance.TolerancePercent)}%.");
             }
         }
 
@@ -85,7 +96,7 @@ public sealed class ProductionMaterialService(
                           orderby d.DocumentDate descending, d.Id descending
                           select new ProductionDocumentDto(d.Id, d.Number, d.DocumentDate, link.Purpose, d.Status)).ToListAsync(ct);
         var wipName = await db.Warehouses.AsNoTracking().Where(w => w.Id == order.WipWarehouseId).Select(w => w.Name).SingleAsync(ct);
-        var canMove = order.Status is ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone
+        var canMove = order.Status is ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone or ProductionOrderStatus.Done
                       && ctx.Permissions.Has(Permissions.ProductionMaterialMove);
         IReadOnlyList<LookupWarehouseDto> warehouses = [];
         IReadOnlyList<ReasonLookupDto> reasons = [];
@@ -111,7 +122,15 @@ public sealed class ProductionMaterialService(
         {
             await using var tx = await db.BeginTransactionAsync(ct);
             var order = await ProductionLocks.LockOrderAsync(db, ctx, orderId, ct);
-            order.EnsureInWork();
+            if (command.Purpose == ProductionDocumentPurpose.Issue)
+            {
+                order.EnsureInWork();
+            }
+            else
+            {
+                order.EnsureMaterialsOpen();
+            }
+
             var lines = await CheckLinesAsync(ctx, order, command.Lines, ct);
             var codes = await CodesAsync(lines.Select(l => l.ItemId), ct);
             var (kind, header) = command.Purpose switch
@@ -162,6 +181,128 @@ public sealed class ProductionMaterialService(
             db.DiscardChanges(); // отказ на любом шаге не оставляет черновик документа или связь в контексте вкладки
             throw;
         }
+    }
+
+    /// <summary>
+    /// Расход на выпуск по норме (D95): норма без отхода × (выпущено с этим выпуском + брак) − уже израсходовано,
+    /// с округлением вверх до точности единицы и не больше остатка заказа в цехе. Отход сверх нормы оформляется отходами.
+    /// </summary>
+    public async Task<IReadOnlyList<ConsumptionProposalDto>> ProposeConsumptionAsync(long orderId, decimal quantity, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionOrderView, ct);
+        var order = await db.ProductionOrders.AsNoTracking().Include(o => o.Materials)
+                        .SingleOrDefaultAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)
+                    ?? throw new NotFoundException("Производственный заказ");
+        Quantities.EnsurePositive(quantity);
+        var proposal = await ProposeAsync(order, quantity, ct);
+        var ids = proposal.Select(p => p.ItemId).ToList();
+        var items = await db.Items.AsNoTracking().Where(i => ids.Contains(i.Id))
+            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol })
+            .ToDictionaryAsync(x => x.Id, ct);
+        return proposal.Select(p => new ConsumptionProposalDto(p.ItemId, items[p.ItemId].Code, items[p.ItemId].Name, items[p.ItemId].Symbol, p.Remaining, p.Proposed))
+            .OrderBy(p => p.Code).ToList();
+    }
+
+    /// <summary>
+    /// Выпуск готовой продукции (D95): не больше упакованного и не выпущенного; расход по факту списывается со склада цеха,
+    /// изделие поступает на склад готовой продукции — оба документа проводятся в одной транзакции под блокировкой заказа.
+    /// Статус заказа — «Выполнен частично» или «Выполнен» по выпущенному всего.
+    /// </summary>
+    public async Task<OutputResultDto> OutputAsync(long orderId, OutputCommand command, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionMaterialMove, ct);
+        try
+        {
+            await using var tx = await db.BeginTransactionAsync(ct);
+            var order = await ProductionLocks.LockOrderAsync(db, ctx, orderId, ct);
+            order.EnsureInWork();
+            var product = await StockEntry.ActiveItems(db, ctx.OrganizationId, order.ItemId).SingleOrDefaultAsync(ct)
+                          ?? throw new BusinessRuleException("catalog.archived", "Изделие заказа в архиве.");
+            Quantities.EnsurePositive(command.Quantity);
+            StockEntry.EnsurePrecision(product, command.Quantity);
+            var released = await ProductionLocks.ReleasedAsync(db, order, ct);
+            var steps = await db.ProductionOperations.AsNoTracking()
+                .Where(o => o.OrganizationId == ctx.OrganizationId && o.ProductionOrderId == orderId).ToListAsync(ct);
+            var ready = new ProductionFlow(order.Quantity, steps.Select(o => o.Step), released).ReadyForOutput;
+            if (command.Quantity > ready)
+            {
+                throw new BusinessRuleException("production.output.exceeds",
+                    $"Выпустить можно не больше {Quantities.Format(ready)} — столько упаковано и ещё не выпущено.");
+            }
+
+            foreach (var warehouseId in new[] { order.WipWarehouseId, order.OutputWarehouseId })
+            {
+                if (!WarehouseScope.Covers(ctx, Permissions.ProductionMaterialMove, warehouseId))
+                {
+                    throw new NotFoundException("Склад");
+                }
+            }
+
+            IReadOnlyList<(long ItemId, decimal Quantity)> consumption;
+            if (command.Consumption is null)
+            {
+                consumption = (await ProposeAsync(order, command.Quantity, ct)).Where(p => p.Proposed > 0).Select(p => (p.ItemId, p.Proposed)).ToList();
+            }
+            else
+            {
+                consumption = command.Consumption.All(l => l.Quantity == 0) ? [] : await CheckLinesAsync(ctx, order, command.Consumption, ct);
+                var codes = await CodesAsync(consumption.Select(l => l.ItemId), ct);
+                MaterialBalance.EnsureWithinRemaining(await BalanceAsync(order, ct), consumption, id => codes[id]);
+            }
+
+            long? consumptionId = null;
+            if (consumption.Count > 0)
+            {
+                var reason = await ProductionReasons.FindOrCreateAsync(db, ctx, currentUser, clock, StockOperationKind.WriteOff, ConsumptionReasonName, ct);
+                consumptionId = await ProductionPosting.PostAsync(db, documents, ctx, clock, order, StockOperationKind.WriteOff,
+                    new StockDocumentHeader(order.WipWarehouseId, null, null, reason, command.DocumentDate, Comment(order, command.Comment)),
+                    consumption, ProductionDocumentPurpose.Consumption, ct);
+            }
+
+            var outputReason = await ProductionReasons.FindOrCreateAsync(db, ctx, currentUser, clock, StockOperationKind.Receipt, OutputReasonName, ct);
+            var outputId = await ProductionPosting.PostAsync(db, documents, ctx, clock, order, StockOperationKind.Receipt,
+                new StockDocumentHeader(order.OutputWarehouseId, null, null, outputReason, command.DocumentDate, Comment(order, command.Comment)),
+                [(order.ItemId, command.Quantity)], ProductionDocumentPurpose.Output, ct);
+
+            var before = ProductionOrder.StatusName(order.Status);
+            order.ApplyOutput(released + command.Quantity);
+            db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ProductionOutputReleased, nameof(ProductionOrder),
+                order.Id.ToString(), before, $"{ProductionOrder.StatusName(order.Status)}: выпущено {Quantities.Format(command.Quantity)} {product.UnitSymbol}, "
+                                             + $"всего {Quantities.Format(released + command.Quantity)} из {Quantities.Format(order.Quantity)}",
+                order.Number, currentUser.CorrelationId));
+            await db.SaveOrConflictAsync(ct);
+            await tx.CommitAsync(ct);
+
+            var warnings = (await BalanceAsync(order, ct)).Where(b => b.OverTolerance(MaterialBalance.TolerancePercent)).ToList();
+            var names = await CodesAsync(warnings.Select(w => w.ItemId), ct);
+            return new OutputResultDto(outputId, consumptionId, warnings.Select(w =>
+                $"{names[w.ItemId]}: расход с отходами отличается от нормы на {Quantities.Format(w.DeviationPercent!.Value)}% — допуск {Quantities.Format(MaterialBalance.TolerancePercent)}%.").ToList());
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    private async Task<IReadOnlyList<(long ItemId, decimal Remaining, decimal Proposed)>> ProposeAsync(ProductionOrder order, decimal quantity, CancellationToken ct)
+    {
+        var balance = await BalanceAsync(order, ct);
+        var released = await ProductionLocks.ReleasedAsync(db, order, ct);
+        var defect = await db.ProductionOperations.AsNoTracking()
+            .Where(o => o.OrganizationId == order.OrganizationId && o.ProductionOrderId == order.Id && o.Kind == ProductionOperationKind.Defect)
+            .SumAsync(o => (decimal?)o.Quantity, ct) ?? 0m;
+        var ids = order.Materials.Select(m => m.ItemId).ToList();
+        var precision = await db.Items.AsNoTracking().Where(i => ids.Contains(i.Id))
+            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, u.Precision }).ToDictionaryAsync(x => x.Id, x => (int)x.Precision, ct);
+        return order.Materials.Select(m =>
+        {
+            var line = balance.Single(b => b.ItemId == m.ItemId);
+            var need = m.PlannedNet * (released + quantity + defect) / order.Quantity - line.Consumed;
+            var factor = (decimal)Math.Pow(10, precision[m.ItemId]);
+            var rounded = Math.Ceiling(need * factor) / factor;
+            return (m.ItemId, line.Remaining, Math.Clamp(rounded, 0, Math.Max(0, line.Remaining)));
+        }).ToList();
     }
 
     /// <summary>Баланс материалов заказа по проведённым документам.</summary>

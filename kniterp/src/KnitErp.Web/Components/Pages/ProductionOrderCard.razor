@@ -77,6 +77,10 @@ else
             {
                 <dt>@L("Запустил")</dt><dd>@_order.ReleasedBy, @Local(_order.ReleasedAtUtc!.Value)</dd>
             }
+            @if (_order.ClosedBy is not null)
+            {
+                <dt>@L("Закрыл")</dt><dd>@_order.ClosedBy, @Local(_order.ClosedAtUtc!.Value)@(_order.CloseReason is null ? "" : $": {_order.CloseReason}")</dd>
+            }
             @if (_order.CancelledBy is not null)
             {
                 <dt>@L("Отменил")</dt><dd>@_order.CancelledBy, @Local(_order.CancelledAtUtc!.Value): @_order.CancelReason</dd>
@@ -92,11 +96,25 @@ else
             {
                 <ConfirmButton Class="" OnConfirm="ReleaseAsync" Disabled="@_busy" Question='@L("Запустить? Версия техкарты и нормы зафиксируются.")'>@L("Запустить")</ConfirmButton>
             }
+            @if (_order.CanClose && !_closing)
+            {
+                <button type="button" @onclick="() => _closing = true" disabled="@_busy">@L("Закрыть заказ")</button>
+            }
             @if (_order.CanCancel && !_cancelling)
             {
                 <button type="button" class="secondary" @onclick="() => _cancelling = true" disabled="@_busy">@L("Отменить заказ")</button>
             }
         </div>
+
+        @if (_closing)
+        {
+            <form class="inline-form" @onsubmit="CloseAsync">
+                <label>@(_order.Released < _order.Quantity ? L("Причина закрытия (выполнен не полностью)") : L("Комментарий"))
+                    <input @bind="_closeReason" maxlength="@ProductionOrder.ReasonMaxLength" size="40" aria-label="@L("Причина закрытия")" /></label>
+                <button type="submit" disabled="@_busy">@L("Закрыть заказ")</button>
+                <button type="button" class="secondary" @onclick="() => _closing = false">@L("Отмена")</button>
+            </form>
+        }
 
         @if (_cancelling)
         {
@@ -145,6 +163,11 @@ else
     {
         <ProductionStagesPanel OrderId="_order.Id" Progress="_progress" Today="Today" OnChanged="LoadAsync" />
         <ProductionMaterialsPanel OrderId="_order.Id" Data="_materials" Today="Today" OnChanged="LoadAsync" />
+        @if (_progress is not null)
+        {
+            <ProductionOutputPanel OrderId="_order.Id" Progress="_progress" CanMove="@(_materials?.CanMove ?? false)"
+                                   OutputWarehouseName="@_order.OutputWarehouseName" Today="Today" OnChanged="LoadAsync" />
+        }
     }
 
     @if (_order.PricesVisible && _order.Materials.Count > 0)
@@ -157,6 +180,13 @@ else
             else
             {
                 <span class="muted">@L("Плановая себестоимость неизвестна: нет цены хотя бы одного материала (нет закупок по заказам поставщикам).")</span>
+            }
+            @if (_order.ActualCost is { } actual)
+            {
+                <br />
+                @(_order.ActualUnitCost is { } unit
+                    ? L("Фактическая себестоимость по выданной пряже: {0} ₽, на выпущенное изделие — {1} ₽.", actual.ToString("N2"), unit.ToString("N2"))
+                    : L("Фактическая себестоимость по выданной пряже: {0} ₽ (выпуска ещё нет).", actual.ToString("N2")))
             }
         </p>
     }
@@ -176,6 +206,8 @@ else
     private bool _busy;
     private bool _notFound;
     private bool _cancelling;
+    private bool _closing;
+    private string? _closeReason;
     private string? _denied;
     private string? _message;
     private bool _messageIsError;
@@ -226,6 +258,12 @@ else
     }, L("Сохранено."));
 
     private Task ReleaseAsync() => RunAsync(() => Orders.ReleaseAsync(Id, _order!.RowVersion), L("Заказ запущен."));
+
+    private Task CloseAsync() => RunAsync(async () =>
+    {
+        await Orders.CloseAsync(Id, _closeReason, _order!.RowVersion);
+        _closing = false;
+    }, L("Заказ закрыт."));
 
     private Task CancelAsync() => RunAsync(async () =>
     {

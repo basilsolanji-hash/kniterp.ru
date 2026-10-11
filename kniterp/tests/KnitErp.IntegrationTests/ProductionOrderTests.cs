@@ -349,6 +349,91 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D95: выпуск не больше упакованного, расход по норме и по факту, статусы, закрытие с остатками и без, фактическая себестоимость.</summary>
+    [SqlFact]
+    public async Task Output_consumes_by_fact_updates_status_and_close_requires_empty_workshop()
+    {
+        var f = await SetUpAsync();
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 7m), (f.Buttons, 100m)));
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(order, Mark(stage, 20));
+            }
+
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 18));
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.QualityControl, 2) with { Kind = ProductionOperationKind.Defect, Reason = "Дыры" });
+            Assert.Equal("production.output.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.OutputAsync(order, new OutputCommand(1, Day, null, null)))).Code);
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.Packing, 18));
+
+            // Расход по норме без отхода на 10 выпущенных и 2 брака: пряжа 0,32 × 12 = 3,84 кг, пуговицы 5 × 12 = 60.
+            var proposal = (await s.Materials.ProposeConsumptionAsync(order, 10)).ToDictionary(p => p.ItemId);
+            Assert.Equal((3.84m, 60m), (proposal[f.Yarn].Proposed, proposal[f.Buttons].Proposed));
+            var result = await s.Materials.OutputAsync(order, new OutputCommand(10, Day, null, null));
+            Assert.NotNull(result.ConsumptionDocumentId);
+            var output = await s.Documents.GetAsync(result.OutputDocumentId);
+            Assert.Equal((StockOperationKind.Receipt, f.Store, "Выпуск из производства", 10m),
+                (output.Kind, output.WarehouseId, output.ReasonName, output.Lines.Single(l => l.ItemId == f.Sweater).Quantity));
+            var dto = await s.ProductionOrders.GetAsync(order);
+            Assert.Equal((ProductionOrderStatus.PartiallyDone, 10m, true), (dto.Status, dto.Released, dto.CanClose));
+            Assert.Equal(8m, (await s.Floor.ProgressAsync(order)).ReadyForOutput);
+            Assert.Equal("production.output.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.OutputAsync(order, new OutputCommand(9, Day, null, null)))).Code);
+
+            // Расход по факту: пряжи больше остатка заказа в цехе — нельзя; 2,6 кг и 40 пуговиц — можно.
+            Assert.Equal("production.material.exceeds_remaining", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.OutputAsync(order, new OutputCommand(8, Day, [new(f.Yarn, 3.2m), new(f.Buttons, 40m)], null)))).Code);
+            Assert.Equal("production.order.materials_left", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.ProductionOrders.CloseAsync(order, "срочно", (await s.ProductionOrders.GetAsync(order)).RowVersion))).Code);
+            result = await s.Materials.OutputAsync(order, new OutputCommand(8, Day, [new(f.Yarn, 2.6m), new(f.Buttons, 40m)], "вторая партия"));
+            // Пряжа: израсходовано 6,44, норма на 20 (18 + 2 брака) — 6,592; в цехе ещё 0,56 кг.
+            var yarn = (await s.Materials.MaterialsAsync(order)).Lines.Single(l => l.ItemId == f.Yarn);
+            Assert.Equal((6.44m, 0.56m, 6.592m), (yarn.Consumed, yarn.Remaining, yarn.Normative!.Value));
+            Assert.Equal(ProductionOrderStatus.PartiallyDone, (await s.ProductionOrders.GetAsync(order)).Status);
+
+            // Остаток пряжи — отходами; после этого в цехе пусто, но заказ выполнен не полностью — закрытие только с причиной.
+            var waste = (await s.Materials.MaterialsAsync(order)).WasteReasons.Single(r => r.Name == "Брак").Id;
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Waste, null, (f.Yarn, 0.56m)) with { ReasonId = waste, Comment = "Обрезки" });
+            yarn = (await s.Materials.MaterialsAsync(order)).Lines.Single(l => l.ItemId == f.Yarn);
+            Assert.Equal((0m, 6.19m), (yarn.Remaining, yarn.DeviationPercent!.Value)); // (6,44 + 0,56 − 6,592) / 6,592
+            Assert.Contains((await s.Materials.MaterialsAsync(order)).Warnings, w => w.Contains("ПР-1") && w.Contains("6,19"));
+            await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.ProductionOrders.CloseAsync(order, null, (await s.ProductionOrders.GetAsync(order)).RowVersion));
+
+            // Фактическая себестоимость по выданному: 7 × 1 000 + 100 × 5 = 7 500 ₽, на изделие 416,67; плановая на 20 — 7 092.
+            dto = await s.ProductionOrders.GetAsync(order);
+            Assert.Equal((7_500m, 416.67m, 7_092m, 18m), (dto.ActualCost!.Value, dto.ActualUnitCost!.Value, dto.PlannedCost!.Value, dto.Released));
+
+            await s.ProductionOrders.CloseAsync(order, "Брак 2 шт, клиент согласен на 18", dto.RowVersion);
+            dto = await s.ProductionOrders.GetAsync(order);
+            Assert.Equal((ProductionOrderStatus.Closed, "Брак 2 шт, клиент согласен на 18", false), (dto.Status, dto.CloseReason, dto.CanClose));
+            Assert.Equal("production.order.not_in_work", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Waste, null, (f.Yarn, 0.1m)) with { ReasonId = waste, Comment = "x" }))).Code);
+            Assert.Equal("production.order.not_in_work", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Floor.RecordAsync(order, Mark(ProductionStage.Knitting, 1)))).Code);
+
+            var store = await s.Db.StockMovements.Where(x => x.WarehouseId == f.Store && x.ItemId == f.Sweater).SumAsync(x => x.Quantity);
+            Assert.Equal(18m, store);
+        }
+
+        // Кладовщик склада пряжи не выпускает: склад цеха и склад готовой продукции — не его.
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            Assert.Null((await s.ProductionOrders.GetAsync(order)).ActualCost); // цены не видит
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.Equal(2, await db.AuditEntries.CountAsync(e => e.EntityId == order.ToString() && e.Action == "production.output.released"));
+            Assert.Equal(1, await db.AuditEntries.CountAsync(e => e.EntityId == order.ToString() && e.Action == "production.order.closed"));
+        }
+    }
+
     private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
         new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 

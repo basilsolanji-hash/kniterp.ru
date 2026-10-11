@@ -28,6 +28,7 @@ public sealed class AppFixture : IAsyncLifetime
     private readonly List<string> _log = [];
     private long _userId;
     private long _organizationId;
+    private long _ownerId;
     private Process? _app;
     private IPlaywright? _playwright;
 
@@ -112,12 +113,32 @@ public sealed class AppFixture : IAsyncLifetime
             token = invitation.SetupToken!;
             _userId = invitation.UserId;
             _organizationId = org.OrganizationId;
+            _ownerId = org.OwnerUserId;
         }
 
         await using (var s = _host.As(null, null))
         {
             await s.SignIn.AcceptInvitationAsync(token, Password, Password);
             await s.SignIn.AcceptInvitationAsync(storekeeperToken, Password, Password);
+        }
+
+        // Кладовщику пряжи — ещё склад цеха и склад готовой продукции отдельными правами: он выдаёт, выпускает и возвращает остатки.
+        await using (var db = _host.NewDb())
+        {
+            var storekeeper = await db.Users.Where(u => u.Email == StorekeeperEmail).Select(u => u.Id).SingleAsync();
+            var warehouses = await db.Warehouses.Where(w => w.OrganizationId == org.OrganizationId
+                                                            && (w.Name == ProductionOrderService.DefaultWipWarehouseName || w.Name == "Склад готовой продукции"))
+                .Select(w => w.Id).ToListAsync();
+            foreach (var warehouse in warehouses)
+            {
+                foreach (var code in new[] { Permissions.ProductionMaterialMove, Permissions.WarehouseDocumentCreate, Permissions.WarehouseDocumentPost })
+                {
+                    db.RoleAssignments.Add(KnitErp.Domain.Access.RoleAssignment.ForPermission(org.OrganizationId, storekeeper, code, false, org.OwnerUserId,
+                        DateTime.UtcNow, "e2e", warehouseId: warehouse));
+                }
+            }
+
+            await db.SaveChangesAsync();
         }
     }
 
@@ -131,6 +152,24 @@ public sealed class AppFixture : IAsyncLifetime
             KnitErp.Domain.Production.ProductionSource.Plan, null, options.DefaultWipWarehouseId!.Value, output, null));
         await s.ProductionOrders.ReleaseAsync(id, (await s.ProductionOrders.GetAsync(id)).RowVersion);
         return id;
+    }
+
+    /// <summary>Заказ, по которому выдана пряжа и пройдены все этапы: остаётся выпустить. Готовит Владелец.</summary>
+    public async Task<long> CreatePackedOrderAsync(decimal quantity)
+    {
+        var order = await CreateReleasedOrderAsync(quantity);
+        await using var s = _host.As(_ownerId, _organizationId);
+        var materials = await s.Materials.MaterialsAsync(order);
+        var yarnStore = (await s.ProductionOrders.OptionsAsync()).Warehouses.Single(w => w.Name == "Склад пряжи").Id;
+        await s.Materials.MoveAsync(order, new MaterialMoveCommand(KnitErp.Domain.Production.ProductionDocumentPurpose.Issue, yarnStore, null, null,
+            DateOnly.FromDateTime(DateTime.UtcNow), materials.Lines.Select(l => new MaterialLineCommand(l.ItemId, l.Planned)).ToList()));
+        foreach (var stage in KnitErp.Domain.Production.ProductionFlow.Stages)
+        {
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(stage, KnitErp.Domain.Production.ProductionOperationKind.Done, quantity, null, null,
+                DateOnly.FromDateTime(DateTime.UtcNow)));
+        }
+
+        return order;
     }
 
     private async Task StartAppAsync()

@@ -90,4 +90,28 @@ public sealed class ProductionOrderTests
         released.Cancel(false, "ошибка планирования", 5, Now);
         Assert.Equal(ProductionOrderStatus.Cancelled, released.Status);
     }
+
+    [Fact]
+    public void Output_sets_partial_and_done_and_close_needs_empty_workshop()
+    {
+        var order = Draft(20);
+        Assert.Equal("production.order.not_in_work", Assert.Throws<BusinessRuleException>(() => order.ApplyOutput(1)).Code);
+        order.Release(ActiveCard(), _ => 3, _ => 1, 6, Now);
+        Assert.Equal("production.order.close_status", Assert.Throws<BusinessRuleException>(() => order.Close(0, false, 0, null, 5, Now)).Code);
+
+        order.ApplyOutput(12);
+        Assert.Equal(ProductionOrderStatus.PartiallyDone, order.Status);
+        Assert.Equal("production.order.materials_left", Assert.Throws<BusinessRuleException>(() => order.Close(12, true, 0, "x", 5, Now)).Code);
+        Assert.Equal("production.order.packed_not_released", Assert.Throws<BusinessRuleException>(() => order.Close(12, false, 3, "x", 5, Now)).Code);
+        // Выполнен не полностью — только с причиной.
+        Assert.Throws<BusinessRuleException>(() => order.Close(12, false, 0, null, 5, Now));
+
+        order.ApplyOutput(20);
+        Assert.Equal(ProductionOrderStatus.Done, order.Status);
+        Assert.Equal("production.order.not_in_work", Assert.Throws<BusinessRuleException>(() => order.ApplyOutput(21)).Code);
+        order.EnsureMaterialsOpen(); // возврат остатка и отходы — и после полного выпуска
+        order.Close(20, false, 0, null, 5, Now);
+        Assert.Equal((ProductionOrderStatus.Closed, (string?)null), (order.Status, order.CloseReason));
+        Assert.Throws<BusinessRuleException>(() => order.EnsureMaterialsOpen());
+    }
 }

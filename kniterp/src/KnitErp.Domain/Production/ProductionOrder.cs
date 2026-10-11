@@ -75,6 +75,11 @@ public sealed class ProductionOrder
     public long? CancelledByUserId { get; private set; }
     public DateTime? CancelledAtUtc { get; private set; }
     public string? CancelReason { get; private set; }
+    public long? ClosedByUserId { get; private set; }
+    public DateTime? ClosedAtUtc { get; private set; }
+
+    /// <summary>Причина закрытия не полностью выполненного заказа.</summary>
+    public string? CloseReason { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
     /// <summary>Нормы материалов на весь заказ, снятые при запуске. У черновика пусто.</summary>
@@ -165,6 +170,53 @@ public sealed class ProductionOrder
             throw new BusinessRuleException("production.order.not_in_work",
                 Status == ProductionOrderStatus.Draft ? "Заказ ещё не запущен — сначала нажмите «Запустить»." : $"Заказ в статусе «{StatusName(Status)}» — работы по нему не отмечаются.");
         }
+    }
+
+    /// <summary>Возврат остатков и отходы — и после полного выпуска, пока заказ не закрыт: остаток в цехе нужно разнести.</summary>
+    public void EnsureMaterialsOpen()
+    {
+        if (Status is not (ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone or ProductionOrderStatus.Done))
+        {
+            EnsureInWork();
+        }
+    }
+
+    /// <summary>Выпуск (D95): статус по выпущенному всего — частично или полностью.</summary>
+    public void ApplyOutput(decimal releasedTotal)
+    {
+        EnsureInWork();
+        Status = releasedTotal >= Quantity ? ProductionOrderStatus.Done : ProductionOrderStatus.PartiallyDone;
+    }
+
+    /// <summary>
+    /// Закрытие (D95): после выпуска, когда в цехе не осталось материалов заказа и всё упакованное выпущено.
+    /// Не полностью выполненный заказ закрывается с причиной. После закрытия по заказу ничего не движется.
+    /// </summary>
+    public void Close(decimal releasedTotal, bool materialsLeft, decimal packedNotReleased, string? reason, long userId, DateTime nowUtc)
+    {
+        if (Status is not (ProductionOrderStatus.PartiallyDone or ProductionOrderStatus.Done))
+        {
+            throw new BusinessRuleException("production.order.close_status", "Закрыть можно заказ, по которому был выпуск.");
+        }
+
+        if (materialsLeft)
+        {
+            throw new BusinessRuleException("production.order.materials_left",
+                "В цехе остались материалы заказа — верните их на склад или спишите отходами, затем закройте заказ.");
+        }
+
+        if (packedNotReleased > 0)
+        {
+            throw new BusinessRuleException("production.order.packed_not_released",
+                $"Упаковано и не выпущено {Quantities.Format(packedNotReleased)} — выпустите их на склад.");
+        }
+
+        var partial = releasedTotal < Quantity;
+        CloseReason = partial ? DomainText.Require(reason, ReasonMaxLength, "Причина закрытия не полностью выполненного заказа")
+                              : DomainText.Optional(reason, ReasonMaxLength, "Комментарий");
+        Status = ProductionOrderStatus.Closed;
+        ClosedByUserId = userId;
+        ClosedAtUtc = nowUtc;
     }
 
     /// <summary>Плановая себестоимость всего заказа по снимку норм: Σ потребность с отходом × плановая цена. null — цена хотя бы одного материала неизвестна.</summary>

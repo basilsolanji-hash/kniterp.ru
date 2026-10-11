@@ -117,7 +117,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByRole(AriaRole.Cell, new() { Name = "Начальник цеха" })).ToHaveCountAsync(2);
     }
 
-    /// <summary>D93: кладовщик склада пряжи выдаёт пряжу в цех из карточки заказа; склад цеха ему не подвластен.</summary>
+    /// <summary>D93: кладовщик выдаёт пряжу в цех из карточки заказа и возвращает часть обратно.</summary>
     [SqlFact]
     public async Task Storekeeper_issues_yarn_to_workshop()
     {
@@ -149,13 +149,54 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("6,592");
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^ПМ-") })).ToHaveCountAsync(1);
 
-        // Возврат из цеха — склад цеха не в области кладовщика пряжи.
+        // Возврат части пряжи из цеха на склад (кладовщику выдано право на склад цеха).
         await page.GetByLabel("Операция").SelectOptionAsync(new SelectOptionValue { Label = "Возврат из цеха" });
         await page.GetByLabel("Количество: ПР-1").FillAsync("1");
         await page.GetByLabel("Склад материалов").SelectOptionAsync(new SelectOptionValue { Label = "Склад пряжи" });
         await page.GetByRole(AriaRole.Button, new() { Name = "Провести" }).ClickAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToBeVisibleAsync();
-        await Assertions.Expect(page.Locator("td[data-label='Возвращено']")).ToHaveTextAsync("0");
+        await Assertions.Expect(page.Locator("td[data-label='Возвращено']")).ToHaveTextAsync("1");
+        await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("5,592");
+    }
+
+    /// <summary>D95: кладовщик выпускает продукцию с расходом по норме и возвращает остаток пряжи; начальник цеха закрывает заказ.</summary>
+    [SqlFact]
+    public async Task Output_return_rest_and_close_order()
+    {
+        var order = await app.CreatePackedOrderAsync(10);
+        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        {
+            var page = await context.NewPageAsync();
+            await LoginAsync(page, AppFixture.StorekeeperEmail);
+            await page.GotoAsync($"production-orders/{order}");
+            await Assertions.Expect(page.GetByText("Выпущено 0 из 10 шт, готово к выпуску (упаковано): 10.")).ToBeVisibleAsync();
+            await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Рассчитать расход" }), page.GetByLabel("Расход: ПР-1"));
+            // Норма без отхода: 3,2 кг на 10 свитеров; выдано 3,296 (с отходом 3%).
+            await Assertions.Expect(page.GetByLabel("Расход: ПР-1")).ToHaveValueAsync("3,2");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Выпустить", Exact = true }).ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "Да", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.GetByText("Продукция выпущена на склад.")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("h1 .tag")).ToHaveTextAsync("Выполнен");
+            await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("0,096");
+
+            // После полного выпуска выдачи нет — по умолчанию возврат остатка.
+            await Assertions.Expect(page.GetByLabel("Операция")).ToHaveValueAsync("Return");
+            await page.GetByLabel("Количество: ПР-1").FillAsync("0,096");
+            await page.GetByLabel("Склад материалов").SelectOptionAsync(new SelectOptionValue { Label = "Склад пряжи" });
+            await page.GetByRole(AriaRole.Button, new() { Name = "Провести" }).ClickAsync();
+            await Assertions.Expect(page.GetByText("Документ проведён.")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("0");
+        }
+
+        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        {
+            var page = await context.NewPageAsync();
+            await LoginAsync(page);
+            await page.GotoAsync($"production-orders/{order}");
+            await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Закрыть заказ" }), page.GetByLabel("Причина закрытия"));
+            await page.GetByRole(AriaRole.Button, new() { Name = "Закрыть заказ" }).ClickAsync();
+            await Assertions.Expect(page.Locator("h1 .tag")).ToHaveTextAsync("Закрыт");
+            await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Заказ закрыт.");
+        }
     }
 
     private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);

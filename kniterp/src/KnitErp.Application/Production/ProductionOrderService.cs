@@ -36,10 +36,15 @@ public sealed record ProductionOrderDto(
     string CreatedBy, DateTime CreatedAtUtc, string? ReleasedBy, DateTime? ReleasedAtUtc,
     string? CancelledBy, DateTime? CancelledAtUtc, string? CancelReason,
     IReadOnlyList<ProductionMaterialDto> Materials, bool MaterialsFixed, bool PricesVisible, decimal? PlannedCost,
-    byte[] RowVersion, bool CanEdit, bool CanRelease, bool CanCancel)
+    byte[] RowVersion, bool CanEdit, bool CanRelease, bool CanCancel,
+    decimal Released = 0, decimal? ActualCost = null, string? ClosedBy = null, DateTime? ClosedAtUtc = null, string? CloseReason = null,
+    bool CanClose = false)
 {
     public string StatusName => ProductionOrder.StatusName(Status);
     public string SourceName => ProductionOrder.SourceName(Source);
+
+    /// <summary>Фактическая себестоимость единицы: по выданной пряже (выдано − возвращено) на выпущенное.</summary>
+    public decimal? ActualUnitCost => ActualCost is { } c && Released > 0 ? decimal.Round(c / Released, 2, MidpointRounding.AwayFromZero) : null;
 
     /// <summary>Плановая себестоимость единицы изделия; null — нет права на цены или цена материала неизвестна.</summary>
     public decimal? PlannedUnitCost => PlannedCost is { } c && Quantity > 0 ? decimal.Round(c / Quantity, 2, MidpointRounding.AwayFromZero) : null;
@@ -144,7 +149,7 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             .ToDictionaryAsync(x => x.Id, ct);
         var warehouses = await db.Warehouses.AsNoTracking()
             .Where(w => w.Id == order.WipWarehouseId || w.Id == order.OutputWarehouseId).ToDictionaryAsync(w => w.Id, w => w.Name, ct);
-        long?[] userIds = [order.CreatedByUserId, order.ReleasedByUserId, order.CancelledByUserId];
+        long?[] userIds = [order.CreatedByUserId, order.ReleasedByUserId, order.CancelledByUserId, order.ClosedByUserId];
         var users = await db.Users.AsNoTracking().Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
         var salesNumber = order.SalesOrderId is { } sid
             ? await db.SalesOrders.AsNoTracking().Where(s => s.Id == sid).Select(s => s.Number).SingleAsync(ct)
@@ -159,6 +164,13 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
 
         var canEdit = ctx.Permissions.Has(Permissions.ProductionOrderEdit);
         var draft = order.Status == ProductionOrderStatus.Draft;
+        var released = draft ? 0m : await ProductionLocks.ReleasedAsync(db, order, ct);
+        decimal? actualCost = null;
+        if (pricesVisible && !draft && order.Status != ProductionOrderStatus.Cancelled)
+        {
+            actualCost = await ActualCostAsync(ctx, order, ct);
+        }
+
         var cancellable = order.Status is ProductionOrderStatus.Draft or ProductionOrderStatus.Released
                           && !await HasMovementsAsync(order, ct);
         return new ProductionOrderDto(order.Id, order.Number, order.Status, order.OrderDate, order.DueDate,
@@ -170,7 +182,9 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
             order.ReleasedByUserId is { } r ? users[r] : null, order.ReleasedAtUtc,
             order.CancelledByUserId is { } c ? users[c] : null, order.CancelledAtUtc, order.CancelReason,
             lines, !draft, pricesVisible, plannedCost, order.RowVersion,
-            canEdit && draft, canEdit && draft && card is not null, canEdit && cancellable);
+            canEdit && draft, canEdit && draft && card is not null, canEdit && cancellable,
+            released, actualCost, order.ClosedByUserId is { } cl ? users[cl] : null, order.ClosedAtUtc, order.CloseReason,
+            canEdit && order.Status is ProductionOrderStatus.PartiallyDone or ProductionOrderStatus.Done);
     }
 
     /// <summary>Справочники формы: изделия с версией техкарты, действующие склады и подтверждённые заказы покупателей.</summary>
@@ -291,7 +305,7 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         var cost = order.PlannedCost();
         Audit(ctx, AuditActions.ProductionOrderReleased, order, "Черновик", "Запущен",
             $"техкарта {product.Code}, версия {card.Version}; материалов: {order.Materials.Count}"
-            + (cost is { } c ? $"; плановая себестоимость {c:0.00}" : "; плановая себестоимость неизвестна"));
+            + (cost is { } c ? $"; плановая себестоимость {Quantities.Format(c)}" : "; плановая себестоимость неизвестна"));
         await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
     }
@@ -308,6 +322,59 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         Audit(ctx, AuditActions.ProductionOrderCancelled, order, before, "Отменён", order.CancelReason);
         await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// Закрытие (D95): после выпуска, когда в цехе не осталось материалов заказа и всё упакованное выпущено;
+    /// не полностью выполненный заказ — с причиной. Проверки — под блокировкой заказа.
+    /// </summary>
+    public async Task CloseAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync($"kniterp.production.order.{id}", ct);
+        var released = await ProductionLocks.ReleasedAsync(db, order, ct);
+        var steps = await db.ProductionOperations.AsNoTracking()
+            .Where(o => o.OrganizationId == ctx.OrganizationId && o.ProductionOrderId == id).ToListAsync(ct);
+        var flow = new ProductionFlow(order.Quantity, steps.Select(o => o.Step), released);
+        var balance = MaterialBalance.Calculate(order.Materials, order.Quantity, await ProductionPosting.MovementsAsync(db, order, ct), released, flow.Defect);
+        var before = ProductionOrder.StatusName(order.Status);
+        order.Close(released, balance.Any(b => b.Remaining != 0), flow.ReadyForOutput, reason, ctx.UserId, clock.UtcNow);
+        Audit(ctx, AuditActions.ProductionOrderClosed, order, before, "Закрыт",
+            $"выпущено {Quantities.Format(released)} из {Quantities.Format(order.Quantity)}" + (order.CloseReason is null ? "" : $"; {order.CloseReason}"));
+        await db.SaveOrConflictAsync(ct);
+        await tx.CommitAsync(ct);
+    }
+
+    /// <summary>
+    /// Фактическая себестоимость (D95) по выданной пряже: (выдано − возвращено) × цена материала. Цена — текущая средняя закупочная
+    /// без НДС (как плановая, D69), если её нет — плановая из снимка; неизвестна хотя бы одна — null.
+    /// </summary>
+    private async Task<decimal?> ActualCostAsync(AccessContext ctx, ProductionOrder order, CancellationToken ct)
+    {
+        var moves = await ProductionPosting.MovementsAsync(db, order, ct);
+        var net = order.Materials.ToDictionary(m => m.ItemId, m =>
+            moves.Where(x => x.ItemId == m.ItemId && x.Purpose == ProductionDocumentPurpose.Issue).Sum(x => x.Quantity)
+            - moves.Where(x => x.ItemId == m.ItemId && x.Purpose == ProductionDocumentPurpose.Return).Sum(x => x.Quantity));
+        if (net.Values.All(v => v == 0))
+        {
+            return null;
+        }
+
+        var prices = await MaterialPricesAsync(ctx, net.Keys.ToList(), ct);
+        decimal total = 0;
+        foreach (var m in order.Materials)
+        {
+            var price = prices.TryGetValue(m.ItemId, out var p) ? p : m.PlannedPrice;
+            if (price is null)
+            {
+                return null;
+            }
+
+            total += net[m.ItemId] * price.Value;
+        }
+
+        return Money.Round(total);
     }
 
     /// <summary>Есть ли по заказу движения, после которых отмена запрещена: отметки этапов (D92) и складские документы (D93, D95).</summary>

@@ -2343,6 +2343,16 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long?>("CancelledByUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("CloseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("ClosedByUserId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Comment")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -2410,6 +2420,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CancelledByUserId");
 
+                    b.HasIndex("ClosedByUserId");
+
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("ReleasedByUserId");
@@ -2437,6 +2449,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasTrigger("tr_production_orders_fixed_after_release");
 
                             t.HasCheckConstraint("ck_production_orders_cancelled", "([Status] = 9 AND [CancelledByUserId] IS NOT NULL AND [CancelledAtUtc] IS NOT NULL AND [CancelReason] IS NOT NULL) OR ([Status] <> 9 AND [CancelledByUserId] IS NULL AND [CancelReason] IS NULL)");
+
+                            t.HasCheckConstraint("ck_production_orders_closed", "([Status] = 5 AND [ClosedByUserId] IS NOT NULL AND [ClosedAtUtc] IS NOT NULL) OR ([Status] <> 5 AND [ClosedByUserId] IS NULL)");
 
                             t.HasCheckConstraint("ck_production_orders_due", "[DueDate] IS NULL OR [DueDate] >= [OrderDate]");
 
@@ -5382,6 +5396,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
                         .WithMany()
                         .HasForeignKey("CancelledByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ClosedByUserId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)

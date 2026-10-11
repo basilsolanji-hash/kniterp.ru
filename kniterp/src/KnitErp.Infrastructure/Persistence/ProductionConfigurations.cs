@@ -30,6 +30,8 @@ internal sealed class ProductionOrderConfiguration : IEntityTypeConfiguration<Pr
             t.HasCheckConstraint("ck_production_orders_cancelled",
                 "([Status] = 9 AND [CancelledByUserId] IS NOT NULL AND [CancelledAtUtc] IS NOT NULL AND [CancelReason] IS NOT NULL)"
                 + " OR ([Status] <> 9 AND [CancelledByUserId] IS NULL AND [CancelReason] IS NULL)");
+            t.HasCheckConstraint("ck_production_orders_closed",
+                "([Status] = 5 AND [ClosedByUserId] IS NOT NULL AND [ClosedAtUtc] IS NOT NULL) OR ([Status] <> 5 AND [ClosedByUserId] IS NULL)");
             // Изделие, количество и техкарта запущенного заказа не меняются — триггер в миграции AddProductionOrders.
             t.HasTrigger("tr_production_orders_fixed_after_release");
         });
@@ -41,6 +43,8 @@ internal sealed class ProductionOrderConfiguration : IEntityTypeConfiguration<Pr
         b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
         b.Property(x => x.Comment).HasMaxLength(ProductionOrder.CommentMaxLength);
         b.Property(x => x.CancelReason).HasMaxLength(ProductionOrder.ReasonMaxLength);
+        b.Property(x => x.CloseReason).HasMaxLength(ProductionOrder.ReasonMaxLength);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ClosedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.Property(x => x.RowVersion).IsRowVersion();
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_production_orders_org_id");

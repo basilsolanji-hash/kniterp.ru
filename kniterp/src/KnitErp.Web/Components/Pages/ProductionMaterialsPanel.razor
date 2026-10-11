@@ -58,7 +58,10 @@
             <label>
                 @L("Операция")
                 <select @bind="_purpose" @bind:after="PurposeChanged" aria-label="@L("Операция")">
-                    <option value="@ProductionDocumentPurpose.Issue">@L(ProductionOrderDocument.PurposeName(ProductionDocumentPurpose.Issue))</option>
+                    @if (_data.Status != ProductionOrderStatus.Done)
+                    {
+                        <option value="@ProductionDocumentPurpose.Issue">@L(ProductionOrderDocument.PurposeName(ProductionDocumentPurpose.Issue))</option>
+                    }
                     <option value="@ProductionDocumentPurpose.Return">@L(ProductionOrderDocument.PurposeName(ProductionDocumentPurpose.Return))</option>
                     <option value="@ProductionDocumentPurpose.Waste">@L(ProductionOrderDocument.PurposeName(ProductionDocumentPurpose.Waste))</option>
                 </select>
@@ -154,6 +157,11 @@
         }
 
         _data = Data;
+        if (_data?.Status == ProductionOrderStatus.Done && _purpose == ProductionDocumentPurpose.Issue)
+        {
+            _purpose = ProductionDocumentPurpose.Return; // после полного выпуска — только возврат остатка и отходы
+        }
+
         if (_data is not null && !_keepInput)
         {
             PurposeChanged();
