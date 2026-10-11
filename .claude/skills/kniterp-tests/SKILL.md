@@ -31,6 +31,13 @@ description: Как собрать knitERP и запустить его тест
 4. Проверить порядок миграций по времени: миграция, которая выполняется позже, не должна сужать ограничение, расширенное другой.
 5. `git worktree remove --force <scratch>/trial`; в чужие ветки не пушить.
 
+## Ревью безопасности модуля
+Встроенный `/security-review` сравнивает с `origin/HEAD`, которого в облачном клоне нет. Поэтому ревью делает агент по диффу ветки:
+`git diff origin/<базовая-ветка>...HEAD -- kniterp/src ':!**/Migrations/*.Designer.cs' ':!**/KnitErpDbContextModelSnapshot.cs'`.
+Что проверять: фильтр по `OrganizationId` в каждом запросе по id (чужое → NotFound); область подразделений (`StructureScope`) и уровень
+«С» (только своё); ПДн и суммы заработка в DTO, печати, Excel, XML и **журнале аудита**; блокировка и RowVersion при проведении
+и проверке штата; неизменяемость (триггеры и `HasTrigger`); `MarkupString` и формулы в Excel. Каждая находка — тест и запись в D2xx.
+
 ## Переводы
 - Каждая строка интерфейса пишется как `L("…")`. Сообщения `BusinessRuleException` и `NotFoundException` из Domain и Application тоже попадают в словари.
 - Тест падает как на отсутствующих, так и на лишних ключах в `src/KnitErp.Web/Localization/{be,kk,uz}.json`.
