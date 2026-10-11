@@ -378,7 +378,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 {
                     table.PrimaryKey("PK_crm_activities", x => x.Id);
                     table.CheckConstraint("ck_crm_activities_done", "([IsDone] = 1 AND [DoneAtUtc] IS NOT NULL AND [DoneByUserId] IS NOT NULL) OR ([IsDone] = 0 AND [DoneAtUtc] IS NULL AND [DoneByUserId] IS NULL)");
-                    table.CheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 8 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 5");
+                    table.CheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 9 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 6");
                     table.ForeignKey(
                         name: "FK_crm_activities_organizations_OrganizationId",
                         column: x => x.OrganizationId,

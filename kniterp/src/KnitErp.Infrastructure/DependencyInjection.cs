@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using KnitErp.Application.Common;
 using KnitErp.Application.Workspace;
 using KnitErp.Infrastructure.External;
@@ -33,6 +34,9 @@ public static class DependencyInjection
         // Служебная почта (D81): «Забыли пароль». Без настроек — недоступна, вход по ссылке от администратора.
         services.AddSingleton(email ?? new EmailOptions(null, null, null, null, null));
         services.AddSingleton<IEmailSender, Email.SmtpEmailSender>();
+        // D648 (сессия CRM): чаты с клиентами в MAX. Адрес API — Max:BaseUrl в настройках сервера (Program регистрирует MaxOptions раньше).
+        services.TryAddSingleton(new External.MaxOptions("https://platform-api.max.ru"));
+        services.AddHttpClient<KnitErp.Application.Crm.ICrmMaxClient, External.MaxMessengerClient>(c => c.Timeout = TimeSpan.FromSeconds(8));
         return services;
     }
 

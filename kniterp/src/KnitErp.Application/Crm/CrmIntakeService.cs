@@ -20,6 +20,12 @@ public sealed record CrmIntakeResult(long LeadId, string Number, bool Repeat);
 /// <summary>Событие телефонии (D643): звонок по номеру; ExternalId — id звонка АТС (повтор не создаёт вторую запись).</summary>
 public sealed record CrmCallEvent(string? Phone, bool Incoming = true, int? DurationSeconds = null, string? ExternalId = null, string? Comment = null);
 
+/// <summary>
+/// Сообщение из мессенджера (D644): Channel — whatsapp, telegram или max; Sender — ник или id отправителя в мессенджере; ExternalId — id
+/// сообщения (повтор не создаёт вторую запись). Бот мессенджера пересылает сюда входящие — подключение ботов — следующий шаг.
+/// </summary>
+public sealed record CrmMessageEvent(string? Channel, string? Sender, string? Text, string? Phone = null, string? Name = null, string? ExternalId = null);
+
 public sealed record CrmCallResult(CrmTarget Target, long TargetId, long ActivityId, bool NewLead, bool Duplicate);
 
 /// <summary>
@@ -134,6 +140,87 @@ public sealed class CrmIntakeService(IKnitErpDbContext db, IAccessGuard guard, I
         db.CrmActivities.Add(activity);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.CrmActivityCreated, nameof(CrmActivity), activity.Id, null, $"звонок {CrmText.MaskPhone(phone)}", "телефония");
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new CrmCallResult(target, targetId, activity.Id, newLead, false);
+    }
+
+    public static readonly IReadOnlyDictionary<string, string> Messengers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["whatsapp"] = "WhatsApp",
+        ["telegram"] = "Telegram",
+        ["max"] = "MAX",
+    };
+
+    /// <summary>
+    /// Входящее сообщение мессенджера (D644): находит контакт (по телефону или нику мессенджера), его открытую сделку или открытый лид;
+    /// незнакомый отправитель — новый лид «Сообщение в …» (название — из текста, умная вставка А1), ответственный — по правилу распределения.
+    /// </summary>
+    public async Task<CrmCallResult> RegisterMessageAsync(CrmMessageEvent msg, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        await CrmSettingsService.EnsureDefaultsAsync(db, ctx.OrganizationId, ct);
+        var channel = msg.Channel is { } c && Messengers.TryGetValue(c.Trim(), out var name) ? name
+            : throw new BusinessRuleException("crm.messenger", "Мессенджер: whatsapp, telegram или max.");
+        var sender = CrmText.Require(msg.Sender, CrmText.MessengerMaxLength - channel.Length - 2, "Отправитель");
+        var handle = $"{channel}: {sender}";
+        var text = CrmText.Require(msg.Text, CrmActivity.TextMaxLength, "Текст");
+        var phone = CrmText.NormalizePhone(msg.Phone);
+        var externalId = msg.ExternalId is { } e ? CrmText.Optional($"{channel}:{e}", CrmActivity.ExternalRefMaxLength, "Внешний номер") : null;
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync($"kniterp.crm.intake.{ctx.OrganizationId}", ct);
+        if (externalId is not null && await db.CrmActivities.AsNoTracking()
+                .SingleOrDefaultAsync(a => a.OrganizationId == ctx.OrganizationId && a.Source == CrmActivitySource.Messenger && a.ExternalRef == externalId, ct) is { } dup)
+        {
+            return new CrmCallResult(dup.Target, dup.TargetId, dup.Id, false, true);
+        }
+
+        var contact = await db.CrmContacts.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.ErasedAtUtc == null
+                && ((phone != null && (x.Phone == phone || x.Channels.Any(ch => ch.Kind == CrmChannelKind.Phone && ch.Value == phone)))
+                    || x.Messenger == handle || x.Channels.Any(ch => ch.Kind == CrmChannelKind.Messenger && ch.Value == handle)))
+            .OrderBy(x => x.IsArchived).ThenByDescending(x => x.Id).Select(x => new { x.Id, x.ResponsibleUserId }).FirstOrDefaultAsync(ct);
+        var deal = contact is null ? null : await db.CrmDeals.AsNoTracking()
+            .Where(d => d.OrganizationId == ctx.OrganizationId && d.ContactId == contact.Id && d.Outcome == CrmDealOutcome.Open)
+            .OrderByDescending(d => d.Id).Select(d => new { d.Id, d.ResponsibleUserId }).FirstOrDefaultAsync(ct);
+        var lead = contact is not null ? null : await db.CrmLeads.AsNoTracking()
+            .Where(l => l.OrganizationId == ctx.OrganizationId && (l.Status == CrmLeadStatus.New || l.Status == CrmLeadStatus.InWork)
+                        && ((phone != null && l.Phone == phone) || l.Messenger == handle))
+            .OrderByDescending(l => l.Id).Select(l => new { l.Id, l.ResponsibleUserId }).FirstOrDefaultAsync(ct);
+        CrmTarget target;
+        long targetId, assignee;
+        var newLead = false;
+        if (deal is not null)
+        {
+            (target, targetId, assignee) = (CrmTarget.Deal, deal.Id, deal.ResponsibleUserId);
+        }
+        else if (contact is not null)
+        {
+            (target, targetId, assignee) = (CrmTarget.Contact, contact.Id, contact.ResponsibleUserId);
+        }
+        else if (lead is not null)
+        {
+            (target, targetId, assignee) = (CrmTarget.Lead, lead.Id, lead.ResponsibleUserId);
+        }
+        else
+        {
+            assignee = await CrmEvents.AssigneeAsync(db, ctx.OrganizationId, ctx.UserId, ct);
+            var parsed = CrmTextParser.Parse(text);
+            var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, CrmLead.NumberPrefix, ct);
+            var created = CrmLead.Create(ctx.OrganizationId, number, new CrmLeadValues(parsed.Title ?? $"Сообщение в {channel}", await SourceAsync(ctx, channel, ct), null,
+                    assignee, msg.Name ?? parsed.ContactName, phone ?? parsed.Phone, parsed.Email, handle, parsed.CompanyName, parsed.Inn, text),
+                await CrmCommon.CurrencyAsync(db, ctx, ct), ctx.UserId, clock.UtcNow);
+            db.CrmLeads.Add(created);
+            await db.SaveChangesAsync(ct);
+            Audit(ctx, AuditActions.CrmLeadCreated, nameof(CrmLead), created.Id, null, created.Describe(), channel);
+            (target, targetId, newLead) = (CrmTarget.Lead, created.Id, true);
+        }
+
+        var activity = CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Message, target, targetId, $"Сообщение в {channel} от {msg.Name ?? sender}", text, null,
+            assignee, ctx.UserId, clock.UtcNow, done: true, source: CrmActivitySource.Messenger, externalRef: externalId);
+        activity.SetPeer(sender);
+        db.CrmActivities.Add(activity);
+        await db.SaveChangesAsync(ct);
+        Audit(ctx, AuditActions.CrmActivityCreated, nameof(CrmActivity), activity.Id, null, $"сообщение {channel}", "мессенджер");
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return new CrmCallResult(target, targetId, activity.Id, newLead, false);

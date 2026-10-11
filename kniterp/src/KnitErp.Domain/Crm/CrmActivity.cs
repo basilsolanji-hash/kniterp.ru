@@ -15,6 +15,9 @@ public enum CrmActivityKind : byte
 
     /// <summary>Повторное обращение клиента (заявка из API с тем же телефоном или почтой, D641).</summary>
     RepeatRequest = 8,
+
+    /// <summary>Сообщение в мессенджере (WhatsApp, Telegram, MAX — D644).</summary>
+    Message = 9,
 }
 
 /// <summary>К чему относится активность.</summary>
@@ -33,6 +36,9 @@ public enum CrmActivitySource : byte
     Api = 3,
     Telephony = 4,
     Mail = 5,
+
+    /// <summary>Мессенджер: WhatsApp, Telegram, MAX (D644).</summary>
+    Messenger = 6,
 }
 
 /// <summary>
@@ -67,6 +73,9 @@ public sealed class CrmActivity
     public long? DoneByUserId { get; private set; }
     public CrmActivitySource Source { get; private set; }
     public string? ExternalRef { get; private set; }
+
+    /// <summary>Собеседник в мессенджере (D644): id пользователя MAX, Telegram, WhatsApp — кому отвечать из ленты.</summary>
+    public string? Peer { get; private set; }
 
     /// <summary>КП (D624): номер и сумма отправленного предложения.</summary>
     public long? OfferId { get; private set; }
@@ -109,6 +118,8 @@ public sealed class CrmActivity
 
         return a;
     }
+
+    public void SetPeer(string? peer) => Peer = DomainText.Optional(peer, ExternalRefMaxLength, "Собеседник");
 
     public void Update(string? subject, string? text, DateTime? dueAtUtc, long assigneeUserId)
     {
@@ -161,6 +172,7 @@ public sealed class CrmActivity
         CrmActivityKind.OfferSent => "КП отправлено",
         CrmActivityKind.Note => "Заметка",
         CrmActivityKind.RepeatRequest => "Повторное обращение",
+        CrmActivityKind.Message => "Сообщение",
         _ => kind.ToString(),
     };
 

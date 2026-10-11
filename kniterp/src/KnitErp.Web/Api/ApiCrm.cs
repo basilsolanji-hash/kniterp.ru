@@ -26,6 +26,11 @@ public static class ApiCrm
             .AddEndpointFilter(ApiV1.IdempotencyAsync)
             .WithSummary("Звонок из телефонии: активность к контакту, сделке или лиду по номеру; неизвестный номер — новый лид");
 
+        api.MapPost("/crm/messages", async (CrmIntakeService intake, CrmMessageEvent body, CancellationToken ct) =>
+                ApiResult.Ok(await intake.RegisterMessageAsync(body, ct)))
+            .AddEndpointFilter(ApiV1.IdempotencyAsync)
+            .WithSummary("Сообщение из WhatsApp, Telegram или MAX: в ленту контакта, сделки или лида; незнакомый отправитель — новый лид");
+
         api.MapGet("/crm/leads", async (CrmLeadService leads, CrmLeadStatus? status, string? search, int? page, CancellationToken ct) =>
                 ApiResult.Ok(await leads.ListAsync(new CrmLeadFilter(status, search, Page: page ?? 0), ct)))
             .WithSummary("Лиды (по 100, page с 0); без crm.all — только свои");

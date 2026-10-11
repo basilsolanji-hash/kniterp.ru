@@ -1,0 +1,333 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject IEmailSender Mail
+
+@*
+    D620–D626: активности и лента карточки лида, сделки или контакта — звонок, встреча, задача, заметка, письмо клиенту; одна хронология
+    с этапами, КП, заказами, счетами, оплатами, отгрузками и комментариями. Свой контекст базы на каждое действие (как обсуждение),
+    поэтому блок не мешает операциям карточки.
+*@
+<section class="crm-activities" aria-label="@L("Активности")">
+    <h2>@L("Активности и лента")</h2>
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+    @if (_flash is not null)
+    {
+        <div class="flash" role="status">@_flash</div>
+    }
+
+    @if (CanEdit)
+    {
+        <div class="crm-tabs" role="group" aria-label="@L("Что добавить")">
+            <button type="button" aria-pressed="@(_mode == "task" ? "true" : "false")" @onclick='() => _mode = "task"'>@L("Задача или звонок")</button>
+            <button type="button" aria-pressed="@(_mode == "note" ? "true" : "false")" @onclick='() => _mode = "note"'>@L("Заметка")</button>
+            <button type="button" aria-pressed="@(_mode == "mail" ? "true" : "false")" @onclick="OpenMailAsync">@L("Письмо клиенту")</button>
+        </div>
+        @if (_mode == "task")
+        {
+            <form class="inline-form" @onsubmit="AddTaskAsync" aria-label="@L("Новая задача")">
+                <label>
+                    @L("Вид")
+                    <select @bind="_kind">
+                        @foreach (var k in Kinds)
+                        {
+                            <option value="@((byte)k)">@KindName(k)</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Тема") <input @bind="_subject" maxlength="@CrmActivity.SubjectMaxLength" placeholder="@L("Позвонить: обсудить образцы")" /></label>
+                <label>@L("Срок") <input type="datetime-local" @bind="_due" /></label>
+                <label class="inline"><input type="checkbox" @bind="_done" /> @L("Уже выполнено")</label>
+                <button type="submit" disabled="@_busy">@L("Добавить")</button>
+            </form>
+        }
+        else if (_mode == "note")
+        {
+            <form class="inline-form" @onsubmit="AddNoteAsync" aria-label="@L("Новая заметка")">
+                <label class="wide">@L("Заметка") <input @bind="_note" maxlength="@CrmActivity.TextMaxLength" /></label>
+                <button type="submit" disabled="@_busy">@L("Добавить")</button>
+            </form>
+        }
+        else if (_mode == "mail")
+        {
+            @if (!Mail.IsConfigured)
+            {
+                <p class="muted small">@L("Почта сервера не настроена — обратитесь к администратору.")</p>
+            }
+            else
+            {
+                <form class="panel" @onsubmit="SendMailAsync" aria-label="@L("Письмо клиенту")">
+                    <div class="grid">
+                        <label>
+                            @L("Кому")
+                            <input type="email" list="crm-mail-to-@TargetId" @bind="_to" required />
+                            <datalist id="crm-mail-to-@TargetId">
+                                @foreach (var r in _recipients)
+                                {
+                                    <option value="@r"></option>
+                                }
+                            </datalist>
+                        </label>
+                        <label class="wide">@L("Тема") <input @bind="_mailSubject" maxlength="@CrmActivity.SubjectMaxLength" required /></label>
+                        <label class="wide">@L("Текст") <textarea rows="5" @bind="_mailText" maxlength="@CrmActivity.TextMaxLength" required></textarea></label>
+                    </div>
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Отправить")</button></div>
+                </form>
+            }
+        }
+    }
+
+    @if (_feed is null)
+    {
+        <p class="muted small">@L("Загрузка…")</p>
+    }
+    else if (_feed.Items.Count == 0)
+    {
+        <p class="muted small">@L("Событий пока нет.")</p>
+    }
+    else
+    {
+        <ol class="crm-feed">
+            @foreach (var i in _feed.Items)
+            {
+                var a = i.Activity;
+                <li class="crm-feed-item @(a is { Overdue: true } ? "overdue" : null) @(a is { IsDone: false } ? "open" : null)">
+                    <span class="crm-feed-when">@TimeZones.ToLocal(i.AtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</span>
+                    <span class="crm-feed-kind">@FeedKind(i.Kind)</span>
+                    <div class="crm-feed-body">
+                        @if (i.Href is not null)
+                        {
+                            <a href="@i.Href">@i.Title</a>
+                        }
+                        else
+                        {
+                            <b>@i.Title</b>
+                        }
+                        @if (i.PrintHref is not null)
+                        {
+                            <a class="small" href="@i.PrintHref" target="_blank" rel="noopener"> · @L("Печать")</a>
+                        }
+                        @if (i.Author is not null)
+                        {
+                            <span class="muted small"> — @i.Author</span>
+                        }
+                        @if (i.Text is not null)
+                        {
+                            <div class="crm-feed-text">@i.Text</div>
+                        }
+                        @if (a is not null)
+                        {
+                            <div class="muted small">
+                                @if (a.DueAtUtc is { } due)
+                                {
+                                    <span class="@(a.Overdue ? "warn-text" : null)">@L("срок {0}", TimeZones.ToLocal(due, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm"))</span>
+                                }
+                                <span> · @a.Assignee</span>
+                                @if (a.IsDone)
+                                {
+                                    <span> · @L("выполнено")@(a.Result is null ? "" : $": {a.Result}")</span>
+                                }
+                            </div>
+                            @if (CanEdit)
+                            {
+                                <div class="row-actions">
+                                    @if (!a.IsDone)
+                                    {
+                                        <input class="crm-result" @bind="_results[a.Id]" placeholder="@L("Результат")" aria-label="@L("Результат: {0}", a.Subject)" />
+                                        <button type="button" class="secondary" @onclick="() => CompleteAsync(a)" disabled="@_busy">@L("Выполнено")</button>
+                                    }
+                                    else if (a.Kind != CrmActivityKind.Email && a.Kind != CrmActivityKind.OfferSent)
+                                    {
+                                        <input class="crm-result" @bind="_results[a.Id]" placeholder="@L("Причина возврата")" aria-label="@L("Причина возврата: {0}", a.Subject)" />
+                                        <button type="button" class="secondary" @onclick="() => ReopenAsync(a)" disabled="@_busy">@L("Вернуть в работу")</button>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </li>
+            }
+        </ol>
+        @if (_feed.HasMore)
+        {
+            <button type="button" class="secondary" @onclick="MoreAsync" disabled="@_busy">@L("Показать ещё")</button>
+        }
+    }
+</section>
+
+@code {
+    private static readonly CrmActivityKind[] Kinds =
+        [CrmActivityKind.Call, CrmActivityKind.Task, CrmActivityKind.Meeting, CrmActivityKind.SamplesSent, CrmActivityKind.Email];
+
+    [Parameter, EditorRequired] public CrmTarget Target { get; set; }
+    [Parameter, EditorRequired] public long TargetId { get; set; }
+    [Parameter] public bool CanEdit { get; set; }
+
+    /// <summary>Номер изменения карточки: карточка увеличивает его, и лента перечитывается (смена этапа, КП, заказ).</summary>
+    [Parameter] public int Version { get; set; }
+
+    [CascadingParameter] public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private CrmFeedPageDto? _feed;
+    private IReadOnlyList<string> _recipients = [];
+    private readonly Dictionary<long, string?> _results = [];
+    private int _page;
+    private int _loadedVersion = -1;
+    private bool _busy;
+    private string? _error;
+    private string? _flash;
+    private string _mode = "task";
+    private string _kind = ((byte)CrmActivityKind.Call).ToString();
+    private string? _subject;
+    private DateTime? _due;
+    private bool _done;
+    private string? _note;
+    private string? _to;
+    private string? _mailSubject;
+    private string? _mailText;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedVersion != Version)
+        {
+            _loadedVersion = Version;
+            await RunAsync(LoadAsync, null);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = Factory.Create();
+        _feed = await Service(db).FeedAsync(Target, TargetId, _page);
+    }
+
+    private Task MoreAsync()
+    {
+        _page++;
+        return RunAsync(LoadAsync, null);
+    }
+
+    private Task AddTaskAsync() => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            var kind = (CrmActivityKind)byte.Parse(_kind);
+            await Service(db).CreateAsync(new CrmActivityCommand(Target, TargetId, kind, string.IsNullOrWhiteSpace(_subject) ? KindName(kind) : _subject,
+                DueLocal: _due, Done: _done));
+        }
+
+        (_subject, _due, _done) = (null, null, false);
+        await LoadAsync();
+    }, L("Добавлено."));
+
+    private Task AddNoteAsync() => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            var text = _note?.Trim();
+            await Service(db).CreateAsync(new CrmActivityCommand(Target, TargetId, CrmActivityKind.Note,
+                string.IsNullOrEmpty(text) ? null : text.Length <= 80 ? text : text[..80] + "…", text, Done: true));
+        }
+
+        _note = null;
+        await LoadAsync();
+    }, L("Заметка добавлена."));
+
+    private Task OpenMailAsync() => RunAsync(async () =>
+    {
+        _mode = "mail";
+        await using var db = Factory.Create();
+        _recipients = await Service(db).RecipientsAsync(Target, TargetId);
+        _to ??= _recipients.FirstOrDefault();
+    }, null);
+
+    private Task SendMailAsync() => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).SendEmailAsync(Target, TargetId, _to, _mailSubject, _mailText);
+        }
+
+        (_mailSubject, _mailText) = (null, null);
+        await LoadAsync();
+    }, L("Письмо отправлено и сохранено в ленте."));
+
+    private Task CompleteAsync(CrmActivityDto a) => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).CompleteAsync(a.Id, _results.GetValueOrDefault(a.Id), a.RowVersion);
+        }
+
+        _results.Remove(a.Id);
+        await LoadAsync();
+    }, L("Отмечено выполненным."));
+
+    private Task ReopenAsync(CrmActivityDto a) => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).ReopenAsync(a.Id, _results.GetValueOrDefault(a.Id), a.RowVersion);
+        }
+
+        _results.Remove(a.Id);
+        await LoadAsync();
+    }, L("Возвращено в работу."));
+
+    private CrmActivityService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock, Mail);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _flash = null;
+        try
+        {
+            await action();
+            _flash = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public static string KindName(CrmActivityKind kind) => kind switch
+    {
+        CrmActivityKind.Call => L("Звонок"),
+        CrmActivityKind.Meeting => L("Встреча"),
+        CrmActivityKind.Email => L("Письмо"),
+        CrmActivityKind.Task => L("Задача"),
+        CrmActivityKind.SamplesSent => L("Образцы отправлены"),
+        CrmActivityKind.OfferSent => L("КП отправлено"),
+        CrmActivityKind.Note => L("Заметка"),
+        CrmActivityKind.Message => L("Сообщение"),
+        _ => L("Повторное обращение"),
+    };
+
+    private static string FeedKind(CrmFeedKind kind) => kind switch
+    {
+        CrmFeedKind.Activity => L("Активность"),
+        CrmFeedKind.Stage => L("Этап"),
+        CrmFeedKind.Order => L("Заказ"),
+        CrmFeedKind.Invoice => L("Счёт"),
+        CrmFeedKind.Payment => L("Оплата"),
+        CrmFeedKind.Shipment => L("Отгрузка"),
+        CrmFeedKind.Offer => L("КП"),
+        _ => L("Комментарий"),
+    };
+}

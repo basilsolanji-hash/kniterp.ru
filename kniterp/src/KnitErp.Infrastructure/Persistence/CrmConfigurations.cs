@@ -351,7 +351,7 @@ internal sealed class CrmActivityConfiguration : IEntityTypeConfiguration<CrmAct
     {
         b.ToTable("crm_activities", t =>
         {
-            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 8 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 5");
+            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 9 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 6");
             t.HasCheckConstraint("ck_crm_activities_done",
                 "([IsDone] = 1 AND [DoneAtUtc] IS NOT NULL AND [DoneByUserId] IS NOT NULL) OR ([IsDone] = 0 AND [DoneAtUtc] IS NULL AND [DoneByUserId] IS NULL)");
         });
@@ -364,6 +364,7 @@ internal sealed class CrmActivityConfiguration : IEntityTypeConfiguration<CrmAct
         b.Property(x => x.Text).HasMaxLength(CrmActivity.TextMaxLength);
         b.Property(x => x.Result).HasMaxLength(CrmActivity.ResultMaxLength);
         b.Property(x => x.ExternalRef).HasMaxLength(CrmActivity.ExternalRefMaxLength);
+        b.Property(x => x.Peer).HasMaxLength(CrmActivity.ExternalRefMaxLength);
         b.Property(x => x.DueAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.DoneAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
@@ -443,6 +444,12 @@ internal sealed class CrmSettingsConfiguration : IEntityTypeConfiguration<CrmSet
         b.Property(x => x.AssignMode).HasConversion<byte>();
         b.Property(x => x.PlanFact).HasConversion<byte>();
         b.Property(x => x.OfferTerms).HasMaxLength(CrmSettings.OfferTermsMaxLength);
+        b.Property(x => x.MaxToken).HasConversion(PersonalDataColumns.Text).HasMaxLength(PersonalDataColumns.Cipher(300)); // D648: шифрование мастер-ключом
+        b.Property(x => x.MaxSecretHash).HasColumnType("binary(32)");
+        b.Property(x => x.MaxConnectedAtUtc).HasColumnType("datetime2(3)");
+        b.Ignore(x => x.MaxConnected);
+        b.HasIndex(x => x.MaxSecretHash).IsUnique().HasFilter("[MaxSecretHash] IS NOT NULL").HasDatabaseName("ux_crm_settings_max_secret");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.MaxConnectedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_settings_max_user");
         b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.Values);
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);

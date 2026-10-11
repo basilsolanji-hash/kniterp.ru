@@ -47,6 +47,8 @@ if (!builder.Environment.IsDevelopment())
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddKnitErpApplication();
+// D648 (сессия CRM): адрес MAX Bot API для чатов с клиентами; пустая строка в настройках — MAX выключен.
+builder.Services.AddSingleton(new KnitErp.Infrastructure.External.MaxOptions(builder.Configuration["Max:BaseUrl"] ?? "https://platform-api.max.ru"));
 builder.Services.AddKnitErpInfrastructure(
     connectionString,
     // ИИ-помощник включается ключом из секретов сервера; без ключа он отвечает по справочному центру.

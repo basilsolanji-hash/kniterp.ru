@@ -372,6 +372,68 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
         Assert.Equal(("ООО «ТФ»", "773601001", "г. Москва, ул. Тестовая, д. 1"), (c.Name, c.Kpp, c.Address));
     }
 
+    [SqlFact]
+    public async Task Max_chat_connects_receives_and_replies()
+    {
+        var org = await host.CreateCrmOrganizationAsync();
+        var manager = await host.CrmUserAsync(org, SystemRoles.SalesManager);
+        CrmMaxConnectResult connected;
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            Assert.Equal("crm.max.bad_token", (await Assert.ThrowsAsync<BusinessRuleException>(() => crm.Messenger.ConnectAsync("bad"))).Code);
+            connected = await crm.Messenger.ConnectAsync("max-token-test");
+            Assert.True(connected.Subscribed);
+            Assert.Contains(connected.WebhookUrl, CrmTestKit.Max.Subscriptions);
+            Assert.True((await crm.Messenger.StatusAsync()).Connected);
+            // Токен в базе зашифрован, секрет — только хэшем.
+            await using var raw = host.NewDb();
+            var stored = await raw.Database.SqlQueryRaw<string>("SELECT [MaxToken] AS [Value] FROM [kniterp].[crm_settings] WHERE [OrganizationId] = {0}",
+                org.OrganizationId).SingleAsync();
+            Assert.DoesNotContain("max-token-test", stored);
+        }
+
+        var secret = connected.WebhookUrl.Split('/')[^1];
+        await using (var db = host.NewDb())
+        {
+            Assert.False(await CrmMessengerService.InboundAsync(db, host.Clock, "wrong", new CrmMaxUpdate("1", null, null, "x", null)));
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, secret,
+                new CrmMaxUpdate("770001", "Анна Клиентова", "anna_max", "Здравствуйте! Нужно 150 шарфов к ноябрю. Тел. +7 900 000-00-61", "mid-1")));
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, secret, new CrmMaxUpdate("770001", "Анна Клиентова", null, "Повтор", "mid-1")));
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, secret, new CrmMaxUpdate("770001", "Анна Клиентова", null, "И ещё 50 шапок", "mid-2")));
+        }
+
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            var lead = (await crm.Leads.ListAsync(new CrmLeadFilter())).Rows.Single();
+            Assert.Equal(("150 шарфов", "Анна Клиентова"), (lead.Title, lead.ContactName));
+            var chat = (await crm.Messenger.ChatsAsync()).Single();
+            Assert.Equal(("MAX", 2, true), (chat.Channel, chat.Messages, chat.AwaitingReply)); // повтор mid-1 не задвоился
+            await crm.Messenger.ReplyToPeerAsync(chat.Peer, "Добрый день! Посчитаем к вечеру.");
+            Assert.Contains(CrmTestKit.Max.Sent, m => m.UserId == "770001" && m.Text == "Добрый день! Посчитаем к вечеру.");
+            var messages = await crm.Messenger.MessagesAsync(chat.Peer);
+            Assert.Equal(new[] { true, true, false }, messages.Select(m => m.Incoming));
+            Assert.False((await crm.Messenger.ChatsAsync()).Single().AwaitingReply);
+        }
+
+        await using (var m = host.Crm(manager, org.OrganizationId))
+        {
+            // Лид распределён Владельцу (подключившему) — менеджер чужой чат не видит.
+            Assert.Empty(await m.Messenger.ChatsAsync());
+            await Assert.ThrowsAsync<NotFoundException>(() => m.Messenger.ReplyToPeerAsync("770001", "x"));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => m.Messenger.ConnectAsync("max-token-test"));
+        }
+
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            await crm.Messenger.DisconnectAsync();
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.False(await CrmMessengerService.InboundAsync(db, host.Clock, secret, new CrmMaxUpdate("770001", null, null, "после отключения", "mid-3")));
+        }
+    }
+
     private async Task<long> CustomerAsync(KnitErp.Application.Organizations.CreatedOrganization org)
     {
         await using var s = host.As(org.OwnerUserId, org.OrganizationId);

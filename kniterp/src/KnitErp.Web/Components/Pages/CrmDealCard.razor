@@ -4,6 +4,10 @@
 @using KnitErp.Domain.Crm
 @using KnitErp.Domain.Tagging
 @inject CrmDealService Deals
+@inject CrmOfferService Offers
+@inject CrmActivityService Activities
+@inject KnitErp.Application.Production.SalesProductionService Production
+@inject IEmailSender Mail
 @inject NavigationManager Navigation
 
 <PageTitle>@(_deal?.Number ?? L("Сделка")) — knitERP</PageTitle>
@@ -38,6 +42,16 @@ else
     @if (_message is not null)
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    @if (_suggestion is { } next)
+    {
+        <div class="flash" role="status">
+            <span>@L("Следующий шаг: «{0}» через {1} дн. ({2})", next.Subject, next.Days, TimeZones.ToLocal(next.DueAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm"))</span>
+            <span class="actions">
+                <button type="button" @onclick="AcceptSuggestionAsync" disabled="@_busy">@L("Создать задачу")</button>
+                <button type="button" class="secondary" @onclick="() => _suggestion = null">@L("Не нужно")</button>
+            </span>
+        </div>
     }
 
     <ol class="crm-ribbon" aria-label="@L("Этапы сделки")">
@@ -109,7 +123,7 @@ else
     {
         <div class="scroll">
             <table class="compact">
-                <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th></tr></thead>
+                <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th><th></th></tr></thead>
                 <tbody>
                     @foreach (var o in _deal.Orders)
                     {
@@ -120,6 +134,17 @@ else
                             <td class="num">@Amounts.Format(o.Total)</td>
                             <td class="num">@Amounts.Format(o.Paid)</td>
                             <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
+                            <td>
+                                @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
+                                {
+                                    <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>
+                                }
+                                else if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed && CurrentAccess.Has(Permissions.ProductionOrderEdit))
+                                {
+                                    <button type="button" class="secondary" @onclick="() => ToProductionAsync(o.Id)" disabled="@_busy">@L("В производство")</button>
+                                }
+                                <a class="small" href="sales-orders/@o.Id">@L("Открыть")</a>
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -144,9 +169,85 @@ else
                         }
                     </select>
                 </label>
-                <button type="submit" disabled="@_busy">@L("Создать черновик заказа")</button>
+                <button type="submit" disabled="@_busy">@(_orderOffer is null ? L("Создать черновик заказа") : L("Создать заказ по {0}", _orderOffer.Number))</button>
                 <button type="button" class="secondary" @onclick="() => _warehouses = null">@L("Отмена")</button>
             </form>
+        }
+    }
+
+    @if (_deal.CanSeeAmounts)
+    {
+        <h2>@L("Коммерческие предложения")</h2>
+        @if (_offers.Count > 0)
+        {
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("КП")</th><th>@L("Действует до")</th><th class="num">@L("Сумма")</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var o in _offers)
+                        {
+                            <tr>
+                                <td>@o.Number <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
+                                <td>@o.ValidUntil.ToString("dd.MM.yyyy")</td>
+                                <td class="num">@Amounts.Format(o.Amount) @o.CurrencyCode</td>
+                                <td class="row-actions">
+                                    <a class="button secondary" href="print/crm-offer/@o.Id" target="_blank" rel="noopener">@L("Печать / PDF")</a>
+                                    @if (_deal.CanEdit)
+                                    {
+                                        <button type="button" class="secondary" @onclick="() => OpenSend(o)" disabled="@_busy">@L("Отправить")</button>
+                                        @if (_deal.CanCreateOrder)
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => OpenOfferOrderAsync(o)" disabled="@_busy">@L("Заказ по КП")</button>
+                                        }
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        @if (_sendOffer is { } so)
+        {
+            <form class="panel" @onsubmit="SendOfferAsync" aria-label="@L("Отправить КП")">
+                <h3>@L("Отправить {0}", so.Number)</h3>
+                @if (!Mail.IsConfigured)
+                {
+                    <p class="muted small">@L("Почта сервера не настроена — обратитесь к администратору. КП можно распечатать или сохранить в PDF.")</p>
+                }
+                else
+                {
+                    <div class="grid">
+                        <label>@L("Кому") <input type="email" @bind="_sendTo" required /></label>
+                        <label class="wide">@L("Сопроводительный текст") <textarea rows="3" @bind="_sendText"></textarea></label>
+                    </div>
+                    <div class="actions">
+                        <button type="submit" disabled="@_busy">@L("Отправить КП")</button>
+                        <button type="button" class="secondary" @onclick="() => _sendOffer = null">@L("Отмена")</button>
+                    </div>
+                }
+            </form>
+        }
+        @if (_deal.CanEdit && open && _deal.Lines.Count > 0)
+        {
+            <form class="inline-form" @onsubmit="CreateOfferAsync" aria-label="@L("Сформировать КП")">
+                <label>
+                    @L("Цены")
+                    <select @bind="_priceType">
+                        <option value="">@L("из сделки")</option>
+                        @foreach (var pt in _priceTypes)
+                        {
+                            <option value="@pt.Id">@pt.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Действует, дней") <input type="number" min="1" max="365" @bind="_offerDays" /></label>
+                <button type="submit" disabled="@_busy">@L("Сформировать КП")</button>
+            </form>
+        }
+        else if (_deal.CanEdit && open)
+        {
+            <p class="muted small">@L("Добавьте позиции ниже — из них сформируется КП.")</p>
         }
     }
 
@@ -338,6 +439,8 @@ else
         </div>
     </details>
 
+    <CrmActivities Target="CrmTarget.Deal" TargetId="Id" CanEdit="@_deal.CanEdit" Version="_feedVersion" />
+
     <Discussion Target="TaggedEntity.CrmDeal" TargetId="Id" />
 }
 
@@ -371,6 +474,16 @@ else
     private string? _qty;
     private string? _price;
     private string _participant = string.Empty;
+    private CrmNextStepDto? _suggestion;
+    private IReadOnlyList<CrmOfferRowDto> _offers = [];
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto> _priceTypes = [];
+    private string _priceType = string.Empty;
+    private int _offerDays = 14;
+    private CrmOfferRowDto? _sendOffer;
+    private CrmOfferRowDto? _orderOffer;
+    private string? _sendTo;
+    private string? _sendText;
+    private int _feedVersion;
     private string _reassign = string.Empty;
 
     protected override async Task OnParametersSetAsync()
@@ -393,7 +506,19 @@ else
 
     private async Task LoadAsync()
     {
+        _feedVersion++;
         _deal = await Deals.GetAsync(Id);
+        _contactEmail = (await Activities.RecipientsAsync(CrmTarget.Deal, Id)).FirstOrDefault();
+        if (_deal.CanSeeAmounts)
+        {
+            _offers = await Offers.ListAsync(Id);
+            if (_priceTypes.Count == 0)
+            {
+                _priceTypes = await Offers.PriceTypesAsync();
+                _priceType = _priceTypes.FirstOrDefault()?.Id.ToString() ?? "";
+            }
+        }
+
         _contacts = await Deals.ContactsOfAsync(_deal.Values.CounterpartyId);
         var v = _deal.Values;
         _f = new DealForm
@@ -413,7 +538,7 @@ else
             return Task.CompletedTask;
         }
 
-        return RunAsync(() => Deals.MoveAsync(Id, stage.Id, _deal!.RowVersion), L("Сделка на этапе «{0}».", stage.Name));
+        return RunAsync(async () => _suggestion = await Deals.MoveAsync(Id, stage.Id, _deal!.RowVersion), L("Сделка на этапе «{0}».", stage.Name));
     }
 
     private Task LoseAsync() => RunAsync(async () =>
@@ -445,9 +570,51 @@ else
     private Task CreateOrderAsync() => RunAsync(async () =>
     {
         var warehouse = Long(_warehouse) ?? throw new BusinessRuleException("crm.deal.warehouse", L("Выберите склад отгрузки."));
-        var order = await Deals.CreateOrderAsync(Id, warehouse);
-        Navigation.NavigateTo($"sales-orders/{order}");
+        _ = _orderOffer is { } offer ? await Deals.CreateOrderFromOfferAsync(offer.Id, warehouse) : await Deals.CreateOrderAsync(Id, warehouse);
+        (_warehouses, _orderOffer) = (null, null);
+    }, L("Заказ покупателя создан — подтвердите его здесь или откройте заказ."));
+
+    private Task OpenOfferOrderAsync(CrmOfferRowDto offer) => RunAsync(async () =>
+    {
+        _orderOffer = offer;
+        _warehouses = await Deals.WarehousesAsync();
+        _warehouse = _warehouses.FirstOrDefault()?.Id.ToString() ?? "";
     }, null, reload: false);
+
+    private Task ConfirmOrderAsync(long orderId) => RunAsync(() => Deals.ConfirmOrderAsync(Id, orderId), L("Заказ подтверждён — сделка выиграна."));
+
+    private Task ToProductionAsync(long orderId) => RunAsync(async () =>
+    {
+        var r = await Production.CreateAsync(orderId);
+        _message = r.Numbers.Count > 0
+            ? L("В производство: {0}", string.Join(", ", r.Numbers)) + (r.Skipped.Count > 0 ? " · " + L("пропущено: {0}", string.Join("; ", r.Skipped)) : "")
+            : L("Нечего запускать: {0}", r.Skipped.Count > 0 ? string.Join("; ", r.Skipped) : L("всё уже запланировано"));
+    }, null);
+
+    private Task CreateOfferAsync() => RunAsync(() => Offers.CreateAsync(new CrmOfferCommand(Id, Long(_priceType), _offerDays)),
+        L("КП сформировано — распечатайте или отправьте его."));
+
+    private void OpenSend(CrmOfferRowDto offer)
+    {
+        _sendOffer = offer;
+        _sendTo ??= _deal?.Contact is null ? null : _contactEmail;
+    }
+
+    private Task SendOfferAsync() => RunAsync(async () =>
+    {
+        await Offers.SendAsync(_sendOffer!.Id, _sendTo, _sendText);
+        _sendOffer = null;
+    }, L("КП отправлено письмом и сохранено в ленте."));
+
+    private Task AcceptSuggestionAsync() => RunAsync(async () =>
+    {
+        var s = _suggestion!;
+        await Activities.CreateAsync(new CrmActivityCommand(CrmTarget.Deal, Id, CrmActivityKind.Task, s.Subject,
+            DueLocal: TimeZones.ToLocal(s.DueAtUtc, CurrentAccess.TimeZoneId)));
+        _suggestion = null;
+    }, L("Задача создана."));
+
+    private string? _contactEmail;
 
     private Task SearchItemsAsync() => RunAsync(async () =>
     {
@@ -516,7 +683,7 @@ else
         try
         {
             await action();
-            _message = success;
+            _message = success ?? _message;
             if (reload)
             {
                 await LoadAsync();

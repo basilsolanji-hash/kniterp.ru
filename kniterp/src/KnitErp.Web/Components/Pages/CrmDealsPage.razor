@@ -122,6 +122,11 @@ else
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
+    @if (_options.CanAll && _options.CanEdit)
+    {
+        <CrmImportPanel Kind="CrmImportKind.Deals" Applied="ReloadAsync" />
+    }
+
     <div class="crm-tabs" role="group" aria-label="@L("Вид")">
         <button type="button" aria-pressed="@(_view == "board" ? "true" : "false")" @onclick='() => SwitchAsync("board")'>@L("Канбан")</button>
         <button type="button" aria-pressed="@(_view == "table" ? "true" : "false")" @onclick='() => SwitchAsync("table")'>@L("Таблица")</button>

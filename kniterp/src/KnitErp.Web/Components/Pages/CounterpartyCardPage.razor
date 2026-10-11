@@ -75,6 +75,11 @@ else
         {
             <button type="button" role="tab" class="@TabClass(Tab.Documents)" aria-selected="@Selected(Tab.Documents)" @onclick="() => OpenTabAsync(Tab.Documents)" disabled="@_busy">@L("Документы")</button>
         }
+        @if (CurrentAccess.Has(Permissions.CrmView))
+        {
+            @* D616 (сессия CRM): контакты и сделки контрагента — компонент CRM со своим контекстом базы. *@
+            <button type="button" role="tab" class="@TabClass(Tab.Crm)" aria-selected="@Selected(Tab.Crm)" @onclick="() => OpenTabAsync(Tab.Crm)" disabled="@_busy">@L("Контакты и сделки")</button>
+        }
         <button type="button" role="tab" class="@TabClass(Tab.Discussion)" aria-selected="@Selected(Tab.Discussion)" @onclick="() => OpenTabAsync(Tab.Discussion)" disabled="@_busy">@L("Обсуждение")</button>
     </div>
 
@@ -92,6 +97,9 @@ else
         case Tab.Discussion:
             <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.Counterparty" TargetId="Id" />
             break;
+        case Tab.Crm:
+            <CrmCounterpartyPanel CounterpartyId="Id" />
+            break;
     }
 }
 
@@ -102,7 +110,7 @@ else
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
-    private enum Tab { Contracts, Orders, Documents, Discussion }
+    private enum Tab { Contracts, Orders, Documents, Discussion, Crm }
 
     private CounterpartyCardDto? _card;
     private IReadOnlyList<ContractDto>? _contracts;

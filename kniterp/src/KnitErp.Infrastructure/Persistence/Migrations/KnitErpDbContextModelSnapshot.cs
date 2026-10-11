@@ -1908,6 +1908,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("Peer")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("Result")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
@@ -1961,7 +1965,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_crm_activities_done", "([IsDone] = 1 AND [DoneAtUtc] IS NOT NULL AND [DoneByUserId] IS NOT NULL) OR ([IsDone] = 0 AND [DoneAtUtc] IS NULL AND [DoneByUserId] IS NULL)");
 
-                            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 8 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 5");
+                            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 9 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 6");
                         });
                 });
 
@@ -2980,6 +2984,19 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long?>("LastAssignedUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<DateTime?>("MaxConnectedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("MaxConnectedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("MaxSecretHash")
+                        .HasColumnType("binary(32)");
+
+                    b.Property<string>("MaxToken")
+                        .HasMaxLength(877)
+                        .HasColumnType("nvarchar(877)");
+
                     b.Property<bool>("NextStepSuggestions")
                         .HasColumnType("bit");
 
@@ -3014,6 +3031,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("DefaultResponsibleUserId");
+
+                    b.HasIndex("MaxConnectedByUserId");
+
+                    b.HasIndex("MaxSecretHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_settings_max_secret")
+                        .HasFilter("[MaxSecretHash] IS NOT NULL");
 
                     b.HasIndex("OrganizationId")
                         .IsUnique()
@@ -8720,6 +8744,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("DefaultResponsibleUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_crm_settings_default_user");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("MaxConnectedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_settings_max_user");
 
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
                         .WithMany()

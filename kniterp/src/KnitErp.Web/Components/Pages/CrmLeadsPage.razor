@@ -31,12 +31,19 @@ else
 
     @if (_options.CanEdit)
     {
+        <details class="panel" open="@_pasteOpen">
+            <summary>@L("Умная вставка: вставьте сообщение клиента")</summary>
+            <p class="muted small">@L("Скопируйте сообщение из мессенджера или письма — телефон, почта, ИНН, компания, имя и количество подставятся в поля сами. Проверьте и нажмите «Добавить лид».")</p>
+            <textarea rows="4" @bind="_paste" aria-label="@L("Сообщение клиента")" placeholder="@L("Здравствуйте! Нужно 300 свитеров с логотипом к декабрю. ООО «Ромашка», ИНН … С уважением, Анна, +7 900 000-00-01")"></textarea>
+            <div class="actions"><button type="button" class="secondary" @onclick="ParsePaste" disabled="@_busy">@L("Разобрать")</button></div>
+        </details>
         <form class="inline-form" @onsubmit="CreateAsync" aria-label="@L("Быстрый ввод лида")">
             <label>@L("Что нужно клиенту") <input @bind="_title" maxlength="@CrmLead.TitleMaxLength" required placeholder="@L("300 свитеров к Новому году")" /></label>
             <label>@L("Контактное лицо") <input @bind="_contact" maxlength="@CrmLead.NameMaxLength" /></label>
             <label>@L("Телефон") <input type="tel" @bind="_phone" @bind:after="CheckDuplicatesAsync" placeholder="+7 900 000-00-01" maxlength="@CrmText.PhoneMaxLength" /></label>
             <label>@L("Почта") <input type="email" @bind="_email" @bind:after="CheckDuplicatesAsync" maxlength="@CrmText.EmailMaxLength" /></label>
             <label>@L("Компания") <input @bind="_company" maxlength="@CrmLead.NameMaxLength" /></label>
+            <label>@L("ИНН") <input inputmode="numeric" @bind="_inn" maxlength="12" /></label>
             <label>
                 @L("Источник")
                 <select @bind="_source">
@@ -54,6 +61,11 @@ else
             <button type="submit" disabled="@_busy">@L("Добавить лид")</button>
         </form>
         <CrmDuplicates Items="_duplicates" />
+    }
+
+    @if (_options.CanAll)
+    {
+        <CrmImportPanel Kind="CrmImportKind.Leads" Applied="ReloadAsync" />
     }
 
     <form class="inline-form" @onsubmit="ReloadAsync">
@@ -154,6 +166,11 @@ else
     private string? _company;
     private string _source = string.Empty;
     private string? _amount;
+    private string? _inn;
+    private string? _need;
+    private string? _messenger;
+    private string? _paste;
+    private bool _pasteOpen;
 
     protected override async Task OnInitializedAsync()
     {
@@ -194,13 +211,29 @@ else
         return ReloadAsync();
     }
 
+    /// <summary>А1 (D661): разбор сообщения клиента в поля быстрого ввода.</summary>
+    private async Task ParsePaste()
+    {
+        var p = CrmTextParser.Parse(_paste);
+        _title = p.Title ?? _title;
+        _contact = p.ContactName ?? _contact;
+        _phone = p.Phone ?? _phone;
+        _email = p.Email ?? _email;
+        _company = p.CompanyName ?? _company;
+        _inn = p.Inn ?? _inn;
+        _messenger = p.Messenger ?? _messenger;
+        _need = p.Need;
+        _pasteOpen = true;
+        await CheckDuplicatesAsync();
+    }
+
     private Task CheckDuplicatesAsync() => RunAsync(async () => _duplicates = await Leads.DuplicatesAsync(_phone, _email, null));
 
     private Task CreateAsync() => RunAsync(async () =>
     {
         var amount = KnitErp.Domain.Catalog.Decimals.Parse(_amount, L("Ожидаемая сумма"));
         var id = await Leads.CreateAsync(new CrmLeadValues(_title, long.TryParse(_source, out var s) ? s : null, ContactName: _contact, Phone: _phone,
-            Email: _email, CompanyName: _company, ExpectedAmount: amount));
+            Email: _email, CompanyName: _company, Inn: _inn, Need: _need, Messenger: _messenger, ExpectedAmount: amount));
         Navigation.NavigateTo($"crm/leads/{id}");
     });
 

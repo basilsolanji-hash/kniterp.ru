@@ -1,0 +1,92 @@
+@page "/print/crm-offer/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using System.Globalization
+@using KnitErp.Application.Crm
+@inject CrmOfferService Offers
+
+@*
+    D624: коммерческое предложение — снимок позиций на дату КП, итог прописью, условия и срок действия. Печатается по-русски, как счёт и УПД
+    (D68, D71); «Печать» → «Сохранить как PDF» даёт файл для отправки.
+*@
+<PageTitle>@(_doc is null ? "КП" : $"КП {_doc.Number}") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 12mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    @if (_doc is not null)
+    {
+        <a href="crm/deals/@_doc.DealId">@L("← К сделке")</a>
+    }
+</div>
+@if (_error is not null)
+{
+    <div class="error" role="alert">@_error</div>
+}
+else if (_doc is not null)
+{
+    <div class="sheet portrait">
+        <table class="plain">
+            <tr><td style="width: 140px">Поставщик:</td><td><b>@_doc.Seller</b>@(_doc.SellerInn is null ? "" : $", ИНН {_doc.SellerInn}")@(_doc.SellerAddress is null ? "" : $", {_doc.SellerAddress}")</td></tr>
+            <tr><td>Покупатель:</td><td><b>@_doc.Customer</b>@(_doc.CustomerInn is null ? "" : $", ИНН {_doc.CustomerInn}")</td></tr>
+            @if (_doc.Contact is not null)
+            {
+                <tr><td>Контактное лицо:</td><td>@_doc.Contact</td></tr>
+            }
+        </table>
+
+        <h1>Коммерческое предложение № @_doc.Number от @PrintInvoicePage.Date(_doc.Date)</h1>
+        <p>@_doc.DealTitle</p>
+
+        <table style="margin-top: 8px">
+            <thead><tr><th>№</th><th>Наименование</th><th>Код</th><th>Кол-во</th><th>Ед.</th><th>Цена</th><th>Сумма</th></tr></thead>
+            <tbody>
+                @foreach (var l in _doc.Lines)
+                {
+                    <tr>
+                        <td class="c">@l.LineNo</td>
+                        <td>@l.Name</td>
+                        <td>@l.Code</td>
+                        <td class="n">@Quantities.Format(l.Quantity)</td>
+                        <td>@l.UnitSymbol</td>
+                        <td class="n">@Amounts.Format(l.Price)</td>
+                        <td class="n">@Amounts.Format(l.Amount)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <table class="totals-print">
+            <tr><td>Итого@(_doc.PricesIncludeVat ? ", в т. ч. НДС" : ", без НДС"):</td><td class="n">@Amounts.Format(_doc.Amount) @_doc.CurrencyCode</td></tr>
+        </table>
+        <p class="words">@_doc.AmountInWords</p>
+        <p>Предложение действительно до @PrintInvoicePage.Date(_doc.ValidUntil).</p>
+        @if (_doc.Terms is not null)
+        {
+            <p style="white-space: pre-wrap">@_doc.Terms</p>
+        }
+
+        <div class="sign">
+            <div>@(_doc.SellerDirector ?? "Руководитель") <span class="line"></span></div>
+            <div>Менеджер <span class="line"></span> @_doc.CreatedBy</div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private CrmOfferDto? _doc;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await Offers.GetAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}
