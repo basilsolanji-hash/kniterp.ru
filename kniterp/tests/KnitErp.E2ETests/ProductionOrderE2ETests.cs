@@ -412,6 +412,10 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
             await Assertions.Expect(assigned).ToBeVisibleAsync();
             await Assertions.Expect(page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Петрова А. С." }).Last).ToContainTextAsync("0%");
+            // Повтор заданий прошлого дня: вчера заданий нет — ничего не скопировано, сообщение понятное.
+            await page.GetByRole(AriaRole.Button, new() { Name = "Повторить задания прошлого дня" }).ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "Да", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Скопировано заданий: 0.");
         }
 
         await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions

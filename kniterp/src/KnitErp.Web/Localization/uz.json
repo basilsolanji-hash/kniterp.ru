@@ -3448,5 +3448,10 @@
   "Причина брака": "Nuqson sababi",
   "Результат контроля": "Nazorat natijasi",
   "(зафиксируется при запуске)": "(ishga tushirilganda qayd etiladi)",
-  "Выгрузить в Excel": "Excel’ga yuklash"
+  "Выгрузить в Excel": "Excel’ga yuklash",
+  "Выберите другую дату, с которой копировать задания.": "Topshiriqlarni nusxalash uchun boshqa sanani tanlang.",
+  "Повторить задания прошлого дня": "O‘tgan kun topshiriqlarini takrorlash",
+  "Скопировать действующие задания {0} на {1}?": "{0} dagi amaldagi topshiriqlarni {1} ga nusxalaysizmi?",
+  "Скопировано заданий: {0}.": "Nusxalangan topshiriqlar: {0}.",
+  "Скопировано заданий: {0}; пропущено: {1} (сотрудник не работает, заказ не в работе или задание уже есть).": "Nusxalangan topshiriqlar: {0}; o‘tkazib yuborildi: {1} (xodim ishlamaydi, buyurtma ishda emas yoki topshiriq allaqachon bor)."
 }

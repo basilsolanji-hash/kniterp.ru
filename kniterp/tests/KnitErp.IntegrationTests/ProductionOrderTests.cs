@@ -1526,6 +1526,55 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Shift_tasks_of_previous_day_are_copied_without_invalid_and_duplicate_ones()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        var (_, colleague) = await AddWorkerAsync(f, grant: true, "0103", "Сидорова");
+        long order, cancelledOrder, cancelledTask;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            cancelledOrder = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 5));
+            await s.ProductionOrders.ReleaseAsync(cancelledOrder, (await s.ProductionOrders.GetAsync(cancelledOrder)).RowVersion);
+
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 10, "до обеда"));
+            cancelledTask = await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, colleague, order, ProductionStage.Knitting, 5, null));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, colleague, cancelledOrder, ProductionStage.Knitting, 5, null));
+            await s.ShiftTasks.CancelAsync(cancelledTask, (await s.ShiftTasks.BoardAsync()).Tasks.Single(t => t.Id == cancelledTask).RowVersion);
+            await s.ProductionOrders.CancelAsync(cancelledOrder, "перенос", (await s.ProductionOrders.GetAsync(cancelledOrder)).RowVersion);
+        }
+
+        host.Clock.UtcNow = host.Clock.UtcNow.AddDays(1);
+        try
+        {
+            await using (var s = host.As(worker, f.Org.OrganizationId))
+            {
+                await Assert.ThrowsAsync<AccessDeniedException>(() => s.ShiftTasks.CopyAsync(Day, Day.AddDays(1)));
+            }
+
+            await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                Assert.Equal("production.shift.past", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShiftTasks.CopyAsync(Day.AddDays(-1), Day))).Code);
+                Assert.Equal("production.shift.copy_same", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                    s.ShiftTasks.CopyAsync(Day.AddDays(1), Day.AddDays(1)))).Code);
+
+                // Отменённое задание не копируется; задание по отменённому заказу пропускается.
+                Assert.Equal(new ShiftCopyResult(1, 1), await s.ShiftTasks.CopyAsync(Day, Day.AddDays(1)));
+                var copied = Assert.Single((await s.ShiftTasks.BoardAsync(Day.AddDays(1))).Tasks);
+                Assert.Equal((employee, order, ProductionStage.Knitting, 10m, "до обеда", 0m), (copied.EmployeeId, copied.OrderId, copied.Stage, copied.Planned, copied.Comment, copied.Fact));
+                // Повтор не создаёт дублей.
+                Assert.Equal(new ShiftCopyResult(0, 2), await s.ShiftTasks.CopyAsync(Day, Day.AddDays(1)));
+            }
+        }
+        finally
+        {
+            host.Clock.UtcNow = host.Clock.UtcNow.AddDays(-1);
+        }
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
     private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {

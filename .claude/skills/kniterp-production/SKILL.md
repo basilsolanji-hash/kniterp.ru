@@ -29,6 +29,9 @@ description: Модуль «Производство» knitERP — произв�
   (прошлые дни и утверждённый расчёт заработка не меняются). Допуск баланса и правила баллов — `ProductionSettingsService.LoadAsync`, не константы.
 - Сценарий, который упал после `Add`/изменения отслеживаемой сущности (проверка, конфликт версий), вызывает `db.DiscardChanges()`:
   у вкладки Blazor один DbContext, и следующая операция иначе сохранит «мусор».
+- Форма Blazor, которую заполняют сразу после открытия страницы (терминал, задания): поля — внутри
+  `<fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">`, иначе ввод до подключения теряется.
+  Форму, в которую вводит сканер, делать обычной GET-формой.
 - Новый сервис, который используют виджеты на чужих страницах, — через `IKnitErpDbContextFactory` (как `SalesProductionService`), иначе два компонента делят один DbContext.
 
 ## Тесты
@@ -46,7 +49,8 @@ description: Модуль «Производство» knitERP — произв�
 - Коммит — только после зелёной проверки: связывать `dotnet test … && git commit`, а не через `;` (иначе уходит коммит с красным тестом).
 - В e2e локаторы кнопок — с `Exact = true`: общие элементы (кнопка помощника «Открыть: Ника», D116) совпадают по началу имени.
 - В LINQ-запросе с синтаксисом запросов параметр `from` пишется как `@from` — иначе «Invalid expression term '&&'».
-- Docker в облачной сессии: `dockerd` запускать фоновой командой (`run_in_background`), иначе он умирает вместе с командой; затем `docker start kniterp-sql`.
+- Docker в облачной сессии: `setsid nohup dockerd >/tmp/dockerd.log 2>&1 < /dev/null & disown`, затем `docker start kniterp-sql`. Фоновая задача
+  (`run_in_background`) живёт не больше двух часов и убивает Docker посреди прогона — тесты падают «не найден сервер».
 
 ## Переводы
 Словари `src/KnitErp.Web/Localization/{be,kk,uz}.json` — скриптом `kniterp-tests`: `python3 -I .claude/skills/kniterp-tests/translations.py add new.json`
