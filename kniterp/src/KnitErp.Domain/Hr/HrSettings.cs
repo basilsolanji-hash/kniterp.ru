@@ -25,7 +25,9 @@ public sealed record PayrollSettingsValues(
     string? ZupHolidayCode = null);
 
 /// <summary>Кадровые правила организации (D216).</summary>
-public sealed record HrRulesValues(bool HrOfficerClosesTimesheet = false, bool LeaveOnlyByOrder = false, bool BlockPersonalDataWithoutConsent = false);
+/// <param name="RequireAgreements">D227: сотрудник со своей учётной записью сначала подписывает согласие на обработку ПДн, правила работы в системе и обязательство о конфиденциальности.</param>
+public sealed record HrRulesValues(bool HrOfficerClosesTimesheet = false, bool LeaveOnlyByOrder = false, bool BlockPersonalDataWithoutConsent = false,
+    bool RequireAgreements = true);
 
 /// <summary>
 /// Настройки модуля «Сотрудники» для организации (D216): доплаты и база оклада для расчёта, коды видов начислений для 1С: ЗУП,
@@ -60,6 +62,7 @@ public sealed class HrSettings
     public bool HrOfficerClosesTimesheet { get; private set; }
     public bool LeaveOnlyByOrder { get; private set; }
     public bool BlockPersonalDataWithoutConsent { get; private set; }
+    public bool RequireAgreements { get; private set; } = true;
     public DateTime UpdatedAtUtc { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
@@ -68,7 +71,7 @@ public sealed class HrSettings
     public PayrollSettingsValues Payroll => new(NightPercent, OvertimeFirst, OvertimeNext, HolidayMultiplier, SalaryBase, PieceHourlyRate, ZupVersion,
         ZupPieceCode, ZupSalaryCode, ZupNightCode, ZupOvertimeCode, ZupHolidayCode);
 
-    public HrRulesValues Rules => new(HrOfficerClosesTimesheet, LeaveOnlyByOrder, BlockPersonalDataWithoutConsent);
+    public HrRulesValues Rules => new(HrOfficerClosesTimesheet, LeaveOnlyByOrder, BlockPersonalDataWithoutConsent, RequireAgreements);
 
     /// <summary>Параметры заработка. Возвращает описание изменений для журнала (без сумм ставок сотрудников).</summary>
     public string? SetPayroll(PayrollSettingsValues v, DateTime nowUtc)
@@ -114,10 +117,12 @@ public sealed class HrSettings
         HrOfficerClosesTimesheet = v.HrOfficerClosesTimesheet;
         LeaveOnlyByOrder = v.LeaveOnlyByOrder;
         BlockPersonalDataWithoutConsent = v.BlockPersonalDataWithoutConsent;
+        RequireAgreements = v.RequireAgreements;
         UpdatedAtUtc = nowUtc;
         return before == Rules ? null
             : $"кадровик закрывает табель: {(v.HrOfficerClosesTimesheet ? "да" : "нет")}, отпуск только по приказу: {(v.LeaveOnlyByOrder ? "да" : "нет")}, "
-              + $"ПДн без согласия: {(v.BlockPersonalDataWithoutConsent ? "запрещены" : "разрешены")}";
+              + $"ПДн без согласия: {(v.BlockPersonalDataWithoutConsent ? "запрещены" : "разрешены")}, "
+              + $"подписание документов перед доступом: {(v.RequireAgreements ? "да" : "нет")}";
     }
 
     /// <summary>Код вида начисления для ЗУП: из настроек или стандартный.</summary>

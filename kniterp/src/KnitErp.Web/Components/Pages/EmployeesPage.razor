@@ -2,6 +2,7 @@
 @using KnitErp.Application.Structure
 @using KnitErp.Domain.Structure
 @using KnitErp.Web.Components.Shared
+@inject KnitErp.Application.Hr.PersonalDataService PersonalData
 @inject EmployeeService Employees
 @inject EmployeeExchangeService Exchange
 @inject KnitErp.Application.Hr.HrSettingsService HrSettings
@@ -130,11 +131,30 @@ else
         </form>
     }
 
+    @if (_completeness is { Employees.Count: > 0 } cl)
+    {
+        @* D226: сводка заполненности личных дел видимых сотрудников. *@
+        <div class="panel">
+            <h2>@L("Заполненность личных дел: {0} %", (int)cl.Employees.Values.Average(c => c.Percent))</h2>
+            <ul class="small">
+                @foreach (var item in SummaryItems)
+                {
+                    var n = cl.Count(item);
+                    if (n > 0)
+                    {
+                        <li>@L(item): @L("не хватает у {0}", n)</li>
+                    }
+                }
+            </ul>
+        </div>
+    }
+
     <div class="scroll">
         <table>
             <thead>
                 <tr>
                     <th class="opt">@L("Таб. №")</th><th>@L("Сотрудник")</th><th>@L("Подразделение")</th><th class="opt">@L("Должность")</th><th>@L("Статус")</th><th class="opt">@L("Учётная запись")</th>
+                    @if (_completeness is not null) { <th class="num opt">@L("Заполнено")</th> }
                     @if (_list.CanEdit)
                     {
                         <th>@L("Действия")</th>
@@ -161,6 +181,15 @@ else
                             }
                         </td>
                         <td>@(e.UserEmail ?? "—")</td>
+                        @if (_completeness is not null)
+                        {
+                            <td class="num">
+                                @if (_completeness.Employees.TryGetValue(e.Id, out var c))
+                                {
+                                    <span class="@(c.Percent < 100 ? "neg" : "")" title="@string.Join(", ", c.Missing.Select(m => L(m)))">@c.Percent %</span>
+                                }
+                            </td>
+                        }
                         @if (_list.CanEdit)
                         {
                             <td>
@@ -205,6 +234,14 @@ else
     private string _search = string.Empty;
     private bool _includeDismissed;
     private bool _leaveOnlyByOrder;
+    private KnitErp.Application.Hr.CompletenessListDto? _completeness;
+
+    /// <summary>Что показывать в сводке заполненности (D226) — самое нужное кадрам.</summary>
+    private static readonly string[] SummaryItems =
+    [
+        "Действующее согласие на обработку ПДн", "Скан трудового договора", "Скан паспорта", "Скан регистрации", "Фотография",
+        "Паспорт: номер, кем и когда выдан", "СНИЛС", "ИНН", "Телефон", "График работы",
+    ];
 
     protected override async Task OnInitializedAsync()
     {
@@ -214,6 +251,10 @@ else
             if (_list.CanEdit)
             {
                 _leaveOnlyByOrder = (await HrSettings.GetAsync()).Rules.LeaveOnlyByOrder; // D216: отпуск только приказом
+            }
+            if (!_list.OwnOnly && (CurrentAccess.Has(Permissions.PersonalDataView) || CurrentAccess.Has(Permissions.EmployeeEdit)))
+            {
+                _completeness = await PersonalData.CompletenessListAsync(); // D226
             }
         }
         catch (AccessDeniedException ex)
@@ -333,6 +374,10 @@ else
             try
             {
                 _list = await Employees.ListAsync(new EmployeeFilter(null, _includeDismissed, _search));
+                if (_completeness is not null)
+                {
+                    _completeness = await PersonalData.CompletenessListAsync();
+                }
             }
             finally
             {

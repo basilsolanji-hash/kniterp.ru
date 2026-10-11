@@ -78,12 +78,14 @@ internal sealed class ConsentScanConfiguration : IEntityTypeConfiguration<Consen
         b.ToTable("hr_consent_scans", t =>
         {
             t.HasCheckConstraint("ck_hr_consent_scans_size", $"[SizeBytes] BETWEEN 1 AND {ConsentScan.MaxBytes}");
+            t.HasCheckConstraint("ck_hr_consent_scans_kind", "[Kind] BETWEEN 1 AND 13");
             t.HasTrigger("tr_hr_consent_scans_immutable");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.FileName).HasMaxLength(200).IsRequired();
         b.Property(x => x.ContentType).HasMaxLength(50).IsRequired();
+        b.Property(x => x.Kind).HasConversion<byte>().HasDefaultValue(EmployeeDocumentKind.Consent).HasSentinel((EmployeeDocumentKind)0);
         b.Property(x => x.Content).HasConversion(PersonalDataColumns.Bytes).HasColumnType("nvarchar(max)").IsRequired();
         b.Property(x => x.UploadedAtUtc).HasColumnType("datetime2(3)");
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
@@ -248,6 +250,32 @@ internal sealed class DepartmentScheduleConfiguration : IEntityTypeConfiguration
         b.HasOne<WorkSchedule>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ScheduleId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_department_schedules_schedule");
         b.HasIndex(x => new { x.OrganizationId, x.DepartmentId }).IsUnique().HasDatabaseName("ux_hr_department_schedules_department");
+    }
+}
+
+internal sealed class EmployeeAgreementConfiguration : IEntityTypeConfiguration<EmployeeAgreement>
+{
+    public void Configure(EntityTypeBuilder<EmployeeAgreement> b)
+    {
+        b.ToTable("hr_employee_agreements", t =>
+        {
+            t.HasCheckConstraint("ck_hr_employee_agreements_kind", "[Kind] BETWEEN 1 AND 3");
+            t.HasCheckConstraint("ck_hr_employee_agreements_method", "[Method] IN (1, 2)");
+            t.HasCheckConstraint("ck_hr_employee_agreements_hash", "LEN([TextHash]) = 64");
+            t.HasTrigger("tr_hr_employee_agreements_insert_only");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.Method).HasConversion<byte>();
+        b.Property(x => x.Version).HasMaxLength(20).IsRequired();
+        b.Property(x => x.TextHash).HasMaxLength(64).IsFixedLength().IsUnicode(false).IsRequired();
+        b.Property(x => x.SignedAtUtc).HasColumnType("datetime2(3)");
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_employee_agreements_employee");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.SignedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.Kind, x.Version }).HasDatabaseName("ix_hr_employee_agreements_employee");
     }
 }
 

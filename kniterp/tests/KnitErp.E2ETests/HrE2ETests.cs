@@ -39,11 +39,11 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("Нет действующего согласия");
 
         await page.GetByRole(AriaRole.Button, new() { Name = "Показать персональные данные" }).ClickAsync();
-        await page.GetByLabel("СНИЛС").FillAsync("112-233-445 96");
+        await page.GetByLabel("СНИЛС", new() { Exact = true }).FillAsync("112-233-445 96");
         await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить персональные данные" }).ClickAsync();
         await Expect(page.Locator("form .error")).ToContainTextAsync("СНИЛС: 11 цифр");
 
-        await page.GetByLabel("СНИЛС").FillAsync("112-233-445 95");
+        await page.GetByLabel("СНИЛС", new() { Exact = true }).FillAsync("112-233-445 95");
         await page.GetByLabel("Телефон").FillAsync("+7 (900) 000-00-00");
         await page.GetByLabel("Место рождения").FillAsync("г. Тестовск");
         await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить персональные данные" }).ClickAsync();
@@ -260,6 +260,16 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
             await worker.GetByRole(AriaRole.Button, new() { Name = "Войти" }).ClickAsync();
             await worker.WaitForURLAsync(url => !url.Contains("/account/"), new() { Timeout = 30_000 });
 
+            // D227: перед работой — документы с данными сотрудника, подпись паролем (простая электронная подпись).
+            await OpenAsync(worker, "");
+            await Expect(worker.GetByRole(AriaRole.Heading, new() { Name = "Документы перед началом работы" })).ToBeVisibleAsync();
+            await Expect(worker.GetByText("Согласие на обработку персональных данных").First).ToBeVisibleAsync();
+            await ShotAsync(worker, "6-podpisanie-pered-dostupom");
+            await worker.GetByLabel("Я прочитал(а) документы и согласен(на) с ними").CheckAsync();
+            await worker.GetByLabel("Пароль для подписи").FillAsync(password);
+            await worker.GetByRole(AriaRole.Button, new() { Name = "Подписать документы" }).ClickAsync();
+            await Expect(worker.GetByRole(AriaRole.Heading, new() { Name = "Документы перед началом работы" })).ToHaveCountAsync(0);
+
             await OpenAsync(worker, "hr/timesheet");
             await Expect(worker.GetByRole(AriaRole.Heading, new() { Name = "Мой табель" })).ToBeVisibleAsync();
             await worker.GetByLabel("Месяц").FillAsync("2027-03");
@@ -330,6 +340,37 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await ShotAsync(page, "5-rascenki-iz-excel");
         var download = await page.RunAndWaitForDownloadAsync(() => page.GetByRole(AriaRole.Link, new() { Name = "Скачать шаблон" }).ClickAsync());
         Assert.EndsWith(".xlsx", download.SuggestedFilename);
+    });
+
+    /// <summary>D226–D227: скан паспорта в документах сотрудника, заполненность карточки и списка, документы перед доступом и их печать.</summary>
+    [SqlFact]
+    public Task Employee_documents_completeness_and_agreements_print() => RunAsync("hr-documents", false, async page =>
+    {
+        await OpenAsync(page, "employees");
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Заполненность личных дел") })).ToBeVisibleAsync();
+        await ShotAsync(page, "7-zapolnennost-spiska");
+
+        await page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^Петрова Анна") }).First.ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/employees/\d+$"));
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("Заполненность карточки") })).ToBeVisibleAsync();
+        await Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Документы перед доступом" })).ToBeVisibleAsync();
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Показать персональные данные" }).ClickAsync();
+        await page.GetByLabel("Вид документа").SelectOptionAsync(new SelectOptionValue { Label = "Скан паспорта" });
+        await page.Locator("input[type=file]").Last.SetInputFilesAsync(new FilePayload
+        {
+            Name = "passport.pdf", MimeType = "application/pdf", Buffer = "%PDF-1.4 e2e"u8.ToArray(),
+        });
+        await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Документ загружен");
+        await Expect(page.GetByText("passport.pdf")).ToBeVisibleAsync();
+        await ShotAsync(page, "8-kartochka-dokumenty");
+
+        var href = await page.GetByRole(AriaRole.Link, new() { Name = "Печать" }).First.GetAttributeAsync("href");
+        await page.GotoAsync(href!);
+        await Expect(page.GetByText("СОГЛАСИЕ НА ОБРАБОТКУ ПЕРСОНАЛЬНЫХ ДАННЫХ")).ToBeVisibleAsync();
+        await Expect(page.GetByText("Петрова Анна Сергеевна").First).ToBeVisibleAsync();
+        await ShotAsync(page, "9-pechat-soglasiya");
     });
 
     /// <summary>D221: блок «Смена сегодня» на главном — неявка видна по имени (в выходной — выход сверх графика), ссылка ведёт в табель.</summary>

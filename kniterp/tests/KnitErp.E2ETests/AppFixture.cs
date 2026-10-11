@@ -130,6 +130,16 @@ public sealed class AppFixture : IAsyncLifetime
             await s.SignIn.AcceptInvitationAsync(workerToken, Password, Password);
         }
 
+        // D227 (сессия «Сотрудники»): вязальщица с карточкой сотрудника перед работой подписывает документы перед доступом —
+        // в фикстуре это делается заранее её паролем, чтобы сценарии цеха начинались с терминала.
+        await using (var db = _host.NewDb())
+        {
+            var workerId = await db.Users.Where(u => u.Email == WorkerEmail).Select(u => u.Id).SingleAsync();
+            var user = new TestUser { UserId = workerId, OrganizationId = org.OrganizationId };
+            await new KnitErp.Application.Hr.EmployeeAgreementService(db, new AccessGuard(db, user, _host.Clock), user, _host.Clock,
+                new Microsoft.AspNetCore.Identity.PasswordHasher<KnitErp.Domain.Access.UserAccount>()).SignAsync(Password);
+        }
+
         // Кладовщику пряжи — ещё склад цеха и склад готовой продукции отдельными правами: он выдаёт, выпускает и возвращает остатки.
         await using (var db = _host.NewDb())
         {

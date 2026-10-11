@@ -2334,6 +2334,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<byte>("Kind")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)1);
+
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
@@ -2356,6 +2361,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("hr_consent_scans", "kniterp", t =>
                         {
                             t.HasTrigger("tr_hr_consent_scans_immutable");
+
+                            t.HasCheckConstraint("ck_hr_consent_scans_kind", "[Kind] BETWEEN 1 AND 13");
 
                             t.HasCheckConstraint("ck_hr_consent_scans_size", "[SizeBytes] BETWEEN 1 AND 3145728");
                         });
@@ -2389,6 +2396,65 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasIndex("OrganizationId", "ScheduleId");
 
                     b.ToTable("hr_department_schedules", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeAgreement", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte>("Method")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("SignedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("SignedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TextHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("char(64)")
+                        .IsFixedLength();
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SignedByUserId");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "Kind", "Version")
+                        .HasDatabaseName("ix_hr_employee_agreements_employee");
+
+                    b.ToTable("hr_employee_agreements", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_employee_agreements_insert_only");
+
+                            t.HasCheckConstraint("ck_hr_employee_agreements_hash", "LEN([TextHash]) = 64");
+
+                            t.HasCheckConstraint("ck_hr_employee_agreements_kind", "[Kind] BETWEEN 1 AND 3");
+
+                            t.HasCheckConstraint("ck_hr_employee_agreements_method", "[Method] IN (1, 2)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>
@@ -2639,6 +2705,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<decimal?>("PieceHourlyRate")
                         .HasPrecision(19, 4)
                         .HasColumnType("decimal(19,4)");
+
+                    b.Property<bool>("RequireAgreements")
+                        .HasColumnType("bit");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -7275,6 +7344,29 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_hr_department_schedules_schedule");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeAgreement", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("SignedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_agreements_employee");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>

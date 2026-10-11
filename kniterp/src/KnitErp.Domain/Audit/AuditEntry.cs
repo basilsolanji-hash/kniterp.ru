@@ -141,6 +141,18 @@ public static class AuditActions
     public const string ConsentChanged = "hr.consent.changed";
     public const string ConsentScanAdded = "hr.consent.scan_added";
     public const string ConsentScanViewed = "hr.consent.scan_viewed";
+
+    /// <summary>Загружен документ сотрудника: скан паспорта, регистрации или фотография (D226).</summary>
+    public const string EmployeeDocumentAdded = "hr.document.added";
+
+    /// <summary>Просмотр документа сотрудника (D226).</summary>
+    public const string EmployeeDocumentViewed = "hr.document.viewed";
+
+    /// <summary>Подписаны документы перед доступом: согласие, правила, обязательство (D227) — или неудачная попытка.</summary>
+    public const string AgreementsSigned = "hr.agreement.signed";
+
+    /// <summary>Печать документа сотрудника с его данными (D227).</summary>
+    public const string AgreementPrinted = "hr.agreement.printed";
     public const string HrOrderCreated = "hr.order.created";
     public const string HrOrderChanged = "hr.order.changed";
     public const string HrOrderPosted = "hr.order.posted";

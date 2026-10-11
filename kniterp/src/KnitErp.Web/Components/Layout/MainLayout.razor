@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @implements IAsyncDisposable
+@inject KnitErp.Application.Hr.EmployeeAgreementService Agreements
 @inject UserAccessService Access
 @inject PersonalToolsService Personal
 @inject NotificationService Notifications
@@ -92,7 +93,15 @@
                 @* Страница начинает работу после меню: у вкладки один DbContext, параллельных запросов к нему быть не должно.
                    Инструменты панели работают со своим DbContext на каждую операцию и страницу не трогают. *@
                 <CascadingValue Value="_access" IsFixed="true">
-                    @Body
+                    @if (_agreements is { Count: > 0 })
+                    {
+                        @* D227 (сессия «Сотрудники»): сначала документы перед доступом — потом страницы системы. *@
+                        <AgreementsGate Documents="_agreements" Signed="LoadAgreementsAsync" />
+                    }
+                    else
+                    {
+                        @Body
+                    }
                 </CascadingValue>
             }
         </main>
@@ -356,10 +365,26 @@
         },
     });
 
+    private IReadOnlyList<KnitErp.Application.Hr.AgreementDocumentDto>? _agreements;
+
+    /// <summary>D227: неподписанные документы перед доступом текущего сотрудника (пусто — работать можно).</summary>
+    private async Task LoadAgreementsAsync()
+    {
+        try
+        {
+            _agreements = await Agreements.PendingAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _agreements = null;
+        }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
         _access = await Access.GetCurrentAccessAsync();
+        await LoadAgreementsAsync();
         try
         {
             _assistant = new AssistantChoice(await Personal.GetAssistantPersonaAsync(), SetPersonaAsync);
