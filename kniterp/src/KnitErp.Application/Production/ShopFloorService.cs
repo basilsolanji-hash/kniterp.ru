@@ -22,10 +22,17 @@ public enum ShopHint : byte
 public sealed record ShopOperationDto(
     long OrderId, string OrderNumber, string ItemCode, string ItemName, ProductionStage Stage, string Code,
     decimal OrderQuantity, decimal Done, decimal Available, decimal MyToday, string UnitSymbol, byte Precision, DateOnly? DueDate,
-    DateOnly Today, string? EmployeeName, bool CanMark, ShopHint Hint)
+    DateOnly Today, string? EmployeeName, bool CanMark, ShopHint Hint,
+    IReadOnlyList<ProductionStage>? ReworkStages = null, IReadOnlyList<ShiftEmployeeOptionDto>? Culprits = null)
 {
     public string StageName => ProductionFlow.StageName(Stage);
+
+    /// <summary>Контроль качества: кроме годного — брак и переделка.</summary>
+    public bool IsQualityControl => Stage == ProductionStage.QualityControl;
 }
+
+/// <summary>Отметка контроля качества с терминала: брак (причина, виновник) или переделка (этап возврата).</summary>
+public sealed record ShopQualityCommand(ProductionOperationKind Kind, decimal Quantity, string? Reason, long? CulpritEmployeeId, ProductionStage? ReturnTo);
 
 /// <summary>Отметка с терминала: сколько сделано, почему не всё (из списка), комментарий.</summary>
 public sealed record ShopMarkCommand(decimal Quantity, string? ShortfallReason, string? Comment);
@@ -93,9 +100,21 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
             : !inWork ? ShopHint.NotInWork
             : available <= 0 ? ShopHint.NothingAvailable
             : ShopHint.None;
+        IReadOnlyList<ProductionStage>? rework = null;
+        IReadOnlyList<ShiftEmployeeOptionDto>? culprits = null;
+        if (stage == ProductionStage.QualityControl && hint == ShopHint.None)
+        {
+            rework = flow.Route.Stages.Where(s => s < ProductionStage.QualityControl).ToList();
+            culprits = (await db.Employees.AsNoTracking()
+                    .Where(e => e.OrganizationId == ctx.OrganizationId && e.Status == EmploymentStatus.Working)
+                    .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
+                    .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName, e.PersonnelNumber }).ToListAsync(ct))
+                .Select(e => new ShiftEmployeeOptionDto(e.Id, ShortName(e.LastName, e.FirstName, e.MiddleName), e.PersonnelNumber)).ToList();
+        }
+
         return new ShopOperationDto(order.Id, order.Number, item.Code, item.Name, stage, ShopFloorCode.Text(order.Id, stage),
             order.Quantity, flow.Done(stage), available, mine, item.Symbol, item.Precision, order.DueDate, today,
-            employee?.ShortName, hint == ShopHint.None, hint);
+            employee?.ShortName, hint == ShopHint.None, hint, rework, culprits);
     }
 
     /// <summary>Отметка «сделано» от имени своего сотрудника. Частично — меньше доступного; причина — из списка.</summary>
@@ -128,6 +147,34 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         var today = await TodayAsync(ctx, ct);
         return await floor.RecordCoreAsync(ctx, orderId,
             new ProductionOperationCommand(stage, ProductionOperationKind.Done, command.Quantity, null, reason, today), employee.Id, ct);
+    }
+
+    /// <summary>
+    /// Брак или переделка на контроле качества с терминала (D407): исполнитель — контролёр (свой сотрудник), дата — сегодня;
+    /// у брака причина обязательна, виновник — необязательно (показатели качества); у переделки — этап возврата из маршрута.
+    /// Правила потока и блокировка — те же, что в карточке заказа.
+    /// </summary>
+    public async Task<long> MarkQualityAsync(long orderId, ShopQualityCommand command, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.ProductionStageMark, ct);
+        if (command.Kind is not (ProductionOperationKind.Defect or ProductionOperationKind.Rework))
+        {
+            throw new BusinessRuleException("production.stage.kind", "Выберите вид отметки.");
+        }
+
+        var employee = await EmployeeAsync(ctx, ct)
+                       ?? throw new BusinessRuleException("production.shop.no_employee",
+                           "Учётная запись не привязана к сотруднику — обратитесь к кадровику или администратору.");
+        if (employee.Status != EmploymentStatus.Working)
+        {
+            throw new BusinessRuleException("production.shop.not_working", "Сотрудник не работает (отпуск или увольнение) — отмечать работу нельзя.");
+        }
+
+        var today = await TodayAsync(ctx, ct);
+        return await floor.RecordCoreAsync(ctx, orderId, new ProductionOperationCommand(ProductionStage.QualityControl, command.Kind, command.Quantity,
+                command.Kind == ProductionOperationKind.Rework ? command.ReturnTo : null, command.Reason, today,
+                command.Kind == ProductionOperationKind.Defect ? command.CulpritEmployeeId : null),
+            employee.Id, ct);
     }
 
     /// <summary>Мои отметки за день (по умолчанию сегодня) и работа, доступная на этапах открытых заказов.</summary>

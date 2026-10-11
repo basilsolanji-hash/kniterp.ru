@@ -468,6 +468,36 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         }
     }
 
+    /// <summary>D407: контролёр на телефоне отмечает брак с виновником и отправляет на переделку.</summary>
+    [SqlFact]
+    public async Task Controller_marks_defect_and_rework_on_phone()
+    {
+        var order = await app.CreateOrderReadyForQualityAsync(6);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
+        });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page, AppFixture.WorkerEmail);
+        await page.GotoAsync($"shop/op/{order}/4");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Контроль качества" })).ToBeVisibleAsync();
+
+        await ClickUntilAsync(page.GetByLabel("Брак", new() { Exact = true }), page.GetByLabel("Причина брака"));
+        await page.GetByLabel("Количество").FillAsync("1");
+        await page.GetByLabel("Причина брака").FillAsync("спущенные петли (e2e)");
+        await page.GetByLabel("Виновник брака").SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С. (0101)" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отметить брак" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Брак отмечен: 1 шт.");
+
+        await page.GetByLabel("На переделку", new() { Exact = true }).CheckAsync();
+        await page.GetByLabel("Количество").FillAsync("1");
+        await page.GetByLabel("Вернуть на этап").SelectOptionAsync(new SelectOptionValue { Label = "Сборка" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отправить на переделку" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Отправлено на переделку: 1 шт.");
+        Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
+    }
+
     /// <summary>Маршрутный лист: QR-код и текстовый код на каждый этап.</summary>
     [SqlFact]
     public async Task Workshop_head_prints_route_sheet_with_qr_codes()

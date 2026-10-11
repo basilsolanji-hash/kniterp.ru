@@ -39,7 +39,55 @@ else
             <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
         }
 
-        @if (op.CanMark)
+        @if (op.CanMark && op.IsQualityControl)
+        {
+            <fieldset class="shop-quick" aria-label="@L("Результат контроля")">
+                <label><input type="radio" name="qc" checked="@(_qc == QcMode.Good)" @onchange="() => _qc = QcMode.Good" /> @L("Годное")</label>
+                <label><input type="radio" name="qc" checked="@(_qc == QcMode.Defect)" @onchange="() => _qc = QcMode.Defect" /> @L("Брак")</label>
+                <label><input type="radio" name="qc" checked="@(_qc == QcMode.Rework)" @onchange="() => _qc = QcMode.Rework" /> @L("На переделку")</label>
+            </fieldset>
+        }
+        @if (op.CanMark && op.IsQualityControl && _qc != QcMode.Good)
+        {
+            <form @onsubmit="MarkQualityAsync">
+                <label>
+                    @(_qc == QcMode.Defect ? L("Брак, {0}", op.UnitSymbol) : L("На переделку, {0}", op.UnitSymbol))
+                    <input @bind="_quantityText" inputmode="decimal" autocomplete="off" aria-label="@L("Количество")" />
+                </label>
+                @if (_qc == QcMode.Defect)
+                {
+                    <label>@L("Причина брака")
+                        <input @bind="_comment" maxlength="300" aria-label="@L("Причина брака")" /></label>
+                    @if (op.Culprits is { Count: > 0 } people)
+                    {
+                        <label>@L("Виновник брака")
+                            <select @bind="_culprit" aria-label="@L("Виновник брака")">
+                                <option value="">@L("— не указан —")</option>
+                                @foreach (var e in people)
+                                {
+                                    <option value="@e.Id">@e.Name (@e.PersonnelNumber)</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                }
+                else
+                {
+                    <label>@L("Вернуть на этап")
+                        <select @bind="_returnTo" aria-label="@L("Вернуть на этап")">
+                            @foreach (var r in op.ReworkStages ?? [])
+                            {
+                                <option value="@r">@L(ProductionFlow.StageName(r))</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Комментарий")
+                        <input @bind="_comment" maxlength="300" aria-label="@L("Комментарий")" /></label>
+                }
+                <button type="submit" class="shop-submit" disabled="@_busy">@(_qc == QcMode.Defect ? L("Отметить брак") : L("Отправить на переделку"))</button>
+            </form>
+        }
+        else if (op.CanMark)
         {
             <form @onsubmit="MarkAsync">
                 <label>
@@ -89,6 +137,70 @@ else
     private string? _comment;
     private string? _message;
     private bool _messageIsError;
+
+    private enum QcMode { Good, Defect, Rework }
+
+    private QcMode _qc = QcMode.Good;
+    private string _culprit = string.Empty;
+    private ProductionStage _returnTo = ProductionStage.Knitting;
+
+    /// <summary>Брак или переделка на контроле качества (D407).</summary>
+    private async Task MarkQualityAsync()
+    {
+        if (_busy || _op is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!Quantities.TryParse(_quantityText, out var quantity))
+            {
+                throw new BusinessRuleException("production.stage.quantity_invalid", L("Укажите количество числом, например 100."));
+            }
+
+            var kind = _qc == QcMode.Defect ? ProductionOperationKind.Defect : ProductionOperationKind.Rework;
+            await Shop.MarkQualityAsync(OrderId, new ShopQualityCommand(kind, quantity, _comment,
+                kind == ProductionOperationKind.Defect && long.TryParse(_culprit, out var culprit) ? culprit : null,
+                kind == ProductionOperationKind.Rework ? _returnTo : null));
+            _message = kind == ProductionOperationKind.Defect
+                ? L("Брак отмечен: {0} {1}.", Quantities.Format(quantity), _op.UnitSymbol)
+                : L("Отправлено на переделку: {0} {1}.", Quantities.Format(quantity), _op.UnitSymbol);
+            _quantityText = string.Empty;
+            _comment = null;
+            _culprit = string.Empty;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                var message = (_message, _messageIsError);
+                _op = await Shop.OperationAsync(OrderId, (ProductionStage)Stage);
+                (_message, _messageIsError) = message;
+                if (_op.ReworkStages is { Count: > 0 } stages && !stages.Contains(_returnTo))
+                {
+                    _returnTo = stages[0];
+                }
+            }
+            catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+            {
+                _message = UiErrors.Message(ex);
+                _messageIsError = true;
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
 
     /// <summary>Введено меньше доступного — спрашиваем причину.</summary>
     private bool IsPartial => _op is not null && Quantities.TryParse(_quantityText, out var q) && q > 0 && q < _op.Available;

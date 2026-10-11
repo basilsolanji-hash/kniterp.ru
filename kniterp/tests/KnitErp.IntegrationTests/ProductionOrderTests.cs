@@ -1459,6 +1459,62 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Controller_marks_defect_with_culprit_and_rework_from_terminal()
+    {
+        var f = await SetUpAsync();
+        var (controller, controllerEmployee) = await AddWorkerAsync(f, grant: true);
+        var (_, knitter) = await AddWorkerAsync(f, grant: true, "0104", "Иванова");
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(order, Mark(stage, 10));
+            }
+        }
+
+        await using (var s = host.As(controller, f.Org.OrganizationId))
+        {
+            var op = await s.ShopFloor.OperationAsync(order, ProductionStage.QualityControl);
+            Assert.True(op.IsQualityControl);
+            Assert.Equal([ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming], op.ReworkStages);
+            Assert.Contains(op.Culprits!, e => e.Id == knitter);
+            Assert.Null((await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting)).Culprits);
+
+            await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShopFloor.MarkQualityAsync(order,
+                new ShopQualityCommand(ProductionOperationKind.Defect, 2, " ", knitter, null)));
+            Assert.Equal("production.stage.kind", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShopFloor.MarkQualityAsync(order,
+                new ShopQualityCommand(ProductionOperationKind.Done, 2, null, null, null)))).Code);
+            await s.ShopFloor.MarkQualityAsync(order, new ShopQualityCommand(ProductionOperationKind.Defect, 2, "спущенные петли", knitter, null));
+            await s.ShopFloor.MarkQualityAsync(order, new ShopQualityCommand(ProductionOperationKind.Rework, 1, "шов", null, ProductionStage.Assembly));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.QualityControl, new ShopMarkCommand(5, null, null));
+            Assert.Equal("production.stage.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.ShopFloor.MarkQualityAsync(order,
+                new ShopQualityCommand(ProductionOperationKind.Defect, 5, "ещё", null, null)))).Code);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var progress = await s.Floor.ProgressAsync(order);
+            Assert.Equal((5m, 2m, 1m), (progress.Good, progress.Defect, progress.Rework));
+            // Переделка вернула 1 на сборку: на сборке снова можно отметить 1.
+            Assert.Equal(1m, progress.Stages.Single(x => x.Stage == ProductionStage.Assembly).Available);
+            var defect = progress.History.Single(h => h.Kind == ProductionOperationKind.Defect);
+            Assert.Equal(("Иванова А. С.", "Петрова А. С."), (defect.Culprit, defect.Employee));
+            var score = (await s.Scores.BoardAsync(Day, Day)).Rows.Single(r => r.EmployeeId == knitter);
+            Assert.Equal(2m, score.DefectUnits);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            // Брак и переделка в выработку не входят: у контролёра выработка — только «годное».
+            var output = await new ProductionWorkOutputSource(db).OutputAsync(f.Org.OrganizationId, Day, Day, CancellationToken.None);
+            Assert.Equal(5m, output.Where(o => o.EmployeeId == controllerEmployee).Sum(o => o.Quantity));
+        }
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
     private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {
