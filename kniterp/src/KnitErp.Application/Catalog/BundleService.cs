@@ -184,6 +184,7 @@ public sealed class BundleService(IKnitErpDbContext db, IAccessGuard guard, ICur
             list[i].SetSortOrder(i);
         }
 
+        Audit(ctx, row.BundleItemId, (index + 1).ToString(), (target + 1).ToString(), "Порядок компонента");
         await db.SaveOrConflictAsync(ct);
     }
 

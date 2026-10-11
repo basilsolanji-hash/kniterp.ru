@@ -587,7 +587,8 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
 
         if (!ItemTypes.IsStocked(item.Type))
         {
-            throw ServiceRules.NotStocked([item.Code]); // D300 (сессия 4): у услуги нет партий
+            // D300, D302 (сессия 4): у услуги и комплекта нет партий.
+            throw item.Type == ItemType.Service ? ServiceRules.NotStocked([item.Code]) : ServiceRules.BundleNotStocked([item.Code]);
         }
     }
 

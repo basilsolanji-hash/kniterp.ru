@@ -7,7 +7,8 @@ description: E2E-проверка knitERP в браузере (Playwright, 1440 
 
 ## Подготовка (один раз за сессию)
 - SQL Server: `docker run -d --name sql -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD='<одноразовый пароль>' -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest`
-  (если `docker ps` не отвечает — сначала `dockerd >/tmp/dockerd.log 2>&1 &`).
+  (если `docker ps` не отвечает — сначала `dockerd >/tmp/dockerd.log 2>&1 &`; после простоя среды контейнер останавливается —
+  `docker start sql` и ждать `sqlcmd … -Q 'SELECT 1'`; признак — «A network-related … error» в тестах).
 - .NET 10 SDK: если `dotnet` нет, а dot.net закрыт прокси — `apt-get install -y dotnet-sdk-10.0 aspnetcore-runtime-10.0`.
 - Сертификат разработки: `dotnet dev-certs https` (cookie входа только по HTTPS).
 - Playwright уже установлен глобально (`/opt/node22/lib/node_modules/playwright`, Chromium в `/opt/pw-browsers`); `playwright install` не запускать.

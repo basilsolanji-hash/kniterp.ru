@@ -310,6 +310,12 @@ public sealed class PurchaseService(
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
+        if (await db.Items.AnyAsync(i => i.Id == itemId && i.Type == ItemType.Bundle, ct))
+        {
+            // D304 (сессия 4): комплект — коммерческий набор для продажи; закупаются его компоненты, иначе поступление его пропустит.
+            throw new BusinessRuleException("purchase.order.bundle", $"{item.Code} — комплект: в заказ поставщику добавьте его компоненты.");
+        }
+
         StockEntry.EnsurePrecision(item, quantity);
         order.SetLine(itemId, quantity, price, vatPercent);
         var line = order.Lines.Single(l => l.ItemId == itemId);

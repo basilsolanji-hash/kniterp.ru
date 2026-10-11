@@ -127,6 +127,25 @@ public sealed class CatBundlesTests(SqlTestHost host) : IClassFixture<SqlTestHos
             Assert.Equal("sales.order.bundle_shipment", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Sales.CreateShipmentAsync(order))).Code);
         }
 
+        // Проверка рисков (шаг 1): партии, заказ поставщику и импорт Excel не обходят правила комплекта.
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            Assert.Equal("item.bundle_not_stocked", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Batches.CreateAsync(f.Bundle, new StockBatchData("П-1", null, null, null, null, null)))).Code);
+            var supplier = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Поставщик»", null, null, true, false, null));
+            var po = await s.Purchases.CreateOrderAsync(new PurchaseOrderHeader(Day, supplier, f.Store, null, null, true, null));
+            Assert.Equal("purchase.order.bundle", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await s.Purchases.SetOrderLineAsync(po, f.Bundle, 1, 100m, null, (await s.Purchases.GetOrderAsync(po)).RowVersion))).Code);
+
+            // Шапка входит в комплект, у комплекта есть состав: файл не меняет их тип — ошибки в строках, без сбоя базы.
+            var plan = await s.ItemExchange.PreviewAsync(new MemoryStream(SqlTestHost.Spreadsheet.Write(
+            [
+                new SheetData("Номенклатура", ItemExchangeService.Columns,
+                    [["Ш-1", "Шапка", "Комплекты", "шт", ""], ["НБ-1", "Набор шапка + шарф", "Готовая продукция", "шт", ""], ["ШФ-1", "Шарф", "Комплекты", "шт", ""]]),
+            ])));
+            Assert.Equal([ImportAction.Error, ImportAction.Error, ImportAction.Update], plan.Rows.OrderBy(r => r.RowNumber).Select(r => r.Action));
+        }
+
         // Право: Бухгалтер видит состав, но не меняет его; чужая организация — 404.
         await using (var s = host.As(f.Accountant, f.Org.OrganizationId))
         {

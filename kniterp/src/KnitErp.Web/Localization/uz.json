@@ -2517,5 +2517,6 @@
   "Укажите количество компонента в комплекте.": "To‘plamdagi tarkibiy qism miqdorini ko‘rsating.",
   "код или наименование": "kod yoki nomi",
   "комплект": "to‘plam",
-  "комплект не хранится на складе: доступность и списание — по компонентам": "to‘plam omborda saqlanmaydi: mavjudlik va hisobdan chiqarish — tarkibiy qismlar bo‘yicha"
+  "комплект не хранится на складе: доступность и списание — по компонентам": "to‘plam omborda saqlanmaydi: mavjudlik va hisobdan chiqarish — tarkibiy qismlar bo‘yicha",
+  "{0} — комплект: в заказ поставщику добавьте его компоненты.": "{0} — to‘plam: yetkazib beruvchiga buyurtmaga uning tarkibiy qismlarini qo‘shing."
 }

@@ -483,15 +483,25 @@ public sealed class ItemExchangeService(
             .Select(r => Item.NormalizeCode(r.Code)).ToHashSet();
         var fileVariantKeys = new Dictionary<(string Parent, string Key), int>();
 
-        // D300: услуга из файла — ставка НДС (своя или основная организации) и только у позиции, которой не было на складе.
+        // D300, D302: услуга или комплект из файла — только у позиции, которой не было на складе и которая не входит в комплекты;
+        // у услуги — ставка НДС (своя или основная организации); комплект с составом не меняет тип. Те же правила, что в карточке.
         var serviceCodes = raw.Where(r => ParseType(r.TypeText) == ItemType.Service).Select(r => Item.NormalizeCode(r.Code)).ToHashSet();
+        var notStockedCodes = raw.Where(r => ParseType(r.TypeText) is { } t && !ItemTypes.IsStocked(t)).Select(r => Item.NormalizeCode(r.Code)).ToHashSet();
         var serviceVat = serviceCodes.Count > 0 ? await DefaultServiceVatAsync(org, ct) : null;
-        var serviceIds = existing.Values.Where(i => serviceCodes.Contains(i.Code) && i.Type != ItemType.Service).Select(i => i.Id).ToList();
-        var stocked = serviceIds.Count == 0
+        var convertIds = existing.Values.Where(i => notStockedCodes.Contains(i.Code) && ItemTypes.IsStocked(i.Type)).Select(i => i.Id).ToList();
+        var stocked = convertIds.Count == 0
             ? []
-            : (await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == org && serviceIds.Contains(m.ItemId)).Select(m => m.ItemId)
-                .Concat(db.StockBatches.AsNoTracking().Where(b => b.OrganizationId == org && serviceIds.Contains(b.ItemId)).Select(b => b.ItemId))
+            : (await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == org && convertIds.Contains(m.ItemId)).Select(m => m.ItemId)
+                .Concat(db.StockBatches.AsNoTracking().Where(b => b.OrganizationId == org && convertIds.Contains(b.ItemId)).Select(b => b.ItemId))
+                .Concat(db.BundleComponents.AsNoTracking().Where(c => c.OrganizationId == org && convertIds.Contains(c.ComponentItemId)).Select(c => c.ComponentItemId))
+                .Concat(db.Items.AsNoTracking().Where(i => i.OrganizationId == org && i.ParentItemId != null && convertIds.Contains(i.ParentItemId.Value))
+                    .Select(i => i.ParentItemId!.Value))
                 .Distinct().ToListAsync(ct)).ToHashSet();
+        var bundleIds = existing.Values.Where(i => i.Type == ItemType.Bundle).Select(i => i.Id).ToList();
+        var withComponents = bundleIds.Count == 0
+            ? []
+            : (await db.BundleComponents.AsNoTracking().Where(c => c.OrganizationId == org && bundleIds.Contains(c.BundleItemId))
+                .Select(c => c.BundleItemId).Distinct().ToListAsync(ct)).ToHashSet();
 
         var rows = new List<ItemImportRow>(raw.Count);
         var parsed = new Dictionary<int, Parsed>();
@@ -561,15 +571,26 @@ public sealed class ItemExchangeService(
                                 errors.Add("У услуги ставка НДС обязательна: заведите основную ставку НДС организации или укажите ставку в карточке.");
                             }
 
-                            if (current is not null && current.Type != ItemType.Service && (stocked.Contains(current.Id) || current.IsModification))
-                            {
-                                errors.Add($"Позиция {current.Code} уже была на складе или это модификация — её нельзя сделать услугой.");
-                            }
-
                             if (p.Details is { } d && (d.WeightKg is not null || d.VolumeM3 is not null || d.MinStock is not null))
                             {
                                 errors.Add("У услуги нет веса, объёма и неснижаемого остатка — оставьте эти столбцы пустыми.");
                             }
+                        }
+
+                        if (!ItemTypes.IsStocked(candidate.Type) && current is not null && ItemTypes.IsStocked(current.Type)
+                            && (stocked.Contains(current.Id) || current.IsModification))
+                        {
+                            errors.Add($"Позиция {current.Code} уже была на складе, входит в комплект, имеет модификации или сама модификация — её нельзя сделать услугой или комплектом.");
+                        }
+
+                        if (candidate.Type == ItemType.Bundle && p.Details?.MinStock is not null)
+                        {
+                            errors.Add("У комплекта нет неснижаемого остатка — оставьте этот столбец пустым.");
+                        }
+
+                        if (current is { Type: ItemType.Bundle } && candidate.Type != ItemType.Bundle && withComponents.Contains(current.Id))
+                        {
+                            errors.Add($"У комплекта {current.Code} есть состав — сначала уберите компоненты, затем меняйте тип.");
                         }
 
                         action = current is null
