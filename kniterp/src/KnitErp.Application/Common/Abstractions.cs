@@ -146,6 +146,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory { get; }
     DbSet<KnitErp.Domain.Hr.WorkSchedule> WorkSchedules { get; }
     DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules { get; }
+    DbSet<KnitErp.Domain.Hr.DepartmentSchedule> DepartmentSchedules { get; }
     DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets { get; }
     DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays { get; }
     DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates { get; }

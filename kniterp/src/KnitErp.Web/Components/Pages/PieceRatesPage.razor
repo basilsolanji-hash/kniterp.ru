@@ -28,6 +28,16 @@ else
 
     @if (CurrentAccess.Has(Permissions.PayrollCalculate))
     {
+        @* D225: много расценок сразу — шаблон уже заполнен операциями производства без расценки, остаётся вписать цену. *@
+        <div class="panel">
+            <h2>@L("Расценки из Excel")</h2>
+            <p class="muted">@L("Шаблон уже содержит операции производства без расценки: впишите цену и загрузите файл. Строки без цены пропускаются; при ошибке не загружается ничего.")</p>
+            <div class="inline-form">
+                <a class="button secondary" href="hr/piece-rates-template.xlsx" download data-enhance-nav="false">@L("Скачать шаблон")</a>
+                <label>@L("Файл .xlsx") <InputFile OnChange="ImportAsync" accept=".xlsx" disabled="@_busy" /></label>
+            </div>
+        </div>
+
         <form class="inline-form" @onsubmit="AddAsync">
             <label>@L("Код операции") <input type="number" min="1" @bind="_operationId" /></label>
             <label>@L("Операция") <input @bind="_operationName" maxlength="200" /></label>
@@ -122,6 +132,44 @@ else
         catch (AccessDeniedException ex)
         {
             _denied = UiErrors.Message(ex);
+        }
+    }
+
+    /// <summary>D225: загрузка расценок из Excel (до 5 МБ): файл проверяется целиком, ошибки — по номерам строк.</summary>
+    private async Task ImportAsync(InputFileChangeEventArgs e)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            const long maxSize = 5 * 1024 * 1024;
+            if (e.File.Size > maxSize)
+            {
+                throw new BusinessRuleException("import.file_too_large", L("Файл больше 5 МБ. Разбейте его на части."));
+            }
+
+            await using var upload = e.File.OpenReadStream(maxAllowedSize: maxSize);
+            using var buffer = new MemoryStream();
+            await upload.CopyToAsync(buffer);
+            buffer.Position = 0;
+            var count = await Payroll.ImportRatesAsync(buffer);
+            _message = L("Загружено расценок: {0}.", count);
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _rates = await Payroll.RatesAsync();
+            _operations = await Payroll.OperationsAsync();
+            _busy = false;
         }
     }
 

@@ -23,7 +23,14 @@ public sealed record WorkScheduleCommand(
 
 public sealed record EmployeeScheduleDto(long EmployeeId, string FullName, string PersonnelNumber, long? ScheduleId, string? ScheduleName, DateOnly? ValidFrom);
 
-public sealed record SchedulesDto(IReadOnlyList<WorkScheduleDto> Schedules, IReadOnlyList<EmployeeScheduleDto> Employees, bool CanEdit, DateOnly Today);
+/// <summary>Подразделение и его график по умолчанию (D225): приём и перевод в подразделение назначают этот график сами.</summary>
+public sealed record DepartmentScheduleDto(long DepartmentId, string DepartmentName, long? ScheduleId);
+
+public sealed record SchedulesDto(IReadOnlyList<WorkScheduleDto> Schedules, IReadOnlyList<EmployeeScheduleDto> Employees, bool CanEdit, DateOnly Today,
+    IReadOnlyList<DepartmentScheduleDto>? Departments = null);
+
+/// <summary>Итог действия над табелями всех подразделений за месяц (D225).</summary>
+public sealed record TimesheetBatchDto(int Created, int Refilled, int Closed, int Skipped);
 
 public sealed record DayCellDto(string Code, decimal Hours, decimal NightHours, decimal OvertimeHours, bool Manual, TimeOnly? FirstSignIn)
 {
@@ -68,7 +75,8 @@ public sealed record MyTimesheetDto(string FullName, int Year, int Month, IReadO
 /// с журналом, закрытие и исправительный табель. Заполняет — право «Табель: заполнение» (мастер — своё подразделение),
 /// закрывает — право «Табель: закрытие». Сотрудник видит только свой табель.
 /// </summary>
-public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, ISpreadsheetFormat spreadsheet)
+public sealed class TimesheetService(
+    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, ISpreadsheetFormat spreadsheet, IWorkOutputSource output)
 {
     // ——— Графики работы ———
 
@@ -90,11 +98,56 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
                 .Where(s => s.OrganizationId == ctx.OrganizationId && ids.Contains(s.EmployeeId) && s.ValidFrom <= today).ToListAsync(ct))
             .GroupBy(s => s.EmployeeId).ToDictionary(g => g.Key, g => g.MaxBy(s => s.ValidFrom)!);
         var names = schedules.ToDictionary(s => s.Id, s => s.Name);
+        var defaults = await db.DepartmentSchedules.AsNoTracking().Where(d => d.OrganizationId == ctx.OrganizationId)
+            .ToDictionaryAsync(d => d.DepartmentId, d => d.ScheduleId, ct);
+        var departments = (await db.Departments.AsNoTracking().Where(d => d.OrganizationId == ctx.OrganizationId && !d.IsArchived)
+                .OrderBy(d => d.Name).Select(d => new { d.Id, d.Name }).ToListAsync(ct))
+            .Where(d => visible is null || visible.Contains(d.Id))
+            .Select(d => new DepartmentScheduleDto(d.Id, d.Name, defaults.TryGetValue(d.Id, out var sid) ? sid : null)).ToList();
         return new SchedulesDto(schedules,
             employees.Select(e => new EmployeeScheduleDto(e.Id, Name(e.LastName, e.FirstName, e.MiddleName), e.PersonnelNumber,
                 current.GetValueOrDefault(e.Id)?.ScheduleId, current.TryGetValue(e.Id, out var s) ? names.GetValueOrDefault(s.ScheduleId) : null,
                 current.GetValueOrDefault(e.Id)?.ValidFrom)).ToList(),
-            ctx.Permissions.Has(Permissions.TimesheetEdit) && visible is null, today);
+            ctx.Permissions.Has(Permissions.TimesheetEdit) && visible is null, today, departments);
+    }
+
+    /// <summary>
+    /// График подразделения по умолчанию (D225); null — снять. Настройка общая для организации, как справочник графиков, — нужна полная
+    /// область права «заполнение табеля». Уже работающим сотрудникам график не меняется: он действует для следующих приёмов и переводов.
+    /// </summary>
+    public async Task SetDepartmentScheduleAsync(long departmentId, long? scheduleId, CancellationToken ct = default)
+    {
+        var ctx = await DemandFullEditAsync(ct);
+        var department = await db.Departments.AsNoTracking().SingleOrDefaultAsync(d => d.Id == departmentId && d.OrganizationId == ctx.OrganizationId, ct)
+                         ?? throw new NotFoundException("Подразделение");
+        string? scheduleName = null;
+        if (scheduleId is { } sid)
+        {
+            scheduleName = await db.WorkSchedules.AsNoTracking().Where(s => s.Id == sid && s.OrganizationId == ctx.OrganizationId && !s.IsArchived)
+                               .Select(s => s.Name).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("График работы");
+        }
+
+        var current = await db.DepartmentSchedules.SingleOrDefaultAsync(d => d.OrganizationId == ctx.OrganizationId && d.DepartmentId == departmentId, ct);
+        if (scheduleId is { } id)
+        {
+            if (current is null)
+            {
+                db.DepartmentSchedules.Add(DepartmentSchedule.Create(ctx.OrganizationId, departmentId, id));
+            }
+            else
+            {
+                current.Change(id);
+            }
+        }
+        else if (current is not null)
+        {
+            db.DepartmentSchedules.Remove(current);
+        }
+
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ScheduleChanged, nameof(Department),
+            departmentId.ToString(), null, scheduleName is null ? "без графика по умолчанию" : $"график по умолчанию: {scheduleName}", department.Name,
+            currentUser.CorrelationId));
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>Новый график или изменение существующего (id). Справочник графиков общий для организации — нужна полная область.</summary>
@@ -159,6 +212,7 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ScheduleChanged, nameof(Employee),
             employeeId.ToString(), null, $"{schedule.Name} с {validFrom:dd.MM.yyyy}", employee.FullName, currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
+        await RefillOpenAsync(ctx.OrganizationId, [employee.DepartmentId], validFrom, ct); // D225: табель обновляется сам
     }
 
     // ——— Табель ———
@@ -209,7 +263,7 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
         var ts = Timesheet.Create(ctx.OrganizationId, departmentId, year, month, ctx.UserId, clock.UtcNow);
         db.Timesheets.Add(ts);
         await db.SaveChangesAsync(ct);
-        await FillAsync(ctx, ts, ct);
+        await FillAsync(ctx.OrganizationId, ts, ct);
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.TimesheetCreated, nameof(Timesheet),
             ts.Id.ToString(), null, $"{department.Name}, {month:00}.{year}", null, currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
@@ -224,7 +278,7 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
         var ts = await LoadAsync(ctx, id, rowVersion, Permissions.TimesheetEdit, ct);
         ts.EnsureOpen();
         await using var tx = await db.BeginTransactionAsync(ct);
-        await FillAsync(ctx, ts, ct);
+        await FillAsync(ctx.OrganizationId, ts, ct);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
     }
@@ -491,23 +545,25 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
     }
 
     /// <summary>Заполнение по графику и отпускам. Ручные правки не трогает.</summary>
-    private async Task FillAsync(AccessContext ctx, Timesheet ts, CancellationToken ct)
+    private async Task FillAsync(long organizationId, Timesheet ts, CancellationToken ct)
     {
         var from = ts.From;
         var to = ts.To;
-        var country = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.CountryCode).SingleAsync(ct);
+        var country = await db.Organizations.AsNoTracking().Where(o => o.Id == organizationId).Select(o => o.CountryCode).SingleAsync(ct);
         var holidays = ProductionCalendar.Holidays(country, from, to.AddDays(1)).Select(h => h.Date).ToHashSet();
         var employees = await db.Employees.AsNoTracking()
-            .Where(e => e.OrganizationId == ctx.OrganizationId && e.DepartmentId == ts.DepartmentId && e.HiredOn <= to
+            .Where(e => e.OrganizationId == organizationId && e.DepartmentId == ts.DepartmentId && e.HiredOn <= to
                         && (e.DismissedOn == null || e.DismissedOn >= from)).ToListAsync(ct);
         var ids = employees.Select(e => e.Id).ToList();
         var assignments = await (from a in db.EmployeeSchedules.AsNoTracking()
                                  join s in db.WorkSchedules.AsNoTracking() on a.ScheduleId equals s.Id
-                                 where a.OrganizationId == ctx.OrganizationId && ids.Contains(a.EmployeeId) && a.ValidFrom <= to
+                                 where a.OrganizationId == organizationId && ids.Contains(a.EmployeeId) && a.ValidFrom <= to
                                  select new { a.EmployeeId, a.ValidFrom, Schedule = s }).ToListAsync(ct);
         var history = await db.EmploymentHistory.AsNoTracking()
-            .Where(h => h.OrganizationId == ctx.OrganizationId && ids.Contains(h.EmployeeId) && h.EffectiveFrom <= to).ToListAsync(ct);
+            .Where(h => h.OrganizationId == organizationId && ids.Contains(h.EmployeeId) && h.EffectiveFrom <= to).ToListAsync(ct);
         var existing = await db.TimesheetDays.Where(d => d.TimesheetId == ts.Id).ToListAsync(ct);
+        // D225: выход в нерабочий по графику день виден по отметкам терминала — день становится «РВ» с часами смены (ручной не трогается).
+        var worked = (await output.OutputAsync(organizationId, from, to, ct)).Where(o => o.Quantity > 0).Select(o => (o.EmployeeId, o.Date)).ToHashSet();
         var byKey = existing.ToDictionary(d => (d.EmployeeId, d.Date));
 
         foreach (var e in employees)
@@ -541,6 +597,11 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
                         night = Math.Min(hours, decimal.Round(plan.NightHours * rate, 2));
                         code = holidays.Contains(date) ? TimesheetCodes.Holiday : TimesheetCodes.Day;
                     }
+                    else if (worked.Contains((e.Id, date)))
+                    {
+                        hours = decimal.Round((schedule?.ShiftHours ?? 8m) * rate, 2);
+                        code = TimesheetCodes.Holiday;
+                    }
                     else
                     {
                         code = TimesheetCodes.Weekend;
@@ -556,10 +617,89 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
                 }
                 else
                 {
-                    db.TimesheetDays.Add(TimesheetDay.Create(ctx.OrganizationId, ts.Id, e.Id, date, code, hours, night, 0, manual: false));
+                    db.TimesheetDays.Add(TimesheetDay.Create(organizationId, ts.Id, e.Id, date, code, hours, night, 0, manual: false));
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// D225: открытые табели подразделений с месяца <paramref name="from"/> и позже перезаполняются по графикам после приказа или назначения
+    /// графика (ручные дни сохраняются). Вызывается внутри сценария, который уже проверил свои права; табели — последние версии месяцев.
+    /// </summary>
+    internal async Task RefillOpenAsync(long organizationId, IReadOnlyCollection<long> departmentIds, DateOnly from, CancellationToken ct)
+    {
+        var fromKey = from.Year * 12 + from.Month;
+        // Без отслеживания: у вкладки Blazor долгий контекст, а табель мог закрыть другой пользователь — статус берём из базы.
+        var open = (await db.Timesheets.AsNoTracking().Where(t => t.OrganizationId == organizationId && departmentIds.Contains(t.DepartmentId)
+                                                   && t.Year * 12 + t.Month >= fromKey).ToListAsync(ct))
+            .GroupBy(t => (t.DepartmentId, t.Year, t.Month)).Select(g => g.MaxBy(t => t.Version)!)
+            .Where(t => t.Status == TimesheetStatus.Open).ToList();
+        foreach (var ts in open)
+        {
+            await FillAsync(organizationId, ts, ct);
+        }
+
+        if (open.Count > 0)
+        {
+            await db.SaveChangesAsync(ct);
+        }
+    }
+
+    /// <summary>
+    /// D225: табели всех подразделений месяца одной кнопкой — нет табеля, а сотрудники есть — составить; открытый — перезаполнить
+    /// (ручные дни сохраняются); закрытый не трогается. Только подразделения в области права «заполнение табеля».
+    /// </summary>
+    public async Task<TimesheetBatchDto> CreateAllAsync(int year, int month, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.TimesheetEdit, ct);
+        var visible = await VisibleAsync(ctx, ct, Permissions.TimesheetEdit);
+        var from = new DateOnly(year, month, 1);
+        var to = from.AddMonths(1).AddDays(-1);
+        var staffed = await db.Employees.AsNoTracking()
+            .Where(e => e.OrganizationId == ctx.OrganizationId && e.HiredOn <= to && (e.DismissedOn == null || e.DismissedOn >= from))
+            .Select(e => e.DepartmentId).Distinct().ToListAsync(ct);
+        int created = 0, refilled = 0, skipped = 0;
+        foreach (var departmentId in staffed.Where(d => visible is null || visible.Contains(d)).Order())
+        {
+            var latest = (await db.Timesheets.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId && t.DepartmentId == departmentId && t.Year == year && t.Month == month)
+                .ToListAsync(ct)).MaxBy(t => t.Version);
+            if (latest is null)
+            {
+                await CreateAsync(departmentId, year, month, ct);
+                created++;
+            }
+            else if (latest.Status == TimesheetStatus.Open)
+            {
+                await using var tx = await db.BeginTransactionAsync(ct);
+                await FillAsync(ctx.OrganizationId, latest, ct);
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+                refilled++;
+            }
+            else
+            {
+                skipped++;
+            }
+        }
+
+        return new TimesheetBatchDto(created, refilled, 0, skipped);
+    }
+
+    /// <summary>D225: закрыть все открытые табели месяца в области права «закрытие табеля» (последние версии).</summary>
+    public async Task<TimesheetBatchDto> CloseAllAsync(int year, int month, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.TimesheetClose, ct);
+        var visible = await VisibleAsync(ctx, ct, Permissions.TimesheetClose);
+        var open = (await db.Timesheets.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId && t.Year == year && t.Month == month).ToListAsync(ct))
+            .GroupBy(t => t.DepartmentId).Select(g => g.MaxBy(t => t.Version)!)
+            .Where(t => t.Status == TimesheetStatus.Open && (visible is null || visible.Contains(t.DepartmentId))).ToList();
+        foreach (var ts in open)
+        {
+            await CloseAsync(ts.Id, ts.RowVersion, ct);
+        }
+
+        return new TimesheetBatchDto(0, 0, open.Count, 0);
     }
 
     private async Task<Timesheet> LoadAsync(AccessContext ctx, long id, byte[] rowVersion, string permission, CancellationToken ct)

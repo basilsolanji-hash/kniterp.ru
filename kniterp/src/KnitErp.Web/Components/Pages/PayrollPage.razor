@@ -4,6 +4,7 @@
 @using KnitErp.Domain.Access
 @using KnitErp.Domain.Hr
 @inject PayrollService Payroll
+@inject TimesheetService Timesheets
 
 <PageTitle>@L("Заработок") — knitERP</PageTitle>
 
@@ -44,6 +45,31 @@ else
     @if (_message is not null)
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_ready is { } r && _data?.Status != PayrollStatus.Approved)
+    {
+        @* D225: готовность месяца — без обхода табелей и расценок. *@
+        <div class="panel">
+            <h2>@L("Готовность месяца")</h2>
+            <ul>
+                <li class="@(r.Departments > 0 && r.Closed == r.Departments ? "" : "neg")">
+                    @L("Табели закрыты: {0} из {1}", r.Closed, r.Departments)@(r.Missing > 0 ? ", " + L("не составлено: {0}", r.Missing) : "")
+                </li>
+                <li class="@(r.OperationsWithoutRate == 0 ? "" : "neg")">
+                    @(r.OperationsWithoutRate == 0 ? L("Расценки есть на все операции выработки") : L("Операций выработки без расценки: {0}", r.OperationsWithoutRate))
+                    @if (r.OperationsWithoutRate > 0 && CurrentAccess.Has(Permissions.PayrollCalculate)) { <a href="hr/piece-rates">@L("Заполнить расценки")</a> }
+                </li>
+            </ul>
+            @if (r.CanCloseTimesheets && r.Open > 0)
+            {
+                <button type="button" class="secondary" @onclick="CloseAllTimesheetsAsync" disabled="@_busy">@L("Закрыть все табели")</button>
+            }
+            @if (r.Missing > 0)
+            {
+                <a class="button secondary" href="hr/timesheet">@L("Составить табели")</a>
+            }
+        </div>
     }
 
     @if (_warnings.Count > 0)
@@ -125,6 +151,7 @@ else
     private PayrollDto? _data;
     private PayslipDto? _mine;
     private IReadOnlyList<string> _warnings = [];
+    private MonthReadinessDto? _ready;
     private DateTime _month;
     private bool _own;
     private bool _busy;
@@ -146,6 +173,7 @@ else
         try
         {
             _data = await Payroll.GetAsync(_month.Year, _month.Month);
+            _ready = await Payroll.ReadinessAsync(_month.Year, _month.Month);
         }
         catch (AccessDeniedException ex)
         {
@@ -172,6 +200,12 @@ else
         var result = await Payroll.CalculateAsync(_month.Year, _month.Month);
         _warnings = result.Warnings;
         _message = L("Рассчитано: сотрудников {0}, сумма {1}.", result.Employees, result.Total.ToString("N2", Ru));
+    });
+
+    private Task CloseAllTimesheetsAsync() => RunAsync(async () =>
+    {
+        var r = await Timesheets.CloseAllAsync(_month.Year, _month.Month);
+        _message = L("Закрыто табелей: {0}.", r.Closed);
     });
 
     private Task ApproveAsync() => RunAsync(async () =>
@@ -205,6 +239,7 @@ else
             try
             {
                 _data = await Payroll.GetAsync(_month.Year, _month.Month);
+                _ready = await Payroll.ReadinessAsync(_month.Year, _month.Month);
             }
             finally
             {

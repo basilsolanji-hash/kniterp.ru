@@ -227,7 +227,7 @@ else
     private Task OpenHireAsync() => RunAsync(async () =>
     {
         _options = await Employees.GetOptionsAsync();
-        _form = new EmployeeForm { HiredOn = Today() };
+        _form = new EmployeeForm { HiredOn = Today(), PersonnelNumber = _options.NextPersonnelNumber }; // D225
         _target = null;
         _mode = Mode.Hire;
     });

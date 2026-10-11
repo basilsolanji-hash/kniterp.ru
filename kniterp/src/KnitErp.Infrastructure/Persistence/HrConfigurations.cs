@@ -235,6 +235,22 @@ internal sealed class EmployeeScheduleConfiguration : IEntityTypeConfiguration<E
     }
 }
 
+internal sealed class DepartmentScheduleConfiguration : IEntityTypeConfiguration<DepartmentSchedule>
+{
+    public void Configure(EntityTypeBuilder<DepartmentSchedule> b)
+    {
+        b.ToTable("hr_department_schedules");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<Department>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DepartmentId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_department_schedules_department");
+        b.HasOne<WorkSchedule>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ScheduleId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_department_schedules_schedule");
+        b.HasIndex(x => new { x.OrganizationId, x.DepartmentId }).IsUnique().HasDatabaseName("ux_hr_department_schedules_department");
+    }
+}
+
 internal sealed class TimesheetConfiguration : IEntityTypeConfiguration<Timesheet>
 {
     public void Configure(EntityTypeBuilder<Timesheet> b)

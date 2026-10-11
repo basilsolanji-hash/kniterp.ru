@@ -114,6 +114,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory => Set<KnitErp.Domain.Hr.EmploymentRecord>();
     public DbSet<KnitErp.Domain.Hr.WorkSchedule> WorkSchedules => Set<KnitErp.Domain.Hr.WorkSchedule>();
     public DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules => Set<KnitErp.Domain.Hr.EmployeeSchedule>();
+    public DbSet<KnitErp.Domain.Hr.DepartmentSchedule> DepartmentSchedules => Set<KnitErp.Domain.Hr.DepartmentSchedule>();
     public DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets => Set<KnitErp.Domain.Hr.Timesheet>();
     public DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays => Set<KnitErp.Domain.Hr.TimesheetDay>();
     public DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates => Set<KnitErp.Domain.Hr.PieceRate>();
