@@ -121,6 +121,23 @@ public sealed class PersonalToolsService(IKnitErpDbContextFactory factory, ICurr
     /// <summary>«Показать скрытые»: список скрытых очищается.</summary>
     public Task RestoreNotificationsAsync(CancellationToken ct = default) => SaveAsync(DismissedKind, new List<string>(), ct);
 
+    // --- Помощник (D116) ------------------------------------------------------------------------
+
+    private const string AssistantKind = "assistant";
+
+    private sealed record AssistantSettings(string? Persona);
+
+    /// <summary>Кто помогает пользователю: Ника, Книт или без персонажа. Хранится в профиле — одинаково на любом устройстве.</summary>
+    public async Task<string> GetAssistantPersonaAsync(CancellationToken ct = default) =>
+        AssistantPersonas.Clean((await LoadAsync<AssistantSettings>(AssistantKind, ct))?.Persona);
+
+    public async Task<string> SetAssistantPersonaAsync(string? persona, CancellationToken ct = default)
+    {
+        var clean = AssistantPersonas.Clean(persona);
+        await SaveAsync(AssistantKind, new AssistantSettings(clean), ct);
+        return clean;
+    }
+
     // --- Главный экран ------------------------------------------------------------------------
 
     public async Task<DashboardLayout> GetDashboardLayoutAsync(CancellationToken ct = default) =>

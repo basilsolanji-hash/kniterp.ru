@@ -380,7 +380,12 @@ public sealed class AssistantService(IAssistantModel model, IKnitErpDbContextFac
 
     public bool ModelConfigured => model.IsConfigured;
 
-    public async Task<AssistantReply> AskAsync(string? question, string? route, IReadOnlyList<AssistantTurn> history, CancellationToken ct = default)
+    public async Task<AssistantReply> AskAsync(string? question, string? route, IReadOnlyList<AssistantTurn> history, CancellationToken ct = default) =>
+        await AskAsync(question, route, history, null, ct);
+
+    /// <summary>persona — выбранный персонаж (D116): Ника или Книт; меняет только обращение, не знания и не права.</summary>
+    public async Task<AssistantReply> AskAsync(string? question, string? route, IReadOnlyList<AssistantTurn> history, string? persona,
+        CancellationToken ct = default)
     {
         var text = question?.Trim() ?? string.Empty;
         if (text.Length == 0)
@@ -415,7 +420,7 @@ public sealed class AssistantService(IAssistantModel model, IKnitErpDbContextFac
             return Fallback(articles, model.IsConfigured ? ui.Translate("Лимит вопросов помощнику на этот час исчерпан. Вот что есть в справке:") : null);
         }
 
-        var system = BuildSystemPrompt(roles, ctx, route, current, articles);
+        var system = BuildSystemPrompt(roles, ctx, route, current, articles, AssistantPersonas.Name(AssistantPersonas.Clean(persona)));
         var conversation = history.TakeLast(MaxHistoryTurns).Append(new AssistantTurn(true, text)).ToList();
         try
         {
@@ -452,12 +457,14 @@ public sealed class AssistantService(IAssistantModel model, IKnitErpDbContextFac
     /// Инструкция модели — по-русски, а справка, роли и права — на языке пользователя (D60): так ответ называет
     /// разделы и кнопки так же, как их видит пользователь.
     /// </summary>
-    private string BuildSystemPrompt(string roles, AccessContext ctx, string? route, HelpArticle? current, IReadOnlyList<HelpArticle> articles)
+    private string BuildSystemPrompt(string roles, AccessContext ctx, string? route, HelpArticle? current, IReadOnlyList<HelpArticle> articles,
+        string? personaName = null)
     {
         var granted = string.Join("; ", Permissions.All.Where(ctx.Permissions.Has).Select(p => ui.Translate(Permissions.Describe(p))));
         var sb = new StringBuilder();
-        sb.AppendLine($"Ты — помощник по работе в knitERP, системе учёта трикотажной фабрики. Отвечай {AnswerLanguage(ui.LanguageCode)}, коротко и по шагам.");
-        sb.AppendLine("Отвечай только о работе в системе. Не выдумывай функции и данные: если в справке ответа нет, так и скажи и предложи создать обращение в «Поддержке».");
+        var who = personaName is null ? "помощник" : $"{personaName}, {(personaName == "Ника" ? "помощница" : "помощник")}";
+        sb.AppendLine($"Ты — {who} по работе в knitERP, системе учёта трикотажной фабрики. Отвечай {AnswerLanguage(ui.LanguageCode)}, коротко и по шагам; тон спокойный, деловой и уважительный.");
+        sb.AppendLine("Отвечай о работе в системе и о производстве одежды и трикотажа — по справке и отраслевой базе знаний ниже. Не выдумывай функции, данные, нормы и номера стандартов: если ответа нет, так и скажи и предложи создать обращение в «Поддержке».");
         sb.AppendLine("Учитывай права пользователя: если для действия нужно право, которого у него нет, объясни, к кому обратиться (Владелец или Администратор), а не как обойти запрет.");
         if (ui.LanguageCode != UiLanguages.Default)
         {

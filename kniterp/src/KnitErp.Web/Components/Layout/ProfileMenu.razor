@@ -41,6 +41,18 @@
                         <button type="button" role="menuitemradio" class="chip" data-theme-choice="@themeCode">@themeTitle</button>
                     }
                 </div>
+                @if (Assistant is not null)
+                {
+                    @* D116: кто помогает — Ника, Книт или без персонажа; хранится в профиле. *@
+                    <div class="menu-caption">@L("Помощник")</div>
+                    <div class="lang-row" role="radiogroup" aria-label="@L("Помощник")">
+                        @foreach (var (code, title) in Personas)
+                        {
+                            <button type="button" role="menuitemradio" aria-checked="@(Assistant.Persona == code ? "true" : "false")"
+                                    class="@(Assistant.Persona == code ? "chip added" : "chip")" @onclick="() => Assistant.SetAsync(code)">@title</button>
+                        }
+                    </div>
+                }
                 <div class="menu-caption">@L("Размер интерфейса")</div>
                 <div class="lang-row" role="radiogroup" aria-label="@L("Размер интерфейса")">
                     <button type="button" role="menuitemradio" class="chip" data-density-choice="compact">@L("Компактно")</button>
@@ -61,6 +73,16 @@
 }
 
 @code {
+    [CascadingParameter]
+    public AssistantChoice? Assistant { get; set; }
+
+    private static IEnumerable<(string Code, string Title)> Personas =>
+    [
+        (KnitErp.Application.Workspace.AssistantPersonas.Nika, L("Ника")),
+        (KnitErp.Application.Workspace.AssistantPersonas.Knit, L("Книт")),
+        (KnitErp.Application.Workspace.AssistantPersonas.None, L("Без персонажа")),
+    ];
+
     [Parameter, EditorRequired]
     public CurrentAccessDto Access { get; set; } = default!;
 

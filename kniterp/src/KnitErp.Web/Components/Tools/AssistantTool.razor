@@ -1,5 +1,14 @@
 @inject AssistantService Assistant
+@using KnitErp.Web.Components.Layout
 
+@if (PersonaName is { } persona)
+{
+    @* D116: лицо помощника — выбранный в профиле персонаж. *@
+    <div class="assistant-head">
+        <img src="knit-mascot/assets/@(Choice!.Persona)-business-128.webp" alt="" width="43" height="64" />
+        <div><b>@persona</b><div class="muted small">@(Choice!.Persona == KnitErp.Application.Workspace.AssistantPersonas.Nika ? L("Помощница knitERP") : L("Помощник knitERP"))</div></div>
+    </div>
+}
 <p class="muted">
     @(Assistant.ModelConfigured
         ? L("Помощник отвечает по работе в knitERP с учётом ваших прав и текущего раздела. Не пишите сюда пароли и персональные данные.")
@@ -10,6 +19,10 @@
     @foreach (var m in _messages)
     {
         <div class="chat-msg @(m.FromUser ? "user" : "bot")">
+            @if (!m.FromUser && PersonaName is { } who)
+            {
+                <div class="chat-who muted small">@who</div>
+            }
             <div class="chat-text">@m.Text</div>
             @if (m.Articles.Count > 0)
             {
@@ -51,6 +64,11 @@
     [Parameter, EditorRequired]
     public ToolContext Context { get; set; } = default!;
 
+    [CascadingParameter]
+    public AssistantChoice? Choice { get; set; }
+
+    private string? PersonaName => Choice is null ? null : KnitErp.Application.Workspace.AssistantPersonas.Name(Choice.Persona) is { } n ? L(n) : null;
+
     private sealed record Message(bool FromUser, string Text, IReadOnlyList<HelpArticle> Articles);
 
     private readonly List<Message> _messages = [];
@@ -73,7 +91,7 @@
         _question = string.Empty;
         try
         {
-            var reply = await Assistant.AskAsync(question, Context.Route, history);
+            var reply = await Assistant.AskAsync(question, Context.Route, history, Choice?.Persona);
             _messages.Add(new Message(false, reply.Text, reply.Articles));
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))

@@ -65,6 +65,8 @@
 window.kniterp = {
     _returnFocus: null,
     registerHotkeys: function (dotnet) {
+        // D116: кнопка в панели персонажа помощника открывает чат помощника.
+        document.addEventListener('knit:action', function () { dotnet.invokeMethodAsync('OnHotkey', 'assistant'); });
         document.addEventListener('keydown', function (e) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K' || e.key === 'л' || e.key === 'Л')) {
                 e.preventDefault();
@@ -168,6 +170,14 @@ document.addEventListener('click', function (e) {
     try { localStorage.setItem('kniterp.density', density); } catch (err) { }
     kniterpMarkDensity();
 });
+// D116: тема персонажа помощника — как у приложения («как в системе» — по настройке системы).
+function kniterpSyncMascot() {
+    var el = document.querySelector('knit-assistant');
+    if (!el) return;
+    var t = document.documentElement.getAttribute('data-theme') || 'dark';
+    if (t === 'auto') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    if (el.getAttribute('theme') !== t) el.setAttribute('theme', t);
+}
 // Улучшенная навигация Blazor может переписать атрибуты <html> — тема и размер восстанавливаются из браузера.
 new MutationObserver(function () {
     if (!document.documentElement.getAttribute('data-theme')) {
@@ -182,4 +192,5 @@ new MutationObserver(function () {
     }
     kniterpMarkTheme();
     kniterpMarkDensity();
+    kniterpSyncMascot();
 }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-theme', 'data-density'] });
