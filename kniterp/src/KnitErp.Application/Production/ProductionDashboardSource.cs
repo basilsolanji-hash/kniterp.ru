@@ -47,15 +47,12 @@ public sealed class ProductionDashboardSource : IProductionDashboardSource
                             orderby o.DueDate == null, o.DueDate, o.Id
                             select new { o.Id, o.Number, o.Quantity, o.DueDate, i.Name, o.Route }).Take(MaxScanned).ToListAsync(ct);
         var ids = orders.Select(o => o.Id).ToList();
-        var done = (await db.ProductionOperations.AsNoTracking()
-                .Where(op => op.OrganizationId == org && ids.Contains(op.ProductionOrderId))
-                .ToListAsync(ct))
-            .ToLookup(op => op.ProductionOrderId);
+        var done = await ProductionSteps.SummedAsync(db, org, ids, ct);
         var progress = orders.Select(o =>
             {
                 // Выпуск не нужен: готовность считаем по упакованному, а упакованное и выпущенное не убывают при выпуске.
                 var route = ProductionRoute.From(o.Route);
-                var flow = new ProductionFlow(o.Quantity, done[o.Id].Select(x => x.Step), 0m, route);
+                var flow = new ProductionFlow(o.Quantity, done[o.Id], 0m, route);
                 var packed = flow.Done(route.Last);
                 var current = route.Stages.Cast<ProductionStage?>().FirstOrDefault(s => flow.Done(s!.Value) < o.Quantity) ?? route.Last;
                 var percent = o.Quantity <= 0 ? 0m : Math.Min(100m, decimal.Round(packed / o.Quantity * 100m, 1));

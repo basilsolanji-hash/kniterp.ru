@@ -214,14 +214,12 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
                             select new { Order = p, i.Name, u.Symbol })
             .Take(MaxTaskOrders).ToListAsync(ct);
         var ids = orders.Select(o => o.Order.Id).ToList();
-        var ops = (await db.ProductionOperations.AsNoTracking()
-                .Where(o => o.OrganizationId == ctx.OrganizationId && ids.Contains(o.ProductionOrderId)).ToListAsync(ct))
-            .ToLookup(o => o.ProductionOrderId);
+        var ops = await ProductionSteps.SummedAsync(db, ctx.OrganizationId, ids, ct);
         var released = await ReleasedAsync(ctx, ids, ct);
         var tasks = new List<ShopTaskDto>();
         foreach (var o in orders)
         {
-            var flow = new ProductionFlow(o.Order.Quantity, ops[o.Order.Id].Select(x => x.Step), released.GetValueOrDefault(o.Order.Id), o.Order.RouteValue);
+            var flow = new ProductionFlow(o.Order.Quantity, ops[o.Order.Id], released.GetValueOrDefault(o.Order.Id), o.Order.RouteValue);
             tasks.AddRange(flow.Route.Stages.Where(s => flow.Available(s) > 0)
                 .Select(s => new ShopTaskDto(o.Order.Id, o.Order.Number, o.Name, s, flow.Available(s), o.Symbol, o.Order.DueDate)));
         }

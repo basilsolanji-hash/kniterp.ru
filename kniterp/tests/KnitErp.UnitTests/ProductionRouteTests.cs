@@ -66,4 +66,31 @@ public sealed class ProductionRouteTests
         Assert.Equal((7m, 0m), (flow.Available(ProductionStage.Steaming), flow.Available(ProductionStage.QualityControl)));
         Assert.Equal(7m, flow.UsedDownstream(ProductionStage.Knitting));
     }
+
+    [Fact]
+    public void Flow_from_summed_steps_equals_flow_from_all_rows()
+    {
+        // Настоящая история заказа: отметки, исправления, брак и переделки вразнобой; суммы по (этап, вид, возврат) дают тот же поток.
+        var rows = new List<ProductionStep>
+        {
+            Done(ProductionStage.Knitting, 6), Done(ProductionStage.Knitting, 6), new(ProductionStage.Knitting, ProductionOperationKind.Correction, -1),
+            Done(ProductionStage.Assembly, 5), Done(ProductionStage.Assembly, 4), Done(ProductionStage.Steaming, 9),
+            Done(ProductionStage.QualityControl, 4), new(ProductionStage.QualityControl, ProductionOperationKind.Defect, 1),
+            new(ProductionStage.QualityControl, ProductionOperationKind.Rework, 1, ProductionStage.Assembly),
+            new(ProductionStage.QualityControl, ProductionOperationKind.Rework, 2, ProductionStage.Knitting),
+            Done(ProductionStage.QualityControl, 1), Done(ProductionStage.Packing, 3), Done(ProductionStage.Packing, 1),
+        };
+        var summed = rows.GroupBy(r => (r.Stage, r.Kind, r.ReturnTo)).Select(g => new ProductionStep(g.Key.Stage, g.Key.Kind, g.Sum(r => r.Quantity), g.Key.ReturnTo));
+        foreach (var route in new[] { ProductionRoute.Full, ProductionRoute.Of([ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming, ProductionStage.QualityControl]) })
+        {
+            var a = new ProductionFlow(10, rows, 2, route);
+            var b = new ProductionFlow(10, summed, 2, route);
+            foreach (var stage in ProductionFlow.Stages)
+            {
+                Assert.Equal((a.Done(stage), a.Available(stage), a.UsedDownstream(stage)), (b.Done(stage), b.Available(stage), b.UsedDownstream(stage)));
+            }
+
+            Assert.Equal((a.Defect, a.Rework, a.ReadyForOutput), (b.Defect, b.Rework, b.ReadyForOutput));
+        }
+    }
 }

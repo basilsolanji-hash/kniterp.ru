@@ -68,8 +68,7 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
                         && (inWorkStatuses.Contains(o.Status) || (o.OrderDate >= filter.From && o.OrderDate <= filter.To)))
             .OrderBy(o => o.OrderDate).ThenBy(o => o.Id).Take(5000).ToListAsync(ct);
         var ids = orders.Select(o => o.Id).ToList();
-        var ops = await db.ProductionOperations.AsNoTracking()
-            .Where(o => o.OrganizationId == ctx.OrganizationId && ids.Contains(o.ProductionOrderId)).ToListAsync(ct);
+        var ops = await ProductionSteps.SummedAsync(db, ctx.OrganizationId, ids, ct);
         var moves = await (from link in db.ProductionOrderDocuments.AsNoTracking()
                            where link.OrganizationId == ctx.OrganizationId && ids.Contains(link.ProductionOrderId)
                            join d in db.StockDocuments.AsNoTracking() on link.StockDocumentId equals d.Id
@@ -84,7 +83,7 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
         decimal Released(ProductionOrder o) =>
             moves.Where(m => m.ProductionOrderId == o.Id && m.Purpose == ProductionDocumentPurpose.Output && m.ItemId == o.ItemId).Sum(m => m.Quantity);
         ProductionFlow Flow(ProductionOrder o) =>
-            new(o.Quantity, ops.Where(x => x.ProductionOrderId == o.Id).Select(x => x.Step), Released(o), o.RouteValue);
+            new(o.Quantity, ops[o.Id], Released(o), o.RouteValue);
 
         var inWork = orders.Where(o => inWorkStatuses.Contains(o.Status)).Select(o =>
         {

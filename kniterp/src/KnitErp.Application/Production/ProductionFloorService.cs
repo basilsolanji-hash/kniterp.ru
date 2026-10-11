@@ -220,3 +220,29 @@ internal static class ProductionLocks
                where l.ItemId == order.ItemId
                select (decimal?)l.Quantity).SumAsync(ct) ?? 0m;
 }
+
+/// <summary>
+/// Отметки этапов многих заказов, сложенные в SQL по заказу, этапу, виду и этапу возврата. Поток этапов считает только суммы, поэтому
+/// результат тот же, что по всем строкам, а из базы приходит не больше 5 × 4 × 3 строк на заказ — главный экран, терминал и отчёт
+/// не растут вместе с историей отметок.
+/// </summary>
+internal static class ProductionSteps
+{
+    public static async Task<ILookup<long, ProductionStep>> SummedAsync(IKnitErpDbContext db, long organizationId, IReadOnlyCollection<long> orderIds,
+        CancellationToken ct)
+    {
+        if (orderIds.Count == 0)
+        {
+            return Array.Empty<ProductionStep>().ToLookup(_ => 0L);
+        }
+
+        var ids = orderIds.ToList();
+        var rows = await db.ProductionOperations.AsNoTracking()
+            .Where(o => o.OrganizationId == organizationId && ids.Contains(o.ProductionOrderId))
+            .GroupBy(o => new { o.ProductionOrderId, o.Stage, o.Kind, o.ReturnToStage })
+            .Select(g => new { g.Key.ProductionOrderId, g.Key.Stage, g.Key.Kind, g.Key.ReturnToStage, Quantity = g.Sum(o => o.Quantity) })
+            .ToListAsync(ct);
+        return rows.ToLookup(r => r.ProductionOrderId, r => new ProductionStep(r.Stage, r.Kind, r.Quantity, r.ReturnToStage));
+    }
+}
+
