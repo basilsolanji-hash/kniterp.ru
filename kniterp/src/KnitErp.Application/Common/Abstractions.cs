@@ -60,6 +60,8 @@ public interface IKnitErpDbContext : IAsyncDisposable
 
     /// <summary>Каталог (сессия № 4): состав комплектов (D302).</summary>
     DbSet<BundleComponent> BundleComponents { get; }
+    DbSet<ItemPriceHistory> ItemPriceHistory { get; }
+    DbSet<PriceRevaluation> PriceRevaluations { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }

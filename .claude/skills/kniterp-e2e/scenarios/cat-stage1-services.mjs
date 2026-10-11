@@ -4,6 +4,7 @@ import { ownerSession, collectErrors, assertNoHorizontalScroll, ready, BASE } fr
 const { browser, page } = await ownerSession(1440);
 const errors = collectErrors(page);
 const ok = (m) => console.log('✓ ' + m);
+const sfx = Date.now().toString(36).slice(-5).toUpperCase(); // повторяемость на одной базе
 
 async function createItem(code, name, type) {
   await page.goto(`${BASE}/catalog`); await ready(page);
@@ -16,11 +17,11 @@ async function createItem(code, name, type) {
   return form;
 }
 
-let form = await createItem('СВ-1', 'Свитер', 'Finished');
+let form = await createItem('СВ-' + sfx, 'Свитер ' + sfx, 'Finished');
 await form.getByRole('button', { name: 'Сохранить' }).click();
 await page.waitForSelector('text=Позиция сохранена.');
 
-form = await createItem('УС-1', 'Доставка по городу', 'Service');
+form = await createItem('УС-' + sfx, 'Доставка по городу ' + sfx, 'Service');
 const unitText = await form.locator('label:has-text("Единица") select option:checked').innerText();
 if (!unitText.includes('усл. ед')) throw new Error('единица услуги по умолчанию: ' + unitText);
 ok('у новой услуги единица «усл. ед»');
@@ -35,13 +36,14 @@ await page.waitForSelector('text=Позиция сохранена.');
 ok('услуга создана');
 
 await page.locator('form.inline-form label:has-text("Вид") select').selectOption({ label: 'Услуги' });
+await page.locator('form.inline-form label:has-text("Поиск") input').fill(sfx);
 await page.getByRole('button', { name: 'Найти' }).click();
 await page.waitForTimeout(500);
 const rows = await page.locator('table tbody tr').allInnerTexts();
-if (rows.length !== 1 || !rows[0].includes('Доставка по городу')) throw new Error('отбор «Услуги»: ' + JSON.stringify(rows));
+if (rows.length !== 1 || !rows[0].includes('Доставка по городу ' + sfx)) throw new Error('отбор «Услуги»: ' + JSON.stringify(rows));
 ok('отбор «Услуги» показывает только услугу');
 
-await page.getByRole('link', { name: 'Доставка по городу' }).click();
+await page.getByRole('link', { name: 'Доставка по городу ' + sfx }).click();
 await page.waitForSelector('text=Предмет расчёта (чек)'); await ready(page);
 const card = await page.locator('main').innerText();
 for (const absent of ['Остаток на всех складах', 'Вес, кг', 'Неснижаемый остаток', 'Модификации']) {

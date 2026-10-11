@@ -6,6 +6,7 @@
 @inject NomenclatureService Nomenclature
 @inject ModificationService Modifications
 @inject BundleService Bundles
+@inject ItemTradeService Trade
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -156,6 +157,55 @@ else
             }
         </form>
     </div>
+
+    @if (_trade is { } trade)
+    {
+        var tradeEditable = trade.CanEdit;
+        <h2 style="margin-top: 20px">@L("Торговля и маркировка")</h2>
+        <div class="panel">
+            <form @onsubmit="SaveTradeAsync">
+                <div class="grid">
+                    <label>
+                        @L("Признак предмета расчёта (чек)")
+                        <select @bind="_tradeForm.Subject" disabled="@(!tradeEditable || _item.Type == ItemType.Service)">
+                            @if (_item.Type == ItemType.Service)
+                            {
+                                <option value="@PaymentSubject.Service">@L("Услуга")</option>
+                            }
+                            else
+                            {
+                                <option value="@PaymentSubject.Goods">@L("Товар")</option>
+                                <option value="@PaymentSubject.ExcisableGoods">@L("Подакцизный товар")</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_item.Type != ItemType.Service)
+                    {
+                        <label class="inline"><input type="checkbox" @bind="_tradeForm.IsMarked" disabled="@(!tradeEditable)" /> @L("Маркируемый товар («Честный ЗНАК»)")</label>
+                        <label>
+                            @L("Вид продукции")
+                            <select @bind="_tradeForm.Tracking" disabled="@(!tradeEditable || !_tradeForm.IsMarked)">
+                                @foreach (var t in Marking.All.Where(t => t != TrackingType.None))
+                                {
+                                    <option value="@t">@TrackingName(t)</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("GTIN (14 цифр)") <input @bind="_tradeForm.Gtin" inputmode="numeric" maxlength="16" placeholder="04601234567893" disabled="@(!tradeEditable)" /></label>
+                    }
+                    @if (trade.CanSeePrices)
+                    {
+                        <label>@L("Минимальная цена продажи") <input @bind="_tradeForm.MinPrice" inputmode="decimal" disabled="@(!tradeEditable)" /></label>
+                    }
+                </div>
+                <p class="muted small">@L("Коды маркировки (DataMatrix), ЭДО и ГИС МТ подключаются отдельно; здесь — признак, вид продукции и GTIN из Национального каталога.")</p>
+                @if (tradeEditable)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить торговые сведения")</button></div>
+                }
+            </form>
+        </div>
+    }
 
     @if (_bundle is { } bundle)
     {
@@ -378,9 +428,37 @@ else
                 <div class="actions">
                     <button type="submit" disabled="@_busy">@L("Сохранить цены")</button>
                     <a href="catalog/settings" class="muted">@L("Виды цен")</a>
+                    @if (CurrentAccess.Has(Permissions.PriceEdit))
+                    {
+                        <a href="catalog/revaluation" class="muted">@L("Массовая переоценка")</a>
+                    }
                 </div>
             }
         </form>
+        @if (_trade is { History.Count: > 0 } withHistory)
+        {
+            <details class="history">
+                <summary>@L("История цен") (@withHistory.History.Count)</summary>
+                <div class="scroll">
+                    <table class="compact">
+                        <thead><tr><th>@L("Когда")</th><th>@L("Вид цены")</th><th class="num">@L("Было")</th><th class="num">@L("Стало")</th><th class="opt">@L("Кто")</th><th class="opt">@L("Откуда")</th></tr></thead>
+                        <tbody>
+                            @foreach (var h in withHistory.History)
+                            {
+                                <tr>
+                                    <td>@h.ChangedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>@h.PriceType</td>
+                                    <td class="num">@(h.OldPrice is { } o ? Amounts.Format(o) : "—")</td>
+                                    <td class="num">@(h.NewPrice is { } n ? Amounts.Format(n) : "—")</td>
+                                    <td>@(h.User ?? "—")</td>
+                                    <td>@SourceName(h.Source)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        }
     }
 
     @if (_variants is { Parent: null } variants && _item.IsStocked)
@@ -457,6 +535,41 @@ else
     private ItemCardDto? _item;
     private ItemVariantsDto? _variants;
     private BundleDto? _bundle;
+    private ItemTradeDto? _trade;
+    private TradeForm _tradeForm = new();
+
+    private sealed class TradeForm
+    {
+        public PaymentSubject Subject { get; set; } = PaymentSubject.Goods;
+        public bool IsMarked { get; set; }
+        public TrackingType Tracking { get; set; } = TrackingType.Clothes;
+        public string? Gtin { get; set; }
+        public string? MinPrice { get; set; }
+    }
+
+    private static string TrackingName(TrackingType t) => t switch
+    {
+        TrackingType.Clothes => L("Предметы одежды (лёгкая промышленность)"),
+        TrackingType.Linens => L("Постельное, столовое и туалетное бельё"),
+        TrackingType.Shoes => L("Обувь"),
+        _ => L("Другой вид маркировки"),
+    };
+
+    private static string SourceName(PriceChangeSource s) => s switch
+    {
+        PriceChangeSource.Revaluation => L("переоценка"),
+        PriceChangeSource.Import => L("загрузка из Excel"),
+        PriceChangeSource.External => L("внешняя система"),
+        PriceChangeSource.Modification => L("создание модификации"),
+        _ => L("вручную"),
+    };
+
+    private Task SaveTradeAsync() => RunAsync(async () =>
+    {
+        var f = _tradeForm;
+        await Trade.SaveAsync(Id, new ItemTradeDetails(f.Subject, f.IsMarked, f.IsMarked ? f.Tracking : TrackingType.None, f.Gtin,
+            Decimals.Parse(f.MinPrice, L("Минимальная цена продажи"))), _item!.RowVersion);
+    }, L("Торговые сведения сохранены."));
     private IReadOnlyList<BundleComponentOptionDto> _componentOptions = [];
     private string? _component;
     private string? _componentQty = "1";
@@ -531,6 +644,13 @@ else
         _characteristics = await Modifications.CharacteristicsAsync(includeArchived: true);
         _values = _variants.Values.ToDictionary(v => v.CharacteristicId, v => (string?)v.Value);
         _bundle = _item.Type == ItemType.Bundle ? await Bundles.GetAsync(Id) : null;
+        _trade = await Trade.GetAsync(Id);
+        _tradeForm = new TradeForm
+        {
+            Subject = _trade.Trade.PaymentSubject, IsMarked = _trade.Trade.IsMarked,
+            Tracking = _trade.Trade.TrackingType == TrackingType.None ? TrackingType.Clothes : _trade.Trade.TrackingType,
+            Gtin = _trade.Trade.Gtin, MinPrice = _trade.Trade.MinPrice is { } mp ? Amounts.Input(mp) : null,
+        };
         _componentOptions = _bundle?.CanEdit == true ? await Bundles.ComponentOptionsAsync() : [];
     }
 

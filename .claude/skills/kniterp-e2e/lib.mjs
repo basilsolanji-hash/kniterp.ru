@@ -44,16 +44,25 @@ export async function ownerSession(width = 1440) {
   await page.locator('input[type=password]').first().fill(saved.password);
   await page.getByRole('button', { name: 'Войти' }).click();
   await page.waitForLoadState('networkidle');
+  // Код TOTP одноразовый: приложение отклоняет повтор в том же 30-секундном окне — ждём новое окно после прошлого входа.
+  const freshStep = async () => {
+    const step = () => Math.floor(Date.now() / 30000);
+    while (saved.lastStep && step() <= saved.lastStep) await page.waitForTimeout(1000);
+    saved.lastStep = step();
+  };
   if (page.url().includes('setup-2fa')) {
     saved.key = (await page.locator('.key').innerText()).replace(/\s/g, '');
+    await freshStep();
     await page.locator('input[autocomplete=one-time-code]').fill(totp(saved.key));
     await page.getByRole('button', { name: 'Подключить и войти' }).click();
   } else if (page.url().includes('login-2fa')) {
+    await freshStep();
     await page.locator('input[autocomplete=one-time-code]').fill(totp(saved.key));
     await page.getByRole('button', { name: 'Подтвердить' }).click();
   }
   await page.waitForLoadState('networkidle');
   fs.writeFileSync(state, JSON.stringify(saved));
+  if (page.url().includes('/account/')) throw new Error('вход не выполнен: ' + page.url());
   return { browser, ctx, page };
 }
 
@@ -76,4 +85,9 @@ export async function ready(page) {
   await page.waitForLoadState('networkidle');
   await page.waitForFunction(() => !document.querySelector('.loading-progress') && !!window.Blazor, null, { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(300);
+}
+
+/** Текст элемента с обычными пробелами: в ru-RU разделитель тысяч — неразрывный пробел. */
+export async function plainText(locator) {
+  return (await locator.innerText()).replace(/[\u00a0\u202f]/g, ' ');
 }

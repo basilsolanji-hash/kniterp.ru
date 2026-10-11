@@ -129,7 +129,7 @@ public sealed class CatServicesTests(SqlTestHost host) : IClassFixture<SqlTestHo
         await using (var db = host.NewDb())
         {
             var ex = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(
-                $"UPDATE [kniterp].[items] SET [Type] = 10, [VatRateId] = {f.Vat} WHERE [Id] = {f.Sweater}"));
+                $"UPDATE [kniterp].[items] SET [Type] = 10, [PaymentSubject] = 4, [VatRateId] = {f.Vat} WHERE [Id] = {f.Sweater}"));
             Assert.Equal(51300, ex.Number);
             ex = await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(
                 $"UPDATE [kniterp].[items] SET [VatRateId] = NULL WHERE [Id] = {f.Service}"));

@@ -273,6 +273,43 @@ public sealed class Item
 
     public bool IsModification => ParentItemId is not null;
 
+    /// <summary>Признак предмета расчёта для чека (54-ФЗ, D305): у услуги всегда «услуга».</summary>
+    public PaymentSubject PaymentSubject { get; private set; } = PaymentSubject.Goods;
+
+    /// <summary>Маркируемый товар «Честного ЗНАКа» (D305): вид продукции и GTIN-14; коды маркировки — отдельное ТЗ.</summary>
+    public bool IsMarked { get; private set; }
+
+    public TrackingType TrackingType { get; private set; }
+    public string? Gtin { get; private set; }
+
+    /// <summary>Минимальная цена продажи (D305): цена ниже — предупреждение в заказе.</summary>
+    public decimal? MinPrice { get; private set; }
+
+    public ItemTradeDetails Trade => new(PaymentSubject, IsMarked, TrackingType, Gtin, MinPrice);
+
+    /// <summary>Предмет расчёта, маркировка и минимальная цена (D305). Возвращает изменения для журнала.</summary>
+    public IReadOnlyList<FieldChange> SetTrade(ItemTradeDetails details)
+    {
+        if (IsArchived)
+        {
+            throw new BusinessRuleException("catalog.archived", "Позиция в архиве. Сначала верните её из архива.");
+        }
+
+        var d = TradeRules.Normalize(Type, details);
+        (string Field, string? Before, string? After)[] pairs =
+        [
+            ("Предмет расчёта", TradeRules.PaymentSubjectName(PaymentSubject), TradeRules.PaymentSubjectName(d.PaymentSubject)),
+            ("Маркировка", IsMarked ? Marking.Name(TrackingType) : null, d.IsMarked ? Marking.Name(d.TrackingType) : null),
+            ("GTIN", Gtin, d.Gtin), ("Минимальная цена", TradeRules.Format(MinPrice), TradeRules.Format(d.MinPrice)),
+        ];
+        PaymentSubject = d.PaymentSubject;
+        IsMarked = d.IsMarked;
+        TrackingType = d.TrackingType;
+        Gtin = d.Gtin;
+        MinPrice = d.MinPrice;
+        return pairs.Where(p => p.Before != p.After).Select(p => new FieldChange(p.Field, p.Before, p.After)).ToList();
+    }
+
     public bool IsArchived { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime? ArchivedAtUtc { get; private set; }
@@ -349,6 +386,7 @@ public sealed class Item
         item.VariantKey = variantKey;
         item.VatRateId = parent.VatRateId;
         item.SetDetails(parent.Details);
+        item.SetTrade(parent.Trade with { Gtin = null }); // D305: GTIN у каждой модификации свой
         return item;
     }
 
@@ -367,6 +405,7 @@ public sealed class Item
     {
         var item = new Item { OrganizationId = organizationId, CreatedAtUtc = nowUtc };
         item.Set(code, name, type, unitId, description);
+        item.PaymentSubject = ItemTypes.DefaultPaymentSubject(type);
         return item;
     }
 
@@ -415,6 +454,19 @@ public sealed class Item
             WeightKg = service ? null : WeightKg;
             VolumeM3 = service ? null : VolumeM3;
             MinStock = null;
+        }
+
+        // D305: у услуги предмет расчёта «услуга» и нет маркировки; услуга, ставшая товаром, — «товар».
+        if (Type == ItemType.Service && (PaymentSubject != PaymentSubject.Service || IsMarked || Gtin is not null))
+        {
+            PaymentSubject = PaymentSubject.Service;
+            IsMarked = false;
+            TrackingType = TrackingType.None;
+            Gtin = null;
+        }
+        else if (Type != ItemType.Service && PaymentSubject == PaymentSubject.Service)
+        {
+            PaymentSubject = PaymentSubject.Goods;
         }
 
         void Add(string field, string? b, string? a)

@@ -14,7 +14,7 @@ a = ap.parse_args()
 root = pathlib.Path(subprocess.check_output(['git', '-C', str(pathlib.Path(__file__).parent), 'rev-parse', '--show-toplevel'], text=True).strip())
 loc = root / 'kniterp' / 'src' / 'KnitErp.Web' / 'Localization'
 new = json.load(open(a.file, encoding='utf-8')) if a.file else {}
-ph = re.compile(r'\{\d+\}')
+ph = re.compile(r'\{\d+(?::[^}]*)?\}')
 for key, tr in new.items():
     for lang in ('be', 'kk', 'uz'):
         if lang not in tr or not tr[lang].strip():

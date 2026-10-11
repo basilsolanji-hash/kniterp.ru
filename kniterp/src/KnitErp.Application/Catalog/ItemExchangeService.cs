@@ -388,7 +388,8 @@ public sealed class ItemExchangeService(
             foreach (var (typeId, price) in prices)
             {
                 var old = current.GetValueOrDefault(typeId);
-                if (old?.Price == price)
+                var before = old?.Price; // до изменения: old.Set меняет цену на месте
+                if (before == price)
                 {
                     continue;
                 }
@@ -406,7 +407,9 @@ public sealed class ItemExchangeService(
                     old.Set(price.Value);
                 }
 
-                Audit(ctx, AuditActions.CatalogChanged, nameof(Item), id, old?.Price.ToString("0.00##", CultureInfo.InvariantCulture),
+                db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, item.Id, typeId, before, price, clock.UtcNow, ctx.UserId,
+                    PriceChangeSource.Import)); // D305
+                Audit(ctx, AuditActions.CatalogChanged, nameof(Item), id, before?.ToString("0.00##", CultureInfo.InvariantCulture),
                     price?.ToString("0.00##", CultureInfo.InvariantCulture), "Импорт: цена");
             }
         }

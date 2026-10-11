@@ -35,6 +35,9 @@ public static class Permissions
     /// <summary>D302 (сессия № 4): состав комплектов.</summary>
     public const string BundleEdit = "catalog.bundle.edit";
 
+    /// <summary>D306 (сессия № 4): массовая переоценка. Через API не выдаётся.</summary>
+    public const string PriceEdit = "catalog.price.edit";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -64,6 +67,7 @@ public static class Permissions
         [SalesView] = "Продажи: просмотр",
         [SalesEdit] = "Продажи: заказы покупателей и оплаты",
         [BundleEdit] = "Номенклатура: состав комплектов",
+        [PriceEdit] = "Цены: переоценка",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;

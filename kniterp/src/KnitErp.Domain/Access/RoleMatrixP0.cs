@@ -76,6 +76,8 @@ public static class RoleMatrixP0
         (Permissions.SalesEdit,               [Full, Full, None, None, None, Full, None, None]),
         // Допущение D302 (каталог): состав комплектов меняют те, кто меняет справочники организации целиком.
         (Permissions.BundleEdit,              [Full, Full, None, None, None, None, None, None]),
+        // Допущение D306: массовую переоценку проводят Владелец и Администратор (цены видят — право «Цены и суммы»).
+        (Permissions.PriceEdit,               [Full, Full, None, None, None, None, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();

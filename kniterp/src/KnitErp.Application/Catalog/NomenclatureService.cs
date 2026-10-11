@@ -282,7 +282,8 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         {
             var type = types.GetValueOrDefault(typeId) ?? throw new NotFoundException("Вид цены");
             var existing = current.GetValueOrDefault(typeId);
-            if (existing?.Price == price)
+            var before = existing?.Price; // до изменения: existing.Set меняет цену на месте
+            if (before == price)
             {
                 continue;
             }
@@ -308,7 +309,9 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
                 existing.Set(price.Value);
             }
 
-            Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, existing?.Price.ToString("0.00##"), price?.ToString("0.00##"),
+            db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, itemId, typeId, before, price, clock.UtcNow, ctx.UserId,
+                PriceChangeSource.Manual)); // D305: история цен
+            Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, before?.ToString("0.00##"), price?.ToString("0.00##"),
                 $"{item.Code}: {type.Name}");
         }
 

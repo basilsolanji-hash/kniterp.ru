@@ -24,6 +24,10 @@ else
         <h1>@L("Номенклатура")</h1>
         <div class="actions">
             <a class="button secondary" href="catalog/settings">@L("Группы, цены, доп. поля, справочники")</a>
+            @if (CurrentAccess.Has(Permissions.PriceEdit) && CurrentAccess.Has(Permissions.PriceView))
+            {
+                <a class="button secondary" href="catalog/revaluation">@L("Массовая переоценка")</a>
+            }
             @if (_list.CanEdit && _mode == Mode.None)
             {
                 <button type="button" @onclick="OpenCreate" disabled="@_busy">@L("Добавить позицию")</button>

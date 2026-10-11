@@ -41,6 +41,8 @@ public static class DependencyInjection
         services.AddScoped<Catalog.NomenclatureService>();
         services.AddScoped<Catalog.ModificationService>();
         services.AddScoped<Catalog.BundleService>(); // D302 (сессия 4)
+        services.AddScoped<Catalog.ItemTradeService>(); // D305 (сессия 4)
+        services.AddScoped<Catalog.RevaluationService>(); // D306 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
         services.AddScoped<Finance.SettlementStatementService>();
