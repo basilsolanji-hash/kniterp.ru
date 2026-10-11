@@ -78,6 +78,9 @@ public static class AuditActions
     public const string AdminRoleGranted = "access.admin_role.granted";
     public const string PermissionGranted = "access.permission.granted";
     public const string AssignmentRevoked = "access.assignment.revoked";
+    public const string PermissionDenied = "access.permission.denied";
+    public const string RoleCreated = "access.role.created";
+    public const string RoleChanged = "access.role.changed";
     public const string UserInvited = "access.user.invited";
     public const string UserBlocked = "access.user.blocked";
     public const string UserUnblocked = "access.user.unblocked";

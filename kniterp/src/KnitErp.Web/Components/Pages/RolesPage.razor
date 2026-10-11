@@ -1,64 +1,206 @@
 @page "/roles"
 @using KnitErp.Web.Components.Shared
 @inject UserAccessService Access
+@inject RoleService Roles
 
 <PageTitle>@L("Роли и права") — knitERP</PageTitle>
 
+@* D112: свои роли с правами по группам; системные роли — шаблоны, их можно взять за основу. Матрица — для сравнения ролей. *@
 @if (_denied is not null)
 {
     <AccessDenied Message="@_denied" />
 }
-else if (_matrix is null)
+else if (_roles is null)
 {
     <p class="muted">@L("Загрузка…")</p>
 }
 else
 {
-    <h1>@L("Роли и права · матрица P0")</h1>
-    <p class="muted">@L("Столбец вашей роли подсвечен. Права проверяются на сервере, запрет сильнее разрешения.")</p>
-    <div class="legend">
-        <span><b>@L("Д")</b> @L("да")</span><span><b>@L("О")</b> @L("только своя область")</span><span><b>@L("Ч")</b> @L("только чтение")</span>
-        <span><b>@L("П")</b> @L("по отдельному праву")</span><span><b>@L("С")</b> @L("только своё")</span><span><b>—</b> @L("нет")</span>
+    <div class="page-head">
+        <h1>@L("Роли и права")</h1>
+        @if (CanManage && _edit is null)
+        {
+            <button type="button" @onclick="StartCreate" disabled="@_busy">@L("Создать роль")</button>
+        }
     </div>
-    <div class="scroll">
-        <table class="matrix">
-            <thead>
-                <tr>
-                    <th>@L("Действие")</th>
-                    @foreach (var r in _matrix.Roles)
-                    {
-                        <th class="@Mine(r.Code)">@L(r.Name)</th>
-                    }
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var row in _matrix.Rows)
+    <p class="muted">@L("Роль — набор прав для должности. Системные роли — готовые шаблоны: их нельзя менять, но можно создать свою роль на их основе. Изменение роли сразу действует для всех, у кого она есть. Отдельному человеку можно добавить особое право или запрет — в «Пользователях», кнопка «Права».")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="@(_tab == 0 ? "tab active" : "tab secondary")" aria-selected="@(_tab == 0 ? "true" : "false")" @onclick="() => _tab = 0">@L("Роли")</button>
+        <button type="button" role="tab" class="@(_tab == 1 ? "tab active" : "tab secondary")" aria-selected="@(_tab == 1 ? "true" : "false")" @onclick="OpenMatrixAsync">@L("Матрица прав")</button>
+    </div>
+
+    @if (_edit is not null)
+    {
+        <form class="panel role-editor" @onsubmit="SaveAsync">
+            <h2>@(_edit.Id == 0 ? L("Новая роль") : L("Роль «{0}»", _edit.Name ?? ""))</h2>
+            <div class="grid">
+                <label>@L("Название") <input @bind="_edit.Name" maxlength="150" required placeholder="@L("Например: Мастер цеха")" /></label>
+                <label>@L("Для кого и что даёт") <input @bind="_edit.Description" maxlength="300" placeholder="@L("Необязательно")" /></label>
+            </div>
+            <div class="role-tools">
+                <input type="search" @bind="_filter" @bind:event="oninput" placeholder="@L("Найти право…")" aria-label="@L("Найти право")" />
+                <span class="muted">@L("Выбрано {0} из {1}", _edit.Codes.Count, _catalog.Sum(g => g.Items.Count(i => !i.OwnerOnly)))</span>
+            </div>
+            <div class="perm-groups">
+                @foreach (var g in _catalog)
                 {
-                    <tr>
-                        <td>@L(row.Label)<div class="muted">@row.PermissionCode</div></td>
-                        @for (var i = 0; i < row.Levels.Count; i++)
+                    var items = g.Items.Where(i => !i.OwnerOnly && Matches(i)).ToList();
+                    if (items.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    var on = items.Count(i => _edit.Codes.Contains(i.Code));
+                    <fieldset class="perm-group">
+                        <legend>
+                            <label class="perm-all">
+                                <input type="checkbox" checked="@(on == items.Count)" disabled="@(!items.Any(Allowed))"
+                                       @onchange="e => ToggleGroup(items, e.Value is true)" />
+                                <b>@L(g.Name)</b> <span class="muted small">@on / @items.Count</span>
+                            </label>
+                        </legend>
+                        @foreach (var i in items)
                         {
-                            <td class="@Mine(_matrix.Roles[i].Code)">@row.Levels[i].Symbol()</td>
+                            var allowed = Allowed(i);
+                            <label class="switch @(allowed ? null : "locked")" title="@(allowed ? null : L("Нельзя выдать право выше своего или административное — только Владелец"))">
+                                <input type="checkbox" role="switch" checked="@_edit.Codes.Contains(i.Code)" disabled="@(!allowed)"
+                                       @onchange="e => Toggle(i.Code, e.Value is true)" />
+                                <span class="switch-ui" aria-hidden="true"></span>
+                                <span>@L(i.Label)
+                                    @if (i.Administrative) { <span class="tag warn">@L("административное")</span> }</span>
+                            </label>
+                        }
+                    </fieldset>
+                }
+            </div>
+            @if (_edit.Users > 0)
+            {
+                <p class="muted small">@L("Роль выдана пользователям: {0}. Изменения подействуют для них сразу.", _edit.Users)</p>
+            }
+            <div class="actions">
+                <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                <button type="button" class="secondary" @onclick="() => _edit = null" disabled="@_busy">@L("Отмена")</button>
+            </div>
+        </form>
+    }
+
+    @if (_tab == 0)
+    {
+        <div class="role-cards">
+            @foreach (var r in _roles)
+            {
+                <article class="role-card @(r.IsArchived ? "archived" : null) @(CurrentAccess.RoleCodes.Contains(r.Code) ? "mine" : null)" @key="r.Id">
+                    <header>
+                        <b>@(r.IsSystem ? L(r.Name) : r.Name)</b>
+                        @if (r.IsSystem) { <span class="tag">@L("системная")</span> } else { <span class="tag info">@L("своя")</span> }
+                        @if (r.IsAdministrative) { <span class="tag warn">@L("административная")</span> }
+                        @if (r.IsArchived) { <span class="tag">@L("в архиве")</span> }
+                    </header>
+                    @if (r.Description is not null) { <p class="muted small">@r.Description</p> }
+                    <p class="small">@L("Прав: {0}", r.PermissionCodes.Count) · @L("Пользователей: {0}", r.Users)</p>
+                    <p class="muted small role-perms">@string.Join(" · ", r.PermissionCodes.Take(6).Select(c => L(Describe(c))))@(r.PermissionCodes.Count > 6 ? " …" : "")</p>
+                    @if (CanManage)
+                    {
+                        <div class="actions">
+                            @if (!r.IsSystem && !r.IsArchived)
+                            {
+                                <button type="button" class="secondary" @onclick="() => StartEdit(r)" disabled="@_busy">@L("Изменить")</button>
+                            }
+                            @if (!r.IsArchived)
+                            {
+                                <button type="button" class="secondary" @onclick="() => CopyAsync(r)" disabled="@_busy">@(r.IsSystem ? L("Создать на основе") : L("Копия"))</button>
+                            }
+                            @if (!r.IsSystem && !r.IsArchived)
+                            {
+                                <ConfirmButton Class="secondary" Disabled="_busy" Question="@L("Отправить роль в архив?")" OnConfirm="() => ArchiveAsync(r)">@L("В архив")</ConfirmButton>
+                            }
+                            @if (r.IsArchived)
+                            {
+                                <button type="button" class="secondary" @onclick="() => RestoreAsync(r)" disabled="@_busy">@L("Вернуть")</button>
+                            }
+                        </div>
+                    }
+                </article>
+            }
+        </div>
+        @if (!_showArchived && CanManage)
+        {
+            <p><button type="button" class="link" @onclick="ShowArchivedAsync" disabled="@_busy">@L("Показать роли в архиве")</button></p>
+        }
+    }
+    else if (_matrix is not null)
+    {
+        <div class="legend">
+            <span><b>@L("Д")</b> @L("да")</span><span><b>@L("О")</b> @L("только своя область")</span><span><b>@L("Ч")</b> @L("только чтение")</span>
+            <span><b>@L("П")</b> @L("по отдельному праву")</span><span><b>@L("С")</b> @L("только своё")</span><span><b>—</b> @L("нет")</span>
+        </div>
+        <div class="scroll">
+            <table class="matrix">
+                <thead>
+                    <tr>
+                        <th>@L("Действие")</th>
+                        @foreach (var r in _matrix.Roles)
+                        {
+                            <th class="@Mine(r.Code)">@L(r.Name)</th>
                         }
                     </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+                </thead>
+                <tbody>
+                    @foreach (var row in _matrix.Rows)
+                    {
+                        <tr>
+                            <td>@L(row.Label)<div class="muted">@row.PermissionCode</div></td>
+                            @for (var i = 0; i < row.Levels.Count; i++)
+                            {
+                                <td class="@Mine(_matrix.Roles[i].Code)">@row.Levels[i].Symbol()</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 }
 
 @code {
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
+    private sealed class RoleForm
+    {
+        public long Id { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public HashSet<string> Codes { get; set; } = [];
+        public byte[] RowVersion { get; set; } = [];
+        public int Users { get; set; }
+    }
+
+    private IReadOnlyList<RoleCardDto>? _roles;
     private RoleMatrixDto? _matrix;
+    private readonly IReadOnlyList<PermissionGroupDto> _catalog = RoleService.Catalog();
+    private RoleForm? _edit;
+    private string _filter = string.Empty;
+    private int _tab;
+    private bool _busy;
+    private bool _showArchived;
     private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private bool CanManage => CurrentAccess.Has(Permissions.UserManage);
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            _matrix = await Access.GetRoleMatrixAsync();
+            _roles = await Roles.ListAsync();
         }
         catch (AccessDeniedException ex)
         {
@@ -66,5 +208,115 @@ else
         }
     }
 
+    private static string Describe(string code) => Permissions.Describe(code);
+
+    /// <summary>Право можно отметить, если оно есть у самого пользователя; административное — только у Владельца.</summary>
+    private bool Allowed(PermissionItemDto item) =>
+        CurrentAccess.Has(Permissions.AdminGrant) || (!item.Administrative && CurrentAccess.Has(item.Code));
+
+    private bool Matches(PermissionItemDto item) =>
+        _filter.Length == 0 || L(item.Label).Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private void Toggle(string code, bool on)
+    {
+        if (on) { _edit!.Codes.Add(code); } else { _edit!.Codes.Remove(code); }
+    }
+
+    private void ToggleGroup(IEnumerable<PermissionItemDto> items, bool on)
+    {
+        foreach (var i in items.Where(Allowed))
+        {
+            Toggle(i.Code, on);
+        }
+    }
+
+    private void StartCreate()
+    {
+        _edit = new RoleForm();
+        _filter = string.Empty;
+    }
+
+    private void StartEdit(RoleCardDto r)
+    {
+        _edit = new RoleForm { Id = r.Id, Name = r.Name, Description = r.Description, Codes = r.PermissionCodes.ToHashSet(), RowVersion = r.RowVersion, Users = r.Users };
+        _filter = string.Empty;
+    }
+
+    private async Task OpenMatrixAsync()
+    {
+        _tab = 1;
+        if (_matrix is null)
+        {
+            await RunAsync(async () => _matrix = await Access.GetRoleMatrixAsync(), null, reload: false);
+        }
+    }
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        if (_edit!.Id == 0)
+        {
+            await Roles.CreateAsync(_edit.Name, _edit.Description, _edit.Codes);
+        }
+        else
+        {
+            await Roles.UpdateAsync(_edit.Id, _edit.Name, _edit.Description, _edit.Codes, _edit.RowVersion);
+        }
+
+        _edit = null;
+    }, L("Роль сохранена."));
+
+    private Task CopyAsync(RoleCardDto r) => RunAsync(async () =>
+    {
+        var id = await Roles.CopyAsync(r.Id);
+        _roles = await Roles.ListAsync(_showArchived);
+        if (_roles.FirstOrDefault(x => x.Id == id) is { } created)
+        {
+            StartEdit(created);
+        }
+    }, L("Создана роль на основе «{0}» — отредактируйте права и сохраните.", r.IsSystem ? L(r.Name) : r.Name), reload: false);
+
+    private Task ArchiveAsync(RoleCardDto r) => RunAsync(() => Roles.ArchiveAsync(r.Id, r.RowVersion), L("Роль «{0}» в архиве.", r.Name));
+
+    private Task RestoreAsync(RoleCardDto r) => RunAsync(() => Roles.RestoreAsync(r.Id, r.RowVersion), L("Роль «{0}» снова действует.", r.Name));
+
+    private Task ShowArchivedAsync()
+    {
+        _showArchived = true;
+        return RunAsync(() => Task.CompletedTask, null);
+    }
+
     private string? Mine(string roleCode) => CurrentAccess.RoleCodes.Contains(roleCode) ? "mine" : null;
+
+    /// <summary>Одна операция за раз, затем свежий список: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? success, bool reload = true)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            if (reload)
+            {
+                _roles = await Roles.ListAsync(_showArchived);
+                _matrix = _tab == 1 ? await Access.GetRoleMatrixAsync() : null;
+            }
+
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 }

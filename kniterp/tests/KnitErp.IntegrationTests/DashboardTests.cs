@@ -171,8 +171,8 @@ public sealed class DashboardTests(SqlTestHost host) : IClassFixture<SqlTestHost
         await s.Personal.SaveDashboardLayoutAsync(new DashboardLayout(
             [DashboardBlocks.Reference, "hack", DashboardBlocks.Kpi], [DashboardBlocks.Kpi, DashboardBlocks.Money, DashboardBlocks.Attention, "hack"]));
         var data = await s.Dashboard.GetAsync(refresh: true);
-        // Блок, которого не было в сохранённой настройке (быстрые действия, D108), встаёт на своё место по умолчанию — наверх.
-        Assert.Equal([DashboardBlocks.Actions, DashboardBlocks.Reference], data.Layout!.Order.Take(2));
+        // Блоки, которых не было в сохранённой настройке (динамика D113, быстрые действия D108), встают на свои места по умолчанию — наверх.
+        Assert.Equal([DashboardBlocks.Charts, DashboardBlocks.Actions, DashboardBlocks.Reference], data.Layout!.Order.Take(3));
         Assert.DoesNotContain("hack", data.Layout.Order);
         Assert.Equal([DashboardBlocks.Kpi, DashboardBlocks.Money, DashboardBlocks.Attention], data.Layout.Hidden);
         Assert.Null(data.Finance!.Accounts);
