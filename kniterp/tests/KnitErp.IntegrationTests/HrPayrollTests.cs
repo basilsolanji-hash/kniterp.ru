@@ -236,6 +236,47 @@ public sealed class HrRiskTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     }
 
     [SqlFact]
+    public async Task Output_corrected_after_calculation_blocks_approval_and_is_flagged_after_approval()
+    {
+        // D217: производство исправило выработку после расчёта — утвердить нельзя; после утверждения — только предупреждение.
+        var org = await host.CreateOrganizationAsync();
+        var (dep, _, emp) = await host.HireAsync(org, hiredOn: new DateOnly(2026, 11, 1));
+        var rows = new List<WorkOutputDto> { new(emp, new DateOnly(2026, 12, 3), 1, "Вязание", null, 10, "шт") };
+        var output = new ListWorkOutputSource(rows);
+        await using var hr = host.Hr(org.OwnerUserId, org.OrganizationId, output);
+        await hr.Payroll.AddRateAsync(new PieceRateCommand(1, "Вязание", null, "шт", 50m, new DateOnly(2026, 12, 1)));
+        var ts = await hr.Timesheets.CreateAsync(dep, 2026, 12);
+        await hr.Timesheets.CloseAsync(ts, (await hr.Timesheets.GetAsync(dep, 2026, 12)).RowVersion!);
+        await hr.Payroll.CalculateAsync(2026, 12);
+        Assert.False((await hr.Payroll.GetAsync(2026, 12)).OutputChanged);
+
+        rows[0] = rows[0] with { Quantity = 12 };
+        var dto = await hr.Payroll.GetAsync(2026, 12);
+        Assert.True(dto.OutputChanged);
+        Assert.Equal("hr.payroll.output_changed", (await Assert.ThrowsAsync<BusinessRuleException>(() => hr.Payroll.ApproveAsync(dto.Id!.Value, dto.RowVersion!))).Code);
+
+        rows.Reverse(); // порядок строк источника не важен
+        await hr.Payroll.CalculateAsync(2026, 12);
+        dto = await hr.Payroll.GetAsync(2026, 12);
+        Assert.False(dto.OutputChanged);
+        Assert.Equal(600m, dto.Total);
+        await hr.Payroll.ApproveAsync(dto.Id!.Value, dto.RowVersion!);
+
+        rows.Add(new WorkOutputDto(emp, new DateOnly(2026, 12, 4), 1, "Вязание", null, 3, "шт"));
+        dto = await hr.Payroll.GetAsync(2026, 12);
+        Assert.True(dto.OutputChanged); // утверждённые суммы не меняются, страница предупреждает
+        Assert.Equal(600m, dto.Total);
+        Assert.NotEmpty((await hr.PayrollExport.ExportAsync(dto.Id!.Value)).Content);
+    }
+
+    /// <summary>Источник выработки, который тест меняет между вызовами — как производство, исправившее отметки.</summary>
+    private sealed class ListWorkOutputSource(List<WorkOutputDto> rows) : IWorkOutputSource
+    {
+        public Task<IReadOnlyList<WorkOutputDto>> OutputAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<WorkOutputDto>>(rows.Where(r => r.Date >= from && r.Date <= to).ToList());
+    }
+
+    [SqlFact]
     public async Task Tag_and_discussion_constraints_reserve_ranges_for_all_modules()
     {
         // D202: 1–10 — общие объекты, 11–19 — производство, 20–29 — «Сотрудники»; модули не переписывают ограничение друг друга.

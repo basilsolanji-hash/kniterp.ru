@@ -327,6 +327,7 @@ internal sealed class PayrollRunConfiguration : IEntityTypeConfiguration<Payroll
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.OutputFingerprint).HasColumnType("binary(32)");
         b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.From);
         b.Ignore(x => x.To);

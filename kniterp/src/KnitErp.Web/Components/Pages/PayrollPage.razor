@@ -78,6 +78,14 @@ else
                 <a class="button secondary" href="hr/payroll/@d.Id/zup.xml" download data-enhance-nav="false">@L("Выгрузить в 1С: ЗУП")</a>
             }
         </div>
+        @if (d.OutputChanged)
+        {
+            <div class="flash error" role="alert">
+                @(d.Status == PayrollStatus.Approved
+                    ? L("Выработка месяца изменилась после утверждения: утверждённые суммы не меняются — разницу учтите перерасчётом в следующем месяце.")
+                    : L("Выработка месяца изменилась после расчёта: пересчитайте перед утверждением."))
+            </div>
+        }
 
         @if (d.Id is null)
         {

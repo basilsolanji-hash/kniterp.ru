@@ -160,6 +160,9 @@ public sealed class PayrollRun
 
     public DateTime CalculatedAtUtc { get; private set; }
     public long CalculatedByUserId { get; private set; }
+
+    /// <summary>SHA-256 выработки месяца на момент расчёта (D217): исправление выработки после расчёта видно при утверждении и выгрузке.</summary>
+    public byte[]? OutputFingerprint { get; private set; }
     public long? ApprovedByUserId { get; private set; }
     public DateTime? ApprovedAtUtc { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
@@ -181,13 +184,17 @@ public sealed class PayrollRun
         };
     }
 
-    public void Recalculated(bool timesheetsClosed, long userId, DateTime nowUtc)
+    public void Recalculated(bool timesheetsClosed, byte[] outputFingerprint, long userId, DateTime nowUtc)
     {
         EnsureDraft();
         TimesheetsClosed = timesheetsClosed;
+        OutputFingerprint = outputFingerprint;
         CalculatedByUserId = userId;
         CalculatedAtUtc = nowUtc;
     }
+
+    /// <summary>Выработка совпадает с той, по которой считали. Старые расчёты без отпечатка считаются совпадающими.</summary>
+    public bool OutputMatches(byte[] currentFingerprint) => OutputFingerprint is null || OutputFingerprint.AsSpan().SequenceEqual(currentFingerprint);
 
     /// <summary>Утверждение: только по закрытым табелям — иначе часы ещё могут измениться.</summary>
     public void Approve(long userId, DateTime nowUtc)

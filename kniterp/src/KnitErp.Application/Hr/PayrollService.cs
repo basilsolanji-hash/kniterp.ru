@@ -21,7 +21,7 @@ public sealed record PayrollEmployeeDto(long EmployeeId, string PersonnelNumber,
 
 public sealed record PayrollDto(
     long? Id, int Year, int Month, PayrollStatus? Status, bool TimesheetsClosed, DateTime? CalculatedAtUtc, IReadOnlyList<PayrollEmployeeDto> Employees,
-    bool CanCalculate, byte[]? RowVersion)
+    bool CanCalculate, byte[]? RowVersion, bool OutputChanged = false)
 {
     public decimal Total => Employees.Sum(e => e.Total);
 }
@@ -144,9 +144,13 @@ public sealed class PayrollService(
             }).ToList();
         }
 
+        var outputChanged = run is not null && !run.OutputMatches(await OutputFingerprintAsync(ctx.OrganizationId, run, ct));
         return new PayrollDto(run?.Id, year, month, run?.Status, run?.TimesheetsClosed ?? false, run?.CalculatedAtUtc, rows,
-            ctx.Permissions.Has(Permissions.PayrollCalculate) && run?.Status != PayrollStatus.Approved, run?.RowVersion);
+            ctx.Permissions.Has(Permissions.PayrollCalculate) && run?.Status != PayrollStatus.Approved, run?.RowVersion, outputChanged);
     }
+
+    private async Task<byte[]> OutputFingerprintAsync(long org, PayrollRun run, CancellationToken ct) =>
+        WorkOutputFingerprint.Of((await output.OutputAsync(org, run.From, run.To, ct)).Where(o => o.Date >= run.From && o.Date <= run.To));
 
     /// <summary>
     /// Расчёт (или пересчёт черновика) за месяц: сдельно = Σ выработка × расценка на дату; оклад × отработано / норма;
@@ -179,7 +183,8 @@ public sealed class PayrollService(
             .Where(e => e.OrganizationId == org && e.HiredOn <= to && (e.DismissedOn == null || e.DismissedOn >= from)).ToListAsync(ct);
         var ids = employees.Select(e => e.Id).ToHashSet();
         var (days, closed) = await timesheets.DaysAsync(org, from, to, ct);
-        var outputs = (await output.OutputAsync(org, from, to, ct)).Where(o => ids.Contains(o.EmployeeId) && o.Date >= from && o.Date <= to).ToList();
+        var periodOutput = (await output.OutputAsync(org, from, to, ct)).Where(o => o.Date >= from && o.Date <= to).ToList();
+        var outputs = periodOutput.Where(o => ids.Contains(o.EmployeeId)).ToList();
         var rates = await db.PieceRates.AsNoTracking().Where(r => r.OrganizationId == org && r.ValidFrom <= to).ToListAsync(ct);
         var assignments = (await db.EmploymentHistory.AsNoTracking()
                 .Where(h => h.OrganizationId == org && ids.Contains(h.EmployeeId) && h.EffectiveFrom <= to
@@ -277,7 +282,7 @@ public sealed class PayrollService(
             }
         }
 
-        run.Recalculated(closed, ctx.UserId, clock.UtcNow);
+        run.Recalculated(closed, WorkOutputFingerprint.Of(periodOutput), ctx.UserId, clock.UtcNow);
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.PayrollCalculated, nameof(PayrollRun), run.Id.ToString(), null,
             $"{month:00}.{year}: сотрудников {paid}", closed ? null : "табели не закрыты", currentUser.CorrelationId));
         try
@@ -309,6 +314,13 @@ public sealed class PayrollService(
         {
             db.DiscardChanges();
             throw new BusinessRuleException("hr.payroll.stale", "Табели месяца изменились после расчёта: пересчитайте и утвердите снова.");
+        }
+
+        // Выработку производства исправили после расчёта — сдельные суммы уже не те (D217).
+        if (!run.OutputMatches(await OutputFingerprintAsync(ctx.OrganizationId, run, ct)))
+        {
+            db.DiscardChanges();
+            throw new BusinessRuleException("hr.payroll.output_changed", "Выработка месяца изменилась после расчёта: пересчитайте и утвердите снова.");
         }
 
         try

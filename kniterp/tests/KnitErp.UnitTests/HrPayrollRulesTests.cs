@@ -61,7 +61,7 @@ public sealed class HrPayrollRulesTests
     {
         var run = PayrollRun.Create(1, 2026, 12, 1, Now);
         Assert.Equal("hr.payroll.timesheets_open", Assert.Throws<BusinessRuleException>(() => run.Approve(1, Now)).Code);
-        run.Recalculated(true, 1, Now);
+        run.Recalculated(true, new byte[32], 1, Now);
         run.Approve(1, Now);
         Assert.Equal("hr.payroll.approved", Assert.Throws<BusinessRuleException>(run.EnsureDraft).Code);
     }
@@ -72,4 +72,16 @@ public sealed class HrPayrollRulesTests
     [InlineData("звоните +7 (900) 000-00-00", "звоните [скрыто]")]
     [InlineData("Заказ № 12345, 40 шт по 1 500 руб.", "Заказ № 12345, 40 шт по 1 500 руб.")]
     public void Mask_hides_long_numbers_only(string text, string expected) => Assert.Equal(expected, PersonalDataMask.Mask(text));
+
+    [Fact]
+    public void Output_fingerprint_ignores_order_and_unit_spelling_but_sees_quantity()
+    {
+        var a = new KnitErp.Application.Hr.WorkOutputDto(1, new DateOnly(2026, 12, 3), 1, "Вязание", null, 10, "шт");
+        var b = new KnitErp.Application.Hr.WorkOutputDto(2, new DateOnly(2026, 12, 4), 2, "Сборка", 7, 1.5m, "пар");
+        var f = KnitErp.Application.Hr.WorkOutputFingerprint.Of([a, b]);
+        Assert.Equal(f, KnitErp.Application.Hr.WorkOutputFingerprint.Of([b with { Unit = "Пар." }, a with { OperationName = "вязание" }]));
+        Assert.NotEqual(f, KnitErp.Application.Hr.WorkOutputFingerprint.Of([a with { Quantity = 10.000001m }, b]));
+        Assert.NotEqual(f, KnitErp.Application.Hr.WorkOutputFingerprint.Of([a]));
+        Assert.Equal(32, f.Length);
+    }
 }
