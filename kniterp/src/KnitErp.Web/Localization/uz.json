@@ -2419,5 +2419,7 @@
   "Скачать файл для 1С": "1C uchun faylni yuklab olish",
   "Сторнированные документы не выгружаются. Если такой документ уже был загружен в 1С раньше, пометьте его на удаление в 1С вручную.": "Storno qilingan hujjatlar yuklanmaydi. Agar bunday hujjat 1Cga avval yuklangan bo'lsa, uni 1Cda qo'lda o'chirishga belgilang.",
   "Файл в универсальном формате обмена EnterpriseData 1.8: его загружают «Бухгалтерия предприятия 3.0», «Управление торговлей 11» и «Комплексная автоматизация 2». В файле — проведённые складские документы за период (поступления, реализации, перемещения, списания, возвраты, оприходования) со справочниками, на которые они ссылаются. Повторная выгрузка того же периода обновляет документы в 1С, а не создаёт дубли.": "EnterpriseData 1.8 universal almashinuv formatidagi fayl: uni «Бухгалтерия предприятия 3.0», «Управление торговлей 11» va «Комплексная автоматизация 2» yuklaydi. Faylda — davr uchun o'tkazilgan ombor hujjatlari (kirimlar, sotuvlar, ko'chirishlar, hisobdan chiqarishlar, qaytarishlar, kirim qilishlar) va ular havola qiladigan ma'lumotnomalar. O'sha davrni qayta yuklash 1Cdagi hujjatlarni yangilaydi, dublikat yaratmaydi.",
-  "Этот вид документа не выгружается.": "Bu hujjat turi yuklanmaydi."
+  "Этот вид документа не выгружается.": "Bu hujjat turi yuklanmaydi.",
+  "Выберите партии или оставьте автоподбор: он берёт одно крашение на весь заказ — сначала уже отгруженное покупателю, затем самое старое, которого хватает целиком.": "Partiyalarni tanlang yoki avtotanlovni qoldiring: u butun buyurtma uchun bitta bo'yashni oladi — avval xaridorga jo'natilganini, keyin to'liq yetadigan eng eskisini.",
+  "Партии и крашения покупателю": "Xaridorga partiyalar va bo'yashlar"
 }

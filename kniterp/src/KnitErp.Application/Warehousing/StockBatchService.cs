@@ -87,7 +87,13 @@ public sealed record DocumentBatchItemDto(
 public sealed record DocumentBatchMovementDto(string WarehouseName, string ItemCode, string BatchLabel, decimal Quantity, string UnitSymbol, decimal? Kg);
 
 public sealed record DocumentBatchesDto(
-    bool CanEdit, bool IsIncoming, IReadOnlyList<DocumentBatchItemDto> Items, IReadOnlyList<DocumentBatchMovementDto> Movements, byte[] RowVersion);
+    bool CanEdit, bool IsIncoming, IReadOnlyList<DocumentBatchItemDto> Items, IReadOnlyList<DocumentBatchMovementDto> Movements, byte[] RowVersion,
+    IReadOnlyList<string>? Warnings = null);
+
+/// <summary>Партии, отгруженные по заказу покупателя (D106): нетто отгрузок минус возвраты.</summary>
+public sealed record SalesOrderBatchDto(long ItemId, string ItemCode, string ItemName, string BatchLabel, string? DyeLot, decimal Quantity, string UnitSymbol);
+
+public sealed record SalesOrderBatchesDto(IReadOnlyList<SalesOrderBatchDto> Rows, IReadOnlyList<string> Warnings);
 
 /// <summary>
 /// Партии (D89): справочник партий, остатки по партиям и разбивка строк складских документов. Партийный регистр пишется
@@ -339,6 +345,43 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
         return new BatchScanDto(f.Id, f.ItemId, f.Code, StockBatch.Describe(f.Number, f.Color, f.DyeLot), f.PackageWeightKg);
     }
 
+    /// <summary>Какие партии и крашения ушли покупателю по заказу (D106): отгрузки минус возвраты, с предупреждением о смешивании.</summary>
+    public async Task<SalesOrderBatchesDto> ForSalesOrderAsync(long salesOrderId, CancellationToken ct = default)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        if (!ctx.Permissions.Has(Permissions.SalesView) && !ViewPermissions.Any(ctx.Permissions.Has))
+        {
+            await guard.DenyAsync(ctx, Permissions.SalesView, ct);
+        }
+
+        if (!await db.SalesOrders.AnyAsync(o => o.Id == salesOrderId && o.OrganizationId == ctx.OrganizationId, ct))
+        {
+            throw new NotFoundException("Заказ");
+        }
+
+        var docIds = await db.StockDocuments.AsNoTracking()
+            .Where(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId == salesOrderId
+                        && (d.Status == StockDocumentStatus.Posted || d.Status == StockDocumentStatus.Reversed))
+            .Select(d => d.Id).ToListAsync(ct);
+        var moves = await (from m in db.StockBatchMovements.AsNoTracking()
+                           join b in db.StockBatches.AsNoTracking() on m.BatchId equals b.Id
+                           join i in db.Items.AsNoTracking() on m.ItemId equals i.Id
+                           join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
+                           where m.OrganizationId == ctx.OrganizationId && docIds.Contains(m.SourceId)
+                                 && (m.Source == StockSource.StockDocument || m.Source == StockSource.StockDocumentReversal)
+                           group m by new { m.ItemId, i.Code, i.Name, BatchId = b.Id, b.Number, b.Color, b.DyeLot, u.Symbol } into g
+                           select new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToListAsync(ct);
+        var rows = moves.Where(m => m.Sum != 0)
+            .Select(m => new SalesOrderBatchDto(m.Key.ItemId, m.Key.Code, m.Key.Name, StockBatch.Describe(m.Key.Number, m.Key.Color, m.Key.DyeLot),
+                m.Key.DyeLot, -m.Sum, m.Key.Symbol))
+            .Where(r => r.Quantity > 0).OrderBy(r => r.ItemCode).ThenBy(r => r.BatchLabel).ToList();
+        var warnings = rows.GroupBy(r => r.ItemId)
+            .Where(g => g.Select(r => r.DyeLot ?? r.BatchLabel).Distinct().Count() > 1)
+            .Select(g => $"{g.First().ItemCode}: покупателю ушли разные крашения ({string.Join(", ", g.Select(r => r.DyeLot ?? r.BatchLabel).Distinct())}).")
+            .ToList();
+        return new SalesOrderBatchesDto(rows, warnings);
+    }
+
     /// <summary>Разбивка строк документа по партиям и фактические движения партий (после проведения).</summary>
     public async Task<DocumentBatchesDto> ForDocumentAsync(long documentId, CancellationToken ct = default)
     {
@@ -426,7 +469,30 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
                 m.Quantity, m.Symbol, WeightConversion.ToKg(m.Quantity, m.UnitCode, m.WeightKg))));
         }
 
-        return new DocumentBatchesDto(canEdit, incoming, result, movements, doc.RowVersion);
+        // D106: в отгрузке по заказу — предупреждения о смешивании крашений.
+        var warnings = new List<string>();
+        if (doc.Kind == StockOperationKind.Shipment)
+        {
+            var shipped = doc.SalesOrderId is { } so && doc.Status == StockDocumentStatus.Draft
+                ? await StockBatchLedger.ShippedLotsAsync(db, ctx.OrganizationId, so, doc.Id, ct)
+                : [];
+            foreach (var item in result)
+            {
+                var lots = rows.Where(r => r.ItemId == item.ItemId).Select(r => (Key: BatchAllocation.LotKey(r.BatchId, r.DyeLot), Text: r.DyeLot ?? r.Number))
+                    .DistinctBy(x => x.Key).ToList();
+                if (lots.Count > 1)
+                {
+                    warnings.Add($"{item.Code}: в отгрузке разные крашения ({string.Join(", ", lots.Select(l => l.Text))}) — тон изделий может отличаться.");
+                }
+
+                if (shipped.GetValueOrDefault(item.ItemId) is { Count: > 0 } before && lots.Any(l => !before.Contains(l.Key)))
+                {
+                    warnings.Add($"{item.Code}: по заказу уже отгружено другое крашение — проверьте, что новый тон подходит покупателю.");
+                }
+            }
+        }
+
+        return new DocumentBatchesDto(canEdit, incoming, result, movements, doc.RowVersion, warnings);
     }
 
     /// <summary>Строка разбивки: партия и количество по позиции документа (новая или замена — одна партия один раз).</summary>
@@ -626,10 +692,25 @@ internal static class StockBatchLedger
                 var totals = await db.StockMovements.AsNoTracking()
                     .Where(m => m.OrganizationId == ctx.OrganizationId && m.WarehouseId == doc.WarehouseId && autoIds.Contains(m.ItemId))
                     .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+                // D106: отгрузка по заказу покупателя — одно крашение на весь заказ, если остатка хватает.
+                Dictionary<long, HashSet<string>>? shippedLots = null;
+                Dictionary<long, string?>? lotOf = null;
+                if (doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } salesOrderId)
+                {
+                    shippedLots = await ShippedLotsAsync(db, ctx.OrganizationId, salesOrderId, doc.Id, ct);
+                    var candidateIds = balances.Where(b => b.Sum > 0).Select(b => b.BatchId).Distinct().ToList();
+                    lotOf = await db.StockBatches.AsNoTracking().Where(b => candidateIds.Contains(b.Id)).ToDictionaryAsync(b => b.Id, b => b.DyeLot, ct);
+                }
+
                 foreach (var line in auto)
                 {
-                    allocations.AddRange(AutoAllocate(line.Quantity, totals.GetValueOrDefault(line.ItemId),
-                            balances.Where(b => b.ItemId == line.ItemId).Select(b => (b.BatchId, b.Sum)))
+                    var itemBalances = balances.Where(b => b.ItemId == line.ItemId).ToList();
+                    var single = lotOf is null
+                        ? null
+                        : BatchAllocation.SingleLotAllocate(line.Quantity, itemBalances.Select(b => (b.BatchId, b.Sum, BatchAllocation.LotKey(b.BatchId, lotOf.GetValueOrDefault(b.BatchId)))),
+                            shippedLots!.GetValueOrDefault(line.ItemId));
+                    allocations.AddRange((single ?? BatchAllocation.AutoAllocate(line.Quantity, totals.GetValueOrDefault(line.ItemId),
+                            itemBalances.Select(b => (b.BatchId, b.Sum))))
                         .Select(a => (line.ItemId, a.BatchId, a.Quantity)));
                 }
             }
@@ -706,26 +787,24 @@ internal static class StockBatchLedger
         }
     }
 
-    /// <summary>
-    /// Расход без указания партии: сначала остаток «без партии» (общий − партии), затем партии по порядку заведения (самые старые первыми).
-    /// Возвращает, сколько списать с каждой партии; остаток сверх партий списывается «без партии».
-    /// </summary>
-    public static IEnumerable<(long BatchId, decimal Quantity)> AutoAllocate(decimal need, decimal total, IEnumerable<(long BatchId, decimal Sum)> balances)
+    /// <summary>Крашения, уже отгруженные по заказу покупателя (D106): позиция → ключи крашений. Документ excludeId не учитывается.</summary>
+    public static async Task<Dictionary<long, HashSet<string>>> ShippedLotsAsync(
+        IKnitErpDbContext db, long organizationId, long salesOrderId, long? excludeId, CancellationToken ct)
     {
-        var list = balances.ToList();
-        var withoutBatch = Math.Max(0, total - list.Sum(b => b.Sum));
-        var left = need - Math.Min(need, withoutBatch);
-        foreach (var b in list.Where(b => b.Sum > 0).OrderBy(b => b.BatchId))
+        var docIds = await db.StockDocuments.AsNoTracking()
+            .Where(d => d.OrganizationId == organizationId && d.SalesOrderId == salesOrderId && d.Kind == StockOperationKind.Shipment
+                        && d.Status == StockDocumentStatus.Posted && d.Id != excludeId)
+            .Select(d => d.Id).ToListAsync(ct);
+        if (docIds.Count == 0)
         {
-            if (left <= 0)
-            {
-                yield break;
-            }
-
-            var take = Math.Min(left, b.Sum);
-            yield return (b.BatchId, take);
-            left -= take;
+            return [];
         }
+
+        var rows = await (from m in db.StockBatchMovements.AsNoTracking()
+                          join b in db.StockBatches.AsNoTracking() on m.BatchId equals b.Id
+                          where m.OrganizationId == organizationId && m.Source == StockSource.StockDocument && docIds.Contains(m.SourceId)
+                          select new { m.ItemId, b.Id, b.DyeLot }).ToListAsync(ct);
+        return rows.GroupBy(r => r.ItemId).ToDictionary(g => g.Key, g => g.Select(r => BatchAllocation.LotKey(r.Id, r.DyeLot)).ToHashSet());
     }
 
     /// <summary>Начальные остатки (D100): разбивка по партиям, если указана, равна количеству строки; партии получают приход.</summary>
@@ -830,7 +909,7 @@ internal static class StockBatchLedger
             else if (counted < book.GetValueOrDefault(line.ItemId))
             {
                 var total = book.GetValueOrDefault(line.ItemId);
-                planned.AddRange(AutoAllocate(total - counted, total, itemBalances.Select(b => (b.BatchId, b.Sum)))
+                planned.AddRange(BatchAllocation.AutoAllocate(total - counted, total, itemBalances.Select(b => (b.BatchId, b.Sum)))
                     .Select(a => new Planned(doc.WarehouseId, line.ItemId, a.BatchId, -a.Quantity)));
             }
         }

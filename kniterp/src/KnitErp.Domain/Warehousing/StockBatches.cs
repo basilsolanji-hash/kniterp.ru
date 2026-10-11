@@ -335,3 +335,65 @@ public static class WeightConversion
     public static decimal? Packages(decimal kg, decimal? packageWeightKg) =>
         packageWeightKg is > 0 ? decimal.Round(kg / packageWeightKg.Value, 1, MidpointRounding.AwayFromZero) : null;
 }
+
+/// <summary>Подбор партий при расходе без явного выбора (D89, D106) — чистые функции, без базы.</summary>
+public static class BatchAllocation
+{
+    /// <summary>Ключ крашения: номер крашения, а у партии без него — сама партия (её нельзя считать одним тоном с другими).</summary>
+    public static string LotKey(long batchId, string? dyeLot) => string.IsNullOrWhiteSpace(dyeLot) ? $"batch:{batchId}" : $"lot:{dyeLot.Trim()}";
+
+    /// <summary>
+    /// Расход без указания партии: сначала остаток «без партии» (общий − партии), затем партии по порядку заведения (самые старые первыми).
+    /// Возвращает, сколько списать с каждой партии; остаток сверх партий списывается «без партии».
+    /// </summary>
+    public static IEnumerable<(long BatchId, decimal Quantity)> AutoAllocate(decimal need, decimal total, IEnumerable<(long BatchId, decimal Sum)> balances)
+    {
+        var list = balances.ToList();
+        var withoutBatch = Math.Max(0, total - list.Sum(b => b.Sum));
+        var left = need - Math.Min(need, withoutBatch);
+        foreach (var b in list.Where(b => b.Sum > 0).OrderBy(b => b.BatchId))
+        {
+            if (left <= 0)
+            {
+                yield break;
+            }
+
+            var take = Math.Min(left, b.Sum);
+            yield return (b.BatchId, take);
+            left -= take;
+        }
+    }
+
+    /// <summary>
+    /// Подбор одного крашения (D106): сначала крашения, уже отгруженные по заказу, затем самое старое крашение, остатка которого хватает
+    /// целиком; внутри крашения — партии по порядку заведения. null — одним крашением не набрать, нужен обычный подбор.
+    /// </summary>
+    public static IReadOnlyList<(long BatchId, decimal Quantity)>? SingleLotAllocate(
+        decimal need, IEnumerable<(long BatchId, decimal Sum, string Lot)> balances, IReadOnlySet<string>? preferred)
+    {
+        var groups = balances.Where(b => b.Sum > 0).GroupBy(b => b.Lot)
+            .Select(g => (Lot: g.Key, Total: g.Sum(b => b.Sum), Batches: g.OrderBy(b => b.BatchId).ToList()))
+            .OrderBy(g => preferred?.Contains(g.Lot) == true ? 0 : 1).ThenBy(g => g.Batches[0].BatchId).ToList();
+        var chosen = groups.FirstOrDefault(g => g.Total >= need);
+        if (chosen.Batches is null)
+        {
+            return null;
+        }
+
+        var result = new List<(long, decimal)>();
+        var left = need;
+        foreach (var b in chosen.Batches)
+        {
+            if (left <= 0)
+            {
+                break;
+            }
+
+            var take = Math.Min(left, b.Sum);
+            result.Add((b.BatchId, take));
+            left -= take;
+        }
+
+        return result;
+    }
+}
