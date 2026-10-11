@@ -83,6 +83,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Production.ProductionOrder> ProductionOrders { get; }
     DbSet<KnitErp.Domain.Production.ProductionOperation> ProductionOperations { get; }
     DbSet<KnitErp.Domain.Production.ShiftTask> ShiftTasks { get; }
+    DbSet<KnitErp.Domain.Production.ProductionSettings> ProductionSettings { get; }
     DbSet<KnitErp.Domain.Production.ProductionOrderDocument> ProductionOrderDocuments { get; }
     DbSet<KnitErp.Domain.Purchasing.PurchaseOrder> PurchaseOrders { get; }
     DbSet<KnitErp.Domain.Purchasing.SupplierPayment> SupplierPayments { get; }

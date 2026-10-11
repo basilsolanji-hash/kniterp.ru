@@ -61,15 +61,22 @@ public sealed class ProductionOperation
     /// <summary>Какую отметку рабочего уменьшает это исправление (выработка исполнителя уменьшается сегодняшним днём).</summary>
     public long? CorrectsOperationId { get; private set; }
 
+    /// <summary>Виновник брака (контроль качества) — для показателей качества сотрудника; у других отметок нет.</summary>
+    public long? CulpritEmployeeId { get; private set; }
+
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 
     /// <summary>Новая запись; что её можно применить к заказу, проверяет <see cref="ProductionFlow.EnsureCanApply"/>.</summary>
     public static ProductionOperation Create(
         long organizationId, long orderId, ProductionStep step, string? reason, DateOnly occurredOn, long userId, DateTime nowUtc,
-        long? employeeId = null, long? correctsOperationId = null) => new()
+        long? employeeId = null, long? correctsOperationId = null, long? culpritEmployeeId = null) => new()
     {
         EmployeeId = employeeId,
+        CulpritEmployeeId = step.Kind == ProductionOperationKind.Defect
+            ? culpritEmployeeId
+            : culpritEmployeeId is null ? null
+            : throw new BusinessRuleException("production.stage.culprit_kind", "Виновник указывается только для брака."),
         CorrectsOperationId = step.Kind == ProductionOperationKind.Correction
             ? correctsOperationId
             : correctsOperationId is null ? null

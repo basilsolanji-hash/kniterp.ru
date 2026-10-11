@@ -119,6 +119,7 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
                 "([Kind] = 3 AND [ReturnToStage] IN (1, 2, 3)) OR ([Kind] <> 3 AND [ReturnToStage] IS NULL)");
             t.HasCheckConstraint("ck_production_operations_reason", "[Kind] NOT IN (2, 4) OR [Reason] IS NOT NULL");
             t.HasCheckConstraint("ck_production_operations_corrects", "[CorrectsOperationId] IS NULL OR ([Kind] = 2 AND [EmployeeId] IS NOT NULL)");
+            t.HasCheckConstraint("ck_production_operations_culprit", "[CulpritEmployeeId] IS NULL OR [Kind] = 4");
             // Только вставка — триггер в миграции AddProductionStages.
             t.HasTrigger("tr_production_operations_immutable");
         });
@@ -141,6 +142,11 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
         b.HasOne<KnitErp.Domain.Structure.Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_production_operations_employee");
+        b.HasOne<KnitErp.Domain.Structure.Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CulpritEmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_operations_culprit");
+        b.HasIndex(x => new { x.OrganizationId, x.CulpritEmployeeId, x.OccurredOn }).HasDatabaseName("ix_production_operations_org_culprit_date")
+            .HasFilter("[CulpritEmployeeId] IS NOT NULL");
         // Исправление отметки рабочего ссылается на неё (та же организация); ссылку имеет только исправление.
         b.HasOne<ProductionOperation>().WithMany().HasForeignKey(x => x.CorrectsOperationId).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_production_operations_corrects");
@@ -208,5 +214,24 @@ internal sealed class ShiftTaskConfiguration : IEntityTypeConfiguration<ShiftTas
         b.HasIndex(x => new { x.OrganizationId, x.Date, x.EmployeeId, x.ProductionOrderId, x.Stage }).IsUnique()
             .HasFilter("[CancelledAtUtc] IS NULL").HasDatabaseName("ux_production_shift_tasks_active");
         b.HasIndex(x => new { x.OrganizationId, x.Date }).HasDatabaseName("ix_production_shift_tasks_org_date");
+    }
+}
+
+internal sealed class ProductionSettingsConfiguration : IEntityTypeConfiguration<ProductionSettings>
+{
+    public void Configure(EntityTypeBuilder<ProductionSettings> b)
+    {
+        b.ToTable("production_settings", t =>
+        {
+            t.HasCheckConstraint("ck_production_settings_tolerance", "[TolerancePercent] BETWEEN 0 AND 50");
+            t.HasCheckConstraint("ck_production_settings_points",
+                "ABS([PointsTaskDone]) <= 100 AND ABS([PointsTaskMissedWithReason]) <= 100 AND ABS([PointsTaskMissedNoReason]) <= 100 AND ABS([PointsPerDefectUnit]) <= 100");
+        });
+        b.HasKey(x => x.OrganizationId);
+        b.Property(x => x.OrganizationId).ValueGeneratedNever();
+        b.Property(x => x.TolerancePercent).HasColumnType("decimal(5,2)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithOne().HasForeignKey<ProductionSettings>(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

@@ -2365,6 +2365,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("CreatedByUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("CulpritEmployeeId")
+                        .HasColumnType("bigint");
+
                     b.Property<long?>("EmployeeId")
                         .HasColumnType("bigint");
 
@@ -2404,6 +2407,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasIndex("OrganizationId", "ProductionOrderId")
                         .HasDatabaseName("ix_production_operations_org_order");
 
+                    b.HasIndex("OrganizationId", "CulpritEmployeeId", "OccurredOn")
+                        .HasDatabaseName("ix_production_operations_org_culprit_date")
+                        .HasFilter("[CulpritEmployeeId] IS NOT NULL");
+
                     b.HasIndex("OrganizationId", "EmployeeId", "OccurredOn")
                         .HasDatabaseName("ix_production_operations_org_employee_date")
                         .HasFilter("[EmployeeId] IS NOT NULL");
@@ -2413,6 +2420,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasTrigger("tr_production_operations_immutable");
 
                             t.HasCheckConstraint("ck_production_operations_corrects", "[CorrectsOperationId] IS NULL OR ([Kind] = 2 AND [EmployeeId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_production_operations_culprit", "[CulpritEmployeeId] IS NULL OR [Kind] = 4");
 
                             t.HasCheckConstraint("ck_production_operations_kind", "[Kind] IN (1, 2, 3, 4)");
 
@@ -2678,6 +2687,53 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionSettings", b =>
+                {
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("PointsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("PointsPerDefectUnit")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PointsTaskDone")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PointsTaskMissedNoReason")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PointsTaskMissedWithReason")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<decimal>("TolerancePercent")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("UpdatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OrganizationId");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("production_settings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_production_settings_points", "ABS([PointsTaskDone]) <= 100 AND ABS([PointsTaskMissedWithReason]) <= 100 AND ABS([PointsTaskMissedNoReason]) <= 100 AND ABS([PointsPerDefectUnit]) <= 100");
+
+                            t.HasCheckConstraint("ck_production_settings_tolerance", "[TolerancePercent] BETWEEN 0 AND 50");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Production.ShiftTask", b =>
@@ -5627,6 +5683,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasOne("KnitErp.Domain.Structure.Employee", null)
                         .WithMany()
+                        .HasForeignKey("OrganizationId", "CulpritEmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_production_operations_culprit");
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
                         .HasForeignKey("OrganizationId", "EmployeeId")
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
@@ -5761,6 +5824,20 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ProductionOrderId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionSettings", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithOne()
+                        .HasForeignKey("KnitErp.Domain.Production.ProductionSettings", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Production.ShiftTask", b =>

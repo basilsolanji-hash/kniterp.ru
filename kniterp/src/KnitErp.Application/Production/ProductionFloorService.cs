@@ -17,7 +17,7 @@ public sealed record ProductionStageDto(ProductionStage Stage, decimal Done, dec
 
 public sealed record ProductionOperationDto(
     long Id, DateOnly OccurredOn, ProductionStage Stage, ProductionOperationKind Kind, decimal Quantity, ProductionStage? ReturnTo, string? Reason,
-    string CreatedBy, DateTime CreatedAtUtc, string? Employee = null, decimal? Remaining = null, bool CanCorrect = false)
+    string CreatedBy, DateTime CreatedAtUtc, string? Employee = null, decimal? Remaining = null, bool CanCorrect = false, string? Culprit = null)
 {
     public string StageName => ProductionFlow.StageName(Stage);
     public string KindName => ProductionFlow.KindName(Kind);
@@ -28,11 +28,12 @@ public sealed record ProductionOperationDto(
 public sealed record ProductionProgressDto(
     long OrderId, ProductionOrderStatus Status, decimal Quantity, string UnitSymbol, byte Precision,
     IReadOnlyList<ProductionStageDto> Stages, decimal Good, decimal Defect, decimal Rework, decimal ReadyForOutput, decimal Released,
-    IReadOnlyList<ProductionOperationDto> History, bool CanMark);
+    IReadOnlyList<ProductionOperationDto> History, bool CanMark, IReadOnlyList<ShiftEmployeeOptionDto>? Employees = null);
 
 /// <summary>Отметка из формы: этап, вид, количество (у исправления — на сколько уменьшить, положительным числом), этап возврата переделки.</summary>
 public sealed record ProductionOperationCommand(
-    ProductionStage Stage, ProductionOperationKind Kind, decimal Quantity, ProductionStage? ReturnTo, string? Reason, DateOnly OccurredOn);
+    ProductionStage Stage, ProductionOperationKind Kind, decimal Quantity, ProductionStage? ReturnTo, string? Reason, DateOnly OccurredOn,
+    long? CulpritEmployeeId = null);
 
 /// <summary>
 /// Работа цеха по производственному заказу (D92): отметка этапов вязание → сборка → ВТО → контроль качества → упаковка,
@@ -56,7 +57,8 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         var flow = await FlowAsync(order, ops, ct);
         var userIds = ops.Select(o => o.CreatedByUserId).Distinct().ToList();
         var users = await db.Users.AsNoTracking().Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
-        var employeeIds = ops.Where(o => o.EmployeeId != null).Select(o => o.EmployeeId!.Value).Distinct().ToList();
+        var employeeIds = ops.Where(o => o.EmployeeId != null).Select(o => o.EmployeeId!.Value)
+            .Concat(ops.Where(o => o.CulpritEmployeeId != null).Select(o => o.CulpritEmployeeId!.Value)).Distinct().ToList();
         var employees = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && employeeIds.Contains(e.Id))
             .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName }).ToListAsync(ct);
         var employeeNames = employees.ToDictionary(e => e.Id, e => ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName));
@@ -67,14 +69,16 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
                 decimal? remaining = o.Kind == ProductionOperationKind.Done && o.EmployeeId is not null ? Remaining(o, ops) : null;
                 return new ProductionOperationDto(o.Id, o.OccurredOn, o.Stage, o.Kind, o.Quantity, o.ReturnToStage, o.Reason,
                     users.GetValueOrDefault(o.CreatedByUserId) ?? "—", o.CreatedAtUtc,
-                    o.EmployeeId is { } e ? employeeNames.GetValueOrDefault(e) : null, remaining, correctable && remaining > 0);
+                    o.EmployeeId is { } e ? employeeNames.GetValueOrDefault(e) : null, remaining, correctable && remaining > 0,
+                    o.CulpritEmployeeId is { } c ? employeeNames.GetValueOrDefault(c) : null);
             })
             .ToList();
         var inWork = inWorkStatus(order);
         return new ProductionProgressDto(order.Id, order.Status, order.Quantity, unit.Symbol, unit.Precision,
             ProductionFlow.Stages.Select(s => new ProductionStageDto(s, flow.Done(s), inWork ? flow.Available(s) : 0)).ToList(),
             flow.Done(ProductionStage.QualityControl), flow.Defect, flow.Rework, flow.ReadyForOutput, flow.Released, history,
-            inWork && ctx.Permissions.Has(Permissions.ProductionStageMark));
+            inWork && ctx.Permissions.Has(Permissions.ProductionStageMark),
+            inWork && ctx.Permissions.Has(Permissions.ProductionStageMark) ? await WorkingEmployeesAsync(ctx, ct) : null);
     }
 
     /// <summary>Отметка на этапе. Проверка потока и запись — под блокировкой заказа в одной транзакции.</summary>
@@ -110,11 +114,25 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         }
 
         (await FlowAsync(order, ops, ct)).EnsureCanApply(step);
-        var op = ProductionOperation.Create(ctx.OrganizationId, orderId, step, command.Reason, command.OccurredOn, ctx.UserId, clock.UtcNow, employeeId, correctsOperationId);
+        if (command.CulpritEmployeeId is { } culprit
+            && !await db.Employees.AnyAsync(e => e.Id == culprit && e.OrganizationId == ctx.OrganizationId, ct))
+        {
+            throw new NotFoundException("Сотрудник");
+        }
+
+        var op = ProductionOperation.Create(ctx.OrganizationId, orderId, step, command.Reason, command.OccurredOn, ctx.UserId, clock.UtcNow, employeeId,
+            correctsOperationId, command.CulpritEmployeeId);
         db.ProductionOperations.Add(op);
         await db.SaveChangesAsync(ct);
         var text = $"{ProductionFlow.StageName(step.Stage)}: {ProductionFlow.KindName(step.Kind)} {Quantities.Format(step.Quantity)} {item.Symbol}"
                    + (step.ReturnTo is { } r ? $" → {ProductionFlow.StageName(r)}" : "");
+        if (command.CulpritEmployeeId is { } guilty)
+        {
+            var g = await db.Employees.AsNoTracking().Where(x => x.Id == guilty)
+                .Select(x => new { x.PersonnelNumber, x.LastName, x.FirstName, x.MiddleName }).SingleAsync(ct);
+            text += $"; виновник {ShopFloorService.ShortName(g.LastName, g.FirstName, g.MiddleName)} (таб. № {g.PersonnelNumber})";
+        }
+
         if (employeeId is { } performer)
         {
             var e = await db.Employees.AsNoTracking().Where(x => x.Id == performer)
@@ -156,6 +174,14 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         return await RecordCoreAsync(ctx, orderId,
             new ProductionOperationCommand(target.Stage, ProductionOperationKind.Correction, quantity, null, reason, today), target.EmployeeId, ct, target.Id);
     }
+
+    /// <summary>Работающие сотрудники — для выбора виновника брака.</summary>
+    private async Task<IReadOnlyList<ShiftEmployeeOptionDto>> WorkingEmployeesAsync(AccessContext ctx, CancellationToken ct) =>
+        (await db.Employees.AsNoTracking()
+            .Where(e => e.OrganizationId == ctx.OrganizationId && e.Status == KnitErp.Domain.Structure.EmploymentStatus.Working)
+            .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
+            .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName, e.PersonnelNumber }).ToListAsync(ct))
+        .Select(e => new ShiftEmployeeOptionDto(e.Id, ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName), e.PersonnelNumber)).ToList();
 
     /// <summary>Сколько осталось от отметки рабочего после её исправлений.</summary>
     internal static decimal Remaining(ProductionOperation done, IEnumerable<ProductionOperation> ops) =>

@@ -91,6 +91,7 @@ public static class AuditLabels
         [AuditActions.ProductionShiftTaskAssigned] = "Назначено сменное задание",
         [AuditActions.ProductionShiftTaskCancelled] = "Отменено сменное задание",
         [AuditActions.ProductionShiftShortfall] = "Причина невыполнения сменного задания",
+        [AuditActions.ProductionSettingsChanged] = "Изменены настройки производства",
         [AuditActions.PurchaseOrderCreated] = "Создан заказ поставщику",
         [AuditActions.PurchaseOrderChanged] = "Изменён заказ поставщику",
         [AuditActions.PurchaseOrderConfirmed] = "Заказ поставщику подтверждён",

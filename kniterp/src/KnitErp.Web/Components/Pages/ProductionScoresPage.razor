@@ -1,0 +1,117 @@
+@page "/production/scores"
+@using KnitErp.Application.Production
+@inject ProductionScoreService Scores
+
+@* Баллы и показатели качества и дисциплины по сотрудникам (правила — в настройках производства). *@
+<PageTitle>@L("Баллы и показатели") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_board is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head"><h1>@L("Баллы и показатели")</h1></div>
+    <form class="inline-form" @onsubmit="LoadAsync">
+        <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" aria-label="@L("Месяц")" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+    @if (_message is not null)
+    {
+        <div class="flash error" role="alert">@_message</div>
+    }
+    <p class="muted">
+        @if (_board.PointsEnabled)
+        {
+            @L("Баллы: выполненное задание {0}, невыполненное с причиной {1}, без причины {2}, единица брака по вине сотрудника {3}.",
+                _board.Rules.PointsTaskDone, _board.Rules.PointsTaskMissedWithReason, _board.Rules.PointsTaskMissedNoReason, _board.Rules.PointsPerDefectUnit)
+        }
+        else
+        {
+            @L("Баллы выключены — включите их в настройках производства.")
+        }
+        <a href="settings/production">@L("Настройки производства")</a>
+    </p>
+    <div class="scroll">
+        <table>
+            <thead>
+                <tr><th>@L("Сотрудник")</th><th class="num">@L("Выполнено заданий")</th><th class="num">@L("Не выполнено с причиной")</th>
+                    <th class="num">@L("Без причины")</th><th class="num">@L("В работе")</th><th class="num">@L("Средний %")</th><th class="num">@L("Брак по вине")</th>
+                    @if (_board.PointsEnabled) { <th class="num">@L("Баллы")</th> }
+                </tr>
+            </thead>
+            <tbody>
+                @if (_board.Rows.Count == 0)
+                {
+                    <tr><td colspan="8" class="muted">@L("За этот период нет сменных заданий и брака с виновником.")</td></tr>
+                }
+                @foreach (var r in _board.Rows)
+                {
+                    <tr>
+                        <td data-label="@L("Сотрудник")">@r.Name <span class="muted">@L("таб. № {0}", r.PersonnelNumber)</span></td>
+                        <td class="num" data-label="@L("Выполнено заданий")">@r.TasksDone</td>
+                        <td class="num" data-label="@L("Не выполнено с причиной")">@r.MissedWithReason</td>
+                        <td class="num" data-label="@L("Без причины")">@r.MissedNoReason</td>
+                        <td class="num" data-label="@L("В работе")">@r.InProgress</td>
+                        <td class="num" data-label="@L("Средний %")">@r.AveragePercent%</td>
+                        <td class="num" data-label="@L("Брак по вине")">@Quantities.Format(r.DefectUnits)</td>
+                        @if (_board.PointsEnabled) { <td class="num" data-label="@L("Баллы")"><b>@r.Points</b></td> }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private ScoreBoardDto? _board;
+    private string? _denied;
+    private string? _message;
+    private bool _busy;
+    private DateTime _month = DateTime.Today;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadCoreAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await LoadCoreAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LoadCoreAsync()
+    {
+        var from = new DateOnly(_month.Year, _month.Month, 1);
+        _board = await Scores.BoardAsync(from, from.AddMonths(1).AddDays(-1));
+    }
+}

@@ -68,13 +68,14 @@ public sealed class ProductionMaterialService(
                         .SingleOrDefaultAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Производственный заказ");
         var balance = await BalanceAsync(order, ct);
+        var tolerance = (await ProductionSettingsService.LoadAsync(db, ctx.OrganizationId, ct)).TolerancePercent;
         var ids = balance.Select(b => b.ItemId).ToList();
         var items = await db.Items.AsNoTracking().Where(i => ids.Contains(i.Id))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision })
             .ToDictionaryAsync(x => x.Id, ct);
         var lines = balance.Select(b => new MaterialBalanceDto(b.ItemId, items[b.ItemId].Code, items[b.ItemId].Name, items[b.ItemId].Symbol,
                 items[b.ItemId].Precision, b.Planned, b.Issued, b.Consumed, b.Waste, b.Returned, b.Remaining, b.Normative, b.DeviationPercent,
-                b.OverTolerance(MaterialBalance.TolerancePercent) || b.Remaining < 0))
+                b.OverTolerance(tolerance) || b.Remaining < 0))
             .OrderBy(l => l.Code).ToList();
         var warnings = new List<string>();
         foreach (var l in lines)
@@ -84,9 +85,9 @@ public sealed class ProductionMaterialService(
                 warnings.Add($"{l.Code}: расхождение — израсходовано, списано и возвращено больше выданного на {Quantities.Format(-l.Remaining)} {l.UnitSymbol} (сторнирован документ выдачи?).");
             }
 
-            if (l.DeviationPercent is { } d && Math.Abs(d) > MaterialBalance.TolerancePercent)
+            if (l.DeviationPercent is { } d && Math.Abs(d) > tolerance)
             {
-                warnings.Add($"{l.Code}: расход с отходами {(d > 0 ? "больше" : "меньше")} нормы на {Quantities.Format(Math.Abs(d))}% — допуск {Quantities.Format(MaterialBalance.TolerancePercent)}%.");
+                warnings.Add($"{l.Code}: расход с отходами {(d > 0 ? "больше" : "меньше")} нормы на {Quantities.Format(Math.Abs(d))}% — допуск {Quantities.Format(tolerance)}%.");
             }
         }
 
@@ -111,7 +112,7 @@ public sealed class ProductionMaterialService(
         }
 
         return new ProductionMaterialsDto(order.Id, order.Status, order.WipWarehouseId, wipName, lines, docs, warnings,
-            MaterialBalance.TolerancePercent, canMove, warehouses, reasons);
+            tolerance, canMove, warehouses, reasons);
     }
 
     /// <summary>Выдача, возврат или отходы: проверки, складской документ, проведение и связь с заказом — в одной транзакции.</summary>
@@ -273,10 +274,11 @@ public sealed class ProductionMaterialService(
             await db.SaveOrConflictAsync(ct);
             await tx.CommitAsync(ct);
 
-            var warnings = (await BalanceAsync(order, ct)).Where(b => b.OverTolerance(MaterialBalance.TolerancePercent)).ToList();
+            var tolerance = (await ProductionSettingsService.LoadAsync(db, ctx.OrganizationId, ct)).TolerancePercent;
+            var warnings = (await BalanceAsync(order, ct)).Where(b => b.OverTolerance(tolerance)).ToList();
             var names = await CodesAsync(warnings.Select(w => w.ItemId), ct);
             return new OutputResultDto(outputId, consumptionId, warnings.Select(w =>
-                $"{names[w.ItemId]}: расход с отходами отличается от нормы на {Quantities.Format(w.DeviationPercent!.Value)}% — допуск {Quantities.Format(MaterialBalance.TolerancePercent)}%.").ToList());
+                $"{names[w.ItemId]}: расход с отходами отличается от нормы на {Quantities.Format(w.DeviationPercent!.Value)}% — допуск {Quantities.Format(tolerance)}%.").ToList());
         }
         catch
         {

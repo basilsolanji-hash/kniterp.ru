@@ -1133,6 +1133,117 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Organization_settings_drive_tolerance_and_quality_discipline_points()
+    {
+        var f = await SetUpAsync();
+        var other = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        var (colleague, colleagueEmployee) = await AddWorkerAsync(f, grant: true, "0103", "Сидорова");
+        long order, foreignEmployee;
+        await using (var s = host.As(other.Org.OwnerUserId, other.Org.OrganizationId))
+        {
+            var structure = await s.Structure.GetAsync();
+            var department = structure.Departments.FirstOrDefault()?.Id ?? await s.Structure.CreateDepartmentAsync("Цех", null);
+            foreignEmployee = await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand("0901", "Чужая", "Анна", null, department,
+                await s.Structure.CreatePositionAsync("Швея"), Day.AddYears(-1)));
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var settings = await s.ProductionSettings.GetAsync();
+            Assert.Equal((5m, false, 1, 0, -1, -1, true, (byte[]?)null), (settings.TolerancePercent, settings.PointsEnabled, settings.PointsTaskDone,
+                settings.PointsTaskMissedWithReason, settings.PointsTaskMissedNoReason, settings.PointsPerDefectUnit, settings.CanEdit, settings.RowVersion));
+            Assert.Equal("production.settings.tolerance", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(60, true, 1, 0, -1, -1), null))).Code);
+            Assert.Equal("production.settings.points", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, true, 101, 0, -1, -1), null))).Code);
+            await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, true, 2, 0, -3, -1), null);
+            await Assert.ThrowsAsync<ConcurrencyConflictException>(() => s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(3, true, 2, 0, -3, -1), null));
+            settings = await s.ProductionSettings.GetAsync();
+            Assert.Equal((2m, true, 2, -3), (settings.TolerancePercent, settings.PointsEnabled, settings.PointsTaskDone, settings.PointsTaskMissedNoReason));
+
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            Assert.Equal(2m, (await s.Materials.MaterialsAsync(order)).TolerancePercent);
+
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 10, null));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day.AddDays(1), employee, order, ProductionStage.Knitting, 3, null));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, colleagueEmployee, order, ProductionStage.Knitting, 5, null));
+        }
+
+        await using (var s = host.As(other.Org.OwnerUserId, other.Org.OrganizationId))
+        {
+            Assert.Equal(5m, (await s.ProductionSettings.GetAsync()).TolerancePercent);
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(9, false, 0, 0, 0, 0), null));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Scores.BoardAsync(Day, Day));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(10, null, null));
+        }
+
+        await using (var s = host.As(colleague, f.Org.OrganizationId))
+        {
+            var task = Assert.Single((await s.ShopFloor.MyDayAsync()).Shift!);
+            await s.ShiftTasks.ReportShortfallAsync(task.Id, "Ждал предыдущий этап", null, task.RowVersion);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            foreach (var stage in new[] { ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(order, new ProductionOperationCommand(stage, ProductionOperationKind.Done, 10, null, null, Day));
+            }
+
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl,
+                ProductionOperationKind.Defect, 1, null, "петли", Day, foreignEmployee)));
+            Assert.Equal("production.stage.culprit_kind", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Floor.RecordAsync(order,
+                new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Done, 1, null, null, Day, employee)))).Code);
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Defect, 2, null,
+                "спущенные петли", Day, employee));
+            var progress = await s.Floor.ProgressAsync(order);
+            Assert.Contains(progress.Employees!, e => e.Id == employee);
+            Assert.Equal("Петрова А. С.", progress.History.First().Culprit);
+        }
+
+        host.Clock.UtcNow = host.Clock.UtcNow.AddDays(2);
+        try
+        {
+            await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                var board = await s.Scores.BoardAsync(Day, Day.AddDays(2));
+                var w = board.Rows.Single(r => r.EmployeeId == employee);
+                // 1 выполнено × 2 + 1 без причины × (−3) + 2 единицы брака × (−1) = −3.
+                Assert.Equal((1, 0, 1, 0, 50, 2m, (int?)-3), (w.TasksDone, w.MissedWithReason, w.MissedNoReason, w.InProgress, w.AveragePercent, w.DefectUnits, w.Points));
+                var c = board.Rows.Single(r => r.EmployeeId == colleagueEmployee);
+                Assert.Equal((0, 1, 0, (int?)0), (c.TasksDone, c.MissedWithReason, c.MissedNoReason, c.Points));
+                Assert.Equal("production.score.period", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Scores.BoardAsync(Day, Day.AddDays(100)))).Code);
+
+                await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, false, 2, 0, -3, -1), (await s.ProductionSettings.GetAsync()).RowVersion);
+                Assert.Null((await s.Scores.BoardAsync(Day, Day.AddDays(2))).Rows.Single(r => r.EmployeeId == employee).Points);
+            }
+
+            await using (var s = host.As(worker, f.Org.OrganizationId))
+            {
+                var mine = await s.Scores.MineAsync();
+                Assert.Equal((employee, 1, 1, 2m, (int?)null), (mine!.EmployeeId, mine.TasksDone, mine.MissedNoReason, mine.DefectUnits, mine.Points));
+            }
+        }
+        finally
+        {
+            host.Clock.UtcNow = host.Clock.UtcNow.AddDays(-2);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.Equal(2, await db.AuditEntries.CountAsync(e => e.Action == "production.settings.changed" && e.OrganizationId == f.Org.OrganizationId));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[production_settings] SET [TolerancePercent] = 80 WHERE [OrganizationId] = {0}", f.Org.OrganizationId));
+        }
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
     private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {

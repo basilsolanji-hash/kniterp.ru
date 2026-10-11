@@ -158,6 +158,7 @@ public static class AuditActions
     public const string ProductionShiftTaskAssigned = "production.shift.assigned";
     public const string ProductionShiftTaskCancelled = "production.shift.cancelled";
     public const string ProductionShiftShortfall = "production.shift.shortfall";
+    public const string ProductionSettingsChanged = "production.settings.changed";
     public const string PurchaseOrderCreated = "purchase.order.created";
     public const string PurchaseOrderChanged = "purchase.order.changed";
     public const string PurchaseOrderConfirmed = "purchase.order.confirmed";

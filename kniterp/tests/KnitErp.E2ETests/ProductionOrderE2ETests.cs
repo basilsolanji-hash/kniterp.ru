@@ -401,6 +401,41 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         }
     }
 
+    /// <summary>Настройки производства организации: начальник цеха видит правила без права менять; баллы — в отчёте и на телефоне.</summary>
+    [SqlFact]
+    public async Task Production_settings_are_read_only_for_head_and_points_are_visible()
+    {
+        await app.EnablePointsAsync();
+        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        {
+            var page = await context.NewPageAsync();
+            await LoginAsync(page);
+            await page.GotoAsync("settings/production");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Настройки производства" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByLabel("Допуск отклонения расхода от нормы, %")).ToBeDisabledAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Сохранить" })).ToHaveCountAsync(0);
+
+            await page.GotoAsync("production/scores");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Баллы и показатели" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("thead th").Filter(new() { HasTextRegex = new Regex("^Баллы$") })).ToHaveCountAsync(1);
+            await Assertions.Expect(page.GetByText("Баллы: выполненное задание")).ToBeVisibleAsync();
+        }
+
+        await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
+        }))
+        {
+            var page = await phone.NewPageAsync();
+            await LoginAsync(page, AppFixture.WorkerEmail);
+            await page.GotoAsync("shop");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Мои показатели за месяц" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator(".shop-totals li").Filter(new() { HasText = "Баллы" })).ToHaveCountAsync(1);
+            Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
+        }
+    }
+
     /// <summary>Маршрутный лист: QR-код и текстовый код на каждый этап.</summary>
     [SqlFact]
     public async Task Workshop_head_prints_route_sheet_with_qr_codes()

@@ -4,6 +4,7 @@
 @inject ShopFloorService Shop
 @inject ProductionFloorService Floor
 @inject ShiftTaskService Shifts
+@inject ProductionScoreService Scores
 @inject NavigationManager Nav
 
 @* Терминал цеха на телефоне рабочего (D92, дополнение): код операции, мои отметки за сегодня, доступная работа. *@
@@ -37,6 +38,21 @@ else
                 <div class="flash error" role="alert">@_codeError</div>
             }
         </form>
+
+        @if (_score is { } sc)
+        {
+            <h2>@L("Мои показатели за месяц")</h2>
+            <ul class="shop-totals">
+                <li><span>@L("Выполнено заданий")</span> <b>@sc.TasksDone</b></li>
+                <li><span>@L("Не выполнено (с причиной / без)")</span> <b>@sc.MissedWithReason / @sc.MissedNoReason</b></li>
+                <li><span>@L("Средний процент выполнения")</span> <b>@sc.AveragePercent%</b></li>
+                <li><span>@L("Брак по моей вине")</span> <b>@Quantities.Format(sc.DefectUnits)</b></li>
+                @if (sc.Points is { } points)
+                {
+                    <li><span>@L("Баллы")</span> <b>@points</b></li>
+                }
+            </ul>
+        }
 
         @if (_day.Shift is { Count: > 0 } shift)
         {
@@ -157,6 +173,7 @@ else
 
 @code {
     private ShopDayDto? _day;
+    private EmployeeScoreDto? _score;
     private string? _denied;
     private string _code = string.Empty;
     private string? _codeError;
@@ -272,6 +289,7 @@ else
         try
         {
             _day = await Shop.MyDayAsync();
+            _score = await Scores.MineAsync();
         }
         catch (AccessDeniedException ex)
         {

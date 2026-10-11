@@ -120,7 +120,7 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
         task.EnsureVersion(task.RowVersion, rowVersion);
         task.Cancel(ctx.UserId, clock.UtcNow);
         Audit(ctx, AuditActions.ProductionShiftTaskCancelled, task, "Действует", "Отменено");
-        await db.SaveOrConflictAsync(ct);
+        await SaveOrDiscardAsync(ct);
     }
 
     /// <summary>Причина невыполнения — сам сотрудник по своему заданию на сегодня или прошедшую дату.</summary>
@@ -138,34 +138,53 @@ public sealed class ShiftTaskService(IKnitErpDbContext db, IAccessGuard guard, I
         task.EnsureVersion(task.RowVersion, rowVersion);
         task.ReportShortfall(reason, comment, clock.UtcNow);
         Audit(ctx, AuditActions.ProductionShiftShortfall, task, null, task.ShortfallComment is null ? reason : $"{reason}. {task.ShortfallComment}");
-        await db.SaveOrConflictAsync(ct);
+        await SaveOrDiscardAsync(ct);
     }
 
     /// <summary>Задания организации на дату (по сотруднику — если указан) с фактом по отметкам терминала.</summary>
-    internal static async Task<IReadOnlyList<ShiftTaskDto>> ListAsync(IKnitErpDbContext db, long organizationId, DateOnly day, long? employeeId, CancellationToken ct)
+    internal static Task<IReadOnlyList<ShiftTaskDto>> ListAsync(IKnitErpDbContext db, long organizationId, DateOnly day, long? employeeId, CancellationToken ct) =>
+        ListAsync(db, organizationId, day, day, employeeId, ct);
+
+    /// <summary>Задания за период с фактом по каждому дню.</summary>
+    internal static async Task<IReadOnlyList<ShiftTaskDto>> ListAsync(
+        IKnitErpDbContext db, long organizationId, DateOnly from, DateOnly to, long? employeeId, CancellationToken ct)
     {
         var rows = await (from t in db.ShiftTasks.AsNoTracking()
-                          where t.OrganizationId == organizationId && t.Date == day && (employeeId == null || t.EmployeeId == employeeId)
+                          where t.OrganizationId == organizationId && t.Date >= @from && t.Date <= to && (employeeId == null || t.EmployeeId == employeeId)
                           join e in db.Employees.AsNoTracking() on t.EmployeeId equals e.Id
                           join p in db.ProductionOrders.AsNoTracking() on t.ProductionOrderId equals p.Id
                           join i in db.Items.AsNoTracking() on p.ItemId equals i.Id
                           join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
-                          orderby e.LastName, e.FirstName, t.Id
+                          orderby t.Date, e.LastName, e.FirstName, t.Id
                           select new { Task = t, e.LastName, e.FirstName, e.MiddleName, e.PersonnelNumber, p.Number, ItemName = i.Name, u.Symbol })
             .ToListAsync(ct);
         var employees = rows.Select(r => r.Task.EmployeeId).Distinct().ToList();
         var facts = await db.ProductionOperations.AsNoTracking()
-            .Where(o => o.OrganizationId == organizationId && o.OccurredOn == day && o.EmployeeId != null && employees.Contains(o.EmployeeId.Value)
+            .Where(o => o.OrganizationId == organizationId && o.OccurredOn >= from && o.OccurredOn <= to && o.EmployeeId != null && employees.Contains(o.EmployeeId.Value)
                         && (o.Kind == ProductionOperationKind.Done || o.Kind == ProductionOperationKind.Correction))
-            .GroupBy(o => new { EmployeeId = o.EmployeeId!.Value, o.ProductionOrderId, o.Stage })
+            .GroupBy(o => new { EmployeeId = o.EmployeeId!.Value, o.ProductionOrderId, o.Stage, o.OccurredOn })
             .Select(g => new { g.Key, Sum = g.Sum(o => o.Quantity) })
             .ToListAsync(ct);
-        var fact = facts.ToDictionary(f => (f.Key.EmployeeId, f.Key.ProductionOrderId, f.Key.Stage), f => f.Sum);
+        var fact = facts.ToDictionary(f => (f.Key.EmployeeId, f.Key.ProductionOrderId, f.Key.Stage, f.Key.OccurredOn), f => f.Sum);
         return rows.Select(r => new ShiftTaskDto(r.Task.Id, r.Task.Date, r.Task.EmployeeId,
                 ShopFloorService.ShortName(r.LastName, r.FirstName, r.MiddleName), r.PersonnelNumber, r.Task.ProductionOrderId, r.Number, r.ItemName,
-                r.Task.Stage, r.Task.PlannedQuantity, fact.GetValueOrDefault((r.Task.EmployeeId, r.Task.ProductionOrderId, r.Task.Stage)), r.Symbol,
+                r.Task.Stage, r.Task.PlannedQuantity, fact.GetValueOrDefault((r.Task.EmployeeId, r.Task.ProductionOrderId, r.Task.Stage, r.Task.Date)), r.Symbol,
                 r.Task.Comment, r.Task.ShortfallReason, r.Task.ShortfallComment, r.Task.IsCancelled, r.Task.RowVersion))
             .ToList();
+    }
+
+    /// <summary>Конфликт версий возвращается пользователю, а изменённая строка не остаётся в контексте вкладки.</summary>
+    private async Task SaveOrDiscardAsync(CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
     }
 
     private void Audit(AccessContext ctx, string action, ShiftTask task, string? before, string? after) =>
