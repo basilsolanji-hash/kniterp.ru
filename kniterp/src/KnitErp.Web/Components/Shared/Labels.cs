@@ -49,6 +49,8 @@ public static class AuditLabels
         [AuditActions.DeviceRevoked] = "Доверие устройству отозвано",
         [AuditActions.PasswordResetRequested] = "Запрошена смена пароля",
         [AuditActions.PasswordReset] = "Пароль сменён по ссылке",
+        [AuditActions.PasswordChanged] = "Пароль сменён пользователем",
+        [AuditActions.SessionsRevoked] = "Выход на всех устройствах",
         [AuditActions.PasswordResetIssued] = "Выдана ссылка смены пароля",
         [AuditActions.EmergencyAccess] = "Аварийное восстановление доступа на сервере",
         [AuditActions.SignedIn] = "Вход",

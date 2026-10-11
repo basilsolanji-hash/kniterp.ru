@@ -2,8 +2,23 @@
 @using KnitErp.Web.Components.Shared
 @inject RecoveryCodeService Recovery
 @inject TrustedDeviceService Devices
+@inject AccountSecurityService Account
 
 <PageTitle>@L("Вход и резервные коды") — knitERP</PageTitle>
+
+@if (_done is not null)
+{
+    @* D115: после смены пароля или выхода везде текущая сессия тоже закрыта — показываем итог и кнопку входа. *@
+    <div class="panel" role="status">
+        <h1>@L("Готово")</h1>
+        <p>@_done</p>
+        <form method="post" action="account/logout" data-enhance="false">
+            <AntiforgeryToken />
+            <button type="submit">@L("Войти заново")</button>
+        </form>
+    </div>
+    return;
+}
 
 @if (_status is null)
 {
@@ -23,7 +38,7 @@ else
         </div>
     }
 
-    @if (_error is not null)
+    @if (_error is not null && !_formsError)
     {
         <div class="error" role="alert">@_error</div>
     }
@@ -106,6 +121,39 @@ else
             </div>
         }
     }
+
+    <h2 style="margin-top: 20px">@L("Пароль и сессии")</h2>
+    <p class="muted">@L("Действия подтверждаются текущим паролем") @(_status.TwoFactorEnabled ? L("и кодом из приложения") : null).
+        @L("После них все сессии, включая эту, закрываются, а доверенные устройства забываются. На почту придёт уведомление.")</p>
+    @if (_error is not null && _formsError)
+    {
+        <div class="error" role="alert">@_error</div>
+    }
+    <div class="security-forms">
+        <form class="panel" @onsubmit="ChangePasswordAsync" aria-label="@L("Сменить пароль")">
+            <h3>@L("Сменить пароль")</h3>
+            <label>@L("Текущий пароль") <input type="password" autocomplete="current-password" @bind="_current" required maxlength="128" /></label>
+            <label>@L("Новый пароль") <input type="password" autocomplete="new-password" @bind="_new" required minlength="10" maxlength="128" /></label>
+            <label>@L("Повторите новый пароль") <input type="password" autocomplete="new-password" @bind="_confirm" required maxlength="128" /></label>
+            @if (_status.TwoFactorEnabled)
+            {
+                <label>@L("Код из приложения") <input inputmode="numeric" autocomplete="one-time-code" maxlength="6" @bind="_code" required /></label>
+            }
+            <p class="muted small">@L("Не короче 10 символов. Лучше фраза из нескольких слов; ряды клавиш и известные пароли не принимаются.")</p>
+            <div class="actions"><button type="submit" disabled="@_busy">@L("Сменить пароль")</button></div>
+        </form>
+        <form class="panel" @onsubmit="SignOutEverywhereAsync" aria-label="@L("Выйти на всех устройствах")">
+            <h3>@L("Выйти на всех устройствах")</h3>
+            <p class="muted small">@L("Если телефон или компьютер с открытой программой потерян или вы входили с чужого устройства.")</p>
+            <label>@L("Текущий пароль") <input type="password" autocomplete="current-password" @bind="_outPassword" required maxlength="128" /></label>
+            @if (_status.TwoFactorEnabled)
+            {
+                <label>@L("Код из приложения") <input inputmode="numeric" autocomplete="one-time-code" maxlength="6" @bind="_outCode" required /></label>
+            }
+            <label class="inline"><input type="checkbox" @bind="_revokeTokens" /> @L("Также отозвать мои токены API (интеграции перестанут работать до выпуска новых)")</label>
+            <div class="actions"><button type="submit" class="danger" disabled="@_busy">@L("Выйти везде")</button></div>
+        </form>
+    </div>
 }
 
 @code {
@@ -125,6 +173,15 @@ else
     private IReadOnlyList<string>? _codes;
     private bool _busy;
     private string? _error;
+    private string? _done;
+    private bool _formsError;
+    private string? _current;
+    private string? _new;
+    private string? _confirm;
+    private string? _code;
+    private string? _outPassword;
+    private string? _outCode;
+    private bool _revokeTokens;
 
     protected override async Task OnInitializedAsync()
     {
@@ -136,15 +193,51 @@ else
 
     private Task IssueAsync() => RunAsync(async () =>
     {
+        _formsError = false;
         _codes = await Recovery.IssueAsync();
         _status = await Recovery.GetStatusAsync();
     });
 
     private Task RevokeAsync(long? id) => RunAsync(async () =>
     {
+        _formsError = false;
         await Devices.RevokeAsync(id);
         _devices = await Devices.ListAsync();
     });
+
+    private Task ChangePasswordAsync() => RunForms(async () =>
+    {
+        try
+        {
+            await Account.ChangePasswordAsync(_current, _new, _confirm, _code);
+            _done = L("Пароль сменён. Все сессии закрыты — войдите с новым паролем.");
+        }
+        finally
+        {
+            (_current, _new, _confirm, _code) = (null, null, null, null);
+        }
+    });
+
+    private Task SignOutEverywhereAsync() => RunForms(async () =>
+    {
+        try
+        {
+            var tokens = await Account.SignOutEverywhereAsync(_outPassword, _outCode, _revokeTokens);
+            _done = tokens > 0
+                ? L("Все сессии закрыты, отозвано токенов API: {0}. Войдите снова.", tokens)
+                : L("Все сессии закрыты. Войдите снова.");
+        }
+        finally
+        {
+            (_outPassword, _outCode) = (null, null);
+        }
+    });
+
+    private Task RunForms(Func<Task> action)
+    {
+        _formsError = true;
+        return RunAsync(action);
+    }
 
     /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
     private async Task RunAsync(Func<Task> action)

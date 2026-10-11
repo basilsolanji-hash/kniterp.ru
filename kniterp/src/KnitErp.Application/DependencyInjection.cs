@@ -89,6 +89,7 @@ public static class DependencyInjection
         services.AddScoped<RecoveryCodeService>();
         services.AddScoped<PasswordResetService>();
         services.AddScoped<TrustedDeviceService>();
+        services.AddScoped<AccountSecurityService>();
         services.AddScoped<Structure.EmployeeExchangeService>();
         services.AddScoped<Organizations.LaunchReadinessService>();
         // Кэш главного экрана (DashboardService): общий на процесс, ключ — организация, пользователь и его права.
@@ -114,6 +115,8 @@ public static class DependencyInjection
         services.AddScoped<ReconciliationService>();
         services.AddScoped<StockService>();
         services.TryAddScoped<Workspace.IUiText, Workspace.RussianUiText>();
+        // D115: PBKDF2-HMAC-SHA512, 210 000 итераций (рекомендация OWASP); прежние хеши (100 000) пересчитываются при входе.
+        services.Configure<PasswordHasherOptions>(o => o.IterationCount = 210_000);
         services.TryAddSingleton<IPasswordHasher<UserAccount>, PasswordHasher<UserAccount>>();
         services.AddScoped<SignInService>();
         return services;

@@ -122,6 +122,8 @@ public static class AuditActions
     public const string DeviceRevoked = "auth.device.revoked";
     public const string PasswordResetRequested = "auth.password_reset.requested";
     public const string PasswordReset = "auth.password.reset";
+    public const string PasswordChanged = "auth.password.changed";
+    public const string SessionsRevoked = "auth.sessions.revoked";
     public const string PasswordResetIssued = "access.password_reset.issued";
     public const string EmergencyAccess = "access.emergency";
     public const string DepartmentCreated = "structure.department.created";

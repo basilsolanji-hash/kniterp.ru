@@ -130,8 +130,24 @@ public static class ApiV1
 
     public sealed record TagLinkInput(TaggedEntity Entity, long EntityId);
 
+    /// <summary>D115: размер тела запроса API — 1 МБ; строк в документе — до 500, частей партий в строке — до 100.</summary>
+    public const long MaxBodyBytes = 1_048_576;
+    public const int MaxLines = 500;
+    public const int MaxBatchParts = 100;
+
     public static void MapApiV1(this WebApplication app)
     {
+        // Тело запроса читается при привязке параметров, раньше фильтров конечной точки, — поэтому лимит ставится до неё.
+        app.UseWhen(http => http.Request.Path.StartsWithSegments("/api/v1"), branch => branch.Use((http, next) =>
+        {
+            if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+            {
+                limit.MaxRequestBodySize = MaxBodyBytes;
+            }
+
+            return next(http);
+        }));
+
         var api = app.MapGroup("/api/v1")
             .RequireAuthorization(new AuthorizationPolicyBuilder(ApiTokenAuthenticationHandler.SchemeName).RequireAuthenticatedUser().Build())
             .DisableAntiforgery()
@@ -176,6 +192,7 @@ public static class ApiV1
         api.MapPost("/sales-orders", async (SalesService sales, SalesOrderInput body, CancellationToken ct) =>
         {
             // Заказ, строки и подтверждение — одной транзакцией: при ошибке в любой строке заказ не создаётся.
+            EnsureLines(body.Lines);
             var id = await sales.CreateOrderAsync(new SalesOrderHeader(body.OrderDate, body.CustomerId, body.WarehouseId, body.ShipDate,
                 body.CustomerReference, body.PricesIncludeVat, body.Comment, body.LegalEntityId), ct);
             foreach (var line in body.Lines ?? [])
@@ -218,6 +235,7 @@ public static class ApiV1
         api.MapPost("/purchase-orders", async (PurchaseService purchases, PurchaseOrderInput body, CancellationToken ct) =>
         {
             // Заказ, строки и подтверждение — одной транзакцией.
+            EnsureLines(body.Lines);
             var id = await purchases.CreateOrderAsync(new PurchaseOrderHeader(body.OrderDate, body.SupplierId, body.WarehouseId, body.ExpectedDate,
                 body.SupplierInvoice, body.PricesIncludeVat, body.Comment, body.LegalEntityId), ct);
             foreach (var line in body.Lines ?? [])
@@ -257,6 +275,12 @@ public static class ApiV1
         api.MapPost("/stock-documents", async (StockDocumentService documents, StockBatchService batches, StockDocumentInput body, CancellationToken ct) =>
         {
             // Документ, строки, разбивка по партиям и проведение — одной транзакцией: ошибка в любой части — документа нет.
+            EnsureLines(body.Lines);
+            if (body.Lines?.Any(l => l.Batches?.Count > MaxBatchParts) == true)
+            {
+                throw new BusinessRuleException("api.batches.too_many", $"В строке не больше {MaxBatchParts} частей по партиям.");
+            }
+
             var lines = (body.Lines ?? []).Select(l => (l.ItemId, l.Quantity)).ToList();
             var id = await documents.CreateWithLinesAsync(body.Kind, new StockDocumentHeader(body.WarehouseId, body.TargetWarehouseId, body.CounterpartyId,
                 body.ReasonId, body.DocumentDate, body.Comment, body.PurchaseOrderId, body.SalesOrderId), lines, ct);
@@ -341,6 +365,14 @@ public static class ApiV1
         var l = Math.Clamp(limit ?? 100, 1, MaxLimit);
         var items = all.Skip(o).Take(l).ToList();
         return new Page<T>(items, o, l, o + items.Count < all.Count ? o + items.Count : null);
+    }
+
+    private static void EnsureLines<T>(IReadOnlyList<T>? lines)
+    {
+        if (lines?.Count > MaxLines)
+        {
+            throw new BusinessRuleException("api.lines.too_many", $"В одном документе не больше {MaxLines} строк — разбейте его на несколько.");
+        }
     }
 
     private static long TokenId(ClaimsPrincipal user) => long.Parse(user.FindFirstValue(ApiTokenAuthenticationHandler.TokenClaim)!);
