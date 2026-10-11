@@ -1,0 +1,174 @@
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ProductionMaterialService Materials
+
+@* Выпуск готовой продукции (D95): не больше упакованного; расход материалов по факту — по норме или как ввёл кладовщик. *@
+<h2 style="margin-top: 24px">@L("Выпуск продукции")</h2>
+<p>@L("Выпущено {0} из {1} {2}, готово к выпуску (упаковано): {3}.", Quantities.Format(Progress.Released), Quantities.Format(Progress.Quantity),
+       Progress.UnitSymbol, Quantities.Format(Progress.ReadyForOutput))</p>
+
+@if (_message is not null)
+{
+    <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+}
+
+@foreach (var w in _warnings)
+{
+    <div class="notice warning" role="note">@w</div>
+}
+
+@if (CanOutput)
+{
+    <form class="inline-form" @onsubmit="ProposeAsync">
+        <label>@L("Выпустить, {0}", Progress.UnitSymbol) <input @bind="_quantityText" inputmode="decimal" size="8" aria-label="@L("Выпустить")" /></label>
+        <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата выпуска")" /></label>
+        <label>@L("Комментарий") <input @bind="_comment" size="24" aria-label="@L("Комментарий к выпуску")" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Рассчитать расход")</button>
+    </form>
+
+    @if (_proposal is not null)
+    {
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Код")</th><th>@L("Материал")</th><th class="num">@L("В цехе (НЗП)")</th><th class="num">@L("Расход по факту")</th><th>@L("Ед.")</th></tr></thead>
+                <tbody>
+                    @foreach (var p in _proposal)
+                    {
+                        <tr>
+                            <td>@p.Code</td>
+                            <td>@p.Name</td>
+                            <td class="num">@Quantities.Format(p.Remaining)</td>
+                            <td class="num"><input @bind="_consumption[p.ItemId]" inputmode="decimal" size="8" aria-label="@L("Расход: {0}", p.Code)" /></td>
+                            <td>@p.UnitSymbol</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="muted">@L("Расход подставлен по норме без отхода на выпуск и брак — исправьте по факту. Отход сверх нормы и остаток после выпуска оформляются отходами или возвратом.")</p>
+        <div class="actions">
+            <ConfirmButton Class="" OnConfirm="OutputAsync" Disabled="@_busy" Question='@L("Выпустить на склад «{0}»?", OutputWarehouseName)'>@L("Выпустить")</ConfirmButton>
+            <button type="button" class="secondary" @onclick="() => _proposal = null" disabled="@_busy">@L("Отмена")</button>
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long OrderId { get; set; }
+
+    [Parameter, EditorRequired]
+    public ProductionProgressDto Progress { get; set; } = default!;
+
+    [Parameter]
+    public string OutputWarehouseName { get; set; } = string.Empty;
+
+    /// <summary>Есть право двигать материалы и заказ в работе.</summary>
+    [Parameter]
+    public bool CanMove { get; set; }
+
+    [Parameter]
+    public DateOnly Today { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private IReadOnlyList<ConsumptionProposalDto>? _proposal;
+    private readonly Dictionary<long, string> _consumption = [];
+    private IReadOnlyList<string> _warnings = [];
+    private string _quantityText = string.Empty;
+    private string? _comment;
+    private DateTime _date = DateTime.Today;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+    private decimal _lastReady = -1;
+
+    private bool CanOutput => CanMove && Progress.ReadyForOutput > 0
+                              && Progress.Status is ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone;
+
+    protected override void OnInitialized() => _date = Today.ToDateTime(TimeOnly.MinValue);
+
+    protected override void OnParametersSet()
+    {
+        if (Progress.ReadyForOutput != _lastReady)
+        {
+            _lastReady = Progress.ReadyForOutput;
+            _quantityText = Progress.ReadyForOutput > 0 ? Quantities.Format(Progress.ReadyForOutput) : string.Empty;
+        }
+    }
+
+    private Task ProposeAsync() => RunAsync(async () =>
+    {
+        _proposal = await Materials.ProposeConsumptionAsync(OrderId, Quantity());
+        _consumption.Clear();
+        foreach (var p in _proposal)
+        {
+            _consumption[p.ItemId] = Quantities.Format(p.Proposed);
+        }
+    }, null, reload: false);
+
+    private Task OutputAsync() => RunAsync(async () =>
+    {
+        var lines = new List<MaterialLineCommand>();
+        foreach (var p in _proposal!)
+        {
+            var text = _consumption.GetValueOrDefault(p.ItemId);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            if (!Quantities.TryParse(text, out var q))
+            {
+                throw new BusinessRuleException("production.output.consumption_invalid", L("Количество {0} — укажите числом, например 0,5.", p.Code));
+            }
+
+            lines.Add(new MaterialLineCommand(p.ItemId, q));
+        }
+
+        var result = await Materials.OutputAsync(OrderId, new OutputCommand(Quantity(), DateOnly.FromDateTime(_date), lines, _comment));
+        _warnings = result.Warnings;
+        _proposal = null;
+        _comment = null;
+    }, L("Продукция выпущена на склад."), reload: true);
+
+    private decimal Quantity() =>
+        Quantities.TryParse(_quantityText, out var q) ? q : throw new BusinessRuleException("production.output.quantity_invalid", L("Укажите количество числом, например 100."));
+
+    private async Task RunAsync(Func<Task> action, string? success, bool reload)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                if (reload || _messageIsError)
+                {
+                    await OnChanged.InvokeAsync();
+                }
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

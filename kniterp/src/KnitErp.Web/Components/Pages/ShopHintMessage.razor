@@ -1,0 +1,30 @@
+@using KnitErp.Application.Production
+
+@* Кто отмечает и почему отметить нельзя — на страницах терминала цеха. *@
+@switch (Hint)
+{
+    case ShopHint.NoEmployee:
+        <div class="flash error" role="alert">@L("Учётная запись не привязана к сотруднику — обратитесь к кадровику или администратору.")</div>
+        break;
+    case ShopHint.NotWorking:
+        <div class="flash error" role="alert">@L("Сотрудник не работает (отпуск или увольнение) — отмечать работу нельзя.")</div>
+        break;
+    case ShopHint.NotInWork:
+        <div class="flash error" role="alert">@L("Заказ не в работе — отмечать нельзя.")</div>
+        break;
+    case ShopHint.NothingAvailable:
+        <div class="flash" role="status">@L("На этот этап пока ничего не пришло с предыдущего — отмечать нечего.")</div>
+        break;
+}
+@if (EmployeeName is not null && Hint is not ShopHint.NoEmployee)
+{
+    <p class="muted">@L("Исполнитель: {0}", EmployeeName)</p>
+}
+
+@code {
+    [Parameter]
+    public ShopHint Hint { get; set; }
+
+    [Parameter]
+    public string? EmployeeName { get; set; }
+}

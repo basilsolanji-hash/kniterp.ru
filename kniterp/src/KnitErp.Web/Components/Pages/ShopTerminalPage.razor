@@ -1,0 +1,327 @@
+@page "/shop"
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ShopFloorService Shop
+@inject ProductionFloorService Floor
+@inject ShiftTaskService Shifts
+@inject ProductionScoreService Scores
+@inject NavigationManager Nav
+
+@* Терминал цеха на телефоне рабочего (D92, дополнение): код операции, мои отметки за сегодня, доступная работа. *@
+<PageTitle>@L("Терминал цеха") — knitERP</PageTitle>
+<ShopStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_day is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="shop">
+        <h1>@L("Терминал цеха")</h1>
+        <ShopHintMessage Hint="_day.Hint" EmployeeName="@_day.EmployeeName" />
+
+        <form class="shop-code" @onsubmit="Open">
+            <label for="shop-code">@L("Код операции")</label>
+            <div class="shop-row">
+                <input id="shop-code" @ref="_codeInput" @bind="_code" autocomplete="off" autocapitalize="characters" enterkeyhint="go"
+                       placeholder="ОП-123-1" aria-describedby="shop-code-help" />
+                <button type="submit">@L("Открыть")</button>
+            </div>
+            <p id="shop-code-help" class="muted">@L("Наведите камеру телефона на QR-код этапа в маршрутном листе — операция откроется сама. Сканер штрихкода вводит код в это поле.")</p>
+            @if (_codeError is not null)
+            {
+                <div class="flash error" role="alert">@_codeError</div>
+            }
+        </form>
+
+        @if (_score is { } sc)
+        {
+            <h2>@L("Мои показатели за месяц")</h2>
+            <ul class="shop-totals">
+                <li><span>@L("Выполнено заданий")</span> <b>@sc.TasksDone</b></li>
+                <li><span>@L("Не выполнено (с причиной / без)")</span> <b>@sc.MissedWithReason / @sc.MissedNoReason</b></li>
+                <li><span>@L("Средний процент выполнения")</span> <b>@sc.AveragePercent%</b></li>
+                <li><span>@L("Брак по моей вине")</span> <b>@Quantities.Format(sc.DefectUnits)</b></li>
+                @if (sc.Points is { } points)
+                {
+                    <li><span>@L("Баллы")</span> <b>@points</b></li>
+                }
+            </ul>
+        }
+
+        @if (_day.Shift is { Count: > 0 } shift)
+        {
+            <h2>@L("Задания на смену")</h2>
+            <ul class="shop-list">
+                @foreach (var t in shift)
+                {
+                    <li>
+                        <a href="@ShopFloorCode.Path(t.OrderId, t.Stage)">@t.OrderNumber · @L(t.StageName)</a>
+                        <span>@t.ItemName — @L("норма {0}, сделано {1} {2}", Quantities.Format(t.Planned), Quantities.Format(t.Fact), t.UnitSymbol)</span>
+                        <progress max="100" value="@Math.Min(t.Percent, 100)" aria-label="@L("Выполнено {0}%", t.Percent)"></progress>
+                        <b>@L("Выполнено {0}%", t.Percent)</b>
+                        @if (t.Comment is not null)
+                        {
+                            <span class="muted">@t.Comment</span>
+                        }
+                        @if (t.ShortfallReason is not null)
+                        {
+                            <span>@L("Причина: {0}", L(t.ShortfallReason))@(t.ShortfallComment is null ? "" : $". {t.ShortfallComment}")</span>
+                        }
+                        else if (!t.Done && _day.Date <= _day.Today && _shortfallTask != t.Id)
+                        {
+                            <button type="button" class="secondary" disabled="@_busy" @onclick="() => StartShortfall(t.Id)"
+                                    aria-label="@L("Почему не выполнено задание {0}", t.Id)">@L("Почему не выполнено")</button>
+                        }
+                        @if (_shortfallTask == t.Id)
+                        {
+                            <form @onsubmit="() => ShortfallAsync(t)">
+                                <label>@L("Причина")
+                                    <select @bind="_shortfallReason" aria-label="@L("Причина невыполнения")">
+                                        <option value="">@L("— выберите —")</option>
+                                        @foreach (var r in ShopFloorShortfall.Reasons)
+                                        {
+                                            <option value="@r">@L(r)</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label>@L("Комментарий") <textarea @bind="_shortfallComment" maxlength="300" aria-label="@L("Комментарий к причине")"></textarea></label>
+                                <div class="shop-quick">
+                                    <button type="submit" disabled="@_busy">@L("Сообщить")</button>
+                                    <button type="button" class="secondary" @onclick="() => _shortfallTask = null">@L("Отмена")</button>
+                                </div>
+                            </form>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        <h2>@L("Мои отметки за {0}", _day.Date.ToString("dd.MM.yyyy"))</h2>
+        @if (_message is not null)
+        {
+            <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+        }
+        @if (_day.Entries.Count == 0)
+        {
+            <p class="muted">@L("Отметок пока нет.")</p>
+        }
+        else
+        {
+            <ul class="shop-totals">
+                @foreach (var t in _day.Entries.GroupBy(e => (e.Stage, e.StageName, e.UnitSymbol)).OrderBy(g => g.Key.Stage))
+                {
+                    <li><span>@L(t.Key.StageName)</span> <b>@Quantities.Format(t.Sum(e => e.Quantity)) @t.Key.UnitSymbol</b></li>
+                }
+            </ul>
+            <ul class="shop-list">
+                @foreach (var e in _day.Entries)
+                {
+                    <li>
+                        <a href="@ShopFloorCode.Path(e.OrderId, e.Stage)">@e.OrderNumber · @L(e.StageName)</a>
+                        <span>@e.ItemName — @Quantities.Format(e.Quantity) @e.UnitSymbol, @e.LocalTime.ToString("HH:mm")</span>
+                        @if (e.Reason is not null)
+                        {
+                            <span class="muted">@e.Reason</span>
+                        }
+                        @if (e.CanCorrect && _correcting != e.Id)
+                        {
+                            <button type="button" class="secondary" disabled="@_busy" @onclick="() => StartCorrect(e.Id)"
+                                    aria-label="@L("Ошибся — уменьшить отметку {0}", e.Id)">@L("Ошибся — уменьшить")</button>
+                        }
+                        @if (_correcting == e.Id)
+                        {
+                            <form @onsubmit="() => CorrectAsync(e)">
+                                <label>@L("На сколько меньше (осталось {0})", Quantities.Format(e.Remaining ?? 0))
+                                    <input @bind="_correctText" inputmode="decimal" autocomplete="off" aria-label="@L("На сколько уменьшить")" /></label>
+                                <label>@L("Причина") <input @bind="_correctReason" maxlength="300" aria-label="@L("Причина исправления")" /></label>
+                                <div class="shop-quick">
+                                    <button type="submit" disabled="@_busy">@L("Исправить")</button>
+                                    <button type="button" class="secondary" @onclick="() => _correcting = null">@L("Отмена")</button>
+                                </div>
+                            </form>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+
+        <h2>@L("Доступная работа")</h2>
+        @if (_day.Tasks.Count == 0)
+        {
+            <p class="muted">@L("Сейчас на этапах нет работы, которую можно отметить.")</p>
+        }
+        else
+        {
+            <ul class="shop-list">
+                @foreach (var t in _day.Tasks)
+                {
+                    <li>
+                        <a href="@ShopFloorCode.Path(t.OrderId, t.Stage)">@t.OrderNumber · @L(t.StageName)</a>
+                        <span>@t.ItemName — @L("можно отметить {0} {1}", Quantities.Format(t.Available), t.UnitSymbol)@(t.DueDate is { } d ? ", " + L("срок {0}", d.ToString("dd.MM.yyyy")) : "")</span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@code {
+    private ShopDayDto? _day;
+    private EmployeeScoreDto? _score;
+    private string? _denied;
+    private string _code = string.Empty;
+    private string? _codeError;
+    private ElementReference _codeInput;
+    private bool _focused;
+    private bool _busy;
+    private long? _correcting;
+    private string _correctText = string.Empty;
+    private string? _correctReason;
+    private string? _message;
+    private bool _messageIsError;
+
+    private long? _shortfallTask;
+    private string _shortfallReason = string.Empty;
+    private string? _shortfallComment;
+
+    private void StartShortfall(long id)
+    {
+        _shortfallTask = id;
+        _shortfallReason = string.Empty;
+        _shortfallComment = null;
+    }
+
+    /// <summary>Причина, почему задание на смену не выполнено, — видит мастер в «Сменных заданиях».</summary>
+    private async Task ShortfallAsync(ShiftTaskDto task)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (_shortfallReason.Length == 0)
+            {
+                throw new BusinessRuleException("production.shop.reason", L("Выберите причину из списка."));
+            }
+
+            await Shifts.ReportShortfallAsync(task.Id, _shortfallReason, _shortfallComment, task.RowVersion);
+            _message = L("Причина передана мастеру.");
+            _shortfallTask = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                _day = await Shop.MyDayAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private void StartCorrect(long id)
+    {
+        _correcting = id;
+        _correctText = string.Empty;
+        _correctReason = null;
+    }
+
+    /// <summary>Своя ошибочная отметка за сегодня: уменьшается исправлением, выработка — тоже.</summary>
+    private async Task CorrectAsync(ShopEntryDto entry)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!Quantities.TryParse(_correctText, out var quantity))
+            {
+                throw new BusinessRuleException("production.stage.quantity_invalid", L("Укажите количество числом, например 100."));
+            }
+
+            await Floor.CorrectAsync(entry.OrderId, entry.Id, quantity, _correctReason);
+            _message = L("Отметка исправлена.");
+            _correcting = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                _day = await Shop.MyDayAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _day = await Shop.MyDayAsync();
+            _score = await Scores.MineAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Фокус в поле кода — сканер штрихкода сразу вводит в него; на телефоне клавиатура появится по касанию.
+        if (_day is not null && !_focused)
+        {
+            _focused = true;
+            try
+            {
+                await _codeInput.FocusAsync();
+            }
+            catch (InvalidOperationException)
+            {
+                // Поле ещё не отрисовано (предварительная отрисовка) — не страшно.
+            }
+        }
+    }
+
+    private void Open()
+    {
+        if (ShopFloorCode.TryParse(_code, out var order, out var stage))
+        {
+            Nav.NavigateTo(ShopFloorCode.Path(order, stage));
+            return;
+        }
+
+        _codeError = L("Код не распознан. Пример: ОП-123-1 (заказ 123, этап 1).");
+    }
+}

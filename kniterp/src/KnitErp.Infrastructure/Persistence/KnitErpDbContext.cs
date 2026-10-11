@@ -47,6 +47,11 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<Counterparty> Counterparties => Set<Counterparty>();
     public DbSet<VatRate> VatRates => Set<VatRate>();
     public DbSet<KnitErp.Domain.Production.TechCard> TechCards => Set<KnitErp.Domain.Production.TechCard>();
+    public DbSet<KnitErp.Domain.Production.ProductionOrder> ProductionOrders => Set<KnitErp.Domain.Production.ProductionOrder>();
+    public DbSet<KnitErp.Domain.Production.ProductionOperation> ProductionOperations => Set<KnitErp.Domain.Production.ProductionOperation>();
+    public DbSet<KnitErp.Domain.Production.ShiftTask> ShiftTasks => Set<KnitErp.Domain.Production.ShiftTask>();
+    public DbSet<KnitErp.Domain.Production.ProductionSettings> ProductionSettings => Set<KnitErp.Domain.Production.ProductionSettings>();
+    public DbSet<KnitErp.Domain.Production.ProductionOrderDocument> ProductionOrderDocuments => Set<KnitErp.Domain.Production.ProductionOrderDocument>();
     public DbSet<KnitErp.Domain.Purchasing.PurchaseOrder> PurchaseOrders => Set<KnitErp.Domain.Purchasing.PurchaseOrder>();
     public DbSet<KnitErp.Domain.Purchasing.SupplierPayment> SupplierPayments => Set<KnitErp.Domain.Purchasing.SupplierPayment>();
     public DbSet<KnitErp.Domain.Sales.SalesOrder> SalesOrders => Set<KnitErp.Domain.Sales.SalesOrder>();

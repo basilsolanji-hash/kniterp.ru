@@ -1,0 +1,27 @@
+@*
+    Стили терминала цеха. Исключение из общих правил плотности (D114): терминалом пользуются на телефоне в цехе, часто в перчатках,
+    и плотность в профиле рабочий не выбирает — поэтому зоны касания здесь крупные всегда (не меньше 44 CSS px по WCAG 2.5.5),
+    в относительных единицах, чтобы росли вместе с размером шрифта. Без горизонтальной прокрутки на телефоне.
+*@
+<style>
+    .shop { max-width: 560px; }
+    .shop h1 { margin-bottom: 4px; }
+    .shop h2 { margin-top: 1.25rem; font-size: 1.125rem; }
+    .shop-row { display: flex; gap: 8px; }
+    .shop-row input { flex: 1 1 auto; min-width: 0; }
+    .shop input, .shop select, .shop textarea, .shop button { font-size: 1.125rem; min-height: 3em; box-sizing: border-box; }
+    .shop textarea { width: 100%; min-height: 4.5em; }
+    .shop label { display: block; margin-top: 12px; }
+    .shop label > input, .shop label > select { width: 100%; }
+    .shop-list, .shop-totals { list-style: none; padding: 0; margin: 0; }
+    .shop-list li { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+    .shop-list a { font-weight: 600; font-size: 1.0625rem; }
+    .shop-totals li { display: flex; justify-content: space-between; padding: 4px 0; }
+    .shop-big { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+    .shop-big div { border: 1px solid var(--line); border-radius: 8px; padding: 8px; text-align: center; }
+    .shop-big b { display: block; font-size: 1.375rem; }
+    .shop-quick { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .shop-quick button { flex: 1 1 auto; }
+    .shop-submit { width: 100%; margin-top: 16px; }
+    .shop progress { width: 100%; height: 0.875rem; }
+</style>

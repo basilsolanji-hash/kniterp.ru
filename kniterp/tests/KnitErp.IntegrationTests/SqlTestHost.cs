@@ -193,7 +193,18 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Warehousing.StockBatchBreakdownService(db, guard),
             new KnitErp.Application.Tagging.TagService(Factory, user, Clock),
             new KnitErp.Application.Exchange.EnterpriseDataExportService(db, guard, user, Clock),
+            new KnitErp.Application.Production.ProductionOrderService(db, guard, user, Clock),
+            new KnitErp.Application.Production.ProductionFloorService(db, guard, user, Clock),
+            new KnitErp.Application.Production.ProductionMaterialService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock)),
+            new KnitErp.Application.Production.ProductionPrintService(db, guard),
+            new KnitErp.Application.Production.ProductionReportService(db, guard, Spreadsheet, Clock),
+            new KnitErp.Application.Production.MaterialPlanningService(db, guard, Clock,
+                new KnitErp.Application.Purchasing.PurchaseService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock))),
             new KnitErp.Application.Collaboration.DiscussionService(Factory, user, Clock),
+            new KnitErp.Application.Production.ShopFloorService(db, guard, Clock, new KnitErp.Application.Production.ProductionFloorService(db, guard, user, Clock)),
+            new KnitErp.Application.Production.ShiftTaskService(db, guard, user, Clock),
+            new KnitErp.Application.Production.ProductionSettingsService(db, guard, user, Clock),
+            new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock),
             new RoleService(db, guard, user, Clock));
     }
 
@@ -283,7 +294,17 @@ public sealed record Services(
     KnitErp.Application.Warehousing.StockBatchBreakdownService Breakdowns,
     KnitErp.Application.Tagging.TagService Tags,
     KnitErp.Application.Exchange.EnterpriseDataExportService Exchange,
+    KnitErp.Application.Production.ProductionOrderService ProductionOrders,
+    KnitErp.Application.Production.ProductionFloorService Floor,
+    KnitErp.Application.Production.ProductionMaterialService Materials,
+    KnitErp.Application.Production.ProductionPrintService ProductionPrint,
+    KnitErp.Application.Production.ProductionReportService ProductionReports,
+    KnitErp.Application.Production.MaterialPlanningService Planning,
     KnitErp.Application.Collaboration.DiscussionService Discussions,
+    KnitErp.Application.Production.ShopFloorService ShopFloor,
+    KnitErp.Application.Production.ShiftTaskService ShiftTasks,
+    KnitErp.Application.Production.ProductionSettingsService ProductionSettings,
+    KnitErp.Application.Production.ProductionScoreService Scores,
     RoleService Roles) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();

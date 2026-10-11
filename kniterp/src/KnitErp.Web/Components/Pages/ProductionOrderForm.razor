@@ -1,0 +1,211 @@
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+
+@* Форма шапки производственного заказа: новый заказ и правка черновика (изделие у черновика не меняется). *@
+<form @onsubmit="SubmitAsync">
+    @if (_error is not null)
+    {
+        <div class="error" role="alert">@_error</div>
+    }
+    <div class="grid">
+        <label>
+            @L("Изделие")
+            @if (FixedItem is { } fixedItem)
+            {
+                <input value="@($"{fixedItem.Code} — {fixedItem.Name}")" disabled />
+            }
+            else
+            {
+                <input list="production-products" @bind="_productText" @bind:after="ProductChanged" placeholder="@L("Код или наименование")" />
+                <datalist id="production-products">
+                    @foreach (var p in Options.Products)
+                    {
+                        <option value="@($"{p.Code} — {p.Name}")">@CardHint(p)</option>
+                    }
+                </datalist>
+            }
+        </label>
+        <label>@L("Количество") <input @bind="_quantityText" inputmode="decimal" /></label>
+        <label>@L("Дата заказа") <input type="date" @bind="_date" /></label>
+        <label>@L("Срок выпуска") <input type="date" @bind="_due" /></label>
+        <label>
+            @L("Источник")
+            <select @bind="_source" aria-label="@L("Источник")">
+                <option value="@ProductionSource.Plan">@L(ProductionOrder.SourceName(ProductionSource.Plan))</option>
+                <option value="@ProductionSource.SalesOrder">@L(ProductionOrder.SourceName(ProductionSource.SalesOrder))</option>
+            </select>
+        </label>
+        @if (_source == ProductionSource.SalesOrder)
+        {
+            <label>
+                @L("Заказ покупателя")
+                <select @bind="_salesOrder" aria-label="@L("Заказ покупателя")">
+                    <option value="">@L("— выберите —")</option>
+                    @foreach (var s in SalesOrdersForItem())
+                    {
+                        <option value="@s.Id">@s.Number @L("от {0}", s.OrderDate.ToString("dd.MM.yyyy"))@(s.CustomerName is null ? "" : $", {s.CustomerName}")</option>
+                    }
+                </select>
+            </label>
+        }
+        <label>
+            @L("Склад цеха (НЗП)")
+            <select @bind="_wip" aria-label="@L("Склад цеха (НЗП)")">
+                <option value="">@L("— выберите —")</option>
+                @foreach (var w in Options.Warehouses)
+                {
+                    <option value="@w.Id">@w.Name</option>
+                }
+            </select>
+        </label>
+        <label>
+            @L("Склад готовой продукции")
+            <select @bind="_output" aria-label="@L("Склад готовой продукции")">
+                <option value="">@L("— выберите —")</option>
+                @foreach (var w in Options.Warehouses)
+                {
+                    <option value="@w.Id">@w.Name</option>
+                }
+            </select>
+        </label>
+        <label>@L("Комментарий") <input @bind="_comment" maxlength="@ProductionOrder.CommentMaxLength" /></label>
+    </div>
+    @if (SelectedProduct() is { } product)
+    {
+        <p class="muted">
+            @(product.TechCardVersion is { } v
+                ? (product.CardFromModel ? L("Техкарта основной модели, версия {0} — зафиксируется при запуске.", v) : L("Техкарта версия {0} — зафиксируется при запуске.", v))
+                : L("У изделия нет действующей техкарты — сначала введите её в действие."))
+        </p>
+    }
+    <div class="actions">
+        <button type="submit" disabled="@Busy">@SubmitText</button>
+        <button type="button" class="secondary" @onclick="OnCancel" disabled="@Busy">@L("Отмена")</button>
+    </div>
+</form>
+
+@code {
+    [Parameter, EditorRequired]
+    public ProductionOrderOptions Options { get; set; } = default!;
+
+    /// <summary>Изделие черновика: в правке его не меняют.</summary>
+    [Parameter]
+    public ProductionProductOptionDto? FixedItem { get; set; }
+
+    /// <summary>Начальные значения правки; null — новый заказ.</summary>
+    [Parameter]
+    public ProductionOrderCommand? Initial { get; set; }
+
+    [Parameter]
+    public DateOnly Today { get; set; }
+
+    [Parameter]
+    public string SubmitText { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<ProductionOrderCommand> OnSubmit { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private string _productText = string.Empty;
+    private string _quantityText = string.Empty;
+    private DateTime _date = DateTime.Today;
+    private DateTime? _due;
+    private ProductionSource _source = ProductionSource.Plan;
+    private string _salesOrder = string.Empty;
+    private string _wip = string.Empty;
+    private string _output = string.Empty;
+    private string? _comment;
+    private bool _initialized;
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        if (_initialized)
+        {
+            return;
+        }
+
+        _initialized = true;
+        if (Initial is { } c)
+        {
+            _quantityText = Quantities.Format(c.Quantity);
+            _date = c.OrderDate.ToDateTime(TimeOnly.MinValue);
+            _due = c.DueDate?.ToDateTime(TimeOnly.MinValue);
+            _source = c.Source;
+            _salesOrder = c.SalesOrderId?.ToString() ?? string.Empty;
+            _wip = c.WipWarehouseId.ToString();
+            _output = c.OutputWarehouseId.ToString();
+            _comment = c.Comment;
+        }
+        else
+        {
+            _date = Today.ToDateTime(TimeOnly.MinValue);
+            _wip = Options.DefaultWipWarehouseId?.ToString() ?? string.Empty;
+        }
+    }
+
+    private ProductionProductOptionDto? SelectedProduct()
+    {
+        if (FixedItem is not null)
+        {
+            return FixedItem;
+        }
+
+        var code = _productText.Split(" — ", 2)[0].Trim();
+        return Options.Products.FirstOrDefault(p => string.Equals(p.Code, code, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Заказы покупателей, где есть выбранное изделие.</summary>
+    private IEnumerable<ProductionSalesOrderOptionDto> SalesOrdersForItem() =>
+        SelectedProduct() is { } p ? Options.SalesOrders.Where(s => s.Lines.Any(l => l.ItemId == p.Id)) : [];
+
+    private void ProductChanged()
+    {
+        _salesOrder = string.Empty;
+    }
+
+    private string CardHint(ProductionProductOptionDto p) =>
+        p.TechCardVersion is { } v ? L("техкарта, версия {0}", v) : L("нет действующей техкарты");
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        ProductionOrderCommand command;
+        try
+        {
+            command = Read();
+        }
+        catch (BusinessRuleException ex)
+        {
+            _error = ex.Message;
+            return;
+        }
+
+        await OnSubmit.InvokeAsync(command);
+    }
+
+    /// <summary>Значения формы; ошибка ввода показывается здесь же, ошибки сервера — на странице.</summary>
+    private ProductionOrderCommand Read()
+    {
+        var product = SelectedProduct()
+                      ?? throw new BusinessRuleException("production.order.product_unknown", L("Изделие «{0}» не найдено. Выберите из списка.", _productText));
+        if (!Quantities.TryParse(_quantityText, out var quantity))
+        {
+            throw new BusinessRuleException("production.order.quantity_invalid", L("Укажите количество числом, например 100."));
+        }
+
+        if (!long.TryParse(_wip, out var wip) || !long.TryParse(_output, out var output))
+        {
+            throw new BusinessRuleException("production.order.warehouse_required", L("Выберите склад цеха и склад готовой продукции."));
+        }
+
+        long? sales = _source == ProductionSource.SalesOrder && long.TryParse(_salesOrder, out var s) ? s : null;
+        return new ProductionOrderCommand(product.Id, quantity, DateOnly.FromDateTime(_date),
+            _due is { } due ? DateOnly.FromDateTime(due) : null, _source, sales, wip, output, _comment);
+    }
+}

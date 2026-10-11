@@ -169,6 +169,7 @@ else
                         </select>
                     </label>
                 }
+                <label class="inline"><input type="checkbox" @bind="_explode" /> @L("По уровням (полуфабрикаты — до пряжи)")</label>
                 <button type="submit" class="secondary" disabled="@_busy">@L("Рассчитать")</button>
             </form>
             @if (_need is not null)
@@ -230,6 +231,7 @@ else
     private string _wasteText = "0";
     private string _planText = string.Empty;
     private string _warehouse = string.Empty;
+    private bool _explode;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -326,7 +328,7 @@ else
     }
 
     private Task CalculateAsync() => RunAsync(async () =>
-        _need = await Cards.RequirementAsync(Id, ParseQuantity(_planText), long.TryParse(_warehouse, out var w) ? w : null), null);
+        _need = await Cards.RequirementAsync(Id, ParseQuantity(_planText), long.TryParse(_warehouse, out var w) ? w : null, _explode), null);
 
     private static decimal ParseQuantity(string text) =>
         Quantities.TryParse(text, out var value) ? value : throw new BusinessRuleException("techcard.number", L("Укажите число, например 0,35."));

@@ -564,7 +564,7 @@ else
                                         <li>
                                             <a href="@o.Href">
                                                 <span class="prod-name"><b>@o.Number</b> @o.Product
-                                                    @if (o.Operation is not null) { <span class="muted small">· @o.Operation</span> }</span>
+                                                    @if (o.Operation is not null) { <span class="muted small">· @L(o.Operation)</span> }</span>
                                                 <span class="prod-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@((int)pct)"
                                                       aria-label="@L("Готовность {0}", o.Number)"><span style="width: @(pct.ToString("0.#", CultureInfo.InvariantCulture))%"></span></span>
                                                 <span class="prod-pct">@pct.ToString("0", CultureInfo.InvariantCulture)%</span>
@@ -593,7 +593,7 @@ else
                                 <ul class="attention">
                                     @foreach (var a in pa.Alerts)
                                     {
-                                        @Attention(a.Text, a.Count, a.Critical ? L("срочно") : L("проверьте"), a.Href, null)
+                                        @Attention(L(a.Text), a.Count, a.Critical ? L("срочно") : L("проверьте"), a.Href, null)
                                     }
                                 </ul>
                             }

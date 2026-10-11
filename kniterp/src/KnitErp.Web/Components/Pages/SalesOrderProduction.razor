@@ -1,0 +1,129 @@
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject SalesProductionService Production
+
+@* Производство по заказу покупателя (D90, дополнение): заказано / в производстве / выпущено и черновики одной кнопкой.
+   Свой контекст базы на вызов (как теги и обсуждения) — не мешает операциям карточки заказа. *@
+@if (CurrentAccess.Has(Permissions.ProductionOrderView) && _data is not null && _data.Lines.Count > 0)
+{
+    <section class="panel" style="margin-top: 24px" aria-label="@L("Производство")">
+        <h2>@L("Производство")</h2>
+        @if (_message is not null)
+        {
+            <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+        }
+
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Код")</th><th>@L("Наименование")</th><th class="num">@L("Заказано")</th><th class="num">@L("В производстве")</th><th class="num">@L("Выпущено")</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var l in _data.Lines)
+                    {
+                        <tr>
+                            <td>@l.Code</td>
+                            <td>@l.Name</td>
+                            <td class="num">@Quantities.Format(l.Ordered) @l.UnitSymbol</td>
+                            <td class="num">@Quantities.Format(l.Planned)</td>
+                            <td class="num">@Quantities.Format(l.Released)</td>
+                            <td class="muted">@HintText(l.Hint)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (_data.Orders.Count > 0)
+        {
+            <p>
+                @L("Производственные заказы:")
+                @foreach (var o in _data.Orders)
+                {
+                    <a href="production-orders/@o.Id" style="margin-right: 12px">@o.Number</a><span class="muted" style="margin-right: 16px">@o.ItemCode, @Quantities.Format(o.Quantity), @L(o.StatusName)</span>
+                }
+            </p>
+        }
+
+        @if (_data.CanCreate)
+        {
+            <ConfirmButton Class="" OnConfirm="CreateAsync" Disabled="@_busy" Question='@L("Создать черновики производственных заказов на незапланированный остаток?")'>@L("Создать производственные заказы")</ConfirmButton>
+        }
+        else if (_data.CreateHint is not null && CurrentAccess.Has(Permissions.ProductionOrderEdit))
+        {
+            <p class="muted">@HintText(_data.CreateHint)</p>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long SalesOrderId { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private SalesProductionDto? _data;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!CurrentAccess.Has(Permissions.ProductionOrderView) || _data?.SalesOrderId == SalesOrderId)
+        {
+            return;
+        }
+
+        try
+        {
+            _data = await Production.ForSalesOrderAsync(SalesOrderId);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _data = null;
+        }
+    }
+
+    private string HintText(string? code) => code switch
+    {
+        SalesProductionHints.Purchased => L("покупной товар — не производится"),
+        SalesProductionHints.Archived => L("позиция в архиве"),
+        SalesProductionHints.NoTechCard => L("нет действующей техкарты"),
+        SalesProductionHints.NotConfirmed => L("Производство создаётся по подтверждённому заказу покупателя."),
+        SalesProductionHints.AllPlanned => L("Всё, что можно произвести, уже запланировано."),
+        _ => "",
+    };
+
+    private async Task CreateAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            var result = await Production.CreateAsync(SalesOrderId);
+            _message = L("Созданы черновики: {0}.", string.Join(", ", result.Numbers))
+                       + (result.Skipped.Count > 0 ? " " + L("Не производятся или без техкарты: {0}.", string.Join(", ", result.Skipped)) : "");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                _data = await Production.ForSalesOrderAsync(SalesOrderId);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}
