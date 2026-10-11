@@ -1,0 +1,135 @@
+@page "/production/planning"
+@using KnitErp.Application.Production
+@inject MaterialPlanningService Planning
+
+<PageTitle>@L("Потребность в материалах") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_plan is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head"><h1>@L("Потребность в материалах")</h1></div>
+    <p class="muted">@L("По всем открытым производственным заказам: сколько ещё выдать в цех, сколько свободно на складах (кроме складов цеха), сколько ожидается по подтверждённым заказам поставщикам и чего не хватает.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>@L("Код")</th><th>@L("Материал")</th><th class="num">@L("Нужно выдать")</th><th class="num">@L("Свободно")</th><th class="num">@L("Ожидается")</th>
+                    <th class="num">@L("Не хватает")</th><th>@L("Ед.")</th><th class="opt num">@L("Заказов")</th><th class="opt">@L("Поставщик")</th>
+                    @if (_plan.PricesVisible) { <th class="opt num">@L("Последняя цена")</th> }
+                </tr>
+            </thead>
+            <tbody>
+                @if (_plan.Lines.Count == 0)
+                {
+                    <tr><td colspan="10" class="muted">@L("Открытых производственных заказов с потребностью нет.")</td></tr>
+                }
+                @foreach (var l in _plan.Lines)
+                {
+                    <tr class="@(l.Shortage > 0 ? "short" : "")">
+                        <td>@l.Code</td>
+                        <td>@l.Name@(l.Producible ? " " + L("(производится)") : "")</td>
+                        <td class="num">@Quantities.Format(l.Need)</td>
+                        <td class="num">@Quantities.Format(l.Free)</td>
+                        <td class="num">@Quantities.Format(l.Incoming)</td>
+                        <td class="num"><b>@(l.Shortage > 0 ? Quantities.Format(l.Shortage) : "—")</b></td>
+                        <td>@l.UnitSymbol</td>
+                        <td class="num">@l.Orders</td>
+                        <td>@(l.SupplierName ?? "—")</td>
+                        @if (_plan.PricesVisible) { <td class="num">@(l.LastPrice?.ToString("N2") ?? "—")</td> }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_plan.CanOrder && _plan.Lines.Any(l => l.Shortage > 0 && !l.Producible))
+    {
+        <form class="inline-form" @onsubmit="OrderAsync">
+            <label>
+                @L("Склад приёмки")
+                <select @bind="_warehouse" aria-label="@L("Склад приёмки")">
+                    <option value="">@L("— выберите —")</option>
+                    @foreach (var w in _plan.Warehouses)
+                    {
+                        <option value="@w.Id">@w.Name</option>
+                    }
+                </select>
+            </label>
+            <button type="submit" disabled="@_busy">@L("Создать заказы поставщикам на нехватку")</button>
+        </form>
+        <p class="muted">@L("Черновики по поставщику и цене последней закупки — проверьте и подтвердите их в «Закупках». Полуфабрикаты с техкартой не закупаются, а производятся.")</p>
+    }
+}
+
+@code {
+    private MaterialPlanDto? _plan;
+    private string _warehouse = string.Empty;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _plan = await Planning.PlanAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task OrderAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!long.TryParse(_warehouse, out var warehouse))
+            {
+                throw new BusinessRuleException("production.planning.warehouse", L("Выберите склад приёмки."));
+            }
+
+            var result = await Planning.CreatePurchaseOrdersAsync(warehouse);
+            _message = (result.Numbers.Count > 0 ? L("Созданы черновики заказов поставщикам: {0}.", string.Join(", ", result.Numbers)) : "")
+                       + (result.WithoutSupplier.Count > 0 ? " " + L("Без известного поставщика (закажите вручную): {0}.", string.Join(", ", result.WithoutSupplier)) : "");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                _plan = await Planning.PlanAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

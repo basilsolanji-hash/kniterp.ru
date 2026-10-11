@@ -792,6 +792,60 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    /// <summary>D94 (дополнение «планирование»): потребность открытых заказов, свободный остаток без склада цеха, ожидаемые поставки, черновики заказов поставщикам.</summary>
+    [SqlFact]
+    public async Task Material_planning_finds_shortage_and_creates_purchase_drafts()
+    {
+        var f = await SetUpAsync();
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Запущен на 100 свитеров (пряжа 32,96 кг, пуговиц 500), 10 кг уже выдано в цех; черновик на 200 (65,92 кг и 1 000 пуговиц).
+            var released = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 100));
+            await s.ProductionOrders.ReleaseAsync(released, (await s.ProductionOrders.GetAsync(released)).RowVersion);
+            await s.Materials.MoveAsync(released, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 10m)));
+            await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 200));
+
+            // Ожидается 300 пуговиц по подтверждённому заказу поставщику.
+            var supplier = (await s.Db.PurchaseOrders.FirstAsync()).SupplierId;
+            var po = await s.Purchases.CreateOrderAsync(new PurchaseOrderHeader(Day, supplier, f.YarnStore, null, null, false, null));
+            await s.Purchases.SetOrderLineAsync(po, f.Buttons, 300, 5m, null, (await s.Purchases.GetOrderAsync(po)).RowVersion);
+            await s.Purchases.ConfirmOrderAsync(po, (await s.Purchases.GetOrderAsync(po)).RowVersion);
+
+            var plan = await s.Planning.PlanAsync();
+            var yarn = plan.Lines.Single(l => l.ItemId == f.Yarn);
+            Assert.Equal((88.88m, 40m, 0m, 48.88m, 2), (yarn.Need, yarn.Free, yarn.Incoming, yarn.Shortage, yarn.Orders));
+            Assert.Equal(1220m, yarn.LastPrice); // цена строки последней закупки — с НДС, как в том заказе
+            var buttons = plan.Lines.Single(l => l.ItemId == f.Buttons);
+            Assert.Equal((1500m, 500m, 300m, 700m), (buttons.Need, buttons.Free, buttons.Incoming, buttons.Shortage));
+            Assert.True(plan.CanOrder);
+
+            var result = await s.Planning.CreatePurchaseOrdersAsync(f.YarnStore);
+            var draft = await s.Purchases.GetOrderAsync(Assert.Single(result.Orders));
+            Assert.Equal(PurchaseOrderStatus.Draft, draft.Status);
+            Assert.Equal((48.88m, 700m), (draft.Lines.Single(l => l.ItemId == f.Yarn).Quantity, draft.Lines.Single(l => l.ItemId == f.Buttons).Quantity));
+            Assert.Empty(result.WithoutSupplier);
+
+            // Черновики уже ожидаются — повторно заказывать нечего.
+            Assert.All((await s.Planning.PlanAsync()).Lines, l => Assert.Equal(0m, l.Shortage));
+            Assert.Equal("production.planning.no_shortage", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Planning.CreatePurchaseOrdersAsync(f.YarnStore))).Code);
+        }
+
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            var plan = await s.Planning.PlanAsync();
+            Assert.False(plan.CanOrder);
+            Assert.All(plan.Lines, l => Assert.Null(l.LastPrice));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Planning.CreatePurchaseOrdersAsync(f.YarnStore));
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            Assert.Empty((await s.Planning.PlanAsync()).Lines);
+        }
+    }
+
     private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
         new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 

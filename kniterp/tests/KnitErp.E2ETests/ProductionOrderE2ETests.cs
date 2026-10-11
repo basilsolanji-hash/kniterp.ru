@@ -299,6 +299,21 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("10 шт")).ToBeVisibleAsync(); // 2 рукава × 5 кофт
     }
 
+    /// <summary>D94 (дополнение «планирование»): начальник цеха видит потребность в пряже по открытым заказам; заказывать поставщикам — не его право.</summary>
+    [SqlFact]
+    public async Task Workshop_head_sees_material_planning()
+    {
+        await app.CreateReleasedOrderAsync(500); // 160 кг пряжи с отходом при 50 кг на складе — нехватка
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page);
+        await page.GotoAsync("production/planning");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Потребность в материалах" })).ToBeVisibleAsync();
+        var yarn = page.GetByRole(AriaRole.Row).Filter(new() { HasText = "ПР-1" });
+        await Assertions.Expect(yarn).ToHaveClassAsync(new Regex("short"));
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Создать заказы поставщикам на нехватку" })).ToHaveCountAsync(0);
+    }
+
     private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);
 
     private async Task LoginAsync(IPage page, string email)
