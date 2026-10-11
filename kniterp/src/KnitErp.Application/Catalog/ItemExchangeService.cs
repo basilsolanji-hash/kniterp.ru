@@ -266,6 +266,7 @@ public sealed class ItemExchangeService(
         }
 
         var units = await ActiveUnitsAsync(ctx, ct);
+        var serviceVat = await DefaultServiceVatAsync(ctx.OrganizationId, ct);
         var existing = await db.Items.Where(i => i.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(i => i.Code, ct);
         var created = new List<Item>();
         var touched = new List<(Item Item, ItemImportRow Row)>();
@@ -292,6 +293,11 @@ public sealed class ItemExchangeService(
                         item.Update(row.Code, row.Name, type, unit.Id, description);
                     }
 
+                    if (item.Type == ItemType.Service && item.VatRateId is null)
+                    {
+                        item.SetVatRate(serviceVat); // D300: ставка услуги — основная ставка организации
+                    }
+
                     db.Items.Add(item);
                     existing[item.Code] = item;
                     created.Add(item);
@@ -303,6 +309,11 @@ public sealed class ItemExchangeService(
                     foreach (var change in item.Update(row.Code, row.Name, type, unit.Id, description))
                     {
                         Audit(ctx, AuditActions.CatalogChanged, nameof(Item), item.Id.ToString(), change.Before, change.After, $"Импорт: {change.Field}");
+                    }
+
+                    if (item.Type == ItemType.Service && item.VatRateId is null && item.SetVatRate(serviceVat) is { } vatChange)
+                    {
+                        Audit(ctx, AuditActions.CatalogChanged, nameof(Item), item.Id.ToString(), vatChange.Before, vatChange.After, "Импорт: Ставка НДС");
                     }
 
                     touched.Add((item, row));
@@ -377,7 +388,8 @@ public sealed class ItemExchangeService(
             foreach (var (typeId, price) in prices)
             {
                 var old = current.GetValueOrDefault(typeId);
-                if (old?.Price == price)
+                var before = old?.Price; // до изменения: old.Set меняет цену на месте
+                if (before == price)
                 {
                     continue;
                 }
@@ -395,7 +407,9 @@ public sealed class ItemExchangeService(
                     old.Set(price.Value);
                 }
 
-                Audit(ctx, AuditActions.CatalogChanged, nameof(Item), id, old?.Price.ToString("0.00##", CultureInfo.InvariantCulture),
+                db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, item.Id, typeId, before, price, clock.UtcNow, ctx.UserId,
+                    PriceChangeSource.Import)); // D305
+                Audit(ctx, AuditActions.CatalogChanged, nameof(Item), id, before?.ToString("0.00##", CultureInfo.InvariantCulture),
                     price?.ToString("0.00##", CultureInfo.InvariantCulture), "Импорт: цена");
             }
         }
@@ -420,6 +434,11 @@ public sealed class ItemExchangeService(
 
         await db.SaveChangesAsync(ct);
     }
+
+    /// <summary>Основная ставка НДС организации для новой услуги из файла (D300): действующая ставка вида «Основная».</summary>
+    private Task<long?> DefaultServiceVatAsync(long organizationId, CancellationToken ct) =>
+        db.VatRates.AsNoTracking().Where(r => r.OrganizationId == organizationId && !r.IsArchived && r.Kind == VatRateKind.Standard)
+            .OrderBy(r => r.Id).Select(r => (long?)r.Id).FirstOrDefaultAsync(ct);
 
     private async Task<(ItemImportPlan Plan, Dictionary<int, Parsed> Parsed)> PlanAsync(AccessContext ctx, IReadOnlyList<ItemImportRow> raw, CancellationToken ct)
     {
@@ -450,6 +469,12 @@ public sealed class ItemExchangeService(
                     .Join(db.Items.AsNoTracking(), b => b.ItemId, i => i.Id, (b, i) => new { Barcode = b.Code, b.ItemId, ItemCode = i.Code })
                     .ToListAsync(ct))
                 .Select(x => (x.Barcode, x.ItemId, x.ItemCode)).ToList();
+            // D307: штрихкоды упаковок заняты для любой позиции (ItemId = long.MinValue — не совпадает ни с одной).
+            barcodeOwners.AddRange((await db.ItemPacks.AsNoTracking()
+                    .Where(p => p.OrganizationId == org && p.Barcode != null && fileBarcodes.Contains(p.Barcode))
+                    .Join(db.Items.AsNoTracking(), p => p.ItemId, i => i.Id, (p, i) => new { Barcode = p.Barcode!, ItemCode = i.Code })
+                    .ToListAsync(ct))
+                .Select(x => (x.Barcode, long.MinValue, x.ItemCode)));
             currentPrices = (await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == org && ids.Contains(p.ItemId)).ToListAsync(ct))
                 .ToLookup(p => p.ItemId);
             parentKeys = (await db.Items.AsNoTracking()
@@ -466,6 +491,27 @@ public sealed class ItemExchangeService(
         var fileParents = raw.Where(r => string.IsNullOrWhiteSpace(r.Extra?.GetValueOrDefault(ParentColumn)))
             .Select(r => Item.NormalizeCode(r.Code)).ToHashSet();
         var fileVariantKeys = new Dictionary<(string Parent, string Key), int>();
+
+        // D300, D302: услуга или комплект из файла — только у позиции, которой не было на складе и которая не входит в комплекты;
+        // у услуги — ставка НДС (своя или основная организации); комплект с составом не меняет тип. Те же правила, что в карточке.
+        var serviceCodes = raw.Where(r => ParseType(r.TypeText) == ItemType.Service).Select(r => Item.NormalizeCode(r.Code)).ToHashSet();
+        var notStockedCodes = raw.Where(r => ParseType(r.TypeText) is { } t && !ItemTypes.IsStocked(t)).Select(r => Item.NormalizeCode(r.Code)).ToHashSet();
+        var serviceVat = serviceCodes.Count > 0 ? await DefaultServiceVatAsync(org, ct) : null;
+        var convertIds = existing.Values.Where(i => notStockedCodes.Contains(i.Code) && ItemTypes.IsStocked(i.Type)).Select(i => i.Id).ToList();
+        var stocked = convertIds.Count == 0
+            ? []
+            : (await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == org && convertIds.Contains(m.ItemId)).Select(m => m.ItemId)
+                .Concat(db.StockBatches.AsNoTracking().Where(b => b.OrganizationId == org && convertIds.Contains(b.ItemId)).Select(b => b.ItemId))
+                .Concat(db.BundleComponents.AsNoTracking().Where(c => c.OrganizationId == org && convertIds.Contains(c.ComponentItemId)).Select(c => c.ComponentItemId))
+                .Concat(db.ItemPacks.AsNoTracking().Where(p => p.OrganizationId == org && convertIds.Contains(p.ItemId)).Select(p => p.ItemId))
+                .Concat(db.Items.AsNoTracking().Where(i => i.OrganizationId == org && i.ParentItemId != null && convertIds.Contains(i.ParentItemId.Value))
+                    .Select(i => i.ParentItemId!.Value))
+                .Distinct().ToListAsync(ct)).ToHashSet();
+        var bundleIds = existing.Values.Where(i => i.Type == ItemType.Bundle).Select(i => i.Id).ToList();
+        var withComponents = bundleIds.Count == 0
+            ? []
+            : (await db.BundleComponents.AsNoTracking().Where(c => c.OrganizationId == org && bundleIds.Contains(c.BundleItemId))
+                .Select(c => c.BundleItemId).Distinct().ToListAsync(ct)).ToHashSet();
 
         var rows = new List<ItemImportRow>(raw.Count);
         var parsed = new Dictionary<int, Parsed>();
@@ -526,6 +572,35 @@ public sealed class ItemExchangeService(
                                     errors.Add($"У позиции {parent} уже есть модификация с такими характеристиками.");
                                 }
                             }
+                        }
+
+                        if (candidate.Type == ItemType.Service)
+                        {
+                            if (current?.VatRateId is null && serviceVat is null)
+                            {
+                                errors.Add("У услуги ставка НДС обязательна: заведите основную ставку НДС организации или укажите ставку в карточке.");
+                            }
+
+                            if (p.Details is { } d && (d.WeightKg is not null || d.VolumeM3 is not null || d.MinStock is not null))
+                            {
+                                errors.Add("У услуги нет веса, объёма и неснижаемого остатка — оставьте эти столбцы пустыми.");
+                            }
+                        }
+
+                        if (!ItemTypes.IsStocked(candidate.Type) && current is not null && ItemTypes.IsStocked(current.Type)
+                            && (stocked.Contains(current.Id) || current.IsModification))
+                        {
+                            errors.Add($"Позиция {current.Code} уже была на складе, входит в комплект, имеет модификации или сама модификация — её нельзя сделать услугой или комплектом.");
+                        }
+
+                        if (candidate.Type == ItemType.Bundle && p.Details?.MinStock is not null)
+                        {
+                            errors.Add("У комплекта нет неснижаемого остатка — оставьте этот столбец пустым.");
+                        }
+
+                        if (current is { Type: ItemType.Bundle } && candidate.Type != ItemType.Bundle && withComponents.Contains(current.Id))
+                        {
+                            errors.Add($"У комплекта {current.Code} есть состав — сначала уберите компоненты, затем меняйте тип.");
                         }
 
                         action = current is null

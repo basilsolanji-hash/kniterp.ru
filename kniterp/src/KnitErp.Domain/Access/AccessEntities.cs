@@ -347,14 +347,95 @@ public sealed class Role
     {
     }
 
+    public const int NameMaxLength = 150;
+    public const int DescriptionMaxLength = 300;
+    public const string CustomPrefix = "custom.";
+
     public long Id { get; private set; }
     public long OrganizationId { get; private set; }
     public string Code { get; private set; } = string.Empty;
     public string Name { get; private set; } = string.Empty;
     public bool IsSystem { get; private set; }
+
+    /// <summary>D112: описание своей роли — для кого она и что даёт.</summary>
+    public string? Description { get; private set; }
+
+    /// <summary>D112: своя роль в архиве не выдаётся; выданные назначения нужно сначала сменить.</summary>
+    public bool IsArchived { get; private set; }
+
+    public byte[] RowVersion { get; private set; } = [];
     public IReadOnlyCollection<RolePermission> Permissions => _permissions;
 
-    public bool IsAdministrative => IsSystem && SystemRoles.IsAdministrative(Code);
+    /// <summary>
+    /// Административная роль: системные Владелец и Администратор, а своя — если даёт управление пользователями (D112):
+    /// такую роль создаёт, меняет и выдаёт только Владелец.
+    /// </summary>
+    public bool IsAdministrative => IsSystem
+        ? SystemRoles.IsAdministrative(Code)
+        : _permissions.Any(p => p.Level.Grants() && KnitErp.Domain.Access.Permissions.IsAdministrative(p.PermissionCode));
+
+    /// <summary>
+    /// Своя роль организации (D112): название, описание и набор прав «да». Право выдачи административных прав в свою роль не входит —
+    /// оно только у Владельца.
+    /// </summary>
+    public static Role CreateCustom(long organizationId, string? name, string? description, IEnumerable<string> permissionCodes)
+    {
+        var role = new Role { OrganizationId = organizationId, Code = CustomPrefix + Guid.NewGuid().ToString("N")[..16] };
+        role.Update(name, description, permissionCodes);
+        return role;
+    }
+
+    public void Update(string? name, string? description, IEnumerable<string> permissionCodes)
+    {
+        if (IsSystem)
+        {
+            throw new BusinessRuleException("access.role.system", "Системную роль менять нельзя — создайте свою на её основе.");
+        }
+
+        if (IsArchived)
+        {
+            throw new BusinessRuleException("access.role.archived", "Роль в архиве. Сначала верните её.");
+        }
+
+        Name = DomainText.Require(name, NameMaxLength, "Название роли");
+        var d = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        Description = d is { Length: > DescriptionMaxLength }
+            ? throw new BusinessRuleException("access.role.description", $"Описание — не длиннее {DescriptionMaxLength} символов.")
+            : d;
+        var codes = permissionCodes.Distinct(StringComparer.Ordinal).ToList();
+        if (codes.FirstOrDefault(c => !KnitErp.Domain.Access.Permissions.IsKnown(c)) is { } unknown)
+        {
+            throw new BusinessRuleException("access.permission.unknown", $"Неизвестное право: {unknown}.");
+        }
+
+        if (codes.Contains(KnitErp.Domain.Access.Permissions.AdminGrant))
+        {
+            throw new BusinessRuleException("access.role.admin_grant", "Выдача административных прав остаётся только у Владельца и в свою роль не входит.");
+        }
+
+        if (codes.Count == 0)
+        {
+            throw new BusinessRuleException("access.role.empty", "Отметьте хотя бы одно право.");
+        }
+
+        _permissions.RemoveAll(p => !codes.Contains(p.PermissionCode));
+        foreach (var code in codes.Where(c => _permissions.All(p => p.PermissionCode != c)))
+        {
+            _permissions.Add(new RolePermission(code, PermissionLevel.Full));
+        }
+    }
+
+    public void Archive()
+    {
+        if (IsSystem)
+        {
+            throw new BusinessRuleException("access.role.system", "Системную роль нельзя отправить в архив.");
+        }
+
+        IsArchived = true;
+    }
+
+    public void Restore() => IsArchived = false;
 
     /// <summary>Системная роль P0, наполненная из матрицы ТЗ §4.8.</summary>
     public static Role CreateSystem(long organizationId, string code)

@@ -1,0 +1,116 @@
+@page "/settings/production"
+@using KnitErp.Application.Production
+@inject ProductionSettingsService Settings
+
+@* Настройки производства организации: допуск отклонения расхода и правила баллов за качество и дисциплину (задаёт заказчик). *@
+<PageTitle>@L("Настройки производства") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_s is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head"><h1>@L("Настройки производства")</h1></div>
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    <form class="panel" @onsubmit="SaveAsync">
+        <h2>@L("Материалы")</h2>
+        <label>@L("Допуск отклонения расхода от нормы, %")
+            <input @bind="_tolerance" inputmode="decimal" disabled="@(!_s.CanEdit)" aria-label="@L("Допуск отклонения расхода от нормы, %")" /></label>
+        <p class="muted">@L("Если расход с отходами отличается от нормы больше допуска, карточка заказа и отчёт по производству предупреждают. От 0 до 50%.")</p>
+
+        <h2>@L("Баллы за качество и дисциплину")</h2>
+        <label><input type="checkbox" @bind="_enabled" disabled="@(!_s.CanEdit)" /> @L("Считать баллы (видят сотрудник на терминале и мастер)")</label>
+        <label>@L("За выполненное сменное задание")
+            <input type="number" min="-100" max="100" step="1" @bind="_done" disabled="@(!_s.CanEdit)" aria-label="@L("За выполненное сменное задание")" /></label>
+        <label>@L("За невыполненное задание с причиной")
+            <input type="number" min="-100" max="100" step="1" @bind="_withReason" disabled="@(!_s.CanEdit)" aria-label="@L("За невыполненное задание с причиной")" /></label>
+        <label>@L("За невыполненное задание без причины")
+            <input type="number" min="-100" max="100" step="1" @bind="_noReason" disabled="@(!_s.CanEdit)" aria-label="@L("За невыполненное задание без причины")" /></label>
+        <label>@L("За каждую единицу брака по вине сотрудника")
+            <input type="number" min="-100" max="100" step="1" @bind="_defect" disabled="@(!_s.CanEdit)" aria-label="@L("За каждую единицу брака по вине сотрудника")" /></label>
+        <p class="muted">@L("Целые числа от −100 до 100; минус — штраф. Задание выполнено, если факт не меньше плана; не выполнено — если день прошёл, а факт меньше. Виновника брака указывает контролёр на контроле качества.")</p>
+        @if (_s.UpdatedAtUtc is { } at)
+        {
+            <p class="muted">@L("Изменено: {0}, {1}", _s.UpdatedBy ?? "—", at.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</p>
+        }
+        @if (_s.CanEdit)
+        {
+            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+        }
+    </form>
+}
+
+@code {
+    private ProductionSettingsDto? _s;
+    private string? _denied;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+    private string _tolerance = string.Empty;
+    private bool _enabled;
+    private int _done;
+    private int _withReason;
+    private int _noReason;
+    private int _defect;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Fill(await Settings.GetAsync());
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private void Fill(ProductionSettingsDto s)
+    {
+        _s = s;
+        _tolerance = Quantities.Format(s.TolerancePercent);
+        _enabled = s.PointsEnabled;
+        (_done, _withReason, _noReason, _defect) = (s.PointsTaskDone, s.PointsTaskMissedWithReason, s.PointsTaskMissedNoReason, s.PointsPerDefectUnit);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy || _s is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!Quantities.TryParse(_tolerance, out var tolerance))
+            {
+                throw new BusinessRuleException("production.settings.tolerance", L("Допуск — от 0 до 50%, не больше двух знаков после запятой."));
+            }
+
+            await Settings.SaveAsync(new ProductionSettingsCommand(tolerance, _enabled, _done, _withReason, _noReason, _defect), _s.RowVersion);
+            Fill(await Settings.GetAsync());
+            _message = L("Настройки сохранены.");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

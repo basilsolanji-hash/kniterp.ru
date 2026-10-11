@@ -509,6 +509,14 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         Audit(ctx, AuditActions.ProductionOrderReleased, order, "Черновик", "Запущен",
             $"техкарта {product.Code}, версия {card.Version}; материалов: {order.Materials.Count}"
             + (cost is { } c ? $"; плановая себестоимость {Quantities.Format(c)}" : "; плановая себестоимость неизвестна"));
+        if (order.SalesOrderId is { } salesOrder)
+        {
+            // D110 базы: производство по заказу покупателя начато — этап заказа сдвигается по правилам организации (только вперёд).
+            // Следствие производственного действия: право на изменение продаж у начальника цеха не требуется.
+            await KnitErp.Application.Sales.StageAutomation.ApplyAsync(db, ctx, [salesOrder], clock.UtcNow, currentUser.CorrelationId, ct,
+                KnitErp.Domain.Sales.StageTrigger.ProductionStarted);
+        }
+
         await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
     }

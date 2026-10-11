@@ -1051,6 +1051,337 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Shift_task_plan_fact_percent_and_shortfall_reason()
+    {
+        var f = await SetUpAsync();
+        var other = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        var (colleague, colleagueEmployee) = await AddWorkerAsync(f, grant: true, "0103", "Сидорова");
+        long order, draft, task;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            draft = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 5));
+
+            var board = await s.ShiftTasks.BoardAsync();
+            Assert.Equal((Day, true), (board.Date, board.CanAssign));
+            Assert.Contains(board.Employees, e => e.Id == employee && e.Name == "Петрова А. С.");
+            Assert.Contains(board.Orders, o => o.Id == order);
+            Assert.DoesNotContain(board.Orders, o => o.Id == draft);
+
+            task = await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 10, "до обеда"));
+            Assert.Equal("production.shift.duplicate", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 5, null)))).Code);
+            Assert.Equal("production.shift.past", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day.AddDays(-1), employee, order, ProductionStage.Knitting, 5, null)))).Code);
+            Assert.Equal("production.order.not_in_work", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, draft, ProductionStage.Knitting, 5, null)))).Code);
+            Assert.Equal("production.shift.planned", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, colleagueEmployee, order, ProductionStage.Knitting, 0, null)))).Code);
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day.AddDays(1), colleagueEmployee, order, ProductionStage.Assembly, 4, null));
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Assembly, 1, null)));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(6, "Не хватило времени", null));
+            var mine = Assert.Single((await s.ShopFloor.MyDayAsync()).Shift!);
+            Assert.Equal((task, 10m, 6m, 60, false, "до обеда"), (mine.Id, mine.Planned, mine.Fact, mine.Percent, mine.Done, mine.Comment));
+
+            Assert.Equal("production.shop.reason", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.ReportShortfallAsync(task, "Погода", null, mine.RowVersion))).Code);
+            await s.ShiftTasks.ReportShortfallAsync(task, "Поломка оборудования", "станок № 3", mine.RowVersion);
+            // Старая версия строки — конфликт, а не тихая перезапись.
+            await Assert.ThrowsAnyAsync<Exception>(() => s.ShiftTasks.ReportShortfallAsync(task, "Другая причина", null, mine.RowVersion));
+        }
+
+        await using (var s = host.As(colleague, f.Org.OrganizationId))
+        {
+            // Чужое задание сотрудник не видит; своё на завтра — причину указывать рано.
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShiftTasks.ReportShortfallAsync(task, "Другая причина", null, []));
+            Assert.Empty((await s.ShopFloor.MyDayAsync()).Shift!);
+            var tomorrow = Assert.Single((await s.ShopFloor.MyDayAsync(Day.AddDays(1))).Shift!);
+            Assert.Equal("production.shift.future", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ShiftTasks.ReportShortfallAsync(tomorrow.Id, "Другая причина", null, tomorrow.RowVersion))).Code);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var t = (await s.ShiftTasks.BoardAsync()).Tasks.Single(x => x.Id == task);
+            Assert.Equal((6m, 60, "Поломка оборудования", "станок № 3"), (t.Fact, t.Percent, t.ShortfallReason, t.ShortfallComment));
+            await s.ShiftTasks.CancelAsync(task, t.RowVersion);
+            Assert.True((await s.ShiftTasks.BoardAsync()).Tasks.Single(x => x.Id == task).IsCancelled);
+            // После отмены можно назначить заново.
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 8, null));
+        }
+
+        await using (var s = host.As(other.Org.OwnerUserId, other.Org.OrganizationId))
+        {
+            Assert.Empty((await s.ShiftTasks.BoardAsync(Day)).Tasks);
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShiftTasks.CancelAsync(task, []));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 1, null)));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var actions = await db.AuditEntries.Where(e => e.EntityType == "ShiftTask" && e.EntityId == task.ToString()).Select(e => e.Action).ToListAsync();
+            Assert.Equal(new[] { "production.shift.assigned", "production.shift.cancelled", "production.shift.shortfall" }, actions.Order().ToArray());
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[production_shift_tasks] SET [PlannedQuantity] = 0 WHERE [Id] = {0}", task));
+        }
+    }
+
+    [SqlFact]
+    public async Task Organization_settings_drive_tolerance_and_quality_discipline_points()
+    {
+        var f = await SetUpAsync();
+        var other = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        var (colleague, colleagueEmployee) = await AddWorkerAsync(f, grant: true, "0103", "Сидорова");
+        long order, foreignEmployee;
+        await using (var s = host.As(other.Org.OwnerUserId, other.Org.OrganizationId))
+        {
+            var structure = await s.Structure.GetAsync();
+            var department = structure.Departments.FirstOrDefault()?.Id ?? await s.Structure.CreateDepartmentAsync("Цех", null);
+            foreignEmployee = await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand("0901", "Чужая", "Анна", null, department,
+                await s.Structure.CreatePositionAsync("Швея"), Day.AddYears(-1)));
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var settings = await s.ProductionSettings.GetAsync();
+            Assert.Equal((5m, false, 1, 0, -1, -1, true, (byte[]?)null), (settings.TolerancePercent, settings.PointsEnabled, settings.PointsTaskDone,
+                settings.PointsTaskMissedWithReason, settings.PointsTaskMissedNoReason, settings.PointsPerDefectUnit, settings.CanEdit, settings.RowVersion));
+            Assert.Equal("production.settings.tolerance", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(60, true, 1, 0, -1, -1), null))).Code);
+            Assert.Equal("production.settings.points", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, true, 101, 0, -1, -1), null))).Code);
+            await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, true, 2, 0, -3, -1), null);
+            await Assert.ThrowsAsync<ConcurrencyConflictException>(() => s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(3, true, 2, 0, -3, -1), null));
+            settings = await s.ProductionSettings.GetAsync();
+            Assert.Equal((2m, true, 2, -3), (settings.TolerancePercent, settings.PointsEnabled, settings.PointsTaskDone, settings.PointsTaskMissedNoReason));
+
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            Assert.Equal(2m, (await s.Materials.MaterialsAsync(order)).TolerancePercent);
+
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 10, null));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day.AddDays(1), employee, order, ProductionStage.Knitting, 3, null));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, colleagueEmployee, order, ProductionStage.Knitting, 5, null));
+        }
+
+        await using (var s = host.As(other.Org.OwnerUserId, other.Org.OrganizationId))
+        {
+            Assert.Equal(5m, (await s.ProductionSettings.GetAsync()).TolerancePercent);
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(9, false, 0, 0, 0, 0), null));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Scores.BoardAsync(Day, Day));
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(10, null, null));
+        }
+
+        await using (var s = host.As(colleague, f.Org.OrganizationId))
+        {
+            var task = Assert.Single((await s.ShopFloor.MyDayAsync()).Shift!);
+            await s.ShiftTasks.ReportShortfallAsync(task.Id, "Ждал предыдущий этап", null, task.RowVersion);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            foreach (var stage in new[] { ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(order, new ProductionOperationCommand(stage, ProductionOperationKind.Done, 10, null, null, Day));
+            }
+
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl,
+                ProductionOperationKind.Defect, 1, null, "петли", Day, foreignEmployee)));
+            Assert.Equal("production.stage.culprit_kind", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Floor.RecordAsync(order,
+                new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Done, 1, null, null, Day, employee)))).Code);
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Defect, 2, null,
+                "спущенные петли", Day, employee));
+            var progress = await s.Floor.ProgressAsync(order);
+            Assert.Contains(progress.Employees!, e => e.Id == employee);
+            Assert.Equal("Петрова А. С.", progress.History.First().Culprit);
+        }
+
+        host.Clock.UtcNow = host.Clock.UtcNow.AddDays(2);
+        try
+        {
+            await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+            {
+                var board = await s.Scores.BoardAsync(Day, Day.AddDays(2));
+                var w = board.Rows.Single(r => r.EmployeeId == employee);
+                // 1 выполнено × 2 + 1 без причины × (−3) + 2 единицы брака × (−1) = −3.
+                Assert.Equal((1, 0, 1, 0, 50, 2m, (int?)-3), (w.TasksDone, w.MissedWithReason, w.MissedNoReason, w.InProgress, w.AveragePercent, w.DefectUnits, w.Points));
+                var c = board.Rows.Single(r => r.EmployeeId == colleagueEmployee);
+                Assert.Equal((0, 1, 0, (int?)0), (c.TasksDone, c.MissedWithReason, c.MissedNoReason, c.Points));
+                Assert.Equal("production.score.period", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Scores.BoardAsync(Day, Day.AddDays(100)))).Code);
+
+                await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(2, false, 2, 0, -3, -1), (await s.ProductionSettings.GetAsync()).RowVersion);
+                Assert.Null((await s.Scores.BoardAsync(Day, Day.AddDays(2))).Rows.Single(r => r.EmployeeId == employee).Points);
+            }
+
+            await using (var s = host.As(worker, f.Org.OrganizationId))
+            {
+                var mine = await s.Scores.MineAsync();
+                Assert.Equal((employee, 1, 1, 2m, (int?)null), (mine!.EmployeeId, mine.TasksDone, mine.MissedNoReason, mine.DefectUnits, mine.Points));
+            }
+        }
+        finally
+        {
+            host.Clock.UtcNow = host.Clock.UtcNow.AddDays(-2);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.Equal(2, await db.AuditEntries.CountAsync(e => e.Action == "production.settings.changed" && e.OrganizationId == f.Org.OrganizationId));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "UPDATE [kniterp].[production_settings] SET [TolerancePercent] = 80 WHERE [OrganizationId] = {0}", f.Org.OrganizationId));
+        }
+    }
+
+    [SqlFact]
+    public async Task Dashboard_shows_production_orders_progress_late_defects_and_missed_shift_tasks()
+    {
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        long lateOrder, readyOrder;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            lateOrder = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10) with { DueDate = Day.AddDays(1) });
+            readyOrder = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 5) with { DueDate = Day.AddDays(5) });
+            foreach (var id in new[] { lateOrder, readyOrder })
+            {
+                await s.ProductionOrders.ReleaseAsync(id, (await s.ProductionOrders.GetAsync(id)).RowVersion);
+            }
+
+            await s.Floor.RecordAsync(lateOrder, new ProductionOperationCommand(ProductionStage.Knitting, ProductionOperationKind.Done, 10, null, null, Day));
+            await s.Floor.RecordAsync(lateOrder, new ProductionOperationCommand(ProductionStage.Assembly, ProductionOperationKind.Done, 4, null, null, Day));
+            // Готовый заказ: брак 1 на контроле качества довязан и прошёл маршрут заново — упаковано 5 из 5.
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(stage, ProductionOperationKind.Done, 5, null, null, Day));
+            }
+
+            await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Defect, 1, null, "дыра", Day));
+            await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Done, 4, null, null, Day));
+            foreach (var stage in new[] { ProductionStage.Knitting, ProductionStage.Assembly, ProductionStage.Steaming, ProductionStage.QualityControl })
+            {
+                await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(stage, ProductionOperationKind.Done, 1, null, null, Day));
+            }
+
+            await s.Floor.RecordAsync(readyOrder, new ProductionOperationCommand(ProductionStage.Packing, ProductionOperationKind.Done, 5, null, null, Day));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, lateOrder, ProductionStage.Assembly, 6, null));
+        }
+
+        // Через два дня: первый заказ просрочен, вчерашнее задание не выполнено и без причины.
+        host.Clock.UtcNow = host.Clock.UtcNow.AddDays(2);
+        try
+        {
+            await using var db = host.NewDb();
+            var owner = new TestUser { UserId = f.Org.OwnerUserId, OrganizationId = f.Org.OrganizationId };
+            var guard = new AccessGuard(db, owner, host.Clock);
+            var dashboard = new KnitErp.Application.Organizations.DashboardService(db, guard, host.Clock,
+                new KnitErp.Application.Organizations.LaunchReadinessService(db, guard, host.Clock),
+                new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                [new ProductionDashboardSource()]);
+            // Задание было на Day: на главном экране «сегодня» = Day + 2, вчера = Day + 1 — задания нет; источник на Day + 1 его показывает.
+            var data = (await dashboard.GetAsync(refresh: true)).Production!.Production!;
+            Assert.Equal((2, 1), (data.OrdersInWork, data.OrdersLate));
+            var late = data.Orders.First();
+            Assert.Equal((lateOrder, true, 0m, "Сборка"), (late.Id, late.Late, late.Percent, late.Operation));
+            var ready = data.Orders.Single(o => o.Id == readyOrder);
+            Assert.Equal((100m, false, "Упаковка"), (ready.Percent, ready.Late, ready.Operation));
+            Assert.Contains(data.Alerts, a => a.Text == ProductionDashboardSource.LateText && a.Count == 1 && a.Critical);
+            Assert.Contains(data.Alerts, a => a.Text == ProductionDashboardSource.DefectText && a.Count == 1);
+            Assert.DoesNotContain(data.Alerts, a => a.Text == ProductionDashboardSource.MissedTasksText);
+            Assert.Null(data.OutputToday);
+
+            var ctx = await guard.CurrentAsync();
+            var yesterdayView = await new ProductionDashboardSource().GetAsync(db, ctx, Day.AddDays(1), CancellationToken.None);
+            Assert.Contains(yesterdayView!.Alerts, a => a.Text == ProductionDashboardSource.MissedTasksText && a.Count == 1);
+        }
+        finally
+        {
+            host.Clock.UtcNow = host.Clock.UtcNow.AddDays(-2);
+        }
+
+        // Рабочий без права просмотра заказов — данных производства нет; другая организация не видит чужие заказы.
+        await using (var db = host.NewDb())
+        {
+            var workerGuard = new AccessGuard(db, new TestUser { UserId = worker, OrganizationId = f.Org.OrganizationId }, host.Clock);
+            Assert.Null(await new ProductionDashboardSource().GetAsync(db, await workerGuard.CurrentAsync(), Day, CancellationToken.None));
+
+            var other = await SetUpAsync();
+            var guard = new AccessGuard(db, new TestUser { UserId = other.Org.OwnerUserId, OrganizationId = other.Org.OrganizationId }, host.Clock);
+            var foreign = await new ProductionDashboardSource().GetAsync(db, await guard.CurrentAsync(), Day, CancellationToken.None);
+            Assert.Equal((0, 0), (foreign!.OrdersInWork, foreign.Orders.Count));
+        }
+    }
+
+    [SqlFact]
+    public async Task Release_and_full_output_move_sales_order_stage_without_sales_edit_right()
+    {
+        var f = await SetUpAsync();
+        long sales, head, first, second;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            sales = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, f.Customer, f.Store, Day.AddDays(14), null, false, null));
+            await s.Sales.SetOrderLineAsync(sales, f.Sweater, 10, 2500m, 22m, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+            await s.Sales.ConfirmOrderAsync(sales, (await s.Sales.GetOrderAsync(sales)).RowVersion);
+            head = (await s.Access.InviteAsync(new InviteUserCommand($"head-{Guid.NewGuid():N}@test.local", "Начальник цеха", SystemRoles.DepartmentHead, null))).UserId;
+        }
+
+        await using (var db = host.NewDb())
+        {
+            (await db.Users.SingleAsync(u => u.Id == head)).Activate();
+            await db.SaveChangesAsync();
+        }
+
+        var before = await SalesStageAsync(sales);
+        await using (var s = host.As(head, f.Org.OrganizationId))
+        {
+            // У Руководителя подразделения нет права изменять продажи — этап меняется как следствие запуска производства.
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Sales.NotifyProductionAsync(sales, completed: false));
+            first = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 6) with { Source = ProductionSource.SalesOrder, SalesOrderId = sales });
+            second = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 4) with { Source = ProductionSource.SalesOrder, SalesOrderId = sales });
+            await s.ProductionOrders.ReleaseAsync(first, (await s.ProductionOrders.GetAsync(first)).RowVersion);
+            await s.ProductionOrders.ReleaseAsync(second, (await s.ProductionOrders.GetAsync(second)).RowVersion);
+        }
+
+        Assert.NotEqual(before, await SalesStageAsync(sales));
+        Assert.Equal("В работе", await SalesStageAsync(sales));
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            foreach (var (order, quantity) in new[] { (first, 6m), (second, 4m) })
+            {
+                await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 3m), (f.Buttons, 30m)));
+                foreach (var stage in ProductionFlow.Stages)
+                {
+                    await s.Floor.RecordAsync(order, Mark(stage, quantity));
+                }
+
+                await s.Materials.OutputAsync(order, new OutputCommand(quantity, Day, null, null));
+                // Первый выпущен, второй ещё в работе — «Собран» только после последнего заказа по заказу покупателя.
+                Assert.Equal(order == first ? "В работе" : "Собран", await SalesStageAsync(sales));
+            }
+        }
+    }
+
+    private async Task<string?> SalesStageAsync(long salesOrder)
+    {
+        await using var db = host.NewDb();
+        return await (from o in db.SalesOrders.AsNoTracking()
+                      join st in db.SalesOrderStages.AsNoTracking() on o.StageId equals st.Id
+                      where o.Id == salesOrder
+                      select st.Name).SingleOrDefaultAsync();
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
     private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {

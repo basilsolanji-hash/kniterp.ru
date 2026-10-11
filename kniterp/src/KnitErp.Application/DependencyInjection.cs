@@ -21,6 +21,7 @@ public static class DependencyInjection
         services.AddScoped<IAccessGuard, AccessGuard>();
         services.AddScoped<OrganizationService>();
         services.AddScoped<UserAccessService>();
+        services.AddScoped<RoleService>();
         services.AddScoped<AuditQueryService>();
         services.AddScoped<StructureService>();
         services.AddScoped<EmployeeService>();
@@ -37,6 +38,7 @@ public static class DependencyInjection
         services.AddScoped<CatalogService>();
         services.AddScoped<WarehouseService>();
         services.AddScoped<CounterpartyService>();
+        services.AddScoped<CounterpartyCardService>();
         services.AddScoped<OperationReasonService>();
         services.AddScoped<ItemExchangeService>();
         services.AddScoped<CounterpartyExchangeService>();
@@ -50,6 +52,11 @@ public static class DependencyInjection
         services.AddScoped<Production.SalesProductionService>();
         services.AddScoped<Production.MaterialPlanningService>();
         services.AddScoped<Production.ShopFloorService>();
+        services.AddScoped<Production.ShiftTaskService>();
+        services.AddScoped<Production.ProductionSettingsService>();
+        services.AddScoped<Production.ProductionScoreService>();
+        // Производство на главном экране (контракт D111 базовой ветки).
+        services.AddScoped<Workspace.IProductionDashboardSource, Production.ProductionDashboardSource>();
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();
@@ -60,6 +67,11 @@ public static class DependencyInjection
         services.AddScoped<Organizations.LegalEntityService>();
         services.AddScoped<Catalog.NomenclatureService>();
         services.AddScoped<Catalog.ModificationService>();
+        services.AddScoped<Catalog.BundleService>(); // D302 (сессия 4)
+        services.AddScoped<Catalog.ItemTradeService>(); // D305 (сессия 4)
+        services.AddScoped<Catalog.RevaluationService>(); // D306 (сессия 4)
+        services.AddScoped<Catalog.PackService>(); // D307 (сессия 4)
+        services.AddScoped<Catalog.CatalogQueryService>(); // D307 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
         services.AddScoped<Finance.SettlementStatementService>();

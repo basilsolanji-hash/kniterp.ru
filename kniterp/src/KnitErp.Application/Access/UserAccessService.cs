@@ -84,6 +84,14 @@ public sealed record ChangeRoleCommand(long UserId, string NewRoleCode, string? 
 /// Итог приглашения. Токен ссылки показывается администратору один раз и не хранится.
 /// Пользователю, у которого уже есть пароль (участник другой организации), ссылка не нужна.
 /// </summary>
+/// <summary>D112: строка итоговых прав — есть ли право, от каких ролей, есть ли особое разрешение или запрет.</summary>
+public sealed record UserRightRowDto(string Code, string Label, string Group, bool Effective, string? FromRoles, bool Granted, bool Denied);
+
+public sealed record IndividualRightDto(Guid Id, string PermissionCode, string Label, bool Deny, DateTime? ValidToUtc, string? Reason, string GrantedBy, DateTime GrantedAtUtc);
+
+public sealed record UserRightsDto(long UserId, string Name, IReadOnlyList<string> Roles, IReadOnlyList<UserRightRowDto> Rows,
+    IReadOnlyList<IndividualRightDto> Individual, bool CanEdit, bool Active = true);
+
 public sealed record InvitationResult(long UserId, string? SetupToken, DateTime? ExpiresAtUtc);
 
 public sealed record RoleMatrixDto(IReadOnlyList<RoleColumnDto> Roles, IReadOnlyList<MatrixRowDto> Rows);
@@ -154,7 +162,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
     public async Task<IReadOnlyList<RoleOptionDto>> ListGrantableRolesAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
-        var roles = await db.Roles.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId).Include(r => r.Permissions).ToListAsync(ct);
+        var roles = await db.Roles.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId && !r.IsArchived).Include(r => r.Permissions).ToListAsync(ct);
 
         return OrderRoles(roles).Select(role =>
         {
@@ -314,7 +322,11 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             throw new BusinessRuleException("access.user.exists", "Этот пользователь уже есть в организации.");
         }
 
-        var token = user.HasPassword ? null : user.IssueSetupToken(now);
+        // Аудит 11.10.2026 (D109): учётная запись, приглашённая другой организацией и ещё без пароля, получает пароль по своей
+        // первой ссылке; новая ссылка отсюда дала бы этой организации вход в чужую учётную запись.
+        var invitedElsewhere = !user.HasPassword && user.Id != 0
+                               && await db.OrganizationMembers.AnyAsync(m => m.UserId == user.Id && m.OrganizationId != ctx.OrganizationId, ct);
+        var token = user.HasPassword || invitedElsewhere ? null : user.IssueSetupToken(now);
         db.OrganizationMembers.Add(OrganizationMember.Join(ctx.OrganizationId, user.Id, now));
         db.RoleAssignments.Add(RoleAssignment.ForRole(ctx.OrganizationId, user.Id, role.Id, ctx.UserId, now, cmd.Reason,
             departmentId: cmd.DepartmentId, warehouseId: cmd.WarehouseId));
@@ -342,6 +354,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
         await RequireMemberAsync(ctx, userId, ct);
+        await EnsureAccountActionAllowedAsync(ctx, userId, ct);
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         var token = user.IssueSetupToken(clock.UtcNow);
         db.AuditEntries.Add(Audit(ctx, AuditActions.InvitationIssued, userId, null, $"до {user.SetupTokenExpiresAtUtc:yyyy-MM-dd HH:mm} UTC", "повторная ссылка"));
@@ -364,9 +377,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         }
 
         GrantPolicy.EnsureReason(required: true, reason);
-        var targetIsAdmin = await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Owner, ct)
-                            || await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Administrator, ct);
-        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, targetIsAdmin);
+        await EnsureAccountActionAllowedAsync(ctx, userId, ct);
 
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         var token = user.IssuePasswordResetToken(clock.UtcNow, SignInPolicy.AdminPasswordResetLifetime);
@@ -389,9 +400,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         }
 
         GrantPolicy.EnsureReason(required: true, reason);
-        var targetIsAdmin = await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Owner, ct)
-                            || await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Administrator, ct);
-        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, targetIsAdmin);
+        await EnsureAccountActionAllowedAsync(ctx, userId, ct);
 
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         user.ResetTwoFactor();
@@ -488,16 +497,131 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
         var member = await RequireMemberAsync(ctx, userId, ct);
+        // Аудит 11.10.2026 (D109): разблокировать Владельца или Администратора может только Владелец — как и заблокировать.
+        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, await IsAdministratorHereAsync(ctx, userId, ct));
         member.Unblock();
         db.AuditEntries.Add(Audit(ctx, AuditActions.UserUnblocked, userId, "заблокирован", "активен", reason));
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// D112: итоговые права пользователя с источником — роль, особое право или запрет — и действующие особые права и запреты.
+    /// </summary>
+    public async Task<UserRightsDto> UserRightsAsync(long userId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.UserView, ct);
+        await RequireMemberAsync(ctx, userId, ct);
+        var user = await db.Users.AsNoTracking().SingleAsync(u => u.Id == userId, ct);
+        var effective = await guard.LoadAsync(userId, ctx.OrganizationId, ct);
+        var now = clock.UtcNow;
+        var assignments = await db.RoleAssignments.AsNoTracking()
+            .Where(a => a.OrganizationId == ctx.OrganizationId && a.UserId == userId && a.RevokedAtUtc == null && (a.ValidToUtc == null || a.ValidToUtc > now))
+            .ToListAsync(ct);
+        var roleIds = assignments.Where(a => a.RoleId != null).Select(a => a.RoleId!.Value).ToList();
+        var roles = await db.Roles.AsNoTracking().Include(r => r.Permissions).Where(r => roleIds.Contains(r.Id)).ToListAsync(ct);
+        var grantorIds = assignments.Select(a => a.GrantedByUserId).Distinct().ToList();
+        var grantors = await db.Users.AsNoTracking().Where(u => grantorIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+        var individual = assignments.Where(a => a.PermissionCode != null)
+            .OrderBy(a => a.GrantedAtUtc)
+            .Select(a => new IndividualRightDto(a.Id, a.PermissionCode!, Permissions.Describe(a.PermissionCode!), a.IsDeny, a.ValidToUtc, a.Reason,
+                grantors.GetValueOrDefault(a.GrantedByUserId, "?"), a.GrantedAtUtc))
+            .ToList();
+        var rows = Permissions.All.OrderBy(code => Permissions.Groups.ToList().IndexOf(Permissions.GroupOf(code))).Select(code =>
+        {
+            var fromRoles = roles.Where(r => r.Permissions.Any(p => p.PermissionCode == code && p.Level.Grants())).Select(r => r.Name).ToList();
+            return new UserRightRowDto(code, Permissions.Describe(code), Permissions.GroupOf(code), effective.Has(code),
+                fromRoles.Count == 0 ? null : string.Join(", ", fromRoles),
+                individual.Any(i => i.PermissionCode == code && !i.Deny), individual.Any(i => i.PermissionCode == code && i.Deny));
+        }).ToList();
+        var active = user.Status == UserStatus.Active && await db.OrganizationMembers.AnyAsync(
+            m => m.OrganizationId == ctx.OrganizationId && m.UserId == userId && m.Status == MembershipStatus.Active, ct);
+        return new UserRightsDto(userId, user.DisplayName, OrderRoles(roles).Select(r => r.Name).ToList(), rows, individual,
+            userId != ctx.UserId && ctx.Permissions.Has(Permissions.UserManage), active);
+    }
+
+    /// <summary>
+    /// D112: особое право («разрешить») или запрет поверх роли — со сроком и причиной. Нельзя себе; нельзя выдать право выше своего;
+    /// административное право, а также любые особые права Владельцу и Администратору — только Владелец; Владельца ограничить нельзя.
+    /// Запрет требует причину и сильнее любого разрешения.
+    /// </summary>
+    public async Task<Guid> GrantIndividualAsync(long userId, string permissionCode, bool deny, DateOnly? validTo, string? reason, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync(AccessLock(ctx.OrganizationId), ct);
+        await RequireMemberAsync(ctx, userId, ct);
+        if (userId == ctx.UserId)
+        {
+            throw new BusinessRuleException("access.individual.self", "Свои права меняет другой администратор или Владелец.");
+        }
+
+        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, Permissions.IsAdministrative(permissionCode) || await IsAdministratorHereAsync(ctx, userId, ct));
+        if (deny && await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Owner, ct))
+        {
+            throw new BusinessRuleException("access.individual.owner", "Права Владельца не ограничиваются запретами.");
+        }
+
+        if (!deny)
+        {
+            GrantPolicy.EnsureNoEscalation(ctx.Permissions, [(permissionCode, PermissionLevel.Full)]);
+        }
+
+        var now = clock.UtcNow;
+        DateTime? until = null;
+        if (validTo is { } day)
+        {
+            var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
+            until = TimeZoneInfo.ConvertTimeToUtc(day.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeZoneInfo.FindSystemTimeZoneById(tz));
+        }
+
+        if (await db.RoleAssignments.AnyAsync(a => a.OrganizationId == ctx.OrganizationId && a.UserId == userId && a.PermissionCode == permissionCode
+                                                   && a.IsDeny == deny && a.RevokedAtUtc == null && (a.ValidToUtc == null || a.ValidToUtc > now), ct))
+        {
+            throw new BusinessRuleException("access.individual.exists", deny ? "Такой запрет уже действует." : "Такое право уже выдано.");
+        }
+
+        var assignment = RoleAssignment.ForPermission(ctx.OrganizationId, userId, permissionCode, deny, ctx.UserId, now, reason, until);
+        db.RoleAssignments.Add(assignment);
+        // Права читаются из базы на каждый запрос — действуют сразу, без выхода пользователя из программы.
+        db.AuditEntries.Add(Audit(ctx, deny ? AuditActions.PermissionDenied : AuditActions.PermissionGranted, userId, null,
+            $"{Permissions.Describe(permissionCode)}{(validTo is { } v ? $" до {v:dd.MM.yyyy}" : "")}", reason));
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return assignment.Id;
+    }
+
+    /// <summary>D112: отозвать особое право или запрет. Те же правила, что при выдаче.</summary>
+    public async Task RevokeIndividualAsync(Guid assignmentId, string? reason, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync(AccessLock(ctx.OrganizationId), ct);
+        var a = await db.RoleAssignments.SingleOrDefaultAsync(x => x.Id == assignmentId && x.OrganizationId == ctx.OrganizationId && x.PermissionCode != null, ct)
+                ?? throw new NotFoundException("Особое право");
+        if (a.UserId == ctx.UserId)
+        {
+            throw new BusinessRuleException("access.individual.self", "Свои права меняет другой администратор или Владелец.");
+        }
+
+        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, Permissions.IsAdministrative(a.PermissionCode!) || await IsAdministratorHereAsync(ctx, a.UserId, ct));
+        // Снять запрет — значит вернуть право: тоже не выше своего.
+        if (a.IsDeny)
+        {
+            GrantPolicy.EnsureNoEscalation(ctx.Permissions, [(a.PermissionCode!, PermissionLevel.Full)]);
+        }
+
+        a.Revoke(ctx.UserId, clock.UtcNow);
+        db.AuditEntries.Add(Audit(ctx, AuditActions.AssignmentRevoked, a.UserId, $"{(a.IsDeny ? "запрет" : "право")}: {Permissions.Describe(a.PermissionCode!)}",
+            "отозвано", reason));
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task<RoleMatrixDto> GetRoleMatrixAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.UserView, ct);
         var roles = await db.Roles.AsNoTracking()
-            .Where(r => r.OrganizationId == ctx.OrganizationId)
+            .Where(r => r.OrganizationId == ctx.OrganizationId && !r.IsArchived)
             .Include(r => r.Permissions)
             .ToListAsync(ct);
 
@@ -531,8 +655,28 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
 
     private async Task<Role> FindRoleAsync(AccessContext ctx, string roleCode, CancellationToken ct) =>
         await db.Roles.Include(r => r.Permissions)
-            .SingleOrDefaultAsync(r => r.OrganizationId == ctx.OrganizationId && r.Code == roleCode, ct)
+            .SingleOrDefaultAsync(r => r.OrganizationId == ctx.OrganizationId && r.Code == roleCode && !r.IsArchived, ct)
         ?? throw new NotFoundException("Роль");
+
+    /// <summary>
+    /// Аудит 11.10.2026 (D109): учётная запись (пароль, 2FA, ссылка входа) общая для всех организаций пользователя. Менять её
+    /// отсюда можно, только если пользователь не состоит в другой организации, иначе администратор одной организации получил бы
+    /// вход в чужую. Для Владельца и Администратора — только Владелец.
+    /// </summary>
+    private async Task EnsureAccountActionAllowedAsync(AccessContext ctx, long userId, CancellationToken ct)
+    {
+        if (await db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.OrganizationId != ctx.OrganizationId, ct))
+        {
+            throw new BusinessRuleException("access.account.shared",
+                "Пользователь работает и в другой организации: пароль и вход он восстанавливает сам — «Забыли пароль» или аварийная процедура.");
+        }
+
+        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, await IsAdministratorHereAsync(ctx, userId, ct));
+    }
+
+    private async Task<bool> IsAdministratorHereAsync(AccessContext ctx, long userId, CancellationToken ct) =>
+        await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Owner, ct)
+        || await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Administrator, ct);
 
     /// <summary>Пользователь чужой организации — «не найдено» (ТЗ §4.12).</summary>
     private async Task<OrganizationMember> RequireMemberAsync(AccessContext ctx, long userId, CancellationToken ct) =>

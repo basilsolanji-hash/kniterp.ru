@@ -36,11 +36,14 @@ public static class DashboardBlocks
     public const string Month = "month";
     public const string Reference = "reference";
 
+    /// <summary>Производство (D111): заказы в работе, готовность, выпуск, смена, что требует внимания.</summary>
+    public const string Production = "production";
+
     /// <summary>«Готовность к запуску» — в шапке экрана: её можно скрыть, но не переставить.</summary>
     public const string Readiness = "readiness";
 
-    /// <summary>Порядок по умолчанию: сначала деньги и то, что ждёт действия, — они помещаются на первый экран.</summary>
-    public static readonly IReadOnlyList<string> DefaultOrder = [Actions, Kpi, Money, Attention, Debtors, Charts, Recent, Month, Reference];
+    /// <summary>Порядок по умолчанию (D113): динамика за 30 дней — выше всего, затем быстрые действия, показатели, деньги и производство.</summary>
+    public static readonly IReadOnlyList<string> DefaultOrder = [Charts, Actions, Kpi, Money, Production, Attention, Debtors, Recent, Month, Reference];
 
     public static readonly IReadOnlyList<string> All = [.. DefaultOrder, Readiness];
 

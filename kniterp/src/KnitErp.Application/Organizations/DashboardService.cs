@@ -47,7 +47,7 @@ public sealed record DashboardFinanceDto(
 public sealed record DashboardDto(
     string OrganizationName, IReadOnlyList<DashboardTileDto> Tiles, DashboardMonthDto? Month, IReadOnlyList<DashboardDocumentDto> Recent,
     int? ReadinessPercent, IReadOnlyList<DashboardChartDto> Charts, DashboardFinanceDto? Finance = null, DashboardLayout? Layout = null,
-    DateTime CachedAtUtc = default);
+    DateTime CachedAtUtc = default, KnitErp.Application.Workspace.DashboardProductionDto? Production = null);
 
 /// <summary>
 /// Главный экран: показатели, что ждёт действия, последние документы. Каждый блок — только при праве на его данные
@@ -59,7 +59,9 @@ public sealed record DashboardDto(
 /// без загрузки документов целиком и без повторной проверки прав в каждом разделе.
 /// </para>
 /// </summary>
-public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, IClock clock, LaunchReadinessService readiness, IMemoryCache cache)
+public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, IClock clock, LaunchReadinessService readiness, IMemoryCache cache,
+    IEnumerable<KnitErp.Application.Workspace.IProductionDashboardSource>? productionSources = null,
+    IEnumerable<KnitErp.Application.Workspace.IShiftStaffingSource>? shiftSources = null)
 {
     /// <summary>Дней в графике динамики.</summary>
     public const int ChartDays = 30;
@@ -90,6 +92,7 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
         Money = 16,
         Readiness = 32,
         Accounts = 64,
+        Production = 128,
     }
 
     private sealed record CacheKey(long OrganizationId, long UserId, string Permissions, Parts Parts);
@@ -118,6 +121,11 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
 
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, head.TimeZoneId));
         var data = await BuildAsync(ctx, parts, today, ct) with { OrganizationName = head.ShortName, CachedAtUtc = clock.UtcNow };
+        if (parts.HasFlag(Parts.Production))
+        {
+            data = data with { Production = await ProductionAsync(ctx, today, ct) };
+        }
+
         cache.Set(key, data, TimeSpan.FromSeconds(CacheSeconds));
         return data with { Layout = layout };
     }
@@ -160,6 +168,11 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
             parts |= Parts.Readiness;
         }
 
+        if (layout.Shows(DashboardBlocks.Production))
+        {
+            parts |= Parts.Production;
+        }
+
         return parts;
     }
 
@@ -175,6 +188,60 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
             var scope = permissions.ScopeOf(code);
             return scope.All ? "*" : string.Join(',', scope.WarehouseIds.Order());
         }));
+
+    /// <summary>
+    /// D111: блок «Производство». Воронка — заказы покупателей на этапах из правил D110 «оплачен → производство начато → завершено»,
+    /// одним запросом; готовность, выпуск, внимание и смена — из модулей производства и сотрудников, если они подключены.
+    /// Блока нет, если показывать нечего (нет прав на продажи и нет данных модулей).
+    /// </summary>
+    private async Task<KnitErp.Application.Workspace.DashboardProductionDto?> ProductionAsync(AccessContext ctx, DateOnly today, CancellationToken ct)
+    {
+        var org = ctx.OrganizationId;
+        List<KnitErp.Application.Workspace.ProductionFunnelStepDto> funnel = [];
+        if (ctx.Permissions.Has(Permissions.SalesView))
+        {
+            var prices = ctx.Permissions.Has(Permissions.PriceView);
+            StageTrigger[] triggers = [StageTrigger.Paid, StageTrigger.ProductionStarted, StageTrigger.ProductionCompleted];
+            var rows = await (from r in db.SalesStageRules.AsNoTracking()
+                              where r.OrganizationId == org && r.StageId != null && triggers.Contains(r.Trigger)
+                              join st in db.SalesOrderStages.AsNoTracking() on r.StageId equals st.Id
+                              where !st.IsArchived
+                              select new
+                              {
+                                  st.Id, st.Name, st.Color, st.SortOrder,
+                                  Orders = db.SalesOrders.Count(o => o.OrganizationId == org && o.Status == SalesOrderStatus.Confirmed && o.StageId == st.Id),
+                                  Overdue = db.SalesOrders.Count(o => o.OrganizationId == org && o.Status == SalesOrderStatus.Confirmed && o.StageId == st.Id
+                                                                      && o.ShipDate != null && o.ShipDate < today),
+                                  Amount = db.SalesOrders.Where(o => o.OrganizationId == org && o.Status == SalesOrderStatus.Confirmed && o.StageId == st.Id)
+                                      .SelectMany(o => o.Lines).Sum(l => (decimal?)l.Amount),
+                              }).ToListAsync(ct);
+            funnel = rows.DistinctBy(r => r.Id).OrderBy(r => r.SortOrder)
+                .Select(r => new KnitErp.Application.Workspace.ProductionFunnelStepDto(r.Id, r.Name, r.Color, r.Orders, prices ? r.Amount ?? 0 : null, r.Overdue))
+                .ToList();
+        }
+
+        KnitErp.Application.Workspace.ProductionDashboardData? production = null;
+        foreach (var source in productionSources ?? [])
+        {
+            production = await source.GetAsync(db, ctx, today, ct);
+            if (production is not null)
+            {
+                break;
+            }
+        }
+
+        KnitErp.Application.Workspace.ShiftStaffingDto? shift = null;
+        foreach (var source in shiftSources ?? [])
+        {
+            shift = await source.TodayAsync(db, ctx, today, ct);
+            if (shift is not null)
+            {
+                break;
+            }
+        }
+
+        return funnel.Count == 0 && production is null && shift is null ? null : new(funnel, production, shift);
+    }
 
     private async Task<DashboardDto> BuildAsync(AccessContext ctx, Parts parts, DateOnly today, CancellationToken ct)
     {

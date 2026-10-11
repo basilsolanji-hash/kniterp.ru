@@ -43,6 +43,12 @@ public static class Permissions
     public const string ProductionStageMark = "production.stage.mark";
     public const string ProductionMaterialMove = "production.material.move";
 
+    /// <summary>D302 (сессия № 4): состав комплектов.</summary>
+    public const string BundleEdit = "catalog.bundle.edit";
+
+    /// <summary>D306 (сессия № 4): массовая переоценка. Через API не выдаётся.</summary>
+    public const string PriceEdit = "catalog.price.edit";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -82,6 +88,8 @@ public static class Permissions
         [ProductionOrderEdit] = "Производство: заказы — создание, запуск и отмена",
         [ProductionStageMark] = "Производство: отметка этапов и контроль качества",
         [ProductionMaterialMove] = "Производство: выдача, возврат и списание материалов, выпуск",
+        [BundleEdit] = "Номенклатура: состав комплектов",
+        [PriceEdit] = "Цены: переоценка",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;
@@ -89,6 +97,25 @@ public static class Permissions
     public static bool IsKnown(string code) => Labels.ContainsKey(code);
 
     public static string Describe(string code) => Labels.TryGetValue(code, out var label) ? label : code;
+
+    /// <summary>Группы прав для редактора ролей (D112), в порядке разделов меню.</summary>
+    public static readonly IReadOnlyList<string> Groups =
+        ["Продажи", "Закупки", "Склад", "Деньги и цены", "Справочники", "Производство", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
+
+    /// <summary>Группа права по его коду — так новые права модулей (производство, кадры) сами попадают в свой раздел.</summary>
+    public static string GroupOf(string code) => code.Split('.')[0] switch
+    {
+        "sales" => "Продажи",
+        "purchase" => "Закупки",
+        "warehouse" or "period" => "Склад",
+        "finance" or "money" => "Деньги и цены",
+        "catalog" => "Справочники",
+        "production" => "Производство",
+        "organization" or "structure" or "hr" => "Организация и сотрудники",
+        "access" => "Пользователи и доступ",
+        "audit" => "Журнал и контроль",
+        _ => "Прочее",
+    };
 
     /// <summary>Права, выдача которых считается выдачей административных прав (ТЗ §4.8 KA3634).</summary>
     public static bool IsAdministrative(string code) => code is UserManage or AdminGrant;

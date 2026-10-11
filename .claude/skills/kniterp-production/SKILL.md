@@ -25,6 +25,10 @@ description: Модуль «Производство» knitERP — произв�
   Исправление — новая запись «Исправление» с отрицательным количеством.
 - Запущенный заказ: изделие, количество, техкарта и снимок норм защищены триггером `tr_production_orders_fixed_after_release`.
 - Цены и себестоимость показывать только с `Permissions.PriceView`; на терминале цеха цен нет.
+- Выработка (`IWorkOutputSource`) — только отметки с исполнителем; исправление выработки — `CorrectAsync`, всегда сегодняшним днём
+  (прошлые дни и утверждённый расчёт заработка не меняются). Допуск баланса и правила баллов — `ProductionSettingsService.LoadAsync`, не константы.
+- Сценарий, который упал после `Add`/изменения отслеживаемой сущности (проверка, конфликт версий), вызывает `db.DiscardChanges()`:
+  у вкладки Blazor один DbContext, и следующая операция иначе сохранит «мусор».
 - Новый сервис, который используют виджеты на чужих страницах, — через `IKnitErpDbContextFactory` (как `SalesProductionService`), иначе два компонента делят один DbContext.
 
 ## Тесты
@@ -34,7 +38,13 @@ description: Модуль «Производство» knitERP — произв�
 - Сквозные (.NET Playwright): `tests/KnitErp.E2ETests` — `AppFixture` поднимает приложение по HTTPS с временным сертификатом, сидит организацию,
   начальника цеха, кладовщика и вязальщицу (`WorkerEmail`). Телефон — `ViewportSize 390×844, IsMobile, HasTouch` и проверка `scrollWidth <= clientWidth`.
   Кнопки до готовности Blazor — `ClickUntilAsync`. Падение — снимок в `KNITERP_E2E_ARTIFACTS`.
+  Локатор `GetByRole(Columnheader)` в таблицах приложения не находит заголовок — проверять `Locator("thead th")` по тексту.
+  Сценарии делят одну базу: проверять строки своего заказа (`li:has(a[href='shop/op/{order}/1'])`), а не «первую в списке».
   Запуск: `dotnet build` всего решения, затем `dotnet test tests/KnitErp.E2ETests --no-build` (нужен `KNITERP_TEST_SQL`).
+
+## Частые ошибки
+- В LINQ-запросе с синтаксисом запросов параметр `from` пишется как `@from` — иначе «Invalid expression term '&&'».
+- Docker в облачной сессии: `dockerd` запускать фоновой командой (`run_in_background`), иначе он умирает вместе с командой; затем `docker start kniterp-sql`.
 
 ## Переводы
 Ключи интерфейса — в `src/KnitErp.Web/Localization/{be,kk,uz}.json`, новые — в конец файла: `python3 -I .claude/skills/kniterp-production/append_tr.py <файл с T = {ключ: (be, kk, uz)}> kniterp/src/KnitErp.Web/Localization`.
@@ -44,5 +54,8 @@ description: Модуль «Производство» knitERP — произв�
 - `TaggedEntity`: 1–10 общие, 11–19 производство (`ProductionOrder = 11`), 20–29 кадры; CHECK тегов и обсуждений — `BETWEEN 1 AND 29` (D202).
 - `IWorkOutputSource` (`Application/Hr/WorkOutput.cs`) — файл побайтно одинаковый в обеих ветках; производство регистрирует `ProductionWorkOutputSource`
   через `AddScoped`, кадры — заглушку через `TryAddScoped`: при любом порядке строк побеждает производство. Идентификатор операции — номер этапа 1–5.
+- Номера этапов 1–5 — коды операций в сдельных расценках кадров: не перенумеровывать; новый вид работы — новый номер (6, 7…).
+- `IProductionDashboardSource` (главный экран, D111 базы) — `ProductionDashboardSource`; смена этапа заказа покупателя (D110) —
+  `StageAutomation.ApplyAsync` при запуске и полном выпуске (D406).
 - `ItemType` 10 и 11 заняты каталогом (сессия 4) — не использовать.
 - В ветку `claude/fervent-volta-3pn88r` не пушить; перед новой миграцией — `git merge origin/claude/fervent-volta-3pn88r`.

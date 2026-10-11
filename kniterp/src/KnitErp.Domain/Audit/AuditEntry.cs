@@ -78,6 +78,9 @@ public static class AuditActions
     public const string AdminRoleGranted = "access.admin_role.granted";
     public const string PermissionGranted = "access.permission.granted";
     public const string AssignmentRevoked = "access.assignment.revoked";
+    public const string PermissionDenied = "access.permission.denied";
+    public const string RoleCreated = "access.role.created";
+    public const string RoleChanged = "access.role.changed";
     public const string UserInvited = "access.user.invited";
     public const string UserBlocked = "access.user.blocked";
     public const string UserUnblocked = "access.user.unblocked";
@@ -158,6 +161,10 @@ public static class AuditActions
     public const string CatalogArchived = "catalog.archived";
     public const string CatalogRestored = "catalog.restored";
     public const string CatalogImported = "catalog.imported";
+    public const string ContractCreated = "catalog.contract.created";
+    public const string ContractChanged = "catalog.contract.changed";
+    public const string ContractFileAdded = "catalog.contract.file_added";
+    public const string ContractFileViewed = "catalog.contract.file_viewed";
     public const string StockDocumentCreated = "stock.document.created";
     public const string StockDocumentChanged = "stock.document.changed";
     public const string StockDocumentSubmitted = "stock.document.submitted";
@@ -176,6 +183,10 @@ public static class AuditActions
     public const string ProductionOutputReleased = "production.output.released";
     public const string ProductionOrderClosed = "production.order.closed";
     public const string ProductionDocumentReversed = "production.document.reversed";
+    public const string ProductionShiftTaskAssigned = "production.shift.assigned";
+    public const string ProductionShiftTaskCancelled = "production.shift.cancelled";
+    public const string ProductionShiftShortfall = "production.shift.shortfall";
+    public const string ProductionSettingsChanged = "production.settings.changed";
     public const string PurchaseOrderCreated = "purchase.order.created";
     public const string PurchaseOrderChanged = "purchase.order.changed";
     public const string PurchaseOrderConfirmed = "purchase.order.confirmed";

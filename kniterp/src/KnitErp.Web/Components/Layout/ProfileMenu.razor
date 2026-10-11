@@ -28,7 +28,7 @@
                 <a role="menuitem" href="security">@L("Вход и резервные коды")</a>
                 <div class="menu-caption">@L("Язык")</div>
                 <div class="lang-row">
-                    @foreach (var lang in KnitErp.Domain.Access.UiLanguages.All)
+                    @foreach (var lang in KnitErp.Domain.Access.UiLanguages.Menu)
                     {
                         <button type="button" role="menuitemradio" aria-checked="@(lang.Code == CurrentCode ? "true" : "false")"
                                 class="@(lang.Code == CurrentCode ? "chip added" : "chip")" @onclick="() => ChangeLanguageAsync(lang.Code)">@lang.NativeName</button>
@@ -40,6 +40,24 @@
                     {
                         <button type="button" role="menuitemradio" class="chip" data-theme-choice="@themeCode">@themeTitle</button>
                     }
+                </div>
+                @if (Assistant is not null)
+                {
+                    @* D116: кто помогает — Ника, Книт или без персонажа; хранится в профиле. *@
+                    <div class="menu-caption">@L("Помощник")</div>
+                    <div class="lang-row" role="radiogroup" aria-label="@L("Помощник")">
+                        @foreach (var (code, title) in Personas)
+                        {
+                            <button type="button" role="menuitemradio" aria-checked="@(Assistant.Persona == code ? "true" : "false")"
+                                    class="@(Assistant.Persona == code ? "chip added" : "chip")" @onclick="() => Assistant.SetAsync(code)">@title</button>
+                        }
+                    </div>
+                }
+                <div class="menu-caption">@L("Размер интерфейса")</div>
+                <div class="lang-row" role="radiogroup" aria-label="@L("Размер интерфейса")">
+                    <button type="button" role="menuitemradio" class="chip" data-density-choice="compact">@L("Компактно")</button>
+                    <button type="button" role="menuitemradio" class="chip" data-density-choice="normal">@L("Обычно")</button>
+                    <button type="button" role="menuitemradio" class="chip" data-density-choice="large">@L("Крупно")</button>
                 </div>
                 <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(QuickBar.SettingsId))">@L("Настроить панель")</button>
                 <form method="post" action="account/logout">
@@ -55,6 +73,16 @@
 }
 
 @code {
+    [CascadingParameter]
+    public AssistantChoice? Assistant { get; set; }
+
+    private static IEnumerable<(string Code, string Title)> Personas =>
+    [
+        (KnitErp.Application.Workspace.AssistantPersonas.Nika, L("Ника")),
+        (KnitErp.Application.Workspace.AssistantPersonas.Knit, L("Книт")),
+        (KnitErp.Application.Workspace.AssistantPersonas.None, L("Без персонажа")),
+    ];
+
     [Parameter, EditorRequired]
     public CurrentAccessDto Access { get; set; } = default!;
 

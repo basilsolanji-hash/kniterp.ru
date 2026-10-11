@@ -64,6 +64,19 @@
                     </select>
                 </label>
             }
+            @if (_kind == ProductionOperationKind.Defect && _progress.Employees is { Count: > 0 } people)
+            {
+                <label>
+                    @L("Виновник брака")
+                    <select @bind="_culprit" aria-label="@L("Виновник брака")">
+                        <option value="">@L("— не указан —")</option>
+                        @foreach (var e in people)
+                        {
+                            <option value="@e.Id">@e.Name (@e.PersonnelNumber)</option>
+                        }
+                    </select>
+                </label>
+            }
             <label>@(_kind is ProductionOperationKind.Correction or ProductionOperationKind.Defect ? L("Причина") : L("Комментарий"))
                 <input @bind="_reason" maxlength="@ProductionOperation.ReasonMaxLength" size="24" aria-label="@L("Причина или комментарий")" /></label>
             <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата")" /></label>
@@ -85,7 +98,7 @@
                             <tr>
                                 <td>@h.OccurredOn.ToString("dd.MM.yyyy")</td>
                                 <td>@L(h.StageName)</td>
-                                <td>@L(h.KindName)@(h.ReturnToName is null ? "" : $" → {L(h.ReturnToName)}")</td>
+                                <td>@L(h.KindName)@(h.ReturnToName is null ? "" : $" → {L(h.ReturnToName)}")@(h.Culprit is null ? "" : $" ({L("виновник")} {h.Culprit})")</td>
                                 <td class="num">@Quantities.Format(h.Quantity)</td>
                                 <td>@h.Reason</td>
                                 <td>
@@ -145,6 +158,7 @@
     private string? _reason;
     private DateTime _date = DateTime.Today;
     private long? _correcting;
+    private string _culprit = string.Empty;
     private string _correctText = string.Empty;
     private string? _correctReason;
 
@@ -225,10 +239,12 @@
             }
 
             await Floor.RecordAsync(OrderId, new ProductionOperationCommand(_stage, _kind, quantity,
-                _kind == ProductionOperationKind.Rework ? _returnTo : null, _reason, DateOnly.FromDateTime(_date)));
+                _kind == ProductionOperationKind.Rework ? _returnTo : null, _reason, DateOnly.FromDateTime(_date),
+                _kind == ProductionOperationKind.Defect && long.TryParse(_culprit, out var culprit) ? culprit : null));
             _message = L("Отмечено.");
             _quantityText = string.Empty;
             _reason = null;
+            _culprit = string.Empty;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

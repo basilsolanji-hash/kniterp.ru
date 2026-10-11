@@ -331,7 +331,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("Исполнитель: Петрова А. С.")).ToBeVisibleAsync();
 
         await page.GetByLabel("Код операции").FillAsync($"оп-{order}-1");
-        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Открыть" }), page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" }));
+        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Открыть", Exact = true }), page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" }));
         await page.WaitForURLAsync(new Regex($@"/shop/op/{order}/1$"));
         await Assertions.Expect(page.Locator(".shop-big div").First).ToContainTextAsync("10");
 
@@ -345,20 +345,109 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             "На телефоне не должно быть горизонтальной прокрутки.");
 
         await page.GotoAsync("shop");
-        var number = (await page.Locator(".shop-list a").First.InnerTextAsync()).Split(' ')[0];
-        await Assertions.Expect(page.Locator(".shop-list li").Filter(new() { HasText = "Не выполнено полностью: Не хватило времени" })).ToHaveCountAsync(1);
-        await Assertions.Expect(page.Locator(".shop-list li").Filter(new() { HasText = $"{number} · Вязание" }).Filter(new() { HasText = "можно отметить 4 шт" }))
-            .ToHaveCountAsync(1);
+        // Ссылки на этот заказ и этап: моя отметка и доступная работа (сменные задания других сценариев не мешают).
+        var thisStage = page.Locator($"li:has(a[href='shop/op/{order}/1'])");
+        await Assertions.Expect(thisStage.Filter(new() { HasText = "Не выполнено полностью: Не хватило времени" })).ToHaveCountAsync(1);
+        await Assertions.Expect(thisStage.Filter(new() { HasText = "можно отметить 4 шт" })).ToHaveCountAsync(1);
         Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
 
         // Ошиблась на одну — уменьшает свою сегодняшнюю отметку сама.
-        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Ошибся — уменьшить") }).First,
+        await ClickUntilAsync(thisStage.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Ошибся — уменьшить") }),
             page.GetByLabel("На сколько уменьшить"));
         await page.GetByLabel("На сколько уменьшить").FillAsync("1");
         await page.GetByLabel("Причина исправления").FillAsync("ошиблась при вводе (e2e)");
         await page.GetByRole(AriaRole.Button, new() { Name = "Исправить", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Отметка исправлена.");
         await Assertions.Expect(page.Locator(".shop-totals li").Filter(new() { HasText = "Вязание" })).ToContainTextAsync("5 шт");
+    }
+
+    /// <summary>Сменное задание: начальник цеха назначает вязальщице норму, она видит процент на телефоне и сообщает причину.</summary>
+    [SqlFact]
+    public async Task Workshop_head_assigns_shift_task_and_worker_reports_shortfall()
+    {
+        var order = await app.CreateReleasedOrderAsync(10);
+        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        {
+            var page = await context.NewPageAsync();
+            await LoginAsync(page);
+            await page.GotoAsync("production/shift-tasks");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Сменные задания" })).ToBeVisibleAsync();
+            // Поля, заполненные до того, как страница стала интерактивной, теряются при подключении Blazor: повторяем заполнение и отправку,
+            // пока сервер не подтвердит назначение.
+            var assigned = page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Задание назначено." });
+            for (var attempt = 0; attempt < 15 && !await assigned.IsVisibleAsync(); attempt++)
+            {
+                await page.GetByLabel("Сотрудник", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С. (0101)" });
+                await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync(order.ToString());
+                await page.GetByLabel("План на смену").FillAsync("8");
+                await page.GetByRole(AriaRole.Button, new() { Name = "Назначить", Exact = true }).ClickAsync();
+                try
+                {
+                    await assigned.WaitForAsync(new() { Timeout = 1500 });
+                }
+                catch (TimeoutException)
+                {
+                }
+            }
+
+            await Assertions.Expect(assigned).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Петрова А. С." }).Last).ToContainTextAsync("0%");
+        }
+
+        await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
+        }))
+        {
+            var page = await phone.NewPageAsync();
+            await LoginAsync(page, AppFixture.WorkerEmail);
+            await page.GotoAsync("shop");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Задания на смену" })).ToBeVisibleAsync();
+            var task = page.Locator(".shop-list li").Filter(new() { HasText = "норма 8, сделано 0 шт" });
+            await Assertions.Expect(task).ToContainTextAsync("Выполнено 0%");
+            await ClickUntilAsync(task.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Почему не выполнено") }), page.GetByLabel("Причина невыполнения"));
+            await page.GetByLabel("Причина невыполнения").SelectOptionAsync(new SelectOptionValue { Label = "Нет пряжи или материалов" });
+            await page.GetByRole(AriaRole.Button, new() { Name = "Сообщить" }).ClickAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Причина передана мастеру.");
+            await Assertions.Expect(task).ToContainTextAsync("Причина: Нет пряжи или материалов");
+            Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
+        }
+    }
+
+    /// <summary>Настройки производства организации: начальник цеха видит правила без права менять; баллы — в отчёте и на телефоне.</summary>
+    [SqlFact]
+    public async Task Production_settings_are_read_only_for_head_and_points_are_visible()
+    {
+        await app.EnablePointsAsync();
+        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        {
+            var page = await context.NewPageAsync();
+            await LoginAsync(page);
+            await page.GotoAsync("settings/production");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Настройки производства" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.GetByLabel("Допуск отклонения расхода от нормы, %")).ToBeDisabledAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Сохранить" })).ToHaveCountAsync(0);
+
+            await page.GotoAsync("production/scores");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Баллы и показатели" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator("thead th").Filter(new() { HasTextRegex = new Regex("^Баллы$") })).ToHaveCountAsync(1);
+            await Assertions.Expect(page.GetByText("Баллы: выполненное задание")).ToBeVisibleAsync();
+        }
+
+        await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
+            ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
+        }))
+        {
+            var page = await phone.NewPageAsync();
+            await LoginAsync(page, AppFixture.WorkerEmail);
+            await page.GotoAsync("shop");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Мои показатели за месяц" })).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator(".shop-totals li").Filter(new() { HasText = "Баллы" })).ToHaveCountAsync(1);
+            Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
+        }
     }
 
     /// <summary>Маршрутный лист: QR-код и текстовый код на каждый этап.</summary>

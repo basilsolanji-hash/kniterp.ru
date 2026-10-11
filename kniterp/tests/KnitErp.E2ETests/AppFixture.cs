@@ -155,6 +155,15 @@ public sealed class AppFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>Владелец включает баллы в настройках производства (правила по умолчанию).</summary>
+    public async Task EnablePointsAsync()
+    {
+        await using var s = _host.As(_ownerId, _organizationId);
+        var current = await s.ProductionSettings.GetAsync();
+        await s.ProductionSettings.SaveAsync(new ProductionSettingsCommand(current.TolerancePercent, true, current.PointsTaskDone,
+            current.PointsTaskMissedWithReason, current.PointsTaskMissedNoReason, current.PointsPerDefectUnit), current.RowVersion);
+    }
+
     /// <summary>Запущенный заказ на свитера от имени начальника цеха — для сценариев цеха.</summary>
     public async Task<long> CreateReleasedOrderAsync(decimal quantity)
     {

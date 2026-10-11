@@ -40,7 +40,14 @@ public sealed class AccessGuard(IKnitErpDbContext db, ICurrentUser currentUser, 
             throw new AccessDeniedException(Permissions.OrganizationView);
         }
 
-        var permissions = await LoadAsync(userId, orgId, ct);
+        // Аудит 11.10.2026 (D109): заблокированный участник или учётная запись не получают даже контекст — иначе действия
+        // без отдельного права (теги, личные инструменты) оставались бы доступны после блокировки, в том числе по токену API.
+        if (!await IsActiveMemberAsync(userId, orgId, ct))
+        {
+            throw new AccessDeniedException(Permissions.OrganizationView);
+        }
+
+        var permissions = await ComputeAsync(userId, orgId, ct);
 
         // D88: по токену API — не больше прав токена и не больше текущих прав его создателя.
         if (currentUser.ApiScope is { } scope)
@@ -79,17 +86,19 @@ public sealed class AccessGuard(IKnitErpDbContext db, ICurrentUser currentUser, 
 
     public async Task<EffectivePermissionSet> LoadAsync(long userId, long organizationId, CancellationToken ct = default)
     {
-        var userOk = await db.Users.AnyAsync(u => u.Id == userId && u.Status == UserStatus.Active, ct)
-            && await db.OrganizationMembers.AnyAsync(
-                m => m.UserId == userId && m.OrganizationId == organizationId && m.Status == MembershipStatus.Active, ct);
-        if (!userOk)
-        {
-            return EffectivePermissionSet.Empty;
-        }
+        return await IsActiveMemberAsync(userId, organizationId, ct) ? await ComputeAsync(userId, organizationId, ct) : EffectivePermissionSet.Empty;
+    }
 
+    private async Task<EffectivePermissionSet> ComputeAsync(long userId, long organizationId, CancellationToken ct)
+    {
         var assignments = await ActiveAssignmentsAsync(userId, organizationId, ct);
         return EffectivePermissionSet.Compute(await ExpandAsync(organizationId, assignments, ct));
     }
+
+    private async Task<bool> IsActiveMemberAsync(long userId, long organizationId, CancellationToken ct) =>
+        await db.Users.AnyAsync(u => u.Id == userId && u.Status == UserStatus.Active, ct)
+        && await db.OrganizationMembers.AnyAsync(
+            m => m.UserId == userId && m.OrganizationId == organizationId && m.Status == MembershipStatus.Active, ct);
 
     public async Task<EffectivePermissionSet> PreviewWithRoleAsync(long? userId, long organizationId, Role newRole, CancellationToken ct = default)
     {

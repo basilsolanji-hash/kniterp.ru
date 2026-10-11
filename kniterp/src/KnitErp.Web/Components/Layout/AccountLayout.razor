@@ -6,7 +6,7 @@
     @Body
     @* Язык до входа — ссылками (страницы входа без интерактивности); после входа язык берётся из профиля. *@
     <nav class="lang-links" aria-label="@L("Язык")">
-        @foreach (var lang in KnitErp.Domain.Access.UiLanguages.All)
+        @foreach (var lang in KnitErp.Domain.Access.UiLanguages.Menu)
         {
             <a href="@($"language/{lang.Code}?returnUrl={Uri.EscapeDataString("/" + Navigation.ToBaseRelativePath(Navigation.Uri))}")" data-enhance-nav="false"
                aria-current="@(lang.Code == CurrentCode ? "true" : null)">@lang.NativeName</a>

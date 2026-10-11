@@ -5,6 +5,10 @@
 @using KnitErp.Domain.Common
 @inject NomenclatureService Nomenclature
 @inject ModificationService Modifications
+@inject BundleService Bundles
+@inject ItemTradeService Trade
+@inject PackService PackList
+@inject CatalogService Catalog
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -50,8 +54,20 @@ else
         <dt>@L("Код")</dt><dd>@_item.Code</dd>
         <dt>@L("Группа")</dt><dd>@(_item.GroupPath ?? L("без группы"))</dd>
         <dt>@L("Единица")</dt><dd>@_item.UnitSymbol</dd>
-        <dt>@L("Остаток на всех складах")</dt><dd>@Quantities.Format(_item.Stock) @_item.UnitSymbol
-            @if (_item.Details.MinStock is { } min && _item.Stock < min) { <span class="tag bad">@L("ниже неснижаемого {0}", Quantities.Format(min))</span> }</dd>
+        @if (_item.IsStocked)
+        {
+            <dt>@L("Остаток на всех складах")</dt><dd>@Quantities.Format(_item.Stock) @_item.UnitSymbol
+                @if (_item.Details.MinStock is { } min && _item.Stock < min) { <span class="tag bad">@L("ниже неснижаемого {0}", Quantities.Format(min))</span> }</dd>
+        }
+        else if (_item.Type == ItemType.Bundle)
+        {
+            <dt>@L("Склад")</dt><dd>@L("комплект не хранится на складе: доступность и списание — по компонентам")</dd>
+        }
+        else
+        {
+            <dt>@L("Склад")</dt><dd>@L("не хранится на складе: продаётся и покупается, закрывается актом или УПД")</dd>
+        }
+        <dt>@L("Предмет расчёта (чек)")</dt><dd>@(_item.IsStocked ? L("товар") : L("услуга"))</dd>
         @if (_item.Description is not null)
         {
             <dt>@L("Описание")</dt><dd>@_item.Description</dd>
@@ -75,21 +91,24 @@ else
                     </select>
                 </label>
                 <label>@L("Артикул") <input @bind="_form.Article" maxlength="@ItemDetailRules.ArticleMaxLength" disabled="@(!editable)" /></label>
-                <label>@L("Страна происхождения (код ОКСМ)")
-                    <input @bind="_form.Country" list="countries" maxlength="3" inputmode="numeric" placeholder="643" disabled="@(!editable)" />
-                    <datalist id="countries">
-                        @foreach (var c in ItemDetailRules.CommonCountries)
-                        {
-                            <option value="@c.Code">@c.Name</option>
-                        }
-                    </datalist>
-                </label>
-                <label>@L("Страна — краткое наименование") <input @bind="_form.CountryName" maxlength="@ItemDetailRules.CountryNameMaxLength" placeholder="@L("подставится по коду")" disabled="@(!editable)" /></label>
-                <label>@L("Номер декларации на товары") <input @bind="_form.Declaration" maxlength="@ItemDetailRules.DeclarationMaxLength" placeholder="10702010/101026/0012345" disabled="@(!editable)" /></label>
-                <label>@L("Код ТН ВЭД ЕАЭС") <input @bind="_form.TnVed" maxlength="13" inputmode="numeric" disabled="@(!editable)" /></label>
-                <label>@L("Вес, кг (на единицу)") <input @bind="_form.Weight" inputmode="decimal" disabled="@(!editable)" /></label>
-                <label>@L("Объём, м³ (на единицу)") <input @bind="_form.Volume" inputmode="decimal" disabled="@(!editable)" /></label>
-                <label>@L("Неснижаемый остаток") <input @bind="_form.MinStock" inputmode="decimal" disabled="@(!editable)" /></label>
+                @if (_item.IsStocked)
+                {
+                    <label>@L("Страна происхождения (код ОКСМ)")
+                        <input @bind="_form.Country" list="countries" maxlength="3" inputmode="numeric" placeholder="643" disabled="@(!editable)" />
+                        <datalist id="countries">
+                            @foreach (var c in ItemDetailRules.CommonCountries)
+                            {
+                                <option value="@c.Code">@c.Name</option>
+                            }
+                        </datalist>
+                    </label>
+                    <label>@L("Страна — краткое наименование") <input @bind="_form.CountryName" maxlength="@ItemDetailRules.CountryNameMaxLength" placeholder="@L("подставится по коду")" disabled="@(!editable)" /></label>
+                    <label>@L("Номер декларации на товары") <input @bind="_form.Declaration" maxlength="@ItemDetailRules.DeclarationMaxLength" placeholder="10702010/101026/0012345" disabled="@(!editable)" /></label>
+                    <label>@L("Код ТН ВЭД ЕАЭС") <input @bind="_form.TnVed" maxlength="13" inputmode="numeric" disabled="@(!editable)" /></label>
+                    <label>@L("Вес, кг (на единицу)") <input @bind="_form.Weight" inputmode="decimal" disabled="@(!editable)" /></label>
+                    <label>@L("Объём, м³ (на единицу)") <input @bind="_form.Volume" inputmode="decimal" disabled="@(!editable)" /></label>
+                    <label>@L("Неснижаемый остаток") <input @bind="_form.MinStock" inputmode="decimal" disabled="@(!editable)" /></label>
+                }
                 @if (_item.CanSeePrices)
                 {
                     <label>@L("Закупочная цена, без НДС") <input @bind="_form.PurchasePrice" inputmode="decimal" disabled="@(!editable)" /></label>
@@ -141,6 +160,156 @@ else
         </form>
     </div>
 
+    @if (_trade is { } trade)
+    {
+        var tradeEditable = trade.CanEdit;
+        <h2 style="margin-top: 20px">@L("Торговля и маркировка")</h2>
+        <div class="panel">
+            <form @onsubmit="SaveTradeAsync">
+                <div class="grid">
+                    <label>
+                        @L("Признак предмета расчёта (чек)")
+                        <select @bind="_tradeForm.Subject" disabled="@(!tradeEditable || _item.Type == ItemType.Service)">
+                            @if (_item.Type == ItemType.Service)
+                            {
+                                <option value="@PaymentSubject.Service">@L("Услуга")</option>
+                            }
+                            else
+                            {
+                                <option value="@PaymentSubject.Goods">@L("Товар")</option>
+                                <option value="@PaymentSubject.ExcisableGoods">@L("Подакцизный товар")</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_item.Type != ItemType.Service)
+                    {
+                        <label class="inline"><input type="checkbox" @bind="_tradeForm.IsMarked" disabled="@(!tradeEditable)" /> @L("Маркируемый товар («Честный ЗНАК»)")</label>
+                        <label>
+                            @L("Вид продукции")
+                            <select @bind="_tradeForm.Tracking" disabled="@(!tradeEditable || !_tradeForm.IsMarked)">
+                                @foreach (var t in Marking.All.Where(t => t != TrackingType.None))
+                                {
+                                    <option value="@t">@TrackingName(t)</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("GTIN (14 цифр)") <input @bind="_tradeForm.Gtin" inputmode="numeric" maxlength="16" placeholder="04601234567893" disabled="@(!tradeEditable)" /></label>
+                    }
+                    @if (trade.CanSeePrices)
+                    {
+                        <label>@L("Минимальная цена продажи") <input @bind="_tradeForm.MinPrice" inputmode="decimal" disabled="@(!tradeEditable)" /></label>
+                    }
+                </div>
+                <p class="muted small">@L("Коды маркировки (DataMatrix), ЭДО и ГИС МТ подключаются отдельно; здесь — признак, вид продукции и GTIN из Национального каталога.")</p>
+                @if (tradeEditable)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить торговые сведения")</button></div>
+                }
+            </form>
+        </div>
+    }
+
+    @if (_bundle is { } bundle)
+    {
+        <h2 style="margin-top: 20px">@L("Состав комплекта")</h2>
+        <p class="muted">@L("Комплект продаётся одной строкой, а на складе списываются его компоненты. Изменение состава не меняет проведённые документы.")</p>
+        <div class="totals" role="status">
+            <span>@L("Можно собрать:") <b>@Quantities.Format(bundle.TotalAvailable) @bundle.UnitSymbol</b></span>
+            @foreach (var w in bundle.Availability.Where(a => a.Available > 0))
+            {
+                <span>@w.Warehouse: <b>@Quantities.Format(w.Available)</b></span>
+            }
+        </div>
+        <div class="scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th>@L("Компонент")</th><th class="num">@L("В комплекте")</th><th class="num">@L("Доступно")</th>
+                        @if (bundle.CanSeePrices)
+                        {
+                            <th class="num opt">@L("Цена")</th><th class="num opt">@L("Себестоимость")</th>
+                        }
+                        @if (bundle.CanEdit)
+                        {
+                            <th></th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (bundle.Components.Count == 0)
+                    {
+                        <tr><td colspan="6" class="muted">@L("Состав не задан — добавьте компоненты.")</td></tr>
+                    }
+                    @foreach (var c in bundle.Components)
+                    {
+                        var row = c;
+                        <tr class="@(c.IsArchived ? "archived" : null)">
+                            <td><a href="catalog/items/@c.ItemId">@c.Code</a> @c.Name @if (c.IsArchived) { <span class="tag bad">@L("в архиве")</span> }</td>
+                            <td class="num">@Quantities.Format(c.Quantity) @c.UnitSymbol</td>
+                            <td class="num">@Quantities.Format(c.Available)</td>
+                            @if (bundle.CanSeePrices)
+                            {
+                                <td class="num">@(c.Price is { } p ? Amounts.Format(p) : "—")</td>
+                                <td class="num">@(c.UnitCost is { } uc ? Amounts.Format(uc) : "—")</td>
+                            }
+                            @if (bundle.CanEdit)
+                            {
+                                <td>
+                                    <div class="row-actions">
+                                        <button type="button" class="secondary" @onclick='() => RunAsync(() => Bundles.MoveComponentAsync(row.Id, -1), null)' disabled="@_busy" aria-label="@L("Выше")">↑</button>
+                                        <button type="button" class="secondary" @onclick='() => RunAsync(() => Bundles.MoveComponentAsync(row.Id, 1), null)' disabled="@_busy" aria-label="@L("Ниже")">↓</button>
+                                        <ConfirmButton Class="secondary" OnConfirm='() => RunAsync(() => Bundles.RemoveComponentAsync(row.Id, row.RowVersion), L("Компонент убран."))' Disabled="@_busy" Question='@L("Убрать из состава?")'>@L("Убрать")</ConfirmButton>
+                                    </div>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (bundle.Price is { } hint)
+        {
+            <p class="muted">
+                @if (hint.ComponentsTotal is { } total)
+                {
+                    @L("Сумма цен компонентов: {0}.", Amounts.Format(total))
+                    @if (hint.Discount is { } d && hint.DiscountPercent is { } dp)
+                    {
+                        @(" ")@(d >= 0 ? L("Скидка набора: {0} ({1}%).", Amounts.Format(d), dp.ToString("0.##")) : L("Комплект дороже суммы компонентов на {0}.", Amounts.Format(-d)))
+                    }
+                    else
+                    {
+                        @(" ")@L("Задайте цену комплекта в блоке «Цены».")
+                    }
+                }
+                else if (bundle.Components.Count > 0)
+                {
+                    @L("Не у всех компонентов задана основная цена — сумма не считается.")
+                }
+                @if (bundle.Cost is { } cost)
+                {
+                    @(" ")@L("Себестоимость по компонентам: {0}.", Amounts.Format(cost))
+                }
+            </p>
+        }
+        @if (bundle.CanEdit)
+        {
+            <form class="inline-form" @onsubmit="AddComponentAsync">
+                <label>@L("Компонент")
+                    <input @bind="_component" list="bundle-options" placeholder="@L("код или наименование")" size="28" />
+                    <datalist id="bundle-options">
+                        @foreach (var o in _componentOptions.Where(o => o.Id != Id))
+                        {
+                            <option value="@o.Code">@o.Name (@o.UnitSymbol)</option>
+                        }
+                    </datalist>
+                </label>
+                <label>@L("Количество в комплекте") <input @bind="_componentQty" inputmode="decimal" size="8" /></label>
+                <button type="submit" disabled="@_busy">@L("Добавить в состав")</button>
+            </form>
+        }
+    }
+
     @if (_item.CustomFields.Any(f => f.IsArchived))
     {
         <dl class="facts">
@@ -182,7 +351,7 @@ else
                 @L("Тип")
                 <select @bind="_barcodeType">
                     <option value="">@L("определить по коду")</option>
-                    @foreach (var t in Enum.GetValues<BarcodeType>())
+                    @foreach (var t in Enum.GetValues<BarcodeType>().Where(t => _item.IsStocked || t != BarcodeType.Gtin))
                     {
                         <option value="@t">@ItemBarcode.TypeName(t)</option>
                     }
@@ -190,6 +359,55 @@ else
             </label>
             <button type="submit" disabled="@_busy">@L("Добавить")</button>
         </form>
+    }
+
+    @if (_item.IsStocked)
+    {
+        <h2 style="margin-top: 20px">@L("Упаковки")</h2>
+        <p class="muted">@L("Например, коробка = 12 шт или мешок = 25 кг. Свой штрихкод упаковки: скан даёт позицию и количество в основных единицах.")</p>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Упаковка")</th><th class="num">@L("Основных единиц")</th><th>@L("Штрихкод")</th>@if (editable) { <th></th> }</tr></thead>
+                <tbody>
+                    @if (_packs.Count == 0)
+                    {
+                        <tr><td colspan="4" class="muted">@L("Упаковок нет.")</td></tr>
+                    }
+                    @foreach (var p in _packs)
+                    {
+                        var pack = p;
+                        <tr>
+                            <td>@p.UnitName (@p.UnitSymbol)</td>
+                            <td class="num">@Quantities.Format(p.Factor) @_item.UnitSymbol</td>
+                            <td class="barcode">@(p.Barcode ?? "—")</td>
+                            @if (editable)
+                            {
+                                <td><ConfirmButton Class="secondary" OnConfirm='() => RunAsync(() => PackList.RemoveAsync(pack.Id, pack.RowVersion), L("Упаковка убрана."))' Disabled="@_busy" Question='@L("Убрать упаковку?")'>@L("Убрать")</ConfirmButton></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (editable)
+        {
+            <form class="inline-form" @onsubmit="SavePackAsync">
+                <label>
+                    @L("Упаковка")
+                    <select @bind="_packUnit">
+                        <option value="">@L("— выберите —")</option>
+                        @foreach (var u in _units.Where(u => u.Id != _item.UnitId))
+                        {
+                            <option value="@u.Id">@u.Name (@u.Symbol)</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Сколько {0} в упаковке", _item.UnitSymbol) <input @bind="_packFactor" inputmode="decimal" size="8" /></label>
+                <label>@L("Штрихкод упаковки") <input @bind="_packBarcode" maxlength="@ItemBarcode.CodeMaxLength" size="16" /></label>
+                <button type="submit" disabled="@_busy">@L("Сохранить упаковку")</button>
+            </form>
+            <p class="muted small">@L("Нет нужной единицы (коробка, мешок)? Добавьте её в справочник единиц:") <a href="catalog/settings">@L("Единицы")</a></p>
+        }
     }
 
     <h2 style="margin-top: 20px">@L("Фото")</h2>
@@ -261,12 +479,40 @@ else
                 <div class="actions">
                     <button type="submit" disabled="@_busy">@L("Сохранить цены")</button>
                     <a href="catalog/settings" class="muted">@L("Виды цен")</a>
+                    @if (CurrentAccess.Has(Permissions.PriceEdit))
+                    {
+                        <a href="catalog/revaluation" class="muted">@L("Массовая переоценка")</a>
+                    }
                 </div>
             }
         </form>
+        @if (_trade is { History.Count: > 0 } withHistory)
+        {
+            <details class="history">
+                <summary>@L("История цен") (@withHistory.History.Count)</summary>
+                <div class="scroll">
+                    <table class="compact">
+                        <thead><tr><th>@L("Когда")</th><th>@L("Вид цены")</th><th class="num">@L("Было")</th><th class="num">@L("Стало")</th><th class="opt">@L("Кто")</th><th class="opt">@L("Откуда")</th></tr></thead>
+                        <tbody>
+                            @foreach (var h in withHistory.History)
+                            {
+                                <tr>
+                                    <td>@h.ChangedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>@h.PriceType</td>
+                                    <td class="num">@(h.OldPrice is { } o ? Amounts.Format(o) : "—")</td>
+                                    <td class="num">@(h.NewPrice is { } n ? Amounts.Format(n) : "—")</td>
+                                    <td>@(h.User ?? "—")</td>
+                                    <td>@SourceName(h.Source)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        }
     }
 
-    @if (_variants is { Parent: null } variants)
+    @if (_variants is { Parent: null } variants && _item.IsStocked)
     {
         <h2 style="margin-top: 20px">@L("Модификации")</h2>
         <p class="muted">@L("Цвет, размер и другие характеристики. Каждая модификация — отдельная позиция со своим кодом, остатком, штрихкодом и ценой: в документах и отчётах она выбирается как обычная позиция.")</p>
@@ -339,6 +585,65 @@ else
 
     private ItemCardDto? _item;
     private ItemVariantsDto? _variants;
+    private BundleDto? _bundle;
+    private ItemTradeDto? _trade;
+    private IReadOnlyList<ItemPackDto> _packs = [];
+    private IReadOnlyList<UnitDto> _units = [];
+    private string _packUnit = string.Empty;
+    private string? _packFactor;
+    private string? _packBarcode;
+
+    /// <summary>D307: упаковка той же единицы заменяется (новый коэффициент и штрихкод).</summary>
+    private Task SavePackAsync() => RunAsync(async () =>
+    {
+        if (!long.TryParse(_packUnit, out var unitId))
+        {
+            throw new BusinessRuleException("catalog.pack.unit", L("Выберите единицу упаковки."));
+        }
+
+        var factor = Decimals.Parse(_packFactor, L("Основных единиц")) ?? throw new BusinessRuleException("catalog.pack.factor", L("Укажите, сколько основных единиц в упаковке."));
+        await PackList.SetAsync(Id, unitId, factor, _packBarcode);
+        _packUnit = string.Empty;
+        _packFactor = null;
+        _packBarcode = null;
+    }, L("Упаковка сохранена."));
+    private TradeForm _tradeForm = new();
+
+    private sealed class TradeForm
+    {
+        public PaymentSubject Subject { get; set; } = PaymentSubject.Goods;
+        public bool IsMarked { get; set; }
+        public TrackingType Tracking { get; set; } = TrackingType.Clothes;
+        public string? Gtin { get; set; }
+        public string? MinPrice { get; set; }
+    }
+
+    private static string TrackingName(TrackingType t) => t switch
+    {
+        TrackingType.Clothes => L("Предметы одежды (лёгкая промышленность)"),
+        TrackingType.Linens => L("Постельное, столовое и туалетное бельё"),
+        TrackingType.Shoes => L("Обувь"),
+        _ => L("Другой вид маркировки"),
+    };
+
+    private static string SourceName(PriceChangeSource s) => s switch
+    {
+        PriceChangeSource.Revaluation => L("переоценка"),
+        PriceChangeSource.Import => L("загрузка из Excel"),
+        PriceChangeSource.External => L("внешняя система"),
+        PriceChangeSource.Modification => L("создание модификации"),
+        _ => L("вручную"),
+    };
+
+    private Task SaveTradeAsync() => RunAsync(async () =>
+    {
+        var f = _tradeForm;
+        await Trade.SaveAsync(Id, new ItemTradeDetails(f.Subject, f.IsMarked, f.IsMarked ? f.Tracking : TrackingType.None, f.Gtin,
+            Decimals.Parse(f.MinPrice, L("Минимальная цена продажи"))), _item!.RowVersion);
+    }, L("Торговые сведения сохранены."));
+    private IReadOnlyList<BundleComponentOptionDto> _componentOptions = [];
+    private string? _component;
+    private string? _componentQty = "1";
     private IReadOnlyList<ItemPhotoDto> _photos = [];
     private IReadOnlyList<CharacteristicDto> _characteristics = [];
     private Dictionary<long, string?> _axes = [];
@@ -409,7 +714,32 @@ else
         _photos = await Modifications.PhotosAsync(Id);
         _characteristics = await Modifications.CharacteristicsAsync(includeArchived: true);
         _values = _variants.Values.ToDictionary(v => v.CharacteristicId, v => (string?)v.Value);
+        _bundle = _item.Type == ItemType.Bundle ? await Bundles.GetAsync(Id) : null;
+        _trade = await Trade.GetAsync(Id);
+        _packs = _item.IsStocked ? await PackList.ListAsync(Id) : [];
+        _units = _item.IsStocked && _item.CanEdit ? await Catalog.ListUnitsAsync() : [];
+        _tradeForm = new TradeForm
+        {
+            Subject = _trade.Trade.PaymentSubject, IsMarked = _trade.Trade.IsMarked,
+            Tracking = _trade.Trade.TrackingType == TrackingType.None ? TrackingType.Clothes : _trade.Trade.TrackingType,
+            Gtin = _trade.Trade.Gtin, MinPrice = _trade.Trade.MinPrice is { } mp ? Amounts.Input(mp) : null,
+        };
+        _componentOptions = _bundle?.CanEdit == true ? await Bundles.ComponentOptionsAsync() : [];
     }
+
+    /// <summary>D302: компонент по коду (или «код — наименование» из подсказки) и количество на один комплект.</summary>
+    private Task AddComponentAsync() => RunAsync(async () =>
+    {
+        var text = (_component ?? string.Empty).Trim();
+        var option = _componentOptions.FirstOrDefault(o => string.Equals(o.Code, text, StringComparison.OrdinalIgnoreCase))
+                     ?? _componentOptions.FirstOrDefault(o => string.Equals(o.Name, text, StringComparison.OrdinalIgnoreCase))
+                     ?? throw new BusinessRuleException("catalog.bundle.component_unknown", L("Выберите компонент из списка: товар или модификацию."));
+        var qty = Decimals.Parse(_componentQty, L("Количество в комплекте"))
+                  ?? throw new BusinessRuleException("catalog.bundle.quantity", L("Укажите количество компонента в комплекте."));
+        await Bundles.SetComponentAsync(Id, option.Id, qty);
+        _component = null;
+        _componentQty = "1";
+    }, L("Состав сохранён."));
 
     private Task CreateModificationsAsync() => RunAsync(async () =>
     {

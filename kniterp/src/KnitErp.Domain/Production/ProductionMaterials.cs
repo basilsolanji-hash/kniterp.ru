@@ -83,8 +83,8 @@ public sealed record MaterialBalanceLine(
 
 public static class MaterialBalance
 {
-    /// <summary>Допуск отклонения расхода от нормы, % (допущение D94).</summary>
-    public const decimal TolerancePercent = 5m;
+    /// <summary>Допуск по умолчанию, % (D94); действующий задаётся в настройках производства организации.</summary>
+    public const decimal TolerancePercent = ProductionSettings.DefaultTolerancePercent;
 
     /// <summary>
     /// Баланс по каждому материалу снимка норм заказа. <paramref name="producedUnits"/> — выпущено плюс брак: на них уже ушла пряжа.

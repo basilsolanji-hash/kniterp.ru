@@ -171,8 +171,8 @@ public sealed class DashboardTests(SqlTestHost host) : IClassFixture<SqlTestHost
         await s.Personal.SaveDashboardLayoutAsync(new DashboardLayout(
             [DashboardBlocks.Reference, "hack", DashboardBlocks.Kpi], [DashboardBlocks.Kpi, DashboardBlocks.Money, DashboardBlocks.Attention, "hack"]));
         var data = await s.Dashboard.GetAsync(refresh: true);
-        // Блок, которого не было в сохранённой настройке (быстрые действия, D108), встаёт на своё место по умолчанию — наверх.
-        Assert.Equal([DashboardBlocks.Actions, DashboardBlocks.Reference], data.Layout!.Order.Take(2));
+        // Блоки, которых не было в сохранённой настройке (динамика D113, быстрые действия D108), встают на свои места по умолчанию — наверх.
+        Assert.Equal([DashboardBlocks.Charts, DashboardBlocks.Actions, DashboardBlocks.Reference], data.Layout!.Order.Take(3));
         Assert.DoesNotContain("hack", data.Layout.Order);
         Assert.Equal([DashboardBlocks.Kpi, DashboardBlocks.Money, DashboardBlocks.Attention], data.Layout.Hidden);
         Assert.Null(data.Finance!.Accounts);
@@ -191,6 +191,57 @@ public sealed class DashboardTests(SqlTestHost host) : IClassFixture<SqlTestHost
 
         Assert.Empty((await s.Personal.ResetDashboardLayoutAsync()).Hidden);
         Assert.NotNull((await s.Dashboard.GetAsync(refresh: true)).Finance!.Accounts);
+    }
+
+    [SqlFact]
+    public async Task Production_block_shows_funnel_by_stages_and_data_of_production_and_staff_modules()
+    {
+        // D111: воронка по этапам из правил D110 + готовность и смена из модулей производства и сотрудников.
+        var f = await SeedAsync();
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var inWork = (await s.Stages.ListAsync()).Single(x => x.Name == "В работе").Id;
+            await s.Sales.SetOrderStageAsync(f.SalesOrder, inWork, (await s.Sales.GetOrderAsync(f.SalesOrder)).RowVersion);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var data = await NewDashboard(db, Owner(f)).GetAsync(refresh: true);
+            var funnel = data.Production!.Funnel;
+            Assert.Equal(["Оплачен — в производство", "В работе", "Собран"], funnel.Select(x => x.Stage));
+            Assert.Equal((0, 1), (funnel[0].Orders, funnel[1].Orders));
+            Assert.True(funnel[1].Amount > 0);
+            Assert.Null(data.Production.Production);
+            Assert.Null(data.Production.Shift);
+
+            var guard = new AccessGuard(db, Owner(f), host.Clock);
+            var withModules = new DashboardService(db, guard, host.Clock, new LaunchReadinessService(db, guard, host.Clock), new MemoryCache(new MemoryCacheOptions()),
+                [new FakeProduction()], [new FakeShift()]);
+            var full = (await withModules.GetAsync(refresh: true)).Production!;
+            Assert.Equal((3, 1, 62.5m), (full.Production!.OrdersInWork, full.Production.OrdersLate, full.Production.Orders.Single().Percent));
+            Assert.Equal((11, 12, 1), (full.Shift!.OnShift, full.Shift.Planned, full.Shift.Absent));
+            Assert.Equal(1, full.OverdueTotal);
+        }
+
+        // Скрыт пользователем — не считается.
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await s.Personal.SaveDashboardLayoutAsync(new DashboardLayout(DashboardBlocks.DefaultOrder, [DashboardBlocks.Production]));
+            Assert.Null((await s.Dashboard.GetAsync(refresh: true)).Production);
+        }
+    }
+
+    private sealed class FakeProduction : IProductionDashboardSource
+    {
+        public Task<ProductionDashboardData?> GetAsync(IKnitErpDbContext db, AccessContext ctx, DateOnly today, CancellationToken ct) =>
+            Task.FromResult<ProductionDashboardData?>(new(3, 1, [new(1, "ПЗ-1", "Свитер", 62.5m, today, false, "production-orders/1", "Вязка")], 40m, "шт",
+                [new("Брак выше нормы", "production-orders/1", true)]));
+    }
+
+    private sealed class FakeShift : IShiftStaffingSource
+    {
+        public Task<ShiftStaffingDto?> TodayAsync(IKnitErpDbContext db, AccessContext ctx, DateOnly today, CancellationToken ct) =>
+            Task.FromResult<ShiftStaffingDto?>(new(11, 12, 1, "timesheet", ["Вязальщица 1"]));
     }
 
     private static TestUser Owner(Fixture f) => new() { UserId = f.Org.OwnerUserId, OrganizationId = f.Org.OrganizationId };

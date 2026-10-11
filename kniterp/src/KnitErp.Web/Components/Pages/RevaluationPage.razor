@@ -1,0 +1,240 @@
+@page "/catalog/revaluation"
+@using KnitErp.Application.Catalog
+@using KnitErp.Domain.Catalog
+@inject RevaluationService Revaluations
+@inject NomenclatureService Nomenclature
+
+<PageTitle>@L("Массовая переоценка") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_types is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <p><a href="catalog">@L("← Номенклатура")</a></p>
+    <h1>@L("Массовая переоценка")</h1>
+    <p class="muted">@L("Выберите позиции и правило, проверьте предпросмотр и примените. Каждое изменение цены попадает в историю цен позиции и в журнал переоценок.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="panel">
+        <form @onsubmit="PreviewAsync">
+            <div class="grid">
+                <label>
+                    @L("Вид цены")
+                    <select @bind="_priceType">
+                        @foreach (var t in _types)
+                        {
+                            <option value="@t.Id">@t.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    @L("Правило")
+                    <select @bind="_mode">
+                        <option value="@RevaluationMode.Percent">@L("± процент к текущей цене")</option>
+                        <option value="@RevaluationMode.FromPurchase">@L("закупочная цена × коэффициент")</option>
+                    </select>
+                </label>
+                <label>@(_mode == RevaluationMode.Percent ? L("Процент (например, 10 или −5)") : L("Коэффициент (например, 1,8)")) <input @bind="_value" inputmode="decimal" required /></label>
+                <label>
+                    @L("Округление")
+                    <select @bind="_rounding">
+                        <option value="@PriceRounding.Kopeck">@L("до копеек")</option>
+                        <option value="@PriceRounding.Ruble">@L("до рубля")</option>
+                        <option value="@PriceRounding.Ten">@L("до 10")</option>
+                        <option value="@PriceRounding.Hundred">@L("до 100")</option>
+                    </select>
+                </label>
+                <label>
+                    @L("Группа")
+                    <select @bind="_group">
+                        <option value="">@L("все группы")</option>
+                        @foreach (var g in _groups)
+                        {
+                            <option value="@g.Id">@g.Path</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    @L("Вид")
+                    <select @bind="_kind">
+                        <option value="">@L("Все виды")</option>
+                        <option value="@((byte)ItemKind.Goods)">@L("Товары")</option>
+                        <option value="@((byte)ItemKind.Service)">@L("Услуги")</option>
+                        <option value="@((byte)ItemKind.Bundle)">@L("Комплекты")</option>
+                    </select>
+                </label>
+                <label>@L("Поиск") <input @bind="_search" placeholder="@L("Код, наименование или артикул")" /></label>
+            </div>
+            <div class="actions"><button type="submit" disabled="@_busy">@L("Предпросмотр")</button></div>
+        </form>
+    </div>
+
+    @if (_preview is { } p)
+    {
+        <h2>@L("Предпросмотр")</h2>
+        <div class="totals" role="status">
+            <span>@p.PriceType: @p.Rule</span>
+            <span>@L("Позиций:") <b>@p.Total</b></span>
+            <span>@L("Изменится:") <b>@p.ToChange</b></span>
+            <span>@L("Пропущено:") <b>@p.Skipped</b></span>
+            <span class="@(p.BelowMinimum > 0 ? "bad" : null)">@L("Ниже минимальной цены:") <b>@p.BelowMinimum</b></span>
+        </div>
+        <div class="scroll" style="max-height: 420px; overflow-y: auto">
+            <table class="compact">
+                <thead><tr><th>@L("Код")</th><th>@L("Наименование")</th><th class="num">@L("Было")</th><th class="num">@L("Станет")</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in p.Rows)
+                    {
+                        <tr>
+                            <td><a href="catalog/items/@r.ItemId">@r.Code</a></td>
+                            <td>@r.Name</td>
+                            <td class="num">@(r.OldPrice is { } o ? Amounts.Format(o) : "—")</td>
+                            <td class="num">@(r.NewPrice is { } n ? Amounts.Format(n) : "—")</td>
+                            <td>
+                                @if (r.NewPrice is null)
+                                {
+                                    <span class="tag">@(_previewMode == RevaluationMode.Percent ? L("нет текущей цены") : L("нет закупочной цены"))</span>
+                                }
+                                else if (r.BelowMinimum)
+                                {
+                                    <span class="tag bad">@L("ниже минимальной")</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (p.Total > p.Rows.Count)
+        {
+            <p class="muted">@L("Показано {0} из {1}.", p.Rows.Count, p.Total)</p>
+        }
+        @if (p.ToChange > 0)
+        {
+            <div class="actions">
+                <ConfirmButton OnConfirm="ApplyAsync" Disabled="@_busy" Question='@L("Изменить цены у {0} позиций?", p.ToChange)'>@L("Применить переоценку")</ConfirmButton>
+            </div>
+        }
+    }
+
+    <h2 style="margin-top: 20px">@L("Журнал переоценок")</h2>
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Когда")</th><th>@L("Вид цены")</th><th>@L("Правило")</th><th class="num">@L("Позиций")</th><th class="opt">@L("Кто")</th></tr></thead>
+            <tbody>
+                @if (_journal.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">@L("Переоценок ещё не было.")</td></tr>
+                }
+                @foreach (var j in _journal)
+                {
+                    <tr>
+                        <td>@j.CreatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        <td>@j.PriceType</td>
+                        <td>@j.Rule</td>
+                        <td class="num">@j.Items</td>
+                        <td>@j.User</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<PriceTypeDto>? _types;
+    private IReadOnlyList<ItemGroupDto> _groups = [];
+    private IReadOnlyList<RevaluationJournalDto> _journal = [];
+    private RevaluationPreviewDto? _preview;
+    private RevaluationMode _previewMode;
+    private long _priceType;
+    private RevaluationMode _mode = RevaluationMode.Percent;
+    private string? _value;
+    private PriceRounding _rounding = PriceRounding.Kopeck;
+    private string _group = string.Empty;
+    private string _kind = string.Empty;
+    private string? _search;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!CurrentAccess.Has(Permissions.PriceEdit) || !CurrentAccess.Has(Permissions.PriceView))
+        {
+            _denied = L("Недостаточно прав: {0}. Обратитесь к администратору.", L(Permissions.Describe(Permissions.PriceEdit)));
+            return;
+        }
+
+        try
+        {
+            _types = (await Nomenclature.PriceTypesAsync()).Where(t => !t.IsArchived).ToList();
+            _priceType = _types.FirstOrDefault(t => t.IsDefault)?.Id ?? _types.FirstOrDefault()?.Id ?? 0;
+            _groups = await Nomenclature.GroupsAsync();
+            _journal = await Revaluations.JournalAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private RevaluationRequest Request() =>
+        new(_priceType, _mode, Decimals.Parse(_value, L("Значение")) ?? 0, _rounding, long.TryParse(_group, out var g) ? g : null,
+            byte.TryParse(_kind, out var k) ? (ItemKind)k : null, _search);
+
+    private Task PreviewAsync() => RunAsync(async () =>
+    {
+        _preview = await Revaluations.PreviewAsync(Request());
+        _previewMode = _mode;
+    }, null);
+
+    private Task ApplyAsync() => RunAsync(async () =>
+    {
+        var changed = await Revaluations.ApplyAsync(Request());
+        _preview = null;
+        _message = L("Цены изменены: {0}.", changed);
+        _journal = await Revaluations.JournalAsync();
+    }, null);
+
+    /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success ?? _message;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

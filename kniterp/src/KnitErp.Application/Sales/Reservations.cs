@@ -1,4 +1,5 @@
 using KnitErp.Application.Common;
+using KnitErp.Domain.Catalog;
 using KnitErp.Domain.Sales;
 using KnitErp.Domain.Warehousing;
 using Microsoft.EntityFrameworkCore;
@@ -24,8 +25,10 @@ internal static class Reservations
             orders = orders.Where(o => warehouseIds.Contains(o.WarehouseId));
         }
 
+        // D300 (сессия 4): услуга не хранится на складе — под неё ничего не резервируется.
         var lines = await orders.SelectMany(o => o.Lines.Select(l => new { OrderId = o.Id, o.WarehouseId, l.ItemId, l.Quantity }))
             .Where(l => itemIds == null || itemIds.Contains(l.ItemId))
+            .Where(l => !db.Items.Any(i => i.Id == l.ItemId && ItemTypes.NotStocked.Contains(i.Type)))
             .ToListAsync(ct);
         if (lines.Count == 0)
         {

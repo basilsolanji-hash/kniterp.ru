@@ -110,6 +110,7 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
 
         var period = orders.Where(o => o.OrderDate >= filter.From && o.OrderDate <= filter.To).ToList();
         var deviations = new List<DeviationRowDto>();
+        var tolerance = (await ProductionSettingsService.LoadAsync(db, ctx.OrganizationId, ct)).TolerancePercent;
         foreach (var o in period)
         {
             var flow = Flow(o);
@@ -118,7 +119,7 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
                     .Select(m => new MaterialMovement(m.ItemId, m.Purpose, m.Quantity)), flow.Released, flow.Defect);
             deviations.AddRange(balance.Where(b => b.DeviationPercent is not null).Select(b => new DeviationRowDto(o.Id, o.Number,
                 items[b.ItemId].Code, items[b.ItemId].Name, items[b.ItemId].Symbol, decimal.Round(b.Normative!.Value, 6), b.Consumed + b.Waste,
-                b.DeviationPercent!.Value, b.OverTolerance(MaterialBalance.TolerancePercent))));
+                b.DeviationPercent!.Value, b.OverTolerance(tolerance))));
         }
 
         List<CostRowDto>? costs = null;
@@ -144,7 +145,7 @@ public sealed class ProductionReportService(IKnitErpDbContext db, IAccessGuard g
         }
 
         return new ProductionReportDto(filter, inWork, defects, deviations.OrderByDescending(d => Math.Abs(d.DeviationPercent)).ToList(), costs,
-            MaterialBalance.TolerancePercent);
+            tolerance);
     }
 
     /// <summary>Тот же отчёт в Excel: лист на каждый раздел, количества и деньги — числами.</summary>

@@ -46,7 +46,7 @@ public sealed record StockDocumentOptions(
 /// <summary>Фильтр реестра документов: вид, статус, период по дате документа, склад (отправитель или получатель), поиск по номеру и контрагенту.</summary>
 public sealed record StockDocumentListFilter(
     StockOperationKind? Kind = null, StockDocumentStatus? Status = null, DateOnly? From = null, DateOnly? To = null,
-    long? WarehouseId = null, string? Search = null, bool? ByOrder = null, long? TagId = null);
+    long? WarehouseId = null, string? Search = null, bool? ByOrder = null, long? TagId = null, long? CounterpartyId = null);
 
 /// <summary>
 /// Поступление, списание и перемещение: черновик → проведение (движения регистра) → при ошибке сторно.
@@ -81,6 +81,11 @@ public sealed class StockDocumentService(
         if (visible is not null)
         {
             q = q.Where(d => visible.Contains(d.WarehouseId) || (d.TargetWarehouseId != null && visible.Contains(d.TargetWarehouseId.Value)));
+        }
+
+        if (filter.CounterpartyId is { } counterpartyId)
+        {
+            q = q.Where(d => d.CounterpartyId == counterpartyId);
         }
 
         if (filter.Kind is { } kind)
@@ -232,7 +237,7 @@ public sealed class StockDocumentService(
     public async Task<IReadOnlyList<EntryItemDto>> ListItemsForEntryAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
-        return await StockEntry.ActiveItems(db, ctx.OrganizationId).ToListAsync(ct);
+        return await StockEntry.ActiveItems(db, ctx.OrganizationId, stockedOnly: true).ToListAsync(ct);
     }
 
     public async Task<long> CreateAsync(StockOperationKind kind, StockDocumentHeader header, CancellationToken ct = default)
@@ -260,6 +265,19 @@ public sealed class StockDocumentService(
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
         await ValidateHeaderAsync(ctx, kind, header, ct);
+        // Аудит 11.10.2026 (D109): строки из API и из заказов — позиция своей организации, количество по точности единицы.
+        // Иначе в документ попала бы номенклатура другой организации. Архивная позиция допустима: заказ мог быть до архива.
+        var ids = lines.Select(l => l.ItemId).Distinct().ToList();
+        var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && ids.Contains(i.Id))
+            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new EntryItemDto(i.Id, i.Code, i.Name, u.Symbol, u.Precision))
+            .ToDictionaryAsync(i => i.Id, ct);
+        foreach (var (itemId, quantity) in lines)
+        {
+            StockEntry.EnsurePrecision(items.GetValueOrDefault(itemId) ?? throw new NotFoundException("Номенклатура"), quantity);
+        }
+
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, ids, ct); // D300 (сессия 4)
+
         await using var tx = await db.BeginTransactionAsync(ct);
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, StockDocument.NumberPrefix(kind), ct);
         var doc = StockDocument.Create(ctx.OrganizationId, number, kind, header, ctx.UserId, clock.UtcNow);
@@ -292,6 +310,7 @@ public sealed class StockDocumentService(
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
         var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, [itemId], ct); // D300 (сессия 4)
         StockEntry.EnsurePrecision(item, quantity);
         var before = doc.Lines.FirstOrDefault(l => l.ItemId == itemId)?.Quantity;
         doc.SetLine(itemId, quantity);
@@ -376,6 +395,7 @@ public sealed class StockDocumentService(
             throw new BusinessRuleException("stock.document.archived_item", $"Позиции в архиве: {string.Join(", ", archived.Take(10))}.");
         }
 
+        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
         var requiresComment = doc.ReasonId is { } rid
                               && await db.OperationReasons.AsNoTracking().Where(r => r.Id == rid).Select(r => r.RequiresComment).SingleAsync(ct);
         // Аудит 10.10.2026 (п. 2): проверка лимита возврата и проведение — под блокировкой заказа до конца транзакции,
@@ -398,6 +418,13 @@ public sealed class StockDocumentService(
         StockBatchLedger.Write(db, ctx, doc, batchMoves, StockSource.StockDocument, clock.UtcNow);
         Audit(ctx, AuditActions.StockDocumentPosted, doc, "Черновик", "Проведён", $"строк: {doc.Lines.Count}");
         await ClosedPeriod.SaveAsync(db, ct);
+        // D110: отгрузка по заказу покупателя двигает его этап («Отгружен частично / полностью»).
+        if (doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } shippedOrder)
+        {
+            await KnitErp.Application.Sales.StageAutomation.ApplyAsync(db, ctx, [shippedOrder], clock.UtcNow, currentUser.CorrelationId, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
         await tx.CommitAsync(ct);
     }
 

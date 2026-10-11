@@ -15,6 +15,11 @@
         {
             <p>@L(p)</p>
         }
+        @if (IndustryKnowledge.Find(_article.Id) is { } kb)
+        {
+            @* D116: у отраслевой статьи — источники и дата проверки. *@
+            <p class="muted small">@L("Источники: {0}. Проверено: {1}.", string.Join("; ", kb.Sources), kb.Reviewed)</p>
+        }
     </article>
 }
 else if (_query.Trim().Length >= 3)
@@ -46,7 +51,7 @@ else
             <button type="button" class="link" @onclick="() => _article = current">@L("Читать полностью")</button>
         </div>
     }
-    @foreach (var group in HelpCenter.Articles.GroupBy(a => a.Category))
+    @foreach (var group in HelpCenter.All.GroupBy(a => a.Category))
     {
         <h3>@(group.Key == "Первые шаги" ? L("Обучение: первые шаги") : L(group.Key))</h3>
         <ul class="plain link-list">
@@ -74,7 +79,7 @@ else
     {
         if (ArticleId is not null && ArticleId != _shownId)
         {
-            _article = HelpCenter.Articles.FirstOrDefault(a => a.Id == ArticleId);
+            _article = HelpCenter.All.FirstOrDefault(a => a.Id == ArticleId);
             _shownId = ArticleId;
         }
     }

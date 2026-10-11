@@ -57,6 +57,12 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<Characteristic> Characteristics { get; }
     DbSet<ItemCharacteristicValue> ItemCharacteristicValues { get; }
     DbSet<ItemPhoto> ItemPhotos { get; }
+
+    /// <summary>Каталог (сессия № 4): состав комплектов (D302).</summary>
+    DbSet<BundleComponent> BundleComponents { get; }
+    DbSet<ItemPriceHistory> ItemPriceHistory { get; }
+    DbSet<PriceRevaluation> PriceRevaluations { get; }
+    DbSet<ItemPack> ItemPacks { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }
@@ -78,10 +84,14 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<Site> Sites { get; }
     DbSet<Warehouse> Warehouses { get; }
     DbSet<Counterparty> Counterparties { get; }
+    DbSet<CounterpartyContract> CounterpartyContracts { get; }
+    DbSet<CounterpartyContractFile> CounterpartyContractFiles { get; }
     DbSet<VatRate> VatRates { get; }
     DbSet<KnitErp.Domain.Production.TechCard> TechCards { get; }
     DbSet<KnitErp.Domain.Production.ProductionOrder> ProductionOrders { get; }
     DbSet<KnitErp.Domain.Production.ProductionOperation> ProductionOperations { get; }
+    DbSet<KnitErp.Domain.Production.ShiftTask> ShiftTasks { get; }
+    DbSet<KnitErp.Domain.Production.ProductionSettings> ProductionSettings { get; }
     DbSet<KnitErp.Domain.Production.ProductionOrderDocument> ProductionOrderDocuments { get; }
     DbSet<KnitErp.Domain.Purchasing.PurchaseOrder> PurchaseOrders { get; }
     DbSet<KnitErp.Domain.Purchasing.SupplierPayment> SupplierPayments { get; }
@@ -89,6 +99,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.CustomerPayment> CustomerPayments { get; }
     DbSet<KnitErp.Domain.Sales.CustomerInvoice> CustomerInvoices { get; }
     DbSet<KnitErp.Domain.Sales.SalesOrderStage> SalesOrderStages { get; }
+    DbSet<KnitErp.Domain.Sales.SalesStageRule> SalesStageRules { get; }
     DbSet<KnitErp.Domain.Catalog.Lookup> Lookups { get; }
     DbSet<KnitErp.Domain.Organizations.LegalEntity> LegalEntities { get; }
     DbSet<KnitErp.Domain.Catalog.ItemGroup> ItemGroups { get; }

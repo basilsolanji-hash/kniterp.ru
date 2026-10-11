@@ -6,6 +6,7 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
+<CascadingValue Value="_assistant">
 <div class="shell @(_narrow ? "narrow" : "")">
     <nav class="side" aria-label="@L("Разделы")">
         <div class="side-head">
@@ -105,7 +106,13 @@
     {
         <CalculatorWindow OnClose="() => _calculatorOpen = false" />
     }
+    @if (_access is not null && _assistant.Persona != KnitErp.Application.Workspace.AssistantPersonas.None)
+    {
+        @* D116: персонаж помощника (Ника или Книт) в углу экрана; кнопка в его панели открывает чат помощника (knit:action → OnHotkey). *@
+        <knit-assistant id="knit" animated persona="@_assistant.Persona" texts="@AssistantTexts()"></knit-assistant>
+    }
 </div>
+</CascadingValue>
 
 @code {
     private CurrentAccessDto? _access;
@@ -198,6 +205,8 @@
             new("production-orders", "Производственные заказы", a => a.Has(Permissions.ProductionOrderView)),
             new("tech-cards", "Техкарты", a => a.Has(Permissions.CatalogView)),
             new("production/planning", "Потребность в материалах", a => a.Has(Permissions.ProductionOrderView)),
+            new("production/shift-tasks", "Сменные задания", a => a.Has(Permissions.ProductionOrderView)),
+            new("production/scores", "Баллы и показатели", a => a.Has(Permissions.ProductionOrderView)),
             new("shop", "Терминал цеха", a => a.Has(Permissions.ProductionStageMark)),
             new("reports/production", "Отчёт по производству", a => a.Has(Permissions.ProductionOrderView)),
         ]),
@@ -239,6 +248,7 @@
         [
             new("organization", "Организация", a => a.Has(Permissions.OrganizationView)),
             new("launch", "Готовность к запуску", a => a.Has(Permissions.OrganizationEdit)),
+            new("settings/production", "Производство", a => a.Has(Permissions.OrganizationView)),
             new("hr/settings", "Кадры и заработок", a => a.Has(Permissions.OrganizationEdit) || a.Has(Permissions.PayrollCalculate)),
             new("users", "Пользователи", a => a.Has(Permissions.UserView)),
             new("roles", "Роли и права", a => a.Has(Permissions.UserView)),
@@ -308,10 +318,57 @@
     private DateTime _badgeAt;
     private DotNetObjectReference<MainLayout>? _self;
 
+    private AssistantChoice _assistant = new(KnitErp.Application.Workspace.AssistantPersonas.Nika, _ => Task.CompletedTask);
+
+    /// <summary>D116: смена персонажа из меню профиля — сохраняется в профиле и сразу меняет персонажа на экране и в чате.</summary>
+    private async Task SetPersonaAsync(string persona)
+    {
+        try
+        {
+            persona = await Personal.SetAssistantPersonaAsync(persona);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            return;
+        }
+
+        _assistant = new AssistantChoice(persona, SetPersonaAsync);
+        StateHasChanged();
+    }
+
+    /// <summary>Подписи компонента персонажа на языке интерфейса ({name} — имя персонажа).</summary>
+    private static string AssistantTexts() => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        hello = L("Здравствуйте! Я {name}."),
+        captionNika = L("Помощница knitERP"),
+        captionKnit = L("Помощник knitERP"),
+        alt = L("{name} в деловом костюме с планшетом"),
+        open = L("Открыть: {name}"),
+        collapse = L("Свернуть: {name}"),
+        states = new Dictionary<string, string[]>
+        {
+            ["welcome"] = ["", L("Спросите о работе в knitERP или о производстве трикотажа — отвечу с учётом ваших прав."), L("Задать вопрос")],
+            ["thinking"] = [L("Ищу ответ"), L("Это займёт несколько секунд."), L("Обработка…")],
+            ["success"] = [L("Готово"), L("Операция выполнена."), L("Продолжить")],
+            ["warning"] = [L("Нужно ваше внимание"), L("Проверьте данные перед продолжением."), L("Проверить")],
+            ["error"] = [L("Не удалось выполнить"), L("Попробуйте ещё раз или откройте справку."), L("Повторить")],
+            ["offline"] = [L("Нет соединения"), L("Проверьте подключение к сети."), L("Повторить")],
+        },
+    });
+
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
         _access = await Access.GetCurrentAccessAsync();
+        try
+        {
+            _assistant = new AssistantChoice(await Personal.GetAssistantPersonaAsync(), SetPersonaAsync);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _assistant = new AssistantChoice(KnitErp.Application.Workspace.AssistantPersonas.Nika, SetPersonaAsync);
+        }
+
         try
         {
             _panel = await Personal.GetPanelAsync();
@@ -348,6 +405,10 @@
         if (key == "search")
         {
             await OpenTool(ToolCatalog.Search);
+        }
+        else if (key == "assistant")
+        {
+            await OpenTool(ToolCatalog.Assistant);
         }
         else if (key == "escape" && _activeTool is not null)
         {

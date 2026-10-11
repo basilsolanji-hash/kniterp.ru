@@ -189,6 +189,8 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
             foreach (var price in prices)
             {
                 db.ItemPrices.Add(ItemPrice.Create(ctx.OrganizationId, item.Id, price.PriceTypeId, price.Price));
+                db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, item.Id, price.PriceTypeId, null, price.Price, clock.UtcNow, ctx.UserId,
+                    PriceChangeSource.Modification)); // D305
             }
 
             Audit(ctx, AuditActions.CatalogCreated, nameof(Item), item.Id, null, $"{item.Code} {item.Name}", $"Модификация {parent.Code}");

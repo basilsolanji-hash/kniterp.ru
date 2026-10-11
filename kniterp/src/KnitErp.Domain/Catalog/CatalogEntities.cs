@@ -40,6 +40,9 @@ public sealed class UnitOfMeasure
         ("055", "Квадратный метр", "м²", 3),
         ("715", "Пара", "пар", 0),
         ("778", "Упаковка", "упак", 0),
+        // D300: единицы для услуг; для действующих организаций их добавляет миграция CatServices.
+        ("876", "Условная единица", "усл. ед", 0),
+        ("356", "Час", "ч", 2),
     ];
 
     public static UnitOfMeasure Create(long organizationId, string code, string name, string symbol, byte precision)
@@ -106,7 +109,11 @@ public sealed class UnitOfMeasure
     }
 }
 
-/// <summary>Тип номенклатуры. Допущение D32: фиксированный список; числа хранятся в базе и закреплены CHECK.</summary>
+/// <summary>
+/// Тип номенклатуры. Допущение D32: фиксированный список; числа хранятся в базе и закреплены CHECK.
+/// Service (D300) — услуга: продаётся и покупается, но не хранится на складе.
+/// Bundle (D302) — комплект: продаётся одной строкой, остаток и списание — по компонентам.
+/// </summary>
 public enum ItemType : byte
 {
     RawMaterial = 1,
@@ -116,12 +123,54 @@ public enum ItemType : byte
     Finished = 5,
     Packaging = 6,
     Other = 9,
+    Service = 10,
+    Bundle = 11,
+}
+
+/// <summary>Вид позиции для отбора «Товары / Услуги / Комплекты» (D300, D302).</summary>
+public enum ItemKind : byte
+{
+    Goods = 1,
+    Service = 2,
+    Bundle = 3,
 }
 
 public static class ItemTypes
 {
     public static readonly IReadOnlyList<ItemType> All =
-        [ItemType.RawMaterial, ItemType.Material, ItemType.Accessory, ItemType.SemiFinished, ItemType.Finished, ItemType.Packaging, ItemType.Other];
+    [
+        ItemType.RawMaterial, ItemType.Material, ItemType.Accessory, ItemType.SemiFinished, ItemType.Finished, ItemType.Packaging, ItemType.Other,
+        ItemType.Service, ItemType.Bundle,
+    ];
+
+    /// <summary>Типы, которые хранятся на складе: у них есть остаток, движения и партии (D300).</summary>
+    public static readonly IReadOnlyList<ItemType> Stocked = All.Where(IsStocked).ToArray();
+
+    /// <summary>Типы, которых не бывает на складе (массив — для отбора в запросах к базе).</summary>
+    public static readonly ItemType[] NotStocked = All.Where(t => !IsStocked(t)).ToArray();
+
+    public static bool IsStocked(ItemType type) => type is not (ItemType.Service or ItemType.Bundle);
+
+    public static ItemKind KindOf(ItemType type) => type switch
+    {
+        ItemType.Service => ItemKind.Service,
+        ItemType.Bundle => ItemKind.Bundle,
+        _ => ItemKind.Goods,
+    };
+
+    public static IReadOnlyList<ItemType> OfKind(ItemKind kind) => All.Where(t => KindOf(t) == kind).ToArray();
+
+    public static string KindName(ItemKind kind) => kind switch
+    {
+        ItemKind.Service => "Услуги",
+        ItemKind.Bundle => "Комплекты",
+        _ => "Товары",
+    };
+
+    /// <summary>
+    /// Признак предмета расчёта для чека (54-ФЗ, тег 1212) по типу позиции: услуга — «услуга», остальное — «товар» (D300).
+    /// </summary>
+    public static PaymentSubject DefaultPaymentSubject(ItemType type) => type == ItemType.Service ? PaymentSubject.Service : PaymentSubject.Goods;
 
     public static string Name(ItemType type) => type switch
     {
@@ -132,10 +181,46 @@ public static class ItemTypes
         ItemType.Finished => "Готовая продукция",
         ItemType.Packaging => "Упаковка",
         ItemType.Other => "Прочее",
+        ItemType.Service => "Услуги",
+        ItemType.Bundle => "Комплекты",
         _ => type.ToString(),
     };
 
     public static bool IsDefined(ItemType type) => All.Contains(type);
+}
+
+/// <summary>Признак предмета расчёта (54-ФЗ, тег 1212): справочное поле для будущей кассы. Числа — коды тега.</summary>
+public enum PaymentSubject : byte
+{
+    Goods = 1,
+    ExcisableGoods = 2,
+    Service = 4,
+}
+
+/// <summary>Правила услуги (D300): не хранится на складе, нет веса, объёма и неснижаемого остатка, ставка НДС обязательна.</summary>
+public static class ServiceRules
+{
+    /// <summary>Единицы по умолчанию для услуг: «усл. ед» (ОКЕИ 876) и «ч» (356).</summary>
+    public const string ServiceUnitCode = "876";
+    public const string HourUnitCode = "356";
+
+    public static void EnsureVat(ItemType type, long? vatRateId)
+    {
+        if (type == ItemType.Service && vatRateId is null)
+        {
+            throw new BusinessRuleException("catalog.service.vat_required", "У услуги ставка НДС обязательна — выберите её (или «Без НДС»).");
+        }
+    }
+
+    /// <summary>Позиция, которая не хранится на складе, в складском документе — ошибка.</summary>
+    public static BusinessRuleException NotStocked(IEnumerable<string> codes) =>
+        new("item.service_not_stocked",
+            $"Услуги не хранятся на складе и не проводятся складскими документами: {string.Join(", ", codes.Take(10))}.");
+
+    /// <summary>Комплект (D302) в складском документе — ошибка: на складе лежат его компоненты.</summary>
+    public static BusinessRuleException BundleNotStocked(IEnumerable<string> codes) =>
+        new("item.bundle_not_stocked",
+            $"Комплект не хранится на складе — в складском документе укажите его компоненты: {string.Join(", ", codes.Take(10))}.");
 }
 
 /// <summary>
@@ -188,6 +273,43 @@ public sealed class Item
 
     public bool IsModification => ParentItemId is not null;
 
+    /// <summary>Признак предмета расчёта для чека (54-ФЗ, D305): у услуги всегда «услуга».</summary>
+    public PaymentSubject PaymentSubject { get; private set; } = PaymentSubject.Goods;
+
+    /// <summary>Маркируемый товар «Честного ЗНАКа» (D305): вид продукции и GTIN-14; коды маркировки — отдельное ТЗ.</summary>
+    public bool IsMarked { get; private set; }
+
+    public TrackingType TrackingType { get; private set; }
+    public string? Gtin { get; private set; }
+
+    /// <summary>Минимальная цена продажи (D305): цена ниже — предупреждение в заказе.</summary>
+    public decimal? MinPrice { get; private set; }
+
+    public ItemTradeDetails Trade => new(PaymentSubject, IsMarked, TrackingType, Gtin, MinPrice);
+
+    /// <summary>Предмет расчёта, маркировка и минимальная цена (D305). Возвращает изменения для журнала.</summary>
+    public IReadOnlyList<FieldChange> SetTrade(ItemTradeDetails details)
+    {
+        if (IsArchived)
+        {
+            throw new BusinessRuleException("catalog.archived", "Позиция в архиве. Сначала верните её из архива.");
+        }
+
+        var d = TradeRules.Normalize(Type, details);
+        (string Field, string? Before, string? After)[] pairs =
+        [
+            ("Предмет расчёта", TradeRules.PaymentSubjectName(PaymentSubject), TradeRules.PaymentSubjectName(d.PaymentSubject)),
+            ("Маркировка", IsMarked ? Marking.Name(TrackingType) : null, d.IsMarked ? Marking.Name(d.TrackingType) : null),
+            ("GTIN", Gtin, d.Gtin), ("Минимальная цена", TradeRules.Format(MinPrice), TradeRules.Format(d.MinPrice)),
+        ];
+        PaymentSubject = d.PaymentSubject;
+        IsMarked = d.IsMarked;
+        TrackingType = d.TrackingType;
+        Gtin = d.Gtin;
+        MinPrice = d.MinPrice;
+        return pairs.Where(p => p.Before != p.After).Select(p => new FieldChange(p.Field, p.Before, p.After)).ToList();
+    }
+
     public bool IsArchived { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime? ArchivedAtUtc { get; private set; }
@@ -202,6 +324,18 @@ public sealed class Item
         }
 
         var d = ItemDetailRules.Normalize(details);
+        if (Type == ItemType.Service && (d.WeightKg is not null || d.VolumeM3 is not null || d.MinStock is not null))
+        {
+            // D300: услуга не хранится на складе — у неё нет веса, объёма и неснижаемого остатка.
+            throw new BusinessRuleException("catalog.service.no_stock_fields", "У услуги нет веса, объёма и неснижаемого остатка — оставьте поля пустыми.");
+        }
+
+        if (Type == ItemType.Bundle && d.MinStock is not null)
+        {
+            // D302: остаток комплекта считается по компонентам — неснижаемый остаток задаётся у компонентов.
+            throw new BusinessRuleException("catalog.bundle.no_min_stock", "У комплекта нет неснижаемого остатка — задайте его у компонентов.");
+        }
+
         static string? N(decimal? v) => v?.ToString(System.Globalization.CultureInfo.InvariantCulture);
         (string Field, string? Before, string? After)[] pairs =
         [
@@ -242,11 +376,17 @@ public sealed class Item
             throw new BusinessRuleException("catalog.archived", "Позиция в архиве. Сначала верните её из архива.");
         }
 
+        if (!ItemTypes.IsStocked(parent.Type))
+        {
+            throw new BusinessRuleException("catalog.variant.not_goods", "Модификации бывают только у товаров — у услуги и комплекта их нет.");
+        }
+
         var item = Create(parent.OrganizationId, code, name, parent.Type, parent.UnitId, parent.Description, nowUtc);
         item.ParentItemId = parent.Id;
         item.VariantKey = variantKey;
         item.VatRateId = parent.VatRateId;
         item.SetDetails(parent.Details);
+        item.SetTrade(parent.Trade with { Gtin = null }); // D305: GTIN у каждой модификации свой
         return item;
     }
 
@@ -265,6 +405,7 @@ public sealed class Item
     {
         var item = new Item { OrganizationId = organizationId, CreatedAtUtc = nowUtc };
         item.Set(code, name, type, unitId, description);
+        item.PaymentSubject = ItemTypes.DefaultPaymentSubject(type);
         return item;
     }
 
@@ -288,9 +429,46 @@ public sealed class Item
             throw new BusinessRuleException("catalog.archived", "Позиция в архиве. Сначала верните её из архива.");
         }
 
+        if (type != Type && IsModification)
+        {
+            throw new BusinessRuleException("catalog.variant.type", "Тип модификации — как у основной позиции; меняйте тип основной позиции.");
+        }
+
         var before = (Code, Name, Type, UnitId, Description);
         Set(code, name, type, unitId, description);
         var changes = new List<FieldChange>();
+        if (!ItemTypes.IsStocked(Type) && ItemTypes.IsStocked(before.Type))
+        {
+            // D300, D302: при переводе в услуги или комплекты складские сведения очищаются (остаток и партии проверяет сервис и
+            // триггер базы). У комплекта вес и объём остаются — для доставки.
+            static string? N(decimal? v) => v?.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var service = Type == ItemType.Service;
+            foreach (var (field, value) in new[] { ("Вес, кг", service ? WeightKg : null), ("Объём, м³", service ? VolumeM3 : null), ("Неснижаемый остаток", MinStock) })
+            {
+                if (value is not null)
+                {
+                    changes.Add(new FieldChange(field, N(value), null));
+                }
+            }
+
+            WeightKg = service ? null : WeightKg;
+            VolumeM3 = service ? null : VolumeM3;
+            MinStock = null;
+        }
+
+        // D305: у услуги предмет расчёта «услуга» и нет маркировки; услуга, ставшая товаром, — «товар».
+        if (Type == ItemType.Service && (PaymentSubject != PaymentSubject.Service || IsMarked || Gtin is not null))
+        {
+            PaymentSubject = PaymentSubject.Service;
+            IsMarked = false;
+            TrackingType = TrackingType.None;
+            Gtin = null;
+        }
+        else if (Type != ItemType.Service && PaymentSubject == PaymentSubject.Service)
+        {
+            PaymentSubject = PaymentSubject.Goods;
+        }
+
         void Add(string field, string? b, string? a)
         {
             if (b != a)

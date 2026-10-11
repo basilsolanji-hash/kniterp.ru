@@ -3,6 +3,10 @@
     <RootNamespace>KnitErp.Application</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- D116: отраслевая база знаний помощника. -->
+    <EmbeddedResource Include="Workspace\Knowledge\*.json" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\KnitErp.Domain\KnitErp.Domain.csproj" />
   </ItemGroup>
   <ItemGroup>

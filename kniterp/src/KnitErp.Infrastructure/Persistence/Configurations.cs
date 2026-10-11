@@ -199,8 +199,12 @@ internal sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Code).HasMaxLength(64).IsRequired();
-        b.Property(x => x.Name).HasMaxLength(150).IsRequired();
+        b.Property(x => x.Name).HasMaxLength(Role.NameMaxLength).IsRequired();
+        b.Property(x => x.Description).HasMaxLength(Role.DescriptionMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.IsAdministrative);
+        // D112: своя роль — с кодом «custom.…»; системные роли не архивируются.
+        b.ToTable(t => t.HasCheckConstraint("ck_roles_archive_custom", "[IsArchived] = 0 OR [IsSystem] = 0"));
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique().HasDatabaseName("ux_roles_org_code");
         b.HasMany(x => x.Permissions).WithOne().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
@@ -371,7 +375,19 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
     {
         b.ToTable("items", t =>
         {
-            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9)");
+            t.HasCheckConstraint("ck_items_type", "[Type] IN (1, 2, 3, 4, 5, 6, 9, 10, 11)");
+            // D302: комплект — без неснижаемого остатка и модификаций (остаток считается по компонентам).
+            t.HasCheckConstraint("ck_items_bundle", "[Type] <> 11 OR ([MinStock] IS NULL AND [ParentItemId] IS NULL)");
+            // D305: предмет расчёта (услуга — «услуга», остальное — товар или подакцизный), маркировка — с видом продукции.
+            t.HasCheckConstraint("ck_items_payment_subject", "([Type] = 10 AND [PaymentSubject] = 4) OR ([Type] <> 10 AND [PaymentSubject] IN (1, 2))");
+            t.HasCheckConstraint("ck_items_marking",
+                "([IsMarked] = 0 AND [TrackingType] = 0) OR ([IsMarked] = 1 AND [TrackingType] IN (1, 2, 3, 9) AND [Type] <> 10)");
+            t.HasCheckConstraint("ck_items_gtin", "[Gtin] IS NULL OR (LEN([Gtin]) = 14 AND [Gtin] NOT LIKE '%[^0-9]%')");
+            t.HasCheckConstraint("ck_items_min_price", "[MinPrice] IS NULL OR [MinPrice] >= 0");
+            // D300: услуга — со ставкой НДС, без веса, объёма, неснижаемого остатка и модификаций.
+            t.HasTrigger("tr_items_service_without_stock");
+            t.HasCheckConstraint("ck_items_service",
+                "[Type] <> 10 OR ([VatRateId] IS NOT NULL AND [WeightKg] IS NULL AND [VolumeM3] IS NULL AND [MinStock] IS NULL AND [ParentItemId] IS NULL)");
             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");
             t.HasCheckConstraint("ck_items_parent", "[ParentItemId] IS NULL OR [ParentItemId] <> [Id]");
             t.HasCheckConstraint("ck_items_variant",
@@ -418,6 +434,7 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
         b.HasIndex(x => new { x.OrganizationId, x.ParentItemId, x.VariantKey }).IsUnique().HasFilter("[ParentItemId] IS NOT NULL")
             .HasDatabaseName("ux_items_parent_variant");
         b.Ignore(x => x.Details);
+        ItemTradeConfiguration.Apply(b); // D305 (сессия 4): поля торговли — в CatalogConfigurations.cs
     }
 }
 
@@ -810,6 +827,7 @@ internal sealed class StockMovementConfiguration : IEntityTypeConfiguration<Stoc
         {
             t.HasTrigger("tr_stock_movements_immutable");
             t.HasTrigger("tr_stock_movements_closed_period");
+            t.HasTrigger("tr_stock_movements_stocked_items");
             t.HasCheckConstraint("ck_stock_movements_quantity", "[Quantity] <> 0");
             t.HasCheckConstraint("ck_stock_movements_source", "[Source] IN (1, 2, 3, 4)");
         });
@@ -1106,6 +1124,23 @@ internal sealed class CustomFieldValueConfiguration : IEntityTypeConfiguration<C
     }
 }
 
+/// <summary>D110: правила автоматической смены этапа — одно на событие в организации, этап — своей организации.</summary>
+internal sealed class SalesStageRuleConfiguration : IEntityTypeConfiguration<SalesStageRule>
+{
+    public void Configure(EntityTypeBuilder<SalesStageRule> b)
+    {
+        b.ToTable("sales_stage_rules", t => t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 8"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Trigger).HasConversion<byte>();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<SalesOrderStage>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.StageId })
+            .HasPrincipalKey(s => new { s.OrganizationId, s.Id }).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.Trigger }).IsUnique().HasDatabaseName("ux_sales_stage_rules_org_trigger");
+    }
+}
+
 internal sealed class SalesOrderStageConfiguration : IEntityTypeConfiguration<SalesOrderStage>
 {
     public void Configure(EntityTypeBuilder<SalesOrderStage> b)
@@ -1379,7 +1414,10 @@ internal sealed class StockBatchConfiguration : IEntityTypeConfiguration<StockBa
     public void Configure(EntityTypeBuilder<StockBatch> b)
     {
         b.ToTable("stock_batches", t =>
-            t.HasCheckConstraint("ck_stock_batches_package_weight", "[PackageWeightKg] IS NULL OR [PackageWeightKg] > 0"));
+        {
+            t.HasCheckConstraint("ck_stock_batches_package_weight", "[PackageWeightKg] IS NULL OR [PackageWeightKg] > 0");
+            t.HasTrigger("tr_stock_batches_stocked_items");
+        });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Number).HasMaxLength(StockBatch.NumberMaxLength).IsRequired();
