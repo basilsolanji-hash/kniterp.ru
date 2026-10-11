@@ -404,7 +404,7 @@ app.MapGet("/employees/consent-scans/{id:long}", async (long id, KnitErp.Applica
     }
 });
 
-// Скан договора контрагента (D400): право, своя организация и журнал просмотра — в сервисе; отдаётся вложением.
+// Скан договора контрагента (D500): право, своя организация и журнал просмотра — в сервисе; отдаётся вложением.
 app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.Application.Catalog.CounterpartyCardService cards, HttpContext http, CancellationToken ct) =>
 {
     try

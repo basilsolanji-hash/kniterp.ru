@@ -134,7 +134,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 columns: new[] { "OrganizationId", "CounterpartyId", "Number" },
                 unique: true);
 
-            // Сканы договоров — только вставка (D400): новая версия не затирает старую.
+            // Сканы договоров — только вставка (D500): новая версия не затирает старую.
             migrationBuilder.Sql("""
                 EXEC(N'CREATE OR ALTER TRIGGER [kniterp].[tr_counterparty_contract_files_immutable]
                 ON [kniterp].[counterparty_contract_files]

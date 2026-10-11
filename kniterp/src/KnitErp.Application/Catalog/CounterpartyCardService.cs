@@ -31,7 +31,7 @@ public sealed record ContractDto(
 }
 
 /// <summary>
-/// Карточка контрагента и его договоры (D400). Просмотр — право «Справочники: просмотр», договоры меняются с правом изменять справочники,
+/// Карточка контрагента и его договоры (D500). Просмотр — право «Справочники: просмотр», договоры меняются с правом изменять справочники,
 /// лимит суммы виден только с правом «Цены и суммы». Чужая организация — «не найдено».
 /// </summary>
 public sealed class CounterpartyCardService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)

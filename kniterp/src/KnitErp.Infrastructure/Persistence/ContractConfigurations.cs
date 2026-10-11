@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace KnitErp.Infrastructure.Persistence;
 
-/// <summary>Договоры контрагентов (D400). Ограничения дублируют правила домена в SQL Server.</summary>
+/// <summary>Договоры контрагентов (D500). Ограничения дублируют правила домена в SQL Server.</summary>
 internal sealed class CounterpartyContractConfiguration : IEntityTypeConfiguration<CounterpartyContract>
 {
     public void Configure(EntityTypeBuilder<CounterpartyContract> b)

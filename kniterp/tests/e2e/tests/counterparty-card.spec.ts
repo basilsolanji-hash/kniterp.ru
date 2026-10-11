@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { hasNoHorizontalScroll, openPage } from './blazor';
 
-// D400: карточка контрагента с договорами; меню на телефоне не прокручивает страницу под собой. Данные вымышленные.
+// D500: карточка контрагента с договорами; меню на телефоне не прокручивает страницу под собой. Данные вымышленные.
 test.describe.configure({ mode: 'serial' });
 
 const stamp = Date.now().toString().slice(-6);

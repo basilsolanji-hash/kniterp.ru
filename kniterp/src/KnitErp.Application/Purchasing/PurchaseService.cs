@@ -147,7 +147,7 @@ public sealed class PurchaseService(
         var q = db.PurchaseOrders.AsNoTracking().Where(o => o.OrganizationId == ctx.OrganizationId);
         if (filter.SupplierId is { } supplierId)
         {
-            // D400: история заказов в карточке контрагента.
+            // D500: история заказов в карточке контрагента.
             q = q.Where(o => o.SupplierId == supplierId);
         }
 

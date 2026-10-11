@@ -4,7 +4,7 @@ using KnitErp.Domain.Common;
 
 namespace KnitErp.UnitTests;
 
-/// <summary>D400: правила договора контрагента и файлов договора.</summary>
+/// <summary>D500: правила договора контрагента и файлов договора.</summary>
 public sealed class CounterpartyContractTests
 {
     private static readonly DateTime Now = new(2026, 10, 11, 9, 0, 0, DateTimeKind.Utc);

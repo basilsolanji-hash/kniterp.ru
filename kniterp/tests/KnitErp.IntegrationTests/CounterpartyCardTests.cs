@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.IntegrationTests;
 
-/// <summary>D400: карточка контрагента — договоры, сканы, история заказов и документов.</summary>
+/// <summary>D500: карточка контрагента — договоры, сканы, история заказов и документов.</summary>
 public sealed class CounterpartyCardTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
     private static int _innSeed = 610_000_000;

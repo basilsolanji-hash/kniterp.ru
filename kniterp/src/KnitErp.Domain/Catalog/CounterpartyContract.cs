@@ -3,7 +3,7 @@ using KnitErp.Domain.Organizations;
 
 namespace KnitErp.Domain.Catalog;
 
-/// <summary>Вид договора (D400): с кем и о чём. Числа хранятся в базе — не перенумеровывать.</summary>
+/// <summary>Вид договора (D500): с кем и о чём. Числа хранятся в базе — не перенумеровывать.</summary>
 public enum ContractKind : byte
 {
     /// <summary>Договор с покупателем: поставка нашей продукции.</summary>
@@ -26,7 +26,7 @@ public enum ContractStatus : byte
 }
 
 /// <summary>
-/// Договор с контрагентом (D400): номер, дата, вид, срок действия, отсрочка оплаты, лимит суммы.
+/// Договор с контрагентом (D500): номер, дата, вид, срок действия, отсрочка оплаты, лимит суммы.
 /// Не удаляется — закрывается; закрытый договор можно открыть снова. Скан подписанного договора — <see cref="CounterpartyContractFile"/>.
 /// </summary>
 public sealed class CounterpartyContract
@@ -192,7 +192,7 @@ public sealed record ContractTerms(
     int? PaymentDays, decimal? AmountLimit, string? Comment);
 
 /// <summary>
-/// Скан договора, дополнительного соглашения или спецификации (D400). Только вставка: новая версия не затирает старую.
+/// Скан договора, дополнительного соглашения или спецификации (D500). Только вставка: новая версия не затирает старую.
 /// Тип проверяется по сигнатуре файла, содержимое в базе зашифровано мастер-ключом.
 /// </summary>
 public sealed class CounterpartyContractFile
