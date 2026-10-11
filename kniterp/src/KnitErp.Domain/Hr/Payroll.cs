@@ -245,16 +245,39 @@ public sealed class PayrollLine
     /// <summary>Месяц, за который сделан перерасчёт (только у <see cref="PayrollLineKind.PieceCorrection"/>): первое число месяца.</summary>
     public DateOnly? CorrectsPeriod { get; private set; }
 
-    /// <summary>Доплата по перерасчёту сдельной оплаты за утверждённый месяц <paramref name="period"/> (D219). Только положительная.</summary>
-    public static PayrollLine Correction(long organizationId, long runId, long employeeId, DateOnly period, decimal amount)
+    /// <summary>
+    /// Доплата считалась от часовой ставки «сдельный заработок / часы» (у сдельщика без оклада и тарифа): при исправлении выработки
+    /// она пересчитывается пропорционально сдельной оплате (D220). Только у ночных, сверхурочных и праздничных.
+    /// </summary>
+    public bool FromPiece { get; private set; }
+
+    public PayrollLine MarkFromPiece()
     {
-        if (amount <= 0 || period.Day != 1)
+        if (Kind is not (PayrollLineKind.Night or PayrollLineKind.Overtime or PayrollLineKind.Holiday))
+        {
+            throw new BusinessRuleException("hr.payroll.from_piece", "От сдельной ставки считаются только доплаты.");
+        }
+
+        FromPiece = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Доплата по перерасчёту за утверждённый месяц <paramref name="period"/>, выработку которого исправили (D219, D220). Сдельная —
+    /// видом «Перерасчёт сдельной оплаты», доплата сдельщику — тем же видом доплаты (свой код в 1С: ЗУП). Только положительная.
+    /// </summary>
+    public static PayrollLine Correction(long organizationId, long runId, long employeeId, PayrollLineKind kind, DateOnly period, decimal amount)
+    {
+        if (amount <= 0 || period.Day != 1
+            || kind is not (PayrollLineKind.PieceCorrection or PayrollLineKind.Night or PayrollLineKind.Overtime or PayrollLineKind.Holiday))
         {
             throw new BusinessRuleException("hr.payroll.correction", "Перерасчёт — положительная доплата за прошлый месяц.");
         }
 
-        var line = Create(organizationId, runId, employeeId, PayrollLineKind.PieceCorrection,
-            $"Перерасчёт сдельной оплаты за {period:MM.yyyy}: исправлена выработка", 1, amount, amount);
+        var description = kind == PayrollLineKind.PieceCorrection
+            ? $"Перерасчёт сдельной оплаты за {period:MM.yyyy}: исправлена выработка"
+            : $"Перерасчёт за {period:MM.yyyy}: исправлена выработка — изменилась часовая ставка сдельщика";
+        var line = Create(organizationId, runId, employeeId, kind, description, 1, amount, amount);
         line.CorrectsPeriod = period;
         return line;
     }

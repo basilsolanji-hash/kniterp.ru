@@ -347,7 +347,8 @@ internal sealed class PayrollLineConfiguration : IEntityTypeConfiguration<Payrol
         {
             t.HasCheckConstraint("ck_hr_payroll_lines_kind", "[Kind] BETWEEN 1 AND 6");
             t.HasCheckConstraint("ck_hr_payroll_lines_correction",
-                "([Kind] = 6 AND [CorrectsPeriod] IS NOT NULL AND DAY([CorrectsPeriod]) = 1 AND [Amount] > 0) OR ([Kind] <> 6 AND [CorrectsPeriod] IS NULL)");
+                "([CorrectsPeriod] IS NULL AND [Kind] <> 6) OR ([CorrectsPeriod] IS NOT NULL AND [Kind] IN (3, 4, 5, 6) AND DAY([CorrectsPeriod]) = 1 AND [Amount] > 0)");
+            t.HasCheckConstraint("ck_hr_payroll_lines_from_piece", "[FromPiece] = 0 OR [Kind] IN (3, 4, 5)");
             t.HasTrigger("tr_hr_payroll_lines_approved_immutable");
         });
         b.HasKey(x => x.Id);

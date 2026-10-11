@@ -359,6 +359,47 @@ public sealed class HrRiskTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         }
     }
 
+    [SqlFact]
+    public async Task Piece_worker_premiums_from_piece_rate_are_recalculated_in_proportion()
+    {
+        // D220: у сдельщика без оклада и тарифа часовая ставка = сдельный заработок / часы — доплаты меняются вместе с выработкой.
+        var org = await host.CreateOrganizationAsync();
+        var (dep, _, emp) = await host.HireAsync(org, hiredOn: new DateOnly(2026, 10, 1));
+        var rows = new List<WorkOutputDto> { new(emp, new DateOnly(2026, 11, 3), 1, "Вязание", null, 10, "шт") };
+        await using var hr = host.Hr(org.OwnerUserId, org.OrganizationId, new ListWorkOutputSource(rows));
+        await hr.Payroll.AddRateAsync(new PieceRateCommand(1, "Вязание", null, "шт", 50m, new DateOnly(2026, 11, 1)));
+        var ts = await hr.Timesheets.CreateAsync(dep, 2026, 11);
+        await hr.Timesheets.SetDayAsync(ts, emp, new DateOnly(2026, 11, 3), "Я", 8, 2, 1); // 2 ночных, 1 сверхурочный
+        await hr.Timesheets.CloseAsync(ts, (await hr.Timesheets.GetAsync(dep, 2026, 11)).RowVersion!);
+        var ts12 = await hr.Timesheets.CreateAsync(dep, 2026, 12);
+        await hr.Timesheets.CloseAsync(ts12, (await hr.Timesheets.GetAsync(dep, 2026, 12)).RowVersion!);
+
+        await hr.Payroll.CalculateAsync(2026, 11);
+        var nov = await hr.Payroll.GetAsync(2026, 11);
+        await hr.Payroll.ApproveAsync(nov.Id!.Value, nov.RowVersion!);
+        var novSlip = await hr.Payroll.PayslipAsync(2026, 11, emp);
+        var night = novSlip.Lines.Single(l => l.Kind == PayrollLineKind.Night).Amount;
+        var overtime = novSlip.Lines.Single(l => l.Kind == PayrollLineKind.Overtime).Amount;
+        await using (var db = host.NewDb())
+        {
+            Assert.All(await db.PayrollLines.Where(l => l.RunId == nov.Id && l.Kind != PayrollLineKind.Piece).ToListAsync(), l => Assert.True(l.FromPiece));
+        }
+
+        rows.Add(new WorkOutputDto(emp, new DateOnly(2026, 11, 20), 1, "Вязание", null, 4, "шт")); // сдельная 500 → 700
+        await hr.Payroll.CalculateAsync(2026, 12);
+        var dec = await hr.Payroll.PayslipAsync(2026, 12, emp);
+        Assert.Equal(200m, dec.Lines.Single(l => l.Kind == PayrollLineKind.PieceCorrection).Amount);
+        Assert.Equal(Money.Round(night * 700m / 500m) - night, dec.Lines.Single(l => l.Kind == PayrollLineKind.Night).Amount);
+        Assert.Equal(Money.Round(overtime * 700m / 500m) - overtime, dec.Lines.Single(l => l.Kind == PayrollLineKind.Overtime).Amount);
+        Assert.All(dec.Lines, l => Assert.Contains("11.2026", l.Description));
+        var zup = System.Text.Encoding.UTF8.GetString((await hr.PayrollExport.ExportAsync(nov.Id!.Value)).Content);
+        Assert.Contains("ДоплатаЗаРаботуВНочноеВремя", zup);
+
+        // Пересчёт декабрьского черновика не удваивает: перерасчёт считается заново, а не добавляется.
+        await hr.Payroll.CalculateAsync(2026, 12);
+        Assert.Equal(3, (await hr.Payroll.PayslipAsync(2026, 12, emp)).Lines.Count);
+    }
+
     /// <summary>Источник выработки, который тест меняет между вызовами — как производство, исправившее отметки.</summary>
     private sealed class ListWorkOutputSource(List<WorkOutputDto> rows) : IWorkOutputSource
     {

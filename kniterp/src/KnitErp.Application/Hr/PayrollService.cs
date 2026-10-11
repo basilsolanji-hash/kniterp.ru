@@ -186,7 +186,7 @@ public sealed class PayrollService(
     /// заново по текущей выработке и расценкам. Недоплата = новая сумма − утверждённая сдельная − перерасчёты в других утверждённых расчётах;
     /// она начисляется доплатой в этом месяце. Переплата не удерживается автоматически (ст. 137 ТК РФ) — только предупреждение бухгалтеру.
     /// Расценки — те, что были заведены к расчёту того месяца: расценка, добавленная задним числом позже, перерасчёт не запускает.
-    /// Доплаты по часовой ставке сдельщика (ночные и т. п.) не пересчитываются.
+    /// Доплаты сдельщика, посчитанные от ставки «сдельный заработок / часы», пересчитываются пропорционально (D220).
     /// </summary>
     private async Task<List<PayrollLine>> CorrectionsAsync(long org, PayrollRun run, IReadOnlyList<PieceRate> rates, List<string> warnings, CancellationToken ct)
     {
@@ -218,6 +218,7 @@ public sealed class PayrollService(
 
             var approvedPiece = await db.PayrollLines.AsNoTracking().Where(l => l.RunId == past.Id && l.Kind == PayrollLineKind.Piece)
                 .GroupBy(l => l.EmployeeId).Select(g => new { g.Key, Sum = g.Sum(l => l.Amount) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+            var fromPiece = await db.PayrollLines.AsNoTracking().Where(l => l.RunId == past.Id && l.FromPiece).ToListAsync(ct);
             var ids = approvedPiece.Keys.Union(prior.Select(l => l.EmployeeId)).Union(current.Select(o => o.EmployeeId).Where(employed.Contains)).ToHashSet();
             var names = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == org && ids.Contains(e.Id))
                 .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName }).ToListAsync(ct);
@@ -225,15 +226,46 @@ public sealed class PayrollService(
             {
                 var name = Name(e.LastName, e.FirstName, e.MiddleName);
                 var expected = employed.Contains(e.Id) ? PieceLines(org, run.Id, e.Id, name, current.Where(o => o.EmployeeId == e.Id), pastRates, null).Piece : 0;
-                var diff = Money.Round(expected - approvedPiece.GetValueOrDefault(e.Id) - prior.Where(l => l.EmployeeId == e.Id).Sum(l => l.Amount));
+                var approvedEmployeePiece = approvedPiece.GetValueOrDefault(e.Id);
+                var diff = Money.Round(expected - approvedEmployeePiece
+                                       - prior.Where(l => l.EmployeeId == e.Id && l.Kind == PayrollLineKind.PieceCorrection).Sum(l => l.Amount));
                 if (diff > 0)
                 {
-                    result.Add(PayrollLine.Correction(org, run.Id, e.Id, past.From, diff));
+                    result.Add(PayrollLine.Correction(org, run.Id, e.Id, PayrollLineKind.PieceCorrection, past.From, diff));
                 }
                 else if (diff < 0)
                 {
                     warnings.Add($"{name}: выработку за {past.From:MM.yyyy} уменьшили после утверждения — переплата {-diff:0.00} руб. "
                                  + "Автоматически не удерживается: удержание — только по ст. 137 ТК РФ, решение за бухгалтером.");
+                }
+
+                // Доплаты сдельщика от ставки «сдельный заработок / часы» меняются в той же пропорции, что и сдельная оплата (D220).
+                var premiumOver = 0m;
+                foreach (var kind in fromPiece.Where(l => l.EmployeeId == e.Id).GroupBy(l => l.Kind))
+                {
+                    var approvedPremium = kind.Sum(l => l.Amount);
+                    var target = approvedEmployeePiece > 0 ? Money.Round(approvedPremium * expected / approvedEmployeePiece) : approvedPremium;
+                    var premiumDiff = target - approvedPremium - prior.Where(l => l.EmployeeId == e.Id && l.Kind == kind.Key).Sum(l => l.Amount);
+                    if (premiumDiff > 0)
+                    {
+                        result.Add(PayrollLine.Correction(org, run.Id, e.Id, kind.Key, past.From, premiumDiff));
+                    }
+                    else
+                    {
+                        premiumOver -= premiumDiff;
+                    }
+                }
+
+                if (premiumOver > 0)
+                {
+                    warnings.Add($"{name}: доплаты за {past.From:MM.yyyy} (от ставки сдельщика) уменьшились после исправления выработки — переплата {premiumOver:0.00} руб. "
+                                 + "Автоматически не удерживается (ст. 137 ТК РФ).");
+                }
+
+                if (approvedEmployeePiece == 0 && expected > 0)
+                {
+                    warnings.Add($"{name}: сдельная оплата за {past.From:MM.yyyy} появилась после утверждения — "
+                                 + "если были ночные, сверхурочные или праздничные часы, доплаты к ним проверьте вручную.");
                 }
             }
         }
@@ -322,6 +354,8 @@ public sealed class PayrollService(
             var hourRate = salary > 0 && norm > 0 ? salary / norm
                 : settings.PieceHourlyRate is { } tariff ? tariff
                 : workedHours > 0 ? piece / workedHours : 0;
+            var premiumsFrom = lines.Count;
+            var fromPiece = !(salary > 0 && norm > 0) && settings.PieceHourlyRate is null; // ставка = сдельный заработок / часы (D220)
             var night = worked.Sum(d => d.NightHours);
             if (night > 0 && hourRate > 0)
             {
@@ -343,6 +377,11 @@ public sealed class PayrollService(
                 var extra = settings.HolidayMultiplier - 1;
                 lines.Add(PayrollLine.Create(org, run.Id, e.Id, PayrollLineKind.Holiday, $"Доплата до {settings.HolidayMultiplier:0.##}-кратного размера за часы в праздники и выходные",
                     holiday, hourRate * extra, holiday * hourRate * extra));
+            }
+
+            if (fromPiece)
+            {
+                lines.Skip(premiumsFrom).ToList().ForEach(l => l.MarkFromPiece());
             }
 
             if (lines.Count > 0)
@@ -398,11 +437,11 @@ public sealed class PayrollService(
         }
 
         // Перерасчёт за прошлые месяцы уже начислен в расчёте, утверждённом после этого расчёта, — иначе доплата удвоится (D219).
-        if (await db.PayrollLines.AnyAsync(l => l.RunId == run.Id && l.Kind == PayrollLineKind.PieceCorrection, ct)
+        if (await db.PayrollLines.AnyAsync(l => l.RunId == run.Id && l.CorrectsPeriod != null, ct)
             && await (from l in db.PayrollLines
                       join r in db.PayrollRuns on l.RunId equals r.Id
                       where r.OrganizationId == ctx.OrganizationId && r.Id != run.Id && r.Status == PayrollStatus.Approved
-                            && r.ApprovedAtUtc >= run.CalculatedAtUtc && l.Kind == PayrollLineKind.PieceCorrection
+                            && r.ApprovedAtUtc >= run.CalculatedAtUtc && l.CorrectsPeriod != null
                       select l.Id).AnyAsync(ct))
         {
             db.DiscardChanges();

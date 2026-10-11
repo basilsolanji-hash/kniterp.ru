@@ -84,4 +84,17 @@ public sealed class HrPayrollRulesTests
         Assert.NotEqual(f, KnitErp.Application.Hr.WorkOutputFingerprint.Of([a]));
         Assert.Equal(32, f.Length);
     }
+
+    [Fact]
+    public void Corrections_are_positive_for_past_month_and_only_premiums_come_from_piece_rate()
+    {
+        var period = new DateOnly(2026, 11, 1);
+        Assert.Equal(PayrollLineKind.Night, PayrollLine.Correction(1, 1, 1, PayrollLineKind.Night, period, 10m).Kind);
+        Assert.Equal(period, PayrollLine.Correction(1, 1, 1, PayrollLineKind.PieceCorrection, period, 10m).CorrectsPeriod);
+        Assert.Equal("hr.payroll.correction", Assert.Throws<BusinessRuleException>(() => PayrollLine.Correction(1, 1, 1, PayrollLineKind.Salary, period, 10m)).Code);
+        Assert.Equal("hr.payroll.correction", Assert.Throws<BusinessRuleException>(() => PayrollLine.Correction(1, 1, 1, PayrollLineKind.Night, period, -1m)).Code);
+        Assert.Equal("hr.payroll.correction", Assert.Throws<BusinessRuleException>(() => PayrollLine.Correction(1, 1, 1, PayrollLineKind.Night, period.AddDays(1), 1m)).Code);
+        Assert.True(PayrollLine.Create(1, 1, 1, PayrollLineKind.Overtime, "x", 1, 1, 1).MarkFromPiece().FromPiece);
+        Assert.Equal("hr.payroll.from_piece", Assert.Throws<BusinessRuleException>(() => PayrollLine.Create(1, 1, 1, PayrollLineKind.Piece, "x", 1, 1, 1).MarkFromPiece()).Code);
+    }
 }
