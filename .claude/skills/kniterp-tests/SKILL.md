@@ -24,6 +24,13 @@ description: Как собрать knitERP и запустить его тест
 - Таблица с триггером объявляется в модели через `t.HasTrigger("...")`, иначе EF использует OUTPUT и вставка падает.
 - Конфликт в `KnitErpDbContextModelSnapshot.cs` при слиянии: принять обе стороны и проверить шаг 4.
 
+## Проверка слияния веток (до настоящего слияния)
+1. `git worktree add --detach <scratch>/trial <своя-ветка>`, затем в ней `git merge --no-commit --no-ff origin/<другая-ветка>`.
+2. `python3 .claude/skills/kniterp-tests/resolve-merge.py` — типовые конфликты: значения TaggedEntity, ветки ObjectDirectory, CHECK «1–29», снапшот.
+3. Сборка, `has-pending-model-changes`, все тесты, включая e2e обеих веток (`tests/e2e` на Node и `tests/KnitErp.E2ETests` на .NET, если она есть).
+4. Проверить порядок миграций по времени: миграция, которая выполняется позже, не должна сужать ограничение, расширенное другой.
+5. `git worktree remove --force <scratch>/trial`; в чужие ветки не пушить.
+
 ## Переводы
 - Каждая строка интерфейса пишется как `L("…")`. Сообщения `BusinessRuleException` и `NotFoundException` из Domain и Application тоже попадают в словари.
 - Тест падает как на отсутствующих, так и на лишних ключах в `src/KnitErp.Web/Localization/{be,kk,uz}.json`.
