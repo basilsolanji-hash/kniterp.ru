@@ -11,6 +11,7 @@
 @inject ItemSupplierService Suppliers
 @inject CatalogService Catalog
 @inject CatalogSettingsService CatalogSettings
+@inject ItemCodesService Codes
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -360,8 +361,14 @@ else
                 </select>
             </label>
             <button type="submit" disabled="@_busy">@L("Добавить")</button>
+            @* D315: внутренний EAN-13 по счётчику настроек каталога. *@
+            <button type="button" class="secondary" @onclick="GenerateBarcodeAsync" disabled="@_busy">@L("Создать EAN-13")</button>
         </form>
     }
+    <div class="actions" style="margin-top: 8px">
+        @* D316: печать этикеток по шаблону организации. *@
+        <a class="button secondary" href="catalog/labels/print?ids=@Id" target="_blank" rel="noopener">@L("Печать этикеток")</a>
+    </div>
 
     @if (_item.IsStocked && _settings.Shows(CardBlocks.Packs))
     {
@@ -785,6 +792,12 @@ else
 
     // D312: блоки, скрытые настройками каталога организации (только отображение).
     private CatalogSettingsDto _settings = new(true, true, null, 5, 1, ItemType.Finished, null, false, []);
+
+    private Task GenerateBarcodeAsync() => RunAsync(async () =>
+    {
+        await Codes.GenerateBarcodeAsync(Id);
+        _barcode = null;
+    }, L("Штрихкод создан."));
 
     private async Task LoadAsync()
     {

@@ -303,6 +303,14 @@ else
             </tbody>
         </table>
     </div>
+    @if (_list.Items.Count > 0)
+    {
+        @* D316: этикетки для позиций текущей страницы (с учётом отбора). *@
+        <div class="actions" style="margin-top: 8px">
+            <a class="button secondary" href="@LabelsLink" target="_blank" rel="noopener">@L("Этикетки для позиций на странице")</a>
+            <a href="catalog/labels">@L("Конструктор этикеток")</a>
+        </div>
+    }
     @if (_list.Total > PageSize)
     {
         @* Серверные страницы (сессия 4): список на десятки тысяч позиций читается по PageSize строк. *@
@@ -403,6 +411,8 @@ else
     }
 
     private const int PageSize = 100;
+
+    private string LabelsLink => "catalog/labels/print?ids=" + string.Join(",", _list!.Items.Where(i => !i.IsArchived).Select(i => i.Id));
     private int _page;
 
     /// <summary>Новый отбор — с первой страницы.</summary>

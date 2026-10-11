@@ -50,6 +50,19 @@ public sealed class CatalogSettings
     public bool RequireVat { get; private set; }
 
     public CardBlocks HiddenBlocks { get; private set; }
+
+    /// <summary>D315: новой позиции (кроме услуги) сразу выдаётся внутренний EAN-13.</summary>
+    public bool AutoBarcode { get; private set; }
+
+    public byte BarcodePrefix { get; private set; } = InternalEan13.MinPrefix;
+    public long NextBarcodeNumber { get; private set; } = 1;
+
+    /// <summary>D315: пустой артикул новой позиции заполняется по шаблону.</summary>
+    public bool AutoArticle { get; private set; }
+
+    public string? ArticleTemplateText { get; private set; }
+    public byte ArticleDigits { get; private set; } = 5;
+    public int NextArticleNumber { get; private set; } = 1;
     public DateTime UpdatedAtUtc { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
@@ -121,6 +134,71 @@ public sealed class CatalogSettings
             throw new BusinessRuleException("catalog.required.vat", "Ставка НДС обязательна в настройках каталога: выберите ставку.");
         }
     }
+
+    /// <summary>Автоматические штрихкоды и артикулы (D315). Все проверки — до изменения полей.</summary>
+    public void SetCodes(bool autoBarcode, byte barcodePrefix, long nextBarcodeNumber, bool autoArticle, string? articleTemplate, byte articleDigits,
+        int nextArticleNumber, DateTime nowUtc)
+    {
+        if (barcodePrefix is < InternalEan13.MinPrefix or > InternalEan13.MaxPrefix)
+        {
+            throw new BusinessRuleException("catalog.settings.barcode_prefix", "Префикс внутреннего штрихкода — от 20 до 29.");
+        }
+
+        if (nextBarcodeNumber is < 1 or > InternalEan13.MaxNumber)
+        {
+            throw new BusinessRuleException("catalog.settings.barcode_next", "Следующий номер штрихкода — от 1 до 9 999 999 999.");
+        }
+
+        string? template = null;
+        if (autoArticle || !string.IsNullOrWhiteSpace(articleTemplate))
+        {
+            template = ArticleTemplate.Validate(articleTemplate);
+        }
+
+        if (articleDigits is < MinDigits or > MaxDigits)
+        {
+            throw new BusinessRuleException("catalog.settings.digits", "Номер в автокоде — от 3 до 8 цифр.");
+        }
+
+        if (nextArticleNumber < 1 || nextArticleNumber.ToString(System.Globalization.CultureInfo.InvariantCulture).Length > articleDigits)
+        {
+            throw new BusinessRuleException("catalog.settings.next", "Следующий номер — от 1 и не длиннее заданного числа цифр.");
+        }
+
+        AutoBarcode = autoBarcode;
+        BarcodePrefix = barcodePrefix;
+        NextBarcodeNumber = nextBarcodeNumber;
+        AutoArticle = autoArticle;
+        ArticleTemplateText = template;
+        ArticleDigits = articleDigits;
+        NextArticleNumber = nextArticleNumber;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    /// <summary>Следующий внутренний EAN-13; номер сдвигается. Занятость проверяет вызывающий.</summary>
+    public string TakeBarcode() => InternalEan13.Build(BarcodePrefix, NextBarcodeNumber++);
+
+    public string? PreviewBarcode() => NextBarcodeNumber <= InternalEan13.MaxNumber ? InternalEan13.Build(BarcodePrefix, NextBarcodeNumber) : null;
+
+    /// <summary>Артикул по шаблону для позиции с кодом; номер сдвигается, только если шаблон его содержит.</summary>
+    public string? TakeArticle(string itemCode)
+    {
+        if (!AutoArticle || ArticleTemplateText is not { } template)
+        {
+            return null;
+        }
+
+        var article = ArticleTemplate.Apply(template, itemCode, NextArticleNumber, ArticleDigits);
+        if (ArticleTemplate.UsesNumber(template))
+        {
+            NextArticleNumber++;
+        }
+
+        return article;
+    }
+
+    public string? PreviewArticle(string itemCode = "ТВ-0001") =>
+        ArticleTemplateText is { } t ? ArticleTemplate.Apply(t, itemCode, NextArticleNumber, ArticleDigits) : null;
 
     public bool IsEnabled(ItemType type) => type switch
     {
