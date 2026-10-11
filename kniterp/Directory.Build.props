@@ -9,5 +9,8 @@
     <WarningsNotAsErrors>NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
     <InvariantGlobalization>false</InvariantGlobalization>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- D109: точные версии и хеши всех пакетов (в т. ч. транзитивных) — в packages.lock.json; CI и сборка образа
+         восстанавливают только их (locked mode), подменённый или «уплывший» пакет ломает сборку. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 </Project>

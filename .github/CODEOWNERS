@@ -1,0 +1,8 @@
+# D109: изменения сборки, выпуска и защиты требуют проверки владельца (действует вместе с правилом защиты ветки «Require review from Code Owners»).
+/.github/                         @basilsolanji-hash
+/kniterp/deploy/                  @basilsolanji-hash
+/kniterp/Directory.Packages.props @basilsolanji-hash
+/kniterp/nuget.config             @basilsolanji-hash
+/kniterp/src/KnitErp.Web/Security/          @basilsolanji-hash
+/kniterp/src/KnitErp.Infrastructure/Security/ @basilsolanji-hash
+/kniterp/src/KnitErp.Application/Access/    @basilsolanji-hash

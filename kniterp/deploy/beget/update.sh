@@ -48,7 +48,26 @@ rollback() {
   exit 1
 }
 
+# D109: код на сервере никто не правит руками — изменённые или лишние файлы в рабочей копии останавливают выпуск
+# (признак вмешательства); новые коммиты и их авторы пишутся в журнал выпусков. VERIFY_SIGNATURES=1 в .env — выпускать
+# только коммиты с проверенной подписью (git verify-commit; ключи подписи — в доверенных ключах сервера).
+echo "== Проверка рабочей копии"
+DIRTY="$(git -C ../.. status --porcelain --untracked-files=normal)"
+if [[ -n "$DIRTY" ]]; then
+  alert "Выпуск остановлен: файлы кода на сервере изменены вручную (возможное вмешательство):
+$DIRTY
+Посмотрите: git -C $(cd ../.. && pwd) diff ; вернуть как в репозитории: git -C $(cd ../.. && pwd) checkout -- . && git -C $(cd ../.. && pwd) clean -nd"
+  exit 1
+fi
+OLD_HEAD="$(git -C ../.. rev-parse HEAD)"
 echo "== Код"; git -C ../.. pull --ff-only
+if [[ "${VERIFY_SIGNATURES:-0}" == "1" ]] && ! git -C ../.. verify-commit HEAD 2>/dev/null; then
+  UNSIGNED="$(git -C ../.. rev-parse --short=12 HEAD)"
+  git -C ../.. reset --hard -q "$OLD_HEAD"
+  alert "Выпуск остановлен: коммит $UNSIGNED без проверенной подписи. Код возвращён на ${OLD_HEAD:0:12}."
+  exit 1
+fi
+echo "Новые коммиты:"; git -C ../.. log --format='  %h %an %ad %s' --date=short "$OLD_HEAD..HEAD" | tee -a "$RELEASE_LOG" | head -40
 COMMIT="$(git -C ../.. rev-parse --short=12 HEAD)"
 echo "== Полная копия перед выпуском (точка отката)"; ./backup.sh full
 BACKUP_FILE="$(ls -t "$BACKUP_DIR"/enc/kniterp-full-*.enc | head -1)"
