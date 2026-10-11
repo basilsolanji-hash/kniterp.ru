@@ -1,0 +1,17 @@
+@*
+    D108: знак knitERP «K» в SVG без фона — сливается с фоном меню в обеих темах (у PNG-иконки свой тёмный квадрат).
+    Светлые штрихи берут цвет текста темы, бирюзовые — фирменный цвет.
+*@
+<svg class="logo-mark" width="@Size" height="@Size" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+    <g fill="none" stroke-linecap="round" stroke-width="11">
+        <path d="M19 14v18" stroke="var(--text)" />
+        <path d="M19 32v18" stroke="#2ED3C6" />
+        <path d="M24 37 45 16" stroke="#2ED3C6" />
+        <path d="M27 31 45 49" stroke="var(--text)" />
+    </g>
+</svg>
+
+@code {
+    [Parameter]
+    public int Size { get; set; } = 28;
+}

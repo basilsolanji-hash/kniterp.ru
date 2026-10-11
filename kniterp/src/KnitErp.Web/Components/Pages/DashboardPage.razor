@@ -77,6 +77,23 @@ else
                     </li>
                 }
             </ul>
+            <h2 style="margin-top: 14px">@L("Быстрые действия")</h2>
+            <p class="muted">@L("Кнопки наверху экрана: отметьте нужные и расставьте стрелками. Показываются только действия, доступные вашей роли.")</p>
+            <ul>
+                @for (var i = 0; i < _actionSetup!.Count; i++)
+                {
+                    var index = i;
+                    var row = _actionSetup[i];
+                    var action = DashboardActions.Find(row.Key)!;
+                    <li @key="row.Key">
+                        <label class="inline"><input type="checkbox" checked="@row.Visible" @onchange="e => row.Visible = e.Value is true" /> @ActionTitle(action.Key)</label>
+                        <span>
+                            <button type="button" class="secondary icon" @onclick="() => MoveAction(index, -1)" disabled="@(index == 0)" title="@L("Выше")" aria-label="@L("Выше: {0}", ActionTitle(action.Key))">↑</button>
+                            <button type="button" class="secondary icon" @onclick="() => MoveAction(index, 1)" disabled="@(index >= _actionSetup.Count - 1)" title="@L("Ниже")" aria-label="@L("Ниже: {0}", ActionTitle(action.Key))">↓</button>
+                        </span>
+                    </li>
+                }
+            </ul>
             <div class="actions">
                 <button type="button" @onclick="SaveSetupAsync" disabled="@_busy">@L("Сохранить")</button>
                 <button type="button" class="secondary" @onclick="ResetSetupAsync" disabled="@_busy">@L("Как было по умолчанию")</button>
@@ -90,6 +107,9 @@ else
         {
             @switch (block)
             {
+                case DashboardBlocks.Actions:
+                    @ActionsBlock(layout)
+                    break;
                 case DashboardBlocks.Kpi:
                     @Kpis(f, sales, receipts)
                     break;
@@ -97,7 +117,7 @@ else
                     @MoneyBlock(f)
                     break;
                 case DashboardBlocks.Attention:
-                    @AttentionBlock(f)
+                    @AttentionBlock(f, layout.Shows(DashboardBlocks.Debtors) && f is { TopDebtors.Count: > 0 })
                     break;
                 case DashboardBlocks.Debtors:
                     @DebtorsBlock(f)
@@ -122,7 +142,7 @@ else
                 case DashboardBlocks.Month:
                     @if (_data.Month is { } m)
                     {
-                        <section class="dash-box">
+                        <section class="dash-box span-3">
                             <h2>@L("Склад за месяц") <span class="muted">@m.From.ToString("dd.MM") – @m.To.ToString("dd.MM.yyyy")</span></h2>
                             <div class="mini-stats">
                                 <a href="stock-documents?kind=1"><b>@m.Receipts</b><span>@L("Поступления")</span></a>
@@ -137,7 +157,7 @@ else
                     var reference = _data.Tiles.Where(t => !AttentionHrefs.Contains(t.Href)).ToList();
                     @if (reference.Count > 0)
                     {
-                        <section class="dash-box">
+                        <section class="dash-box span-3">
                             <h2>@L("Справочно")</h2>
                             <div class="mini-stats">
                                 @foreach (var t in reference)
@@ -170,6 +190,7 @@ else
     private string? _message;
     private bool _busy;
     private List<SetupRow>? _setup;
+    private List<SetupRow>? _actionSetup;
 
     /// <summary>Строка панели «Настроить»: блок и его видимость.</summary>
     private sealed class SetupRow(string key, bool visible)
@@ -202,6 +223,21 @@ else
 
         var layout = _data?.Layout ?? DashboardBlocks.Default;
         _setup = [.. layout.Order.Select(b => new SetupRow(b, layout.Shows(b))), new SetupRow(DashboardBlocks.Readiness, layout.Shows(DashboardBlocks.Readiness))];
+        // Действия: выбранные — в их порядке, затем остальные доступные (снятые).
+        var chosen = layout.ActionKeys;
+        _actionSetup = [.. chosen.Select(k => new SetupRow(k, true)),
+            .. DashboardActions.All.Where(a => !chosen.Contains(a.Key) && CurrentAccess.Has(a.Permission)).Select(a => new SetupRow(a.Key, false))];
+    }
+
+    private void MoveAction(int index, int delta)
+    {
+        var target = index + delta;
+        if (_actionSetup is null || target < 0 || target >= _actionSetup.Count)
+        {
+            return;
+        }
+
+        (_actionSetup[index], _actionSetup[target]) = (_actionSetup[target], _actionSetup[index]);
     }
 
     /// <summary>«Готовность к запуску» всегда последняя строка: она в шапке и не переставляется.</summary>
@@ -221,7 +257,8 @@ else
         var rows = _setup!;
         await Personal.SaveDashboardLayoutAsync(new DashboardLayout(
             rows.Where(r => r.Key != DashboardBlocks.Readiness).Select(r => r.Key).ToList(),
-            rows.Where(r => !r.Visible).Select(r => r.Key).ToList()));
+            rows.Where(r => !r.Visible).Select(r => r.Key).ToList(),
+            _actionSetup!.Where(r => r.Visible).Select(r => r.Key).ToList()));
         _setup = null;
         _data = await Dashboard.GetAsync();
     });
@@ -257,8 +294,28 @@ else
         }
     }
 
+    /// <summary>Подписи быстрых действий — здесь, чтобы перевод проверялся тестом покрытия.</summary>
+    private static string ActionTitle(string key) => key switch
+    {
+        "sales-order" => L("Новый заказ покупателя"),
+        "receipt" => L("Поступление на склад"),
+        "shipment" => L("Отгрузка"),
+        "money-in" => L("Приход денег"),
+        "money-out" => L("Расход денег"),
+        "purchase-order" => L("Заказ поставщику"),
+        "write-off" => L("Списание"),
+        "transfer" => L("Перемещение"),
+        "inventory" => L("Инвентаризация"),
+        "counterparty" => L("Новый контрагент"),
+        "item" => L("Новая позиция"),
+        "batch" => L("Партии и ярлыки"),
+        "stock" => L("Остатки"),
+        _ => DashboardActions.Find(key)?.Title ?? key,
+    };
+
     private static string BlockName(string block) => block switch
     {
+        DashboardBlocks.Actions => L("Быстрые действия"),
         DashboardBlocks.Kpi => L("Ключевые показатели"),
         DashboardBlocks.Money => L("Деньги на счетах и в кассах"),
         DashboardBlocks.Attention => L("Требует внимания"),
@@ -269,6 +326,24 @@ else
         DashboardBlocks.Reference => L("Справочно"),
         DashboardBlocks.Readiness => L("Готовность к запуску"),
         _ => block,
+    };
+
+    /// <summary>D108: настраиваемые кнопки ключевых действий — сразу открывают форму создания.</summary>
+    private RenderFragment ActionsBlock(DashboardLayout layout) => __builder =>
+    {
+        var actions = layout.ActionKeys.Select(DashboardActions.Find).Where(a => a is not null && CurrentAccess.Has(a.Permission)).ToList();
+        @if (actions.Count > 0)
+        {
+            <nav class="quick-actions wide" aria-label="@L("Быстрые действия")">
+                @foreach (var a in actions)
+                {
+                    <a href="@a!.Href" class="quick-action" style="--sec: var(--sec-@a.Icon)">
+                        <span class="qa-icon"><Icon Name="@a.Icon" Size="18" /></span>
+                        <span>@ActionTitle(a.Key)</span>
+                    </a>
+                }
+            </nav>
+        }
     };
 
     private RenderFragment Kpis(DashboardFinanceDto? f, DashboardChartDto? sales, DashboardChartDto? receipts) => __builder =>
@@ -305,13 +380,17 @@ else
         }
     };
 
-    /// <summary>Остатки денег по юрлицам (D80): итог, по каждому юрлицу — его счета и кассы; минус — красным.</summary>
+    /// <summary>
+    /// Остатки денег по юрлицам (D80): широкая полоса под показателями (D108) — каждый счёт и касса карточкой, по юрлицам;
+    /// минус — красным.
+    /// </summary>
     private RenderFragment MoneyBlock(DashboardFinanceDto? f) => __builder =>
     {
         @if (f?.Accounts is { } accounts)
         {
-            <section class="dash-box">
-                <h2>@L("Деньги на счетах и в кассах") <span class="muted">@Amounts.Format(f.AccountsTotal)</span></h2>
+            <section class="dash-box wide money-box">
+                <h2>@L("Деньги на счетах и в кассах") <span class="money-total @(f.AccountsTotal < 0 ? "neg" : null)">@Amounts.Format(f.AccountsTotal)</span>
+                    <a class="muted small" href="legal-entities">@L("Счета, кассы и начальные остатки")</a></h2>
                 @if (accounts.Count == 0)
                 {
                     <p class="muted">@L("Счетов и касс пока нет.") <a href="legal-entities">@L("Добавить")</a></p>
@@ -320,36 +399,31 @@ else
                 {
                     var entities = accounts.GroupBy(a => a.LegalEntity).ToList();
                     var several = entities.Count(g => g.Key.Length > 0) > 1;
-                    <table class="compact money">
-                        <tbody>
-                            @foreach (var g in entities)
+                    @foreach (var g in entities)
+                    {
+                        @if (several && g.Key.Length > 0)
+                        {
+                            <div class="money-entity"><span>@g.Key</span><b>@Amounts.Format(g.Sum(a => a.Balance))</b></div>
+                        }
+                        <div class="money-grid">
+                            @foreach (var a in g)
                             {
-                                @if (several && g.Key.Length > 0)
-                                {
-                                    <tr class="group"><td>@g.Key</td><td class="num">@Amounts.Format(g.Sum(a => a.Balance))</td></tr>
-                                }
-                                @foreach (var a in g)
-                                {
-                                    <tr>
-                                        <td>
-                                            <span class="tag">@(a.Kind == MoneyAccountKind.Cash ? L("касса") : a.Kind is null ? L("без счёта") : L("банк"))</span>
-                                            @(a.AccountId is null ? L("Оплаты без счёта") : a.Name)
-                                        </td>
-                                        <td class="num @(a.Balance < 0 ? "neg" : null)"><b>@Amounts.Format(a.Balance)</b></td>
-                                    </tr>
-                                }
+                                <div class="money-card">
+                                    <span class="tag">@(a.Kind == MoneyAccountKind.Cash ? L("касса") : a.Kind is null ? L("без счёта") : L("банк"))</span>
+                                    <span class="money-name">@(a.AccountId is null ? L("Оплаты без счёта") : a.Name)</span>
+                                    <b class="@(a.Balance < 0 ? "neg" : null)">@Amounts.Format(a.Balance)</b>
+                                </div>
                             }
-                        </tbody>
-                    </table>
+                        </div>
+                    }
                 }
-                <p class="muted small"><a href="legal-entities">@L("Счета, кассы и начальные остатки")</a></p>
             </section>
         }
     };
 
-    private RenderFragment AttentionBlock(DashboardFinanceDto? f) => __builder =>
+    private RenderFragment AttentionBlock(DashboardFinanceDto? f, bool beside) => __builder =>
     {
-        <section class="dash-box">
+        <section class="dash-box @(beside ? "span-8" : "wide")">
             <h2>@L("Требует внимания")</h2>
             <ul class="attention">
                 @foreach (var t in _data!.Tiles.Where(t => AttentionHrefs.Contains(t.Href)))
@@ -382,7 +456,7 @@ else
     {
         @if (f is { TopDebtors.Count: > 0 })
         {
-            <section class="dash-box">
+            <section class="dash-box span-4">
                 <h2>@L("Крупнейшие должники")</h2>
                 <table class="compact">
                     <tbody>
@@ -405,7 +479,7 @@ else
     {
         @if (_data!.Recent.Count > 0)
         {
-            <section class="dash-box">
+            <section class="dash-box span-6">
                 <h2>@L("Последние документы")</h2>
                 <table class="compact">
                     <thead><tr><th>@L("Дата")</th><th>@L("Документ")</th><th class="opt">@L("Склад")</th><th>@L("Статус")</th></tr></thead>

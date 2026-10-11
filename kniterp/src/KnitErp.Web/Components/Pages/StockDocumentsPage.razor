@@ -133,6 +133,11 @@ else
 }
 
 @code {
+
+    /// <summary>D108: «?new=…» с главного экрана — сразу открыть форму создания.</summary>
+    [SupplyParameterFromQuery(Name = "new")]
+    public string? NewQuery { get; set; }
+
     // D104: отбор по тегу и цветные точки тегов у строк.
     private long? _tagId;
     private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>> _tagMap = new Dictionary<long, IReadOnlyList<KnitErp.Application.Tagging.TagDto>>();
@@ -181,7 +186,7 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        var query = $"{KindQuery}|{StatusQuery}|{OrderQuery}";
+        var query = $"{KindQuery}|{StatusQuery}|{OrderQuery}|{NewQuery}";
         if (_rows is not null && _appliedQuery == query)
         {
             return;
@@ -198,6 +203,10 @@ else
             }
 
             await LoadAsync();
+            if (byte.TryParse(NewQuery, out var newKind) && StockDocument.Kinds.Contains((StockOperationKind)newKind))
+            {
+                await OpenCreateAsync((StockOperationKind)newKind);
+            }
         }
         catch (AccessDeniedException ex)
         {

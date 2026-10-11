@@ -330,7 +330,7 @@
         .shell.narrow .side-foot .sf-link { justify-content: center; padding: 8px 0; }
 
         /* Меню: разделы сворачиваются, раскрыт текущий; колонку можно сузить до значков. */
-        .side { flex: 0 0 212px; padding: 10px 8px; box-sizing: border-box; display: flex; flex-direction: column;
+        .side { flex: 0 0 232px; padding: 10px 8px; box-sizing: border-box; display: flex; flex-direction: column;
                 position: sticky; top: 0; height: 100vh; overflow: hidden; }
         .side > .nav-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
         .main-col { flex: 1 1 0; }
@@ -400,6 +400,10 @@
         /* Логотип в меню — ссылка на главный экран. */
         a.logo { display: inline-flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; }
         a.logo img { width: 28px; height: 28px; border-radius: 7px; }
+        /* D108: логотип у левого края, как пункты меню; без отступа ссылок меню. */
+        .side a.logo { padding: 4px 10px; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+        .side a.logo:hover { background: transparent; }
+        .logo-mark { flex: none; display: block; }
         .shell.narrow .side-head a.logo { display: inline-flex; }
         .shell.narrow .side-head a.logo .logo-text { display: none; }
         .catalog-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
@@ -424,7 +428,7 @@
         .dash-head h1 { margin: 0 0 2px; font-size: 20px; }
         .dash-head .readiness { margin: 0; }
         .section-title { font-size: 13px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; text-transform: none; }
-        .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+        .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
         .kpi { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px 10px 16px; border: 1px solid var(--line); border-radius: 8px;
                background: var(--surface-2); color: var(--text); text-decoration: none; overflow: hidden; }
         .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--kpi, var(--accent)); }
@@ -447,8 +451,40 @@
         .chart-large .chart-axis { padding-left: 52px; }
         .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-top: 14px; align-items: start; }
         .dash-box h2 { font-size: 14px; margin: 0 0 8px; }
-        .dash-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; align-items: start; }
+        /* D108: главный экран — 12 колонок; блоки занимают продуманную ширину, пустоты заполняются (dense). */
+        .dash-head, .dash-blocks, .dash-setup { max-width: 1760px; }
+        .dash-blocks { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 12px; align-items: start; }
+        .dash-blocks > * { grid-column: span 12; min-width: 0; }
+        .dash-blocks > .span-3 { grid-column: span 3; }
+        .dash-blocks > .span-4 { grid-column: span 4; }
+        .dash-blocks > .span-6 { grid-column: span 6; }
+        .dash-blocks > .span-8 { grid-column: span 8; }
         .dash-blocks > .wide { grid-column: 1 / -1; }
+        .span-8 .attention { columns: 2 300px; column-gap: 28px; }
+        .dash-blocks > .wide .attention { columns: 3 280px; column-gap: 28px; }
+        .money-box h2 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+        .money-box h2 .money-total { font-size: 16px; }
+        .money-box h2 a { margin-left: auto; font-weight: 400; }
+        .money-entity { display: flex; justify-content: space-between; gap: 12px; margin: 10px 0 6px; font-size: 13px; color: var(--text-2); }
+        .money-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+        .money-card { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); min-width: 0; }
+        .money-card .tag { align-self: flex-start; }
+        .money-card .money-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .money-card b { font-size: 17px; font-variant-numeric: tabular-nums; }
+        .attention li { break-inside: avoid; }
+        @@media (max-width: 1279px) {
+            .dash-blocks > .span-3, .dash-blocks > .span-4, .dash-blocks > .span-6 { grid-column: span 6; }
+            .dash-blocks > .span-8 { grid-column: span 12; }
+        }
+        @@media (max-width: 899px) { .dash-blocks > .span-3, .dash-blocks > .span-4, .dash-blocks > .span-6, .dash-blocks > .span-8 { grid-column: span 12; } }
+        .quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+        @@media (max-width: 599px) { .quick-actions { grid-template-columns: 1fr 1fr; } .quick-actions .quick-action { font-size: 12.5px; padding: 6px 8px; gap: 8px; } }
+        .quick-action { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+                        background: var(--raised); color: var(--text); text-decoration: none; font-size: 13px; font-weight: 500; text-align: left; }
+        .quick-action:hover { border-color: var(--sec, var(--accent)); background: var(--field); }
+        .quick-action .qa-icon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; flex: none;
+                                 color: var(--sec, var(--accent)); background: color-mix(in srgb, var(--sec, var(--accent)) 14%, transparent); }
+
         .dash-blocks .section-title { margin-top: 0; }
         .dash-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .dash-setup { margin-bottom: 12px; max-width: 520px; }
@@ -683,7 +719,9 @@
         .tag-dots .tag-dot { width: 8px; height: 8px; }
         .nav-tags { list-style: none; margin: 0; padding: 0 0 0 4px; }
         .nav-tags a { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 13px; color: var(--muted); text-decoration: none; border-radius: 6px; }
-        .nav-tags a:hover, .nav-tags a.active { background: var(--field); color: inherit; }
+        .side .nav-tags a { padding: 4px 10px 4px 32px; color: var(--text-2); }
+        .side .nav-tags a:hover, .side .nav-tags a.active { background: var(--field); color: var(--text); }
+        .side a.nav-group-head { padding: 6px 10px; }
         .note-list { list-style: none; padding: 0; }
         .note-list li { padding: 10px 0; border-bottom: 1px solid var(--raised-3); }
         .note-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 6px; }
@@ -717,7 +755,7 @@
         /* Сенсорный экран: цели не меньше 44 px. */
         @@media (pointer: coarse) { button, a.button, select, input:not([type=checkbox]), .quick-btn, .side a { min-height: 44px; } }
         /* Большие мониторы: крупнее шрифт и поля, таблицы во всю ширину. */
-        @@media (min-width: 1600px) { body { font-size: 16px; } .main { padding: 28px 40px; } .topbar { padding: 0 40px; } }
+        @@media (min-width: 1600px) { .main { padding: 24px 36px; } .topbar { padding: 0 36px; } .side { flex-basis: 248px; } }
 
         @@media (max-width: 899px) {
             .topbar { display: none; }
