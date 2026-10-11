@@ -96,6 +96,22 @@ public sealed class StockBatch
         IsArchived = false;
     }
 
+    /// <summary>Префикс кода партии на ярлыке (D101): «KB» и номер записи — уникален, не зависит от номера партии поставщика.</summary>
+    public const string CodePrefix = "KB";
+
+    /// <summary>Код партии для штрихкода Code 128 на ярлыке: KB00000123.</summary>
+    public static string Code(long id) => CodePrefix + id.ToString("D8");
+
+    /// <summary>Разбор кода со сканера: регистр и пробелы не важны; не код партии — null.</summary>
+    public static long? ParseCode(string? scanned)
+    {
+        var text = scanned?.Trim().ToUpperInvariant();
+        return text is { Length: > 2 } && text.StartsWith(CodePrefix, StringComparison.Ordinal) && text[2..].All(char.IsAsciiDigit)
+               && long.TryParse(text[2..], out var id) && id > 0
+            ? id
+            : null;
+    }
+
     /// <summary>Подпись партии в списках: «П-117 · бордо · кр. 2231».</summary>
     public static string Describe(string number, string? color, string? dyeLot) =>
         string.Join(" · ", new[] { number, color, dyeLot is null ? null : "кр. " + dyeLot }.Where(s => !string.IsNullOrEmpty(s)));

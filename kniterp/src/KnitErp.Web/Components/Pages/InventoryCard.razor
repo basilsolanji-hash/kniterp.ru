@@ -144,6 +144,10 @@ else
         @if (bt2.CanEdit)
         {
             <div class="actions"><button type="button" class="secondary" @onclick="FillBatchesAsync" disabled="@_busy">@L("Заполнить факт партий по учёту")</button></div>
+            <form class="inline-form" @onsubmit="ScanAsync">
+                <label title="@L("Каждое сканирование прибавляет к факту партии одно место: вес места партии или одну штуку")">@L("Сканер: ярлык места") <input @bind="_scan" placeholder="KB…" size="16" autocomplete="off" /></label>
+                <button type="submit" class="secondary" disabled="@_busy">@L("+1 место")</button>
+            </form>
         }
         <div class="scroll">
             <table class="compact">
@@ -276,6 +280,15 @@ else
     }
 
     private InventoryBatchesDto? _batches;
+    private string? _scan;
+
+    /// <summary>D101: сканирование ярлыка места прибавляет к факту партии одно место.</summary>
+    private Task ScanAsync() => RunAsync(async () =>
+    {
+        var (label, counted) = await Breakdowns.ScanInventoryAsync(Id, _scan, _batches!.RowVersion);
+        _scan = null;
+        _message = L("{0}: факт {1}.", label, Quantities.Format(counted));
+    }, null);
 
     private Task FillBatchesAsync() => RunAsync(async () =>
     {

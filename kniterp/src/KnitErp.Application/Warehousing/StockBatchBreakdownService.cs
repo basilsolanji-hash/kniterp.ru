@@ -236,6 +236,54 @@ public sealed class StockBatchBreakdownService(IKnitErpDbContext db, IAccessGuar
         return balances.Count;
     }
 
+    /// <summary>
+    /// Сканирование ярлыка при пересчёте (D101): каждое сканирование прибавляет к факту партии одно место — вес места партии
+    /// для весовой позиции или одну единицу для штучной. Возвращает новый факт партии.
+    /// </summary>
+    public async Task<(string Label, decimal Counted)> ScanInventoryAsync(long id, string? scanned, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, doc) = await LoadInventoryAsync(id, rowVersion, ct);
+        var text = scanned?.Trim() ?? "";
+        var batchId = StockBatch.ParseCode(text) ?? throw new BusinessRuleException("stock.batch.scan_unknown", $"«{text}» — не ярлык партии knitERP.");
+        var batch = await db.StockBatches.AsNoTracking().SingleOrDefaultAsync(b => b.Id == batchId && b.OrganizationId == ctx.OrganizationId, ct)
+                    ?? throw new BusinessRuleException("stock.batch.scan_unknown", $"Партия «{text}» не найдена.");
+        if (doc.Lines.All(l => l.ItemId != batch.ItemId))
+        {
+            throw new BusinessRuleException("stock.batch.scan_not_in_document", $"Позиции партии {batch.Number} нет в инвентаризации — добавьте строку.");
+        }
+
+        var item = await (from i in db.Items.AsNoTracking()
+                          join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
+                          where i.Id == batch.ItemId
+                          select new { u.Code, u.Precision, i.WeightKg }).SingleAsync(ct);
+        decimal step;
+        if (WeightConversion.IsWeightUnit(item.Code))
+        {
+            step = batch.PackageWeightKg is { } kg
+                ? WeightConversion.FromKg(kg, item.Code, item.WeightKg, item.Precision) ?? 0
+                : throw new BusinessRuleException("stock.batch.scan_no_weight", $"У партии {batch.Number} не указан вес места — введите факт вручную.");
+        }
+        else
+        {
+            step = 1;
+        }
+
+        var row = await db.InventoryBatchCounts.SingleOrDefaultAsync(r => r.DocumentId == id && r.ItemId == batch.ItemId && r.BatchId == batchId, ct);
+        if (row is null)
+        {
+            row = InventoryBatchCount.Create(ctx.OrganizationId, id, batch.ItemId, batchId, step);
+            db.InventoryBatchCounts.Add(row);
+        }
+        else
+        {
+            row.SetCounted(row.CountedQuantity + step);
+        }
+
+        doc.MarkBatchesChanged();
+        await db.SaveChangesAsync(ct);
+        return (StockBatch.Describe(batch.Number, batch.Color, batch.DyeLot), row.CountedQuantity);
+    }
+
     // ── Общее ─────────────────────────────────────────────────────────
 
     private async Task<(AccessContext, OpeningBalance)> LoadOpeningAsync(long id, byte[] rowVersion, CancellationToken ct)

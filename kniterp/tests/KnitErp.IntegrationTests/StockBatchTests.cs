@@ -266,6 +266,50 @@ public sealed class StockBatchTests(SqlTestHost host) : IClassFixture<SqlTestHos
         await Assert.ThrowsAsync<DbUpdateException>(() => raw.SaveChangesAsync());
     }
 
+    [SqlFact]
+    public async Task Labels_per_place_and_scanner_lookup()
+    {
+        var f = await SetUpAsync();
+        var other = await SetUpAsync();
+        await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+        var red = await s.Batches.CreateAsync(f.Wool, new StockBatchData("Я-1", "красный", "501", f.Supplier, 1.25m, null));
+        var gray = await s.Batches.CreateAsync(f.Wool, new StockBatchData("Я-2", "серый", null, null, null, null));
+        var pin = await s.Batches.CreateAsync(f.Buttons, new StockBatchData("Я-1", null, null, null, null, null));
+        var receipt = await DocAsync(s, f, StockOperationKind.Receipt, f.Yarn, null, (f.Wool, 10m), (f.Buttons, 40m));
+        await SetBatchAsync(s, receipt, f.Wool, red, 5m, 4, null);
+        await SetBatchAsync(s, receipt, f.Wool, gray, 5m, null, null);
+        await SetBatchAsync(s, receipt, f.Buttons, pin, 40m, 2, null);
+        await PostAsync(s, receipt);
+
+        // По документу: ярлык на каждое место; без числа мест — один.
+        var labels = await s.Batches.LabelsAsync([], 1, receipt);
+        Assert.Equal(7, labels.Sum(l => l.Copies));
+        var redLabel = labels.Single(l => l.Id == red);
+        Assert.Equal((StockBatch.Code(red), 4, "ООО «Пряжа»"), (redLabel.Code, redLabel.Copies, redLabel.SupplierName));
+        Assert.Equal(6, (await s.Batches.LabelsAsync([red, gray, 999_999_999], 3, null)).Sum(l => l.Copies)); // чужой/несуществующий id пропущен
+
+        // Сканер: код ярлыка, однозначный номер, неоднозначный номер.
+        Assert.Equal(red, (await s.Batches.FindByCodeAsync(" " + StockBatch.Code(red).ToLowerInvariant())).Id);
+        Assert.Equal(gray, (await s.Batches.FindByCodeAsync("Я-2")).Id);
+        Assert.Equal("stock.batch.scan_ambiguous", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Batches.FindByCodeAsync("Я-1"))).Code);
+
+        // Пересчёт сканером: каждое сканирование — одно место (1,25 кг) или одна штука.
+        var inv = await s.Inventory.CreateAsync(f.Yarn, Day, null);
+        await s.Inventory.RefillFromBookAsync(inv, (await s.Inventory.GetAsync(inv)).RowVersion);
+        await s.Breakdowns.ScanInventoryAsync(inv, StockBatch.Code(red), (await s.Inventory.GetAsync(inv)).RowVersion);
+        var (_, counted) = await s.Breakdowns.ScanInventoryAsync(inv, StockBatch.Code(red), (await s.Inventory.GetAsync(inv)).RowVersion);
+        Assert.Equal(2.5m, counted);
+        Assert.Equal(1m, (await s.Breakdowns.ScanInventoryAsync(inv, StockBatch.Code(pin), (await s.Inventory.GetAsync(inv)).RowVersion)).Counted);
+        Assert.Equal("stock.batch.scan_no_weight", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+            await s.Breakdowns.ScanInventoryAsync(inv, StockBatch.Code(gray), (await s.Inventory.GetAsync(inv)).RowVersion))).Code);
+
+        // Чужая организация не находит партию ни по коду, ни в ярлыках.
+        await using var o = host.As(other.Org.OwnerUserId, other.Org.OrganizationId);
+        Assert.Equal("stock.batch.scan_unknown", (await Assert.ThrowsAsync<BusinessRuleException>(() => o.Batches.FindByCodeAsync(StockBatch.Code(red)))).Code);
+        Assert.Empty(await o.Batches.LabelsAsync([red], 1, null));
+        await Assert.ThrowsAsync<NotFoundException>(() => o.Batches.LabelsAsync([], 1, receipt));
+    }
+
     private async Task<long> InviteActiveAsync(CreatedOrganization org, string roleCode, long? warehouseId)
     {
         long id;

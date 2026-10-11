@@ -1,0 +1,34 @@
+@using KnitErp.Domain.Common
+@*
+    D101: штрихкод Code 128 в SVG — без скриптов и внешних библиотек (CSP). Поля тишины — по 10 модулей с каждой стороны.
+*@
+@{
+    var widths = Code128.Widths(Value);
+    var total = widths.Sum() + 2 * Quiet;
+    var x = Quiet;
+}
+<svg class="barcode" viewBox="0 0 @total @HeightModules" preserveAspectRatio="none" shape-rendering="crispEdges" role="img" aria-label="@Value"
+     style="width: 100%; height: @Height; display: block">
+    <rect x="0" y="0" width="@total" height="@HeightModules" fill="#fff" />
+    @for (var i = 0; i < widths.Count; i++)
+    {
+        if (i % 2 == 0)
+        {
+            <rect x="@x" y="0" width="@widths[i]" height="@HeightModules" fill="#000" />
+        }
+
+        x += widths[i];
+    }
+</svg>
+
+@code {
+    private const int Quiet = 10;
+    private const int HeightModules = 40;
+
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = "";
+
+    /// <summary>Высота в единицах CSS, например «12mm».</summary>
+    [Parameter]
+    public string Height { get; set; } = "12mm";
+}

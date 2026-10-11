@@ -228,6 +228,17 @@ else
             </table>
         </div>
 
+        @if (bt.Items.Any(i => i.Rows.Count > 0))
+        {
+            <div class="actions"><a class="button secondary" href="print/batch-labels?doc=@Id" target="_blank" rel="noopener">@L("Ярлыки партий (по местам)")</a></div>
+        }
+        @if (bt.CanEdit)
+        {
+            <form class="inline-form" @onsubmit="ScanAsync">
+                <label>@L("Сканер: ярлык партии") <input @bind="_scan" placeholder="KB…" size="16" autocomplete="off" /></label>
+                <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
+            </form>
+        }
         @if (bt.CanEdit)
         {
             var selected = bt.Items.FirstOrDefault(i => i.ItemId == _bItemId);
@@ -380,6 +391,25 @@ else
         _doc = await Documents.GetAsync(Id);
         _batches = await BatchService.ForDocumentAsync(Id);
     }
+
+    private string? _scan;
+
+    /// <summary>D101: ярлык со сканера выбирает позицию и партию в форме разбивки.</summary>
+    private Task ScanAsync() => RunAsync(async () =>
+    {
+        var found = await BatchService.FindByCodeAsync(_scan);
+        _scan = null;
+        var item = _batches!.Items.FirstOrDefault(i => i.ItemId == found.ItemId)
+                   ?? throw new BusinessRuleException("stock.batch.scan_not_in_document", L("Позиции {0} нет в документе — сначала добавьте строку.", found.ItemCode));
+        if (!_batches.IsIncoming && item.Options.All(o => o.Id != found.Id))
+        {
+            throw new BusinessRuleException("stock.batch.insufficient", L("Партии {0} нет на складе-отправителе.", found.Label));
+        }
+
+        _bItemId = found.ItemId;
+        _bBatchId = found.Id;
+        _message = L("Выбрана партия {0} — укажите количество.", found.Label);
+    }, null);
 
     private void BatchItemChanged() => _bBatchId = _batches?.IsIncoming == true ? 0 : null;
 

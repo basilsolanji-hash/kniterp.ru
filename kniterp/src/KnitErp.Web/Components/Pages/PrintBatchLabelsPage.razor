@@ -1,0 +1,120 @@
+@page "/print/batch-labels"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using System.Globalization
+@using KnitErp.Application.Warehousing
+@using KnitErp.Web.Components.Shared
+@inject StockBatchService Batches
+
+@*
+    D101: ярлыки партий пряжи — позиция, партия, цвет, крашение, вес места, поставщик, штрихкод Code 128 с кодом партии.
+    Формат «58×40» — термопринтер этикеток (один ярлык на страницу), «A4» — лист 3×8 самоклеящихся ярлыков 70×37 мм.
+    Ярлык печатается по-русски, как и остальные печатные формы (D68).
+*@
+<PageTitle>Ярлыки партий — knitERP</PageTitle>
+@if (Size == "a4")
+{
+    <style>
+        @@media print { @@page { size: A4 portrait; margin: 0; } .print-bar { display: none; } }
+        .labels { display: grid; grid-template-columns: repeat(3, 70mm); grid-auto-rows: 37mm; width: 210mm; margin: 0 auto; background: #fff; }
+        .label { box-sizing: border-box; padding: 2.5mm 3mm; overflow: hidden; outline: 1px dashed #ccc; }
+        @@media print { .label { outline: none; } }
+    </style>
+}
+else
+{
+    <style>
+        @@media print { @@page { size: 58mm 40mm; margin: 0; } .print-bar { display: none; } .label { page-break-after: always; } }
+        .labels { display: flex; flex-wrap: wrap; gap: 4mm; background: transparent; }
+        .label { box-sizing: border-box; width: 58mm; height: 40mm; padding: 2mm 2.5mm; overflow: hidden; background: #fff; outline: 1px dashed #ccc; }
+        @@media print { .labels { display: block; } .label { outline: none; } }
+    </style>
+}
+<style>
+    .label { color: #000; font-family: Arial, sans-serif; font-size: 7.5pt; line-height: 1.2; display: flex; flex-direction: column; }
+    .label .item { font-weight: bold; font-size: 8.5pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .label .batch { font-size: 10pt; font-weight: bold; }
+    .label .meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .label .code { text-align: center; font-family: monospace; font-size: 8pt; letter-spacing: 1px; }
+    .label .bars { margin-top: auto; }
+</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="@(Doc is { } d ? $"stock-documents/{d}" : "stock-batches")">@L("← Назад")</a>
+    <a href="@Link("58x40")">58×40 мм</a>
+    <a href="@Link("a4")">A4, 3×8</a>
+    @if (_labels is not null)
+    {
+        <span>@L("Ярлыков: {0}", _labels.Sum(l => l.Copies))</span>
+    }
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_labels is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else if (_labels.Count == 0)
+{
+    <div class="sheet portrait"><p>@L("Нет партий для печати: в документе нет разбивки по партиям.")</p></div>
+}
+else
+{
+    <div class="labels">
+        @foreach (var l in _labels)
+        {
+            @for (var i = 0; i < l.Copies; i++)
+            {
+                <div class="label">
+                    <div class="item">@l.ItemCode @l.ItemName</div>
+                    <div class="batch">Партия @l.Number</div>
+                    <div class="meta">@Join(l.Color is null ? null : "Цвет: " + l.Color, l.DyeLot is null ? null : "Крашение: " + l.DyeLot)</div>
+                    <div class="meta">@Join(l.PackageWeightKg is { } w ? "Нетто места: " + w.ToString("0.###", Ru) + " кг" : null, l.Copies > 1 && l.DocumentNumber is not null ? $"место {i + 1} из {l.Copies}" : null)</div>
+                    <div class="meta">@Join(l.SupplierName, l.DocumentNumber is null ? null : $"{l.DocumentNumber} от {l.DocumentDate:dd.MM.yyyy}")</div>
+                    <div class="bars"><Barcode128 Value="@l.Code" Height="@(Size == "a4" ? "10mm" : "11mm")" /></div>
+                    <div class="code">@l.Code</div>
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "ids")]
+    public string? Ids { get; set; }
+
+    [SupplyParameterFromQuery(Name = "copies")]
+    public int? Copies { get; set; }
+
+    [SupplyParameterFromQuery(Name = "doc")]
+    public long? Doc { get; set; }
+
+    [SupplyParameterFromQuery(Name = "size")]
+    public string? Size { get; set; }
+
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private IReadOnlyList<BatchLabelDto>? _labels;
+    private string? _error;
+
+    private static string Join(params string?[] parts) => string.Join(" · ", parts.Where(p => !string.IsNullOrEmpty(p)));
+
+    private string Link(string size) =>
+        $"print/batch-labels?size={size}" + (Doc is { } d ? $"&doc={d}" : $"&ids={Ids}&copies={Copies ?? 1}");
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var ids = (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => long.TryParse(x, out var v) ? v : 0).Where(v => v > 0).ToList();
+            _labels = await Batches.LabelsAsync(ids, Copies ?? 1, Doc);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

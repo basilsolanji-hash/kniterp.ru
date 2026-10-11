@@ -41,6 +41,14 @@ public sealed record BatchItemDto(long Id, string Code, string Name, string Unit
     public decimal? KgPerUnit => WeightConversion.KgPerUnit(UnitCode, WeightKg);
 }
 
+/// <summary>Ярлык партии (D101): что печатается рядом со штрихкодом.</summary>
+public sealed record BatchLabelDto(
+    long Id, string Code, string ItemCode, string ItemName, string Number, string? Color, string? DyeLot, string? SupplierName,
+    decimal? PackageWeightKg, int Copies, string? DocumentNumber, DateOnly? DocumentDate);
+
+/// <summary>Партия, найденная по коду сканера.</summary>
+public sealed record BatchScanDto(long Id, long ItemId, string ItemCode, string Label, decimal? PackageWeightKg);
+
 public sealed record StockBatchFilter(long? ItemId = null, string? Search = null, bool IncludeArchived = false, bool OnlyWithBalance = false);
 
 /// <summary>Остаток позиции на складе с разбивкой по партиям; «без партии» = общий остаток − партии.</summary>
@@ -249,6 +257,86 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
         Audit(ctx, AuditActions.StockBatchArchived, id, "Действует", "В архиве", batch.Number);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+    }
+
+    public const int MaxLabels = 2000;
+
+    /// <summary>
+    /// Ярлыки партий (D101): по списку партий (copies штук каждой) или по складскому документу — по одному на место
+    /// (число мест из разбивки строки, если не указано — один ярлык).
+    /// </summary>
+    public async Task<IReadOnlyList<BatchLabelDto>> LabelsAsync(IReadOnlyList<long> ids, int copies, long? documentId, CancellationToken ct = default)
+    {
+        var ctx = await DemandViewAsync(ct);
+        var perBatch = new Dictionary<long, int>();
+        string? docNumber = null;
+        DateOnly? docDate = null;
+        if (documentId is { } docId)
+        {
+            var doc = await db.StockDocuments.AsNoTracking().SingleOrDefaultAsync(d => d.Id == docId && d.OrganizationId == ctx.OrganizationId, ct)
+                      ?? throw new NotFoundException("Документ");
+            var visible = WarehouseScope.Visible(ctx, ViewPermissions);
+            if (visible is not null && !visible.Contains(doc.WarehouseId) && !(doc.TargetWarehouseId is { } t && visible.Contains(t)))
+            {
+                throw new NotFoundException("Документ");
+            }
+
+            docNumber = doc.Number;
+            docDate = doc.DocumentDate;
+            foreach (var r in await db.StockDocumentBatchLines.AsNoTracking().Where(r => r.DocumentId == docId).ToListAsync(ct))
+            {
+                perBatch[r.BatchId] = perBatch.GetValueOrDefault(r.BatchId) + (r.Packages ?? 1);
+            }
+        }
+        else
+        {
+            var n = Math.Clamp(copies, 1, 100);
+            foreach (var id in ids.Distinct().Take(200))
+            {
+                perBatch[id] = n;
+            }
+        }
+
+        if (perBatch.Values.Sum() > MaxLabels)
+        {
+            throw new BusinessRuleException("stock.batch.labels_limit", $"Не больше {MaxLabels} ярлыков за раз.");
+        }
+
+        var batchIds = perBatch.Keys.ToList();
+        var rows = await (from b in db.StockBatches.AsNoTracking()
+                          join i in db.Items.AsNoTracking() on b.ItemId equals i.Id
+                          join s in db.Counterparties.AsNoTracking() on b.SupplierId equals s.Id into sj
+                          from s in sj.DefaultIfEmpty()
+                          where b.OrganizationId == ctx.OrganizationId && batchIds.Contains(b.Id)
+                          orderby i.Code, b.Id
+                          select new { b.Id, i.Code, i.Name, b.Number, b.Color, b.DyeLot, Supplier = s == null ? null : s.Name, b.PackageWeightKg })
+            .ToListAsync(ct);
+        return rows.Select(r => new BatchLabelDto(r.Id, StockBatch.Code(r.Id), r.Code, r.Name, r.Number, r.Color, r.DyeLot, r.Supplier,
+            r.PackageWeightKg, perBatch[r.Id], docNumber, docDate)).ToList();
+    }
+
+    /// <summary>Партия по коду со сканера (KB…) или по номеру партии, если он однозначен; чужая организация — «не найдено».</summary>
+    public async Task<BatchScanDto> FindByCodeAsync(string? scanned, CancellationToken ct = default)
+    {
+        var ctx = await DemandViewAsync(ct);
+        var text = scanned?.Trim() ?? "";
+        var q = db.StockBatches.AsNoTracking().Where(b => b.OrganizationId == ctx.OrganizationId && !b.IsArchived);
+        q = StockBatch.ParseCode(text) is { } id ? q.Where(b => b.Id == id) : q.Where(b => b.Number == text);
+        var found = await q.Join(db.Items.AsNoTracking(), b => b.ItemId, i => i.Id,
+                (b, i) => new { b.Id, b.ItemId, i.Code, b.Number, b.Color, b.DyeLot, b.PackageWeightKg })
+            .Take(2).ToListAsync(ct);
+        if (found.Count == 0)
+        {
+            throw new BusinessRuleException("stock.batch.scan_unknown", $"Партия «{text}» не найдена.");
+        }
+
+        if (found.Count > 1)
+        {
+            throw new BusinessRuleException("stock.batch.scan_ambiguous", $"Номер «{text}» есть у нескольких позиций — сканируйте ярлык knitERP.");
+        }
+
+        var f = found[0];
+        return new BatchScanDto(f.Id, f.ItemId, f.Code, StockBatch.Describe(f.Number, f.Color, f.DyeLot), f.PackageWeightKg);
     }
 
     /// <summary>Разбивка строк документа по партиям и фактические движения партий (после проведения).</summary>

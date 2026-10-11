@@ -50,6 +50,10 @@ else
             {
                 <button type="button" @onclick="NewBatch" disabled="@_busy">@L("Новая партия")</button>
             }
+            @if (_rows.Any(b => !b.IsArchived))
+            {
+                <a class="button secondary" href="print/batch-labels?ids=@string.Join(",", _rows.Where(b => !b.IsArchived).Take(200).Select(b => b.Id))" target="_blank" rel="noopener">@L("Ярлыки показанных")</a>
+            }
         </form>
 
         @if (_form is not null)
@@ -121,6 +125,7 @@ else
                                 @if (_canEdit && !b.IsArchived)
                                 {
                                     <div class="row-actions">
+                                        <a class="button secondary" href="print/batch-labels?ids=@b.Id" target="_blank" rel="noopener">@L("Ярлык")</a>
                                         <button type="button" class="secondary" @onclick="() => Edit(b)" disabled="@_busy">@L("Изменить")</button>
                                         <ConfirmButton Class="secondary" Disabled="_busy" Question="@L("Перенести партию в архив?")" OnConfirm="() => ArchiveAsync(b)">@L("В архив")</ConfirmButton>
                                     </div>
