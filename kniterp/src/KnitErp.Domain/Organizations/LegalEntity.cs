@@ -229,6 +229,12 @@ public sealed class LegalEntityAccount
     /// <summary>Остаток на начало учёта в knitERP (D80); движения считаются с <see cref="OpeningDate"/> включительно.</summary>
     public decimal OpeningBalance { get; private set; }
 
+    /// <summary>
+    /// Лимит остатка наличных в кассе (D87, п. 2 Указания Банка России № 3210-У): сверх него наличные сдаются в банк. Малое
+    /// предприятие и ИП вправе лимит не устанавливать — тогда пусто. Превышение показывается предупреждением, а не запретом.
+    /// </summary>
+    public decimal? CashLimit { get; private set; }
+
     public DateOnly? OpeningDate { get; private set; }
 
     public bool IsDefault { get; private set; }
@@ -253,6 +259,21 @@ public sealed class LegalEntityAccount
         }
 
         BankName = DomainText.Require(name, BankNameMaxLength, "Название кассы");
+    }
+
+    public void SetCashLimit(decimal? limit)
+    {
+        if (!IsCash)
+        {
+            throw new BusinessRuleException("money.cash_limit.not_cash", "Лимит остатка устанавливается только для кассы.");
+        }
+
+        if (limit is { } l && (l < 0 || Money.Round(l) != l || l > 999_999_999_999m))
+        {
+            throw new BusinessRuleException("money.cash_limit", "Лимит остатка кассы — не меньше нуля, до копеек.");
+        }
+
+        CashLimit = limit;
     }
 
     /// <summary>Начальный остаток на дату (D80): может быть и отрицательным (овердрафт), до копеек.</summary>

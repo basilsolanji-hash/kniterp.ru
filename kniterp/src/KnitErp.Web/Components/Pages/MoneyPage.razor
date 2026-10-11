@@ -129,6 +129,10 @@ else
                             }
                         }
                         <label>@L("Дата") <input type="date" @bind="_form.Date" required /></label>
+                        @if (_form.Kind == MoneyOperationKind.Expense && Accountable())
+                        {
+                            <label>@L("Срок, на который выдан аванс") <input type="date" @bind="_form.AdvanceDue" /></label>
+                        }
                         <label>@L("Сумма") <input @bind="_form.Amount" inputmode="decimal" required /></label>
                         @if (_form.Kind != MoneyOperationKind.Transfer && !Accountable())
                         {
@@ -266,6 +270,7 @@ else
         public string? Comment { get; set; }
         public string Item { get; set; } = string.Empty;
         public string Employee { get; set; } = string.Empty;
+        public DateTime? AdvanceDue { get; set; }
     }
 
     private IReadOnlyList<CashFlowItemDto> _items = [];
@@ -357,7 +362,8 @@ else
 
         var id = await Operations.CreateAsync(new MoneyOperationCommand(DateOnly.FromDateTime(f.Date), f.Kind, long.Parse(f.Account),
             transfer && long.TryParse(f.Target, out var t) ? t : null, amount, Accountable() ? null : f.Party, f.Basis, f.Comment,
-            !transfer && long.TryParse(f.Item, out var item) ? item : null, employee));
+            !transfer && long.TryParse(f.Item, out var item) ? item : null, employee,
+            f.Kind == MoneyOperationKind.Expense && employee is not null && f.AdvanceDue is { } due ? DateOnly.FromDateTime(due) : null));
         _form = null;
         var op = await Operations.GetAsync(id);
         _message = L("Проведено: {0} {1}.", L(op.KindName), op.Number);

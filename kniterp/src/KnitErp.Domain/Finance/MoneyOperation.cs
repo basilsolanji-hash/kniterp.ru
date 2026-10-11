@@ -71,6 +71,12 @@ public sealed class MoneyOperation
     public long? EmployeeId { get; private set; }
 
     /// <summary>
+    /// Срок, на который выдан аванс (D87): авансовый отчёт — не позже 3 рабочих дней после него (п. 6.3 Указания № 3210-У).
+    /// Только у выдачи под отчёт; не указан — 30 дней с даты выдачи.
+    /// </summary>
+    public DateOnly? AdvanceDueDate { get; private set; }
+
+    /// <summary>
     /// Кассовые ордера перемещения (D86): из кассы — РКО (CashOrderNumber), в кассу — ПКО (TargetCashOrderNumber); номер самой
     /// операции — ПД. Так сдача выручки в банк и получение наличных попадают в кассовую книгу под своими ордерами.
     /// </summary>
@@ -88,8 +94,16 @@ public sealed class MoneyOperation
 
     public static MoneyOperation Create(
         long organizationId, string number, DateOnly date, MoneyOperationKind kind, long accountId, long? targetAccountId, decimal amount,
-        string? party, string? basis, string? comment, long userId, DateTime nowUtc, long? cashFlowItemId = null, long? employeeId = null)
+        string? party, string? basis, string? comment, long userId, DateTime nowUtc, long? cashFlowItemId = null, long? employeeId = null, DateOnly? advanceDueDate = null)
     {
+        if (advanceDueDate is { } due && (kind != MoneyOperationKind.Expense || employeeId is null || due < date))
+        {
+            throw new BusinessRuleException("money.advance_due",
+                kind != MoneyOperationKind.Expense || employeeId is null
+                    ? "Срок аванса указывается только при выдаче под отчёт."
+                    : "Срок аванса не может быть раньше даты выдачи.");
+        }
+
         if (amount <= 0 || Money.Round(amount) != amount)
         {
             throw new BusinessRuleException("money.amount", "Сумма — больше нуля, до копеек.");
@@ -131,6 +145,7 @@ public sealed class MoneyOperation
             Comment = DomainText.Optional(comment, CommentMaxLength, "Комментарий"),
             CashFlowItemId = cashFlowItemId,
             EmployeeId = employeeId,
+            AdvanceDueDate = advanceDueDate,
             Status = MoneyOperationStatus.Posted,
             CreatedByUserId = userId,
             CreatedAtUtc = nowUtc,

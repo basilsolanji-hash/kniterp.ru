@@ -1575,6 +1575,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("AccountId")
                         .HasColumnType("bigint");
 
+                    b.Property<DateOnly?>("AdvanceDueDate")
+                        .HasColumnType("date");
+
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(19,4)");
 
@@ -1868,6 +1871,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<string>("Bic")
                         .IsRequired()
                         .HasColumnType("varchar(11)");
+
+                    b.Property<decimal?>("CashLimit")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("CorrAccount")
                         .HasColumnType("varchar(34)");

@@ -12,7 +12,8 @@ using Microsoft.EntityFrameworkCore;
 namespace KnitErp.Application.Finance;
 
 /// <summary>Расчёты с подотчётным лицом: выдано под отчёт, возвращено, отчитано (утверждённые авансовые отчёты). Debt больше нуля — долг сотрудника, меньше — перерасход (долг организации).</summary>
-public sealed record AccountableBalanceDto(long EmployeeId, string Employee, string PersonnelNumber, decimal Issued, decimal Returned, decimal Reported)
+public sealed record AccountableBalanceDto(long EmployeeId, string Employee, string PersonnelNumber, decimal Issued, decimal Returned, decimal Reported,
+    DateOnly? Deadline = null)
 {
     public decimal Debt => Issued - Returned - Reported;
 }
@@ -58,7 +59,23 @@ public sealed class AccountableService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task<IReadOnlyList<AccountableBalanceDto>> BalancesAsync(DateOnly? asOf = null, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.PriceView, ct);
-        return await BalancesAsync(db, ctx.OrganizationId, asOf, null, ct);
+        var rows = await BalancesAsync(db, ctx.OrganizationId, asOf, null, ct);
+        if (asOf is not null)
+        {
+            return rows;
+        }
+
+        // D87: последний день авансового отчёта — по первой непогашенной выдаче.
+        var deadlines = await MoneyAlerts.DeadlinesAsync(db, ctx.OrganizationId, ct);
+        return rows.Select(r => r.Debt > 0 && deadlines.TryGetValue(r.EmployeeId, out var d) ? r with { Deadline = d } : r).ToList();
+    }
+
+    /// <summary>Напоминания по деньгам: просроченные авансовые отчёты, долг подотчётных, кассы сверх лимита (D87).</summary>
+    public async Task<MoneyAlertsDto> AlertsAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.PriceView, ct);
+        var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
+        return await MoneyAlerts.ComputeAsync(db, ctx.OrganizationId, DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, tz)), ct);
     }
 
     internal static async Task<IReadOnlyList<AccountableBalanceDto>> BalancesAsync(IKnitErpDbContext db, long org, DateOnly? asOf, long? employeeId,

@@ -219,6 +219,23 @@ public sealed class NotificationService(IKnitErpDbContextFactory factory, Person
                 }
             }
 
+            // D87: деньги — просроченные авансовые отчёты и кассы сверх лимита.
+            if (ctx.Permissions.Has(Permissions.PriceView))
+            {
+                var alerts = await KnitErp.Application.Finance.MoneyAlerts.ComputeAsync(db, ctx.OrganizationId, today, ct);
+                foreach (var a in alerts.OverdueAdvances)
+                {
+                    result.Add(new($"Просрочен авансовый отчёт: {a.Employee}, {a.Amount:N2} (срок {PersonalToolsService.FormatDate(a.Deadline)})", "accountables",
+                        null, NotificationLevel.Warning, $"advance:{a.EmployeeId}:{a.Deadline:yyyyMMdd}"));
+                }
+
+                foreach (var c in alerts.CashOverLimit)
+                {
+                    result.Add(new($"Остаток кассы выше лимита: {c.Cash} — {c.Balance:N2} при лимите {c.Limit:N2}", "money", null, NotificationLevel.Warning,
+                        $"cashlimit:{c.AccountId}:{today:yyyyMMdd}"));
+                }
+            }
+
             var answered = await db.SupportTickets.AsNoTracking()
                 .Where(t => t.OrganizationId == ctx.OrganizationId && t.AuthorUserId == ctx.UserId && t.UnreadByAuthor)
                 .Select(t => new { t.Number, t.Status }).ToListAsync(ct);

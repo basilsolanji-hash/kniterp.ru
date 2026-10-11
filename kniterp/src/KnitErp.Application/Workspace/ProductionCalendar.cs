@@ -35,6 +35,23 @@ public static class ProductionCalendar
         }
     }
 
+    /// <summary>Дата через n рабочих дней после date: без суббот, воскресений и праздников страны (переносы не учитываются).</summary>
+    public static DateOnly AddWorkingDays(string countryCode, DateOnly date, int days)
+    {
+        var holidays = Holidays(countryCode, date, date.AddDays(days * 3 + 30)).Select(h => h.Date).ToHashSet();
+        var d = date;
+        while (days > 0)
+        {
+            d = d.AddDays(1);
+            if (d.DayOfWeek is not (DayOfWeek.Saturday or DayOfWeek.Sunday) && !holidays.Contains(d))
+            {
+                days--;
+            }
+        }
+
+        return d;
+    }
+
     /// <summary>Годовщины даты в диапазоне; 29 февраля в невисокосный год — 28 февраля.</summary>
     public static IEnumerable<DateOnly> Anniversaries(DateOnly date, DateOnly from, DateOnly to)
     {

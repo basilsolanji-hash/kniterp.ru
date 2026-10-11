@@ -11,7 +11,7 @@ namespace KnitErp.Application.Organizations;
 
 public sealed record LegalEntityAccountDto(
     long Id, string BankName, string Bic, string Account, string? CorrAccount, bool IsDefault, bool IsArchived, byte[] RowVersion,
-    MoneyAccountKind Kind = MoneyAccountKind.Bank, decimal OpeningBalance = 0, DateOnly? OpeningDate = null)
+    MoneyAccountKind Kind = MoneyAccountKind.Bank, decimal OpeningBalance = 0, DateOnly? OpeningDate = null, decimal? CashLimit = null)
 {
     public bool IsCash => Kind == MoneyAccountKind.Cash;
 
@@ -55,7 +55,7 @@ public sealed class LegalEntityService(IKnitErpDbContext db, IAccessGuard guard,
         return entities.Select(e => new LegalEntityDto(e.Id, e.Kind, e.Name, e.ShortName, e.Inn, e.Kpp, e.Ogrn, e.LegalAddress, e.DirectorPosition,
                 e.DirectorName, e.AccountantName, e.VatExempt, e.IsDefault, e.IsArchived, orders.GetValueOrDefault(e.Id),
                 accounts[e.Id].Select(a => new LegalEntityAccountDto(a.Id, a.BankName, a.Bic, a.Account, a.CorrAccount, a.IsDefault, a.IsArchived,
-                    a.RowVersion, a.Kind, a.OpeningBalance, a.OpeningDate)).ToList(), e.RowVersion))
+                    a.RowVersion, a.Kind, a.OpeningBalance, a.OpeningDate, a.CashLimit)).ToList(), e.RowVersion))
             .ToList();
     }
 
@@ -235,6 +235,17 @@ public sealed class LegalEntityService(IKnitErpDbContext db, IAccessGuard guard,
         account.SetOpening(date, amount);
         Audit(ctx, AuditActions.CatalogChanged, nameof(LegalEntityAccount), id, before, $"{account.OpeningBalance:0.00} на {account.OpeningDate:dd.MM.yyyy}",
             "Начальный остаток");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>Лимит остатка кассы (D87); null — лимит не установлен (малое предприятие и ИП вправе не устанавливать).</summary>
+    public async Task SetCashLimitAsync(long id, decimal? limit, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, account) = await LoadAccountAsync(id, rowVersion, ct);
+        var before = account.CashLimit is { } b ? $"{b:0.00}" : "не установлен";
+        account.SetCashLimit(limit);
+        Audit(ctx, AuditActions.CatalogChanged, nameof(LegalEntityAccount), id, before, account.CashLimit is { } a ? $"{a:0.00}" : "не установлен",
+            "Лимит остатка кассы");
         await db.SaveOrConflictAsync(ct);
     }
 

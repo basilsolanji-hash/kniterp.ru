@@ -16,7 +16,7 @@ namespace KnitErp.Application.Finance;
 /// </summary>
 public sealed record MoneyOperationCommand(
     DateOnly Date, MoneyOperationKind Kind, long AccountId, long? TargetAccountId, decimal Amount, string? Party, string? Basis, string? Comment,
-    long? CashFlowItemId = null, long? EmployeeId = null);
+    long? CashFlowItemId = null, long? EmployeeId = null, DateOnly? AdvanceDueDate = null);
 
 /// <summary>
 /// Кассовый ордер для печати: КО-1 (приходный) или КО-2 (расходный) по формам постановления Госкомстата России № 88.
@@ -183,7 +183,7 @@ public sealed class MoneyOperationService(IKnitErpDbContext db, IAccessGuard gua
 
         // Все проверки — до выдачи номера: счётчик сохраняется сразу, и отказ после него оставил бы счётчик в контексте вкладки.
         MoneyOperation.Create(ctx.OrganizationId, "—", cmd.Date, cmd.Kind, cmd.AccountId, cmd.TargetAccountId, cmd.Amount, party, cmd.Basis,
-            cmd.Comment, ctx.UserId, clock.UtcNow, itemId, employee?.Id);
+            cmd.Comment, ctx.UserId, clock.UtcNow, itemId, employee?.Id, cmd.AdvanceDueDate);
         await using var tx = await db.BeginTransactionAsync(ct);
         if (cmd.Kind != MoneyOperationKind.Income)
         {
@@ -204,7 +204,7 @@ public sealed class MoneyOperationService(IKnitErpDbContext db, IAccessGuard gua
 
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, MoneyOperation.PrefixFor(cmd.Kind, source.IsCash), ct);
         var op = MoneyOperation.Create(ctx.OrganizationId, number, cmd.Date, cmd.Kind, cmd.AccountId, cmd.TargetAccountId, cmd.Amount, party, cmd.Basis,
-            cmd.Comment, ctx.UserId, clock.UtcNow, itemId, employee?.Id);
+            cmd.Comment, ctx.UserId, clock.UtcNow, itemId, employee?.Id, cmd.AdvanceDueDate);
 
         // D86: перемещение из кассы — РКО, в кассу — ПКО (в общей нумерации кассовых ордеров): так оно попадает в кассовую книгу.
         if (op.Kind == MoneyOperationKind.Transfer && (source.IsCash || target!.IsCash))

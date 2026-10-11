@@ -364,6 +364,15 @@ else
                     @if (f.OrdersToShip is { } os) { @Attention(L("Заказы ждут отгрузки"), os, L("подтверждены, отгружены не полностью"), "sales-orders", null) }
                     @if (f.SupplierInvoicesToPay is { } sp) { @Attention(L("Счета поставщиков к оплате"), sp, L("не оплачены полностью"), "supplier-invoices", f.SupplierToPay) }
                     @if (f.ReceiptsWithoutVatInvoice is { } rv) { @Attention(L("Приёмки без счёта-фактуры"), rv, L("зарегистрируйте документ поставщика"), "vat-invoices/received", null) }
+                    @if (f.MoneyAlerts is { } ma)
+                    {
+                        @Attention(L("Просроченные авансовые отчёты"), ma.OverdueAdvances.Count, L("срок отчёта подотчётного лица прошёл"), "accountables",
+                            ma.OverdueAdvances.Count > 0 ? ma.OverdueAdvances.Sum(o => o.Amount) : null)
+                        @if (ma.CashOverLimit.Count > 0)
+                        {
+                            @Attention(L("Остаток кассы выше лимита"), ma.CashOverLimit.Count, L("сдайте наличные в банк"), "money", ma.CashOverLimit.Sum(c => c.Balance - c.Limit))
+                        }
+                    }
                 }
             </ul>
         </section>

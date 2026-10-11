@@ -165,11 +165,11 @@ else
             <h3 style="margin-top: 14px">@L("Кассы")</h3>
             <div class="scroll">
                 <table class="compact">
-                    <thead><tr><th>@L("Касса")</th><th class="num">@L("Остаток на начало")</th>@if (CanEdit) { <th></th> }</tr></thead>
+                    <thead><tr><th>@L("Касса")</th><th class="num">@L("Остаток на начало")</th><th class="num opt">@L("Лимит остатка")</th>@if (CanEdit) { <th></th> }</tr></thead>
                     <tbody>
                         @if (!e.Accounts.Any(a => a.IsCash))
                         {
-                            <tr><td colspan="3" class="muted">@L("Касс пока нет. Наличные учитываются, если завести кассу.")</td></tr>
+                            <tr><td colspan="4" class="muted">@L("Касс пока нет. Наличные учитываются, если завести кассу.")</td></tr>
                         }
                         @foreach (var a in e.Accounts.Where(a => a.IsCash))
                         {
@@ -178,6 +178,7 @@ else
                                 {
                                     <td><input @bind="_cash.Name" maxlength="@LegalEntityAccount.BankNameMaxLength" aria-label="@L("Название кассы")" /></td>
                                     <td class="num">@Opening(a)</td>
+                                    <td class="num">@Limit(a)</td>
                                     <td>
                                         <button type="button" @onclick="SaveCashAsync" disabled="@_busy">@L("Сохранить")</button>
                                         <button type="button" class="secondary" @onclick="() => _cash = null">@L("Отмена")</button>
@@ -187,6 +188,7 @@ else
                                 {
                                     <td>@a.BankName @if (a.IsArchived) { <span class="tag">@L("архив")</span> }</td>
                                     <td class="num">@Opening(a)</td>
+                                    <td class="num">@Limit(a)</td>
                                     @if (CanEdit)
                                     {
                                         <td>
@@ -194,6 +196,7 @@ else
                                             {
                                                 <button type="button" class="secondary" @onclick="() => _cash = new CashDraft { Id = a.Id, EntityId = e.Id, Name = a.BankName, RowVersion = a.RowVersion }" disabled="@_busy">@L("Переименовать")</button>
                                                 <button type="button" class="secondary" @onclick="() => StartOpening(a)" disabled="@_busy">@L("Остаток")</button>
+                                                <button type="button" class="secondary" @onclick="() => StartLimit(a)" disabled="@_busy">@L("Лимит")</button>
                                                 <ConfirmButton Class="secondary" OnConfirm="() => ArchiveAccountAsync(a, true)" Disabled="@_busy" Question='@L("Отправить в архив?")'>@L("В архив")</ConfirmButton>
                                             }
                                             else if (a.IsArchived && !e.IsArchived)
@@ -206,13 +209,18 @@ else
                             </tr>
                             @if (_opening?.Id == a.Id)
                             {
-                                <tr><td colspan="3">@OpeningEditor()</td></tr>
+                                <tr><td colspan="4">@OpeningEditor()</td></tr>
+                            }
+                            @if (_limit?.Id == a.Id)
+                            {
+                                <tr><td colspan="4">@LimitEditor()</td></tr>
                             }
                         }
                         @if (_cash is { Id: null } && _cash.EntityId == e.Id)
                         {
                             <tr>
                                 <td><input @bind="_cash.Name" maxlength="@LegalEntityAccount.BankNameMaxLength" placeholder="@L("Касса цеха")" aria-label="@L("Название кассы")" /></td>
+                                <td></td>
                                 <td></td>
                                 <td>
                                     <button type="button" @onclick="SaveCashAsync" disabled="@_busy">@L("Добавить")</button>
@@ -462,6 +470,38 @@ else
 
         _account = null;
     }, L("Счёт сохранён."));
+
+    private OpeningDraft? _limit;
+
+    private string Limit(LegalEntityAccountDto a) => a.CashLimit is { } l ? Amounts.Format(l) : "—";
+
+    private void StartLimit(LegalEntityAccountDto a) =>
+        _limit = _limit?.Id == a.Id
+            ? null
+            : new OpeningDraft { Id = a.Id, RowVersion = a.RowVersion, Amount = a.CashLimit?.ToString("0.##", System.Globalization.CultureInfo.CurrentCulture) ?? string.Empty };
+
+    private RenderFragment LimitEditor() => __builder =>
+    {
+        var o = _limit!;
+        <form class="inline-form" style="margin: 0" @onsubmit="SaveLimitAsync">
+            <label>@L("Лимит остатка кассы") <input @bind="o.Amount" inputmode="decimal" size="14" placeholder="@L("не установлен")" /></label>
+            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+            <button type="button" class="secondary" @onclick="() => _limit = null">@L("Отмена")</button>
+            <span class="muted small">@L("Сверх лимита наличные сдаются в банк. Малое предприятие и ИП вправе лимит не устанавливать — оставьте поле пустым.")</span>
+        </form>
+    };
+
+    private Task SaveLimitAsync() => RunAsync(async () =>
+    {
+        var o = _limit!;
+        decimal? limit = string.IsNullOrWhiteSpace(o.Amount) ? null
+            : decimal.TryParse(o.Amount.Replace(" ", string.Empty).Replace("\u00A0", string.Empty).Replace(',', '.'), System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var v)
+                ? v
+                : throw new BusinessRuleException("money.cash_limit", L("Лимит — число, например 50000."));
+        await Entities.SetCashLimitAsync(o.Id, limit, o.RowVersion);
+        _limit = null;
+    }, L("Лимит остатка сохранён."));
 
     private string Opening(LegalEntityAccountDto a) =>
         a.OpeningDate is { } d ? $"{Amounts.Format(a.OpeningBalance)} {L("на {0}", d.ToString("dd.MM.yyyy"))}" : "—";

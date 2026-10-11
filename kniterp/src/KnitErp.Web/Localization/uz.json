@@ -2173,5 +2173,21 @@
   "Утвердить отчёт? Строки больше не изменить.": "Hisobot tasdiqlansinmi? Qatorlarni endi o'zgartirib bo'lmaydi.",
   "Утверждён авансовый отчёт": "Avans hisoboti tasdiqlandi",
   "Хозяйственные нужды": "Xo'jalik ehtiyojlari",
-  "Чистый денежный поток": "Sof pul oqimi"
+  "Чистый денежный поток": "Sof pul oqimi",
+  "Лимит": "Limit",
+  "Лимит — число, например 50000.": "Limit — son, masalan 50000.",
+  "Лимит остатка": "Qoldiq limiti",
+  "Лимит остатка кассы": "Kassa qoldig'i limiti",
+  "Лимит остатка кассы — не меньше нуля, до копеек.": "Kassa qoldig'i limiti — noldan kam emas, tiyingacha.",
+  "Лимит остатка сохранён.": "Qoldiq limiti saqlandi.",
+  "Лимит остатка устанавливается только для кассы.": "Qoldiq limiti faqat kassa uchun belgilanadi.",
+  "не установлен": "belgilanmagan",
+  "Остаток кассы выше лимита": "Kassa qoldig'i limitdan yuqori",
+  "Отчитаться до": "Hisobot berish muddati",
+  "Просроченные авансовые отчёты": "Muddati o'tgan avans hisobotlari",
+  "Сверх лимита наличные сдаются в банк. Малое предприятие и ИП вправе лимит не устанавливать — оставьте поле пустым.": "Limitdan ortiq naqd pul bankka topshiriladi. Kichik korxona va YaTT limit belgilamasligi mumkin — maydonni bo'sh qoldiring.",
+  "сдайте наличные в банк": "naqd pulni bankka topshiring",
+  "срок отчёта подотчётного лица прошёл": "hisobdor shaxsning hisobot muddati o'tdi",
+  "срок прошёл": "muddati o'tdi",
+  "Срок, на который выдан аванс": "Avans berilgan muddat"
 }

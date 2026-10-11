@@ -36,7 +36,8 @@ public sealed record DashboardDebtorDto(long Id, string Name, decimal Debt);
 public sealed record DashboardFinanceDto(
     decimal? CustomerDebt, decimal? SupplierDebt, int? OverdueInvoices, decimal? OverdueAmount, int? SupplierInvoicesToPay,
     decimal? SupplierToPay, int? OrdersToShip, int? ReceiptsWithoutVatInvoice, IReadOnlyList<DashboardDebtorDto> TopDebtors,
-    int? OverdueShipments = null, int? OverdueReceipts = null, IReadOnlyList<MoneyAccountBalanceDto>? Accounts = null)
+    int? OverdueShipments = null, int? OverdueReceipts = null, IReadOnlyList<MoneyAccountBalanceDto>? Accounts = null,
+    KnitErp.Application.Finance.MoneyAlertsDto? MoneyAlerts = null)
 {
     /// <summary>Деньги на всех счетах и в кассах всех юрлиц (D80).</summary>
     public decimal? AccountsTotal => Accounts?.Sum(a => a.Balance);
@@ -467,8 +468,11 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
         }
 
         var accounts = parts.HasFlag(Parts.Accounts) ? await MoneyService.BalancesAsync(db, org, today, includeArchived: false, ct) : null;
+
+        // D87: просроченные авансовые отчёты, долг подотчётных лиц, кассы сверх лимита.
+        var alerts = attention ? await KnitErp.Application.Finance.MoneyAlerts.ComputeAsync(db, org, today, ct) : null;
         return new DashboardFinanceDto(customerDebt, supplierDebt, overdue, overdueAmount, toPay, supplierToPay, toShip, null, top,
-            lateShipments, lateReceipts, accounts);
+            lateShipments, lateReceipts, accounts, alerts);
     }
 
     /// <summary>Сумма по цене строки заказа с НДС: сумма строки / количество строки (как UnitCostWithVat заказа).</summary>

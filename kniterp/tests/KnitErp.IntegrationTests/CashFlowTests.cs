@@ -181,6 +181,60 @@ public sealed class CashFlowTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         await Assert.ThrowsAsync<NotFoundException>(() => o.CashReports.CashBookAsync(cash, Day, Day));
     }
 
+    [SqlFact]
+    public async Task Overdue_advance_reports_and_cash_over_limit_are_reminded()
+    {
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var entity = (await s.LegalEntities.ListAsync()).Single().Id;
+        var cash = await s.LegalEntities.AddCashAsync(entity, "Касса");
+        await s.MoneyOperations.CreateAsync(new MoneyOperationCommand(Day.AddDays(-60), MoneyOperationKind.Income, cash, null, 50_000m, null, "Взнос", null));
+        var anna = await HireAsync(s, "001", "Иванова", "Анна");
+        var boris = await HireAsync(s, "002", "Петров", "Борис");
+
+        // Анна: аванс 05.10 на срок до 06.10 → отчитаться до 09.10 (3 рабочих дня) — сегодня 09.10, ещё не просрочено.
+        // Борис: аванс 60 дней назад без срока → 30 дней + 3 рабочих — просрочено.
+        await s.MoneyOperations.CreateAsync(new MoneyOperationCommand(Day.AddDays(-4), MoneyOperationKind.Expense, cash, null, 1_000m, null,
+            "Под отчёт", null, null, anna, Day.AddDays(-3)));
+        await s.MoneyOperations.CreateAsync(new MoneyOperationCommand(Day.AddDays(-60), MoneyOperationKind.Expense, cash, null, 2_000m, null,
+            "Под отчёт", null, null, boris));
+        Assert.Equal("money.advance_due", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.MoneyOperations.CreateAsync(
+            new MoneyOperationCommand(Day, MoneyOperationKind.Expense, cash, null, 1m, null, "x", null, null, anna, Day.AddDays(-1))))).Code);
+        Assert.Equal("money.advance_due", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.MoneyOperations.CreateAsync(
+            new MoneyOperationCommand(Day, MoneyOperationKind.Expense, cash, null, 1m, null, "x", null, null, null, Day.AddDays(5))))).Code);
+
+        var rows = await s.Accountables.BalancesAsync();
+        Assert.Equal(Day, rows.Single(r => r.EmployeeId == anna).Deadline);
+        var alerts = await s.Accountables.AlertsAsync();
+        Assert.Equal(boris, alerts.OverdueAdvances.Single().EmployeeId);
+        Assert.Equal(3_000m, alerts.AccountableDebt);
+
+        // Лимит кассы 40 000 при остатке 47 000 — предупреждение; без лимита — нет.
+        Assert.Empty(alerts.CashOverLimit);
+        var row = (await s.LegalEntities.ListAsync()).Single().Accounts.Single(a => a.Id == cash);
+        await s.LegalEntities.SetCashLimitAsync(cash, 40_000m, row.RowVersion);
+        var over = (await s.Accountables.AlertsAsync()).CashOverLimit.Single();
+        Assert.Equal((47_000m, 40_000m), (over.Balance, over.Limit));
+        var bank = await BankAsync(s);
+        var bankRow = (await s.LegalEntities.ListAsync()).Single().Accounts.Single(a => a.Id == bank);
+        Assert.Equal("money.cash_limit.not_cash", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            s.LegalEntities.SetCashLimitAsync(bank, 1m, bankRow.RowVersion))).Code);
+
+        // Главный экран и уведомления показывают то же.
+        var dash = await s.Dashboard.GetAsync(refresh: true);
+        Assert.Single(dash.Finance!.MoneyAlerts!.OverdueAdvances);
+        var notes = await s.Notifications.ListAsync();
+        Assert.Contains(notes, n => n.Text.Contains("Просрочен авансовый отчёт") && n.Text.Contains("Петров"));
+        Assert.Contains(notes, n => n.Text.Contains("Остаток кассы выше лимита"));
+
+        // Утверждённый отчёт Бориса на всю сумму снимает просрочку.
+        var report = await s.Accountables.CreateReportAsync(boris, Day, null, null);
+        var item = (await s.Accountables.OptionsAsync()).ExpenseItems.First().Id;
+        await s.Accountables.AddLineAsync(report, Day, "Чек № 1", null, 2_000m, item, (await s.Accountables.GetReportAsync(report)).RowVersion);
+        await s.Accountables.ApproveAsync(report, (await s.Accountables.GetReportAsync(report)).RowVersion);
+        Assert.Empty((await s.Accountables.AlertsAsync()).OverdueAdvances);
+    }
+
     private static async Task<long> BankAsync(Services s)
     {
         var entity = (await s.LegalEntities.ListAsync()).Single();
