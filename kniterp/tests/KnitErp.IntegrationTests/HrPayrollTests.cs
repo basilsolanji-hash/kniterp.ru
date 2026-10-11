@@ -116,6 +116,29 @@ public sealed class HrPayrollTests(SqlTestHost host) : IClassFixture<SqlTestHost
     }
 
     [SqlFact]
+    public async Task Pairs_from_production_are_paid_and_operations_without_rate_are_listed()
+    {
+        // Как отдаёт производство (D92): операция — этап 1–5, единица — обозначение единицы изделия («пар», «шт.»).
+        var org = await host.CreateOrganizationAsync();
+        var (dep, _, employeeId) = await host.HireAsync(org, hiredOn: new DateOnly(2026, 9, 1));
+        var output = new FakeWorkOutputSource(
+            new WorkOutputDto(employeeId, new DateOnly(2026, 10, 2), 1, "Вязание", 501, 40, "пар"),
+            new WorkOutputDto(employeeId, new DateOnly(2026, 10, 3), 2, "Сборка", 501, 12, "Шт."));
+        await using var hr = host.Hr(org.OwnerUserId, org.OrganizationId, output);
+        await hr.Payroll.AddRateAsync(new PieceRateCommand(1, "Вязание носков", 501, "Пар", 35m, new DateOnly(2026, 10, 1)));
+
+        var operations = await hr.Payroll.OperationsAsync(); // «сегодня» тестов — 09.10.2026
+        Assert.True(operations.Single(o => o.OperationId == 1).HasRate);
+        var missing = operations.Single(o => o.OperationId == 2);
+        Assert.Equal((false, "шт", "Сборка"), (missing.HasRate, missing.Unit, missing.OperationName));
+
+        await hr.Timesheets.CreateAsync(dep, 2026, 10);
+        var calc = await hr.Payroll.CalculateAsync(2026, 10);
+        Assert.Contains(calc.Warnings, w => w.Contains("Сборка"));
+        Assert.Equal(40 * 35m, (await hr.Payroll.GetAsync(2026, 10)).Employees.Single().Piece);
+    }
+
+    [SqlFact]
     public async Task Without_production_source_piece_part_is_zero_and_other_roles_are_denied()
     {
         var org = await host.CreateOrganizationAsync();

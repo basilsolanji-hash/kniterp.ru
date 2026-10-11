@@ -28,9 +28,17 @@ public sealed class HrPayrollRulesTests
     [Fact]
     public void Rate_validation()
     {
-        Assert.Equal("hr.rate.unit", Assert.Throws<BusinessRuleException>(() => PieceRate.Create(1, 1, "x", null, "м", 1, Dec1, 1, Now)).Code);
+        Assert.Equal("hr.rate.unit", Assert.Throws<BusinessRuleException>(() => PieceRate.Create(1, 1, "x", null, " . ", 1, Dec1, 1, Now)).Code);
+        Assert.Equal("пар", PieceRate.Create(1, 1, "Вязка носков", null, "Пар.", 1, Dec1, 1, Now).Unit);
         Assert.Equal("hr.rate.price", Assert.Throws<BusinessRuleException>(() => PieceRate.Create(1, 1, "x", null, "кг", 0, Dec1, 1, Now)).Code);
     }
+
+    [Theory]
+    [InlineData("шт", "шт")]
+    [InlineData(" Шт. ", "шт")]
+    [InlineData("ПАР", "пар")]
+    [InlineData(null, "")]
+    public void Unit_is_normalized(string? unit, string expected) => Assert.Equal(expected, PieceRate.NormalizeUnit(unit));
 
     [Theory]
     [InlineData(1, 300)]   // 1 ч × 200 × 1,5

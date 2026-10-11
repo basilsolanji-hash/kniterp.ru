@@ -9,7 +9,13 @@ namespace KnitErp.Domain.Hr;
 public sealed class PieceRate
 {
     public const int NameMaxLength = 200;
-    public static readonly IReadOnlySet<string> Units = new HashSet<string>(StringComparer.Ordinal) { "шт", "кг" };
+    public const int UnitMaxLength = 10;
+
+    /// <summary>Частые единицы для подсказки в форме; расценка принимает любую единицу изделия (D215).</summary>
+    public static readonly IReadOnlyList<string> CommonUnits = ["шт", "пар", "кг", "м", "компл"];
+
+    /// <summary>Единица для сравнения: без пробелов и точки на конце, строчными — «Шт.» и «шт» одно и то же.</summary>
+    public static string NormalizeUnit(string? unit) => (unit ?? string.Empty).Trim().TrimEnd('.').Trim().ToLowerInvariant();
 
     private PieceRate()
     {
@@ -40,9 +46,10 @@ public sealed class PieceRate
             throw new BusinessRuleException("hr.rate.operation", "Укажите операцию.");
         }
 
-        if (!Units.Contains(unit))
+        unit = NormalizeUnit(unit);
+        if (unit.Length is 0 or > UnitMaxLength)
         {
-            throw new BusinessRuleException("hr.rate.unit", "Единица расценки — «шт» или «кг».");
+            throw new BusinessRuleException("hr.rate.unit", "Единица расценки — обозначение единицы изделия до 10 символов (шт, пар, кг…).");
         }
 
         if (price <= 0 || decimal.Round(price, 4) != price)

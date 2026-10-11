@@ -2403,8 +2403,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Unit")
                         .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("nvarchar(5)");
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
 
                     b.Property<DateOnly>("ValidFrom")
                         .HasColumnType("date");
@@ -2424,7 +2424,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_hr_piece_rates_price", "[Price] > 0");
 
-                            t.HasCheckConstraint("ck_hr_piece_rates_unit", "[Unit] IN (N'шт', N'кг')");
+                            t.HasCheckConstraint("ck_hr_piece_rates_unit", "LEN([Unit]) > 0");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);

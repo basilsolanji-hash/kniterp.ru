@@ -11,6 +11,9 @@ namespace KnitErp.Application.Hr;
 
 public sealed record PieceRateDto(long Id, long OperationId, string OperationName, long? ItemId, string Unit, decimal Price, DateOnly ValidFrom);
 
+/// <summary>Операция из выработки производства за последние месяцы и есть ли на неё действующая расценка (D215).</summary>
+public sealed record WorkOperationDto(long OperationId, string OperationName, long? ItemId, string Unit, decimal Quantity, bool HasRate);
+
 public sealed record PieceRateCommand(long OperationId, string OperationName, long? ItemId, string Unit, decimal Price, DateOnly ValidFrom);
 
 public sealed record PayrollEmployeeDto(long EmployeeId, string PersonnelNumber, string FullName, string Position, decimal Piece, decimal Salary,
@@ -53,6 +56,23 @@ public sealed class PayrollService(
         return await db.PieceRates.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId)
             .OrderBy(r => r.OperationName).ThenBy(r => r.ItemId).ThenByDescending(r => r.ValidFrom)
             .Select(r => new PieceRateDto(r.Id, r.OperationId, r.OperationName, r.ItemId, r.Unit, r.Price, r.ValidFrom)).ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Операции, по которым производство отметило выработку за 3 последних месяца, — подсказка для расценок: код операции и единица
+    /// берутся из производства, а не вводятся вручную. HasRate — есть ли расценка изделия или общая расценка операции на сегодня.
+    /// </summary>
+    public async Task<IReadOnlyList<WorkOperationDto>> OperationsAsync(CancellationToken ct = default)
+    {
+        var ctx = await DemandViewAsync(ct);
+        var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, tz));
+        var rows = await output.OutputAsync(ctx.OrganizationId, new DateOnly(today.Year, today.Month, 1).AddMonths(-2), today, ct);
+        var rates = await db.PieceRates.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId).ToListAsync(ct);
+        return rows.GroupBy(r => (r.OperationId, r.ItemId, Unit: PieceRate.NormalizeUnit(r.Unit)))
+            .Select(g => new WorkOperationDto(g.Key.OperationId, g.First().OperationName, g.Key.ItemId, g.Key.Unit, g.Sum(r => r.Quantity),
+                PieceRate.Find(rates, g.Key.OperationId, g.Key.ItemId, today) is { } rate && PieceRate.NormalizeUnit(rate.Unit) == g.Key.Unit))
+            .OrderBy(o => o.HasRate).ThenBy(o => o.OperationId).ThenBy(o => o.ItemId).ToList();
     }
 
     public async Task<long> AddRateAsync(PieceRateCommand cmd, CancellationToken ct = default)
@@ -155,7 +175,7 @@ public sealed class PayrollService(
             var workedHours = worked.Sum(d => d.Hours);
 
             decimal piece = 0;
-            foreach (var g in outputs.Where(o => o.EmployeeId == e.Id).GroupBy(o => (o.OperationId, o.ItemId, o.Unit)))
+            foreach (var g in outputs.Where(o => o.EmployeeId == e.Id).GroupBy(o => (o.OperationId, o.ItemId, Unit: PieceRate.NormalizeUnit(o.Unit))))
             {
                 foreach (var byRate in g.GroupBy(o => PieceRate.Find(rates, o.OperationId, o.ItemId, o.Date)))
                 {
@@ -166,7 +186,7 @@ public sealed class PayrollService(
                         continue;
                     }
 
-                    if (rate.Unit != g.Key.Unit)
+                    if (PieceRate.NormalizeUnit(rate.Unit) != g.Key.Unit)
                     {
                         warnings.Add($"{e.FullName}: «{rate.OperationName}» — выработка в «{g.Key.Unit}», расценка в «{rate.Unit}»: не оплачено.");
                         continue;

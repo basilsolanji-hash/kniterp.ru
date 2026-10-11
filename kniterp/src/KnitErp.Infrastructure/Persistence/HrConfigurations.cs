@@ -298,13 +298,13 @@ internal sealed class PieceRateConfiguration : IEntityTypeConfiguration<PieceRat
         b.ToTable("hr_piece_rates", t =>
         {
             t.HasCheckConstraint("ck_hr_piece_rates_price", "[Price] > 0");
-            t.HasCheckConstraint("ck_hr_piece_rates_unit", "[Unit] IN (N'шт', N'кг')");
+            t.HasCheckConstraint("ck_hr_piece_rates_unit", "LEN([Unit]) > 0");
             t.HasTrigger("tr_hr_piece_rates_immutable");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.OperationName).HasMaxLength(PieceRate.NameMaxLength).IsRequired();
-        b.Property(x => x.Unit).HasMaxLength(5).IsRequired();
+        b.Property(x => x.Unit).HasMaxLength(PieceRate.UnitMaxLength).IsRequired();
         b.Property(x => x.Price).HasPrecision(19, 4);
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);

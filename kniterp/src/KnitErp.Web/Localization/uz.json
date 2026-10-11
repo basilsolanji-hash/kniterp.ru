@@ -2735,7 +2735,6 @@
   "Добавлена сдельная расценка": "Ishbay narx qo'shildi",
   "Доплата за работу в ночное время (ст. 154 ТК РФ)": "Tungi ish uchun qo'shimcha haq (RF MK 154-modda)",
   "Доплаты": "Qo'shimcha haqlar",
-  "Единица расценки — «шт» или «кг».": "Narx birligi — «dona» yoki «kg».",
   "Заработок": "Ish haqi",
   "Заработок и расчётные листки: просмотр": "Ish haqi va hisob varaqalari: ko'rish",
   "Заработок: расценки, расчёт и утверждение": "Ish haqi: narxlar, hisoblash va tasdiqlash",
@@ -2774,7 +2773,14 @@
   "Утвердить расчёт можно только по закрытым табелям: закройте табели и пересчитайте.": "Hisobni faqat yopilgan tabellar bo'yicha tasdiqlash mumkin: tabellarni yoping va qayta hisoblang.",
   "Утверждён расчёт заработка": "Ish haqi hisobi tasdiqlandi",
   "Цена, руб.": "Narx, rubl",
-  "шт": "dona",
   "История назначений": "Tayinlashlar tarixi",
-  "Табели месяца изменились после расчёта: пересчитайте и утвердите снова.": "Oy tabellari hisobdan keyin o'zgardi: qayta hisoblang va qayta tasdiqlang."
+  "Табели месяца изменились после расчёта: пересчитайте и утвердите снова.": "Oy tabellari hisobdan keyin o'zgardi: qayta hisoblang va qayta tasdiqlang.",
+  "Выработка": "Ishlab chiqarilgan",
+  "Единица расценки — обозначение единицы изделия до 10 символов (шт, пар, кг…).": "Narx birligi — buyum birligining 10 belgigacha belgisi (dona, juft, kg…).",
+  "есть": "bor",
+  "Задать расценку": "Narx belgilash",
+  "нет — не оплачивается": "yo'q — to'lanmaydi",
+  "Операции из производства за 3 месяца": "So'nggi 3 oydagi ishlab chiqarish operatsiyalari",
+  "Расценка": "Narx",
+  "Укажите цену и дату — остальное заполнено из производства.": "Narx va sanani ko'rsating — qolgani ishlab chiqarishdan to'ldirildi."
 }
