@@ -9,6 +9,9 @@ description: Порядок сдачи одного этапа knitERP (ветк
    - Префикс — свой у сессии (каталог — `Cat`). SQL вне модели (триггеры) — `migrationBuilder.Sql("EXEC(N'…')")`, в Down — `DROP … IF EXISTS`.
    - Триггер на таблице → `t.HasTrigger("имя")` в конфигурации, иначе EF падает на OUTPUT («target table has database triggers»).
    - Пересоздать свою неприменённую миграцию: удалить её файлы, `git checkout` снапшота, снова `migrations add` (`migrations remove` хочет базу).
+   - **Идемпотентный скрипт** (так обновляется рабочий сервер): `dotnet ef migrations script --idempotent -p src/KnitErp.Infrastructure -o /tmp/m.sql`,
+     затем выполнить его дважды на пустой базе: `sqlcmd -C -I -b -d <база> -i /tmp/m.sql` (`-I` — QUOTED_IDENTIFIER для фильтрованных индексов).
+     Любой SQL в `migrationBuilder.Sql`, который ссылается на колонки этой же миграции, — только через `EXEC(N'…')`, иначе пакет не компилируется.
 2. **Сборка**: `dotnet build kniterp/KnitErp.slnx` — предупреждения = ошибки.
 3. **Тесты**: `export KNITERP_TEST_SQL="Server=localhost,1433;User Id=sa;Password=<пароль>;TrustServerCertificate=true;Encrypt=false"`;
    `dotnet test kniterp/tests/KnitErp.UnitTests` и `dotnet test kniterp/tests/KnitErp.IntegrationTests` (полный прогон ~3–5 мин, запускать в фоне).

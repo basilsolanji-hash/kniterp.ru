@@ -54,14 +54,20 @@ public sealed class ItemTradeService(IKnitErpDbContext db, IAccessGuard guard, I
             details = details with { MinPrice = item.MinPrice };
         }
 
-        var changes = item.SetTrade(details);
-        if (item.Gtin is { } gtin
+        // Проверки — до изменения позиции: у вкладки Blazor один DbContext, отклонённая правка не должна остаться в нём.
+        if (item.IsArchived)
+        {
+            throw new BusinessRuleException("catalog.archived", "Позиция в архиве. Сначала верните её из архива.");
+        }
+
+        if (TradeRules.Normalize(item.Type, details).Gtin is { } gtin
             && await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && i.Gtin == gtin && i.Id != itemId)
                 .Select(i => i.Code).FirstOrDefaultAsync(ct) is { } owner)
         {
             throw new BusinessRuleException("catalog.gtin.duplicate", $"GTIN {gtin} уже у позиции {owner}.");
         }
 
+        var changes = item.SetTrade(details);
         foreach (var c in changes)
         {
             db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CatalogChanged, nameof(Item), itemId.ToString(),

@@ -7,6 +7,8 @@
 @inject ModificationService Modifications
 @inject BundleService Bundles
 @inject ItemTradeService Trade
+@inject PackService PackList
+@inject CatalogService Catalog
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -359,6 +361,55 @@ else
         </form>
     }
 
+    @if (_item.IsStocked)
+    {
+        <h2 style="margin-top: 20px">@L("Упаковки")</h2>
+        <p class="muted">@L("Например, коробка = 12 шт или мешок = 25 кг. Свой штрихкод упаковки: скан даёт позицию и количество в основных единицах.")</p>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Упаковка")</th><th class="num">@L("Основных единиц")</th><th>@L("Штрихкод")</th>@if (editable) { <th></th> }</tr></thead>
+                <tbody>
+                    @if (_packs.Count == 0)
+                    {
+                        <tr><td colspan="4" class="muted">@L("Упаковок нет.")</td></tr>
+                    }
+                    @foreach (var p in _packs)
+                    {
+                        var pack = p;
+                        <tr>
+                            <td>@p.UnitName (@p.UnitSymbol)</td>
+                            <td class="num">@Quantities.Format(p.Factor) @_item.UnitSymbol</td>
+                            <td class="barcode">@(p.Barcode ?? "—")</td>
+                            @if (editable)
+                            {
+                                <td><ConfirmButton Class="secondary" OnConfirm='() => RunAsync(() => PackList.RemoveAsync(pack.Id, pack.RowVersion), L("Упаковка убрана."))' Disabled="@_busy" Question='@L("Убрать упаковку?")'>@L("Убрать")</ConfirmButton></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (editable)
+        {
+            <form class="inline-form" @onsubmit="SavePackAsync">
+                <label>
+                    @L("Упаковка")
+                    <select @bind="_packUnit">
+                        <option value="">@L("— выберите —")</option>
+                        @foreach (var u in _units.Where(u => u.Id != _item.UnitId))
+                        {
+                            <option value="@u.Id">@u.Name (@u.Symbol)</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Сколько {0} в упаковке", _item.UnitSymbol) <input @bind="_packFactor" inputmode="decimal" size="8" /></label>
+                <label>@L("Штрихкод упаковки") <input @bind="_packBarcode" maxlength="@ItemBarcode.CodeMaxLength" size="16" /></label>
+                <button type="submit" disabled="@_busy">@L("Сохранить упаковку")</button>
+            </form>
+            <p class="muted small">@L("Нет нужной единицы (коробка, мешок)? Добавьте её в справочник единиц:") <a href="catalog/settings">@L("Единицы")</a></p>
+        }
+    }
+
     <h2 style="margin-top: 20px">@L("Фото")</h2>
     <p class="muted">@L("JPEG, PNG или WebP до 2 МБ, не больше {0}. Первое — основное: оно видно в списке номенклатуры.", ItemPhoto.MaxPerItem)</p>
     @if (_photos.Count > 0)
@@ -536,6 +587,26 @@ else
     private ItemVariantsDto? _variants;
     private BundleDto? _bundle;
     private ItemTradeDto? _trade;
+    private IReadOnlyList<ItemPackDto> _packs = [];
+    private IReadOnlyList<UnitDto> _units = [];
+    private string _packUnit = string.Empty;
+    private string? _packFactor;
+    private string? _packBarcode;
+
+    /// <summary>D307: упаковка той же единицы заменяется (новый коэффициент и штрихкод).</summary>
+    private Task SavePackAsync() => RunAsync(async () =>
+    {
+        if (!long.TryParse(_packUnit, out var unitId))
+        {
+            throw new BusinessRuleException("catalog.pack.unit", L("Выберите единицу упаковки."));
+        }
+
+        var factor = Decimals.Parse(_packFactor, L("Основных единиц")) ?? throw new BusinessRuleException("catalog.pack.factor", L("Укажите, сколько основных единиц в упаковке."));
+        await PackList.SetAsync(Id, unitId, factor, _packBarcode);
+        _packUnit = string.Empty;
+        _packFactor = null;
+        _packBarcode = null;
+    }, L("Упаковка сохранена."));
     private TradeForm _tradeForm = new();
 
     private sealed class TradeForm
@@ -645,6 +716,8 @@ else
         _values = _variants.Values.ToDictionary(v => v.CharacteristicId, v => (string?)v.Value);
         _bundle = _item.Type == ItemType.Bundle ? await Bundles.GetAsync(Id) : null;
         _trade = await Trade.GetAsync(Id);
+        _packs = _item.IsStocked ? await PackList.ListAsync(Id) : [];
+        _units = _item.IsStocked && _item.CanEdit ? await Catalog.ListUnitsAsync() : [];
         _tradeForm = new TradeForm
         {
             Subject = _trade.Trade.PaymentSubject, IsMarked = _trade.Trade.IsMarked,

@@ -50,7 +50,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 defaultValue: (byte)0);
 
             // D305: у действующих услуг признак предмета расчёта — «услуга» (до CHECK ck_items_payment_subject).
-            migrationBuilder.Sql("UPDATE [kniterp].[items] SET [PaymentSubject] = 4 WHERE [Type] = 10;");
+            // Через EXEC: в идемпотентном скрипте пакет компилируется до добавления колонки.
+            migrationBuilder.Sql("EXEC(N'UPDATE [kniterp].[items] SET [PaymentSubject] = 4 WHERE [Type] = 10;');");
 
             migrationBuilder.CreateTable(
                 name: "price_revaluations",

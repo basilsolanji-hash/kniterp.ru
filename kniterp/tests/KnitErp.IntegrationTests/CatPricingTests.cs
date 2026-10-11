@@ -116,6 +116,18 @@ public sealed class CatPricingTests(SqlTestHost host) : IClassFixture<SqlTestHos
                 s.Revaluations.ApplyAsync(request with { Kind = ItemKind.Service }))).Code);
         }
 
+        // Один DbContext на вкладку (как в Blazor): отказ на середине правки цен не оставляет частичных изменений.
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var archived = await s.Nomenclature.CreatePriceTypeAsync("Старый опт", false);
+            await s.Nomenclature.SetPriceTypeArchivedAsync(archived, true, (await s.Nomenclature.PriceTypesAsync(true)).Single(t => t.Id == archived).RowVersion);
+            Assert.Equal("catalog.archived", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Nomenclature.SetPricesAsync(f.Scarf, new Dictionary<long, decimal?> { [f.PriceType] = 999, [archived] = 5 }))).Code);
+            var card = await s.Nomenclature.GetItemAsync(f.Scarf);
+            await s.Nomenclature.SaveItemDetailsAsync(f.Scarf, card.Details with { Article = "SCARF" }, new Dictionary<long, string?>(), card.RowVersion);
+            Assert.NotEqual(999m, (await s.Nomenclature.GetItemAsync(f.Scarf)).Prices.Single(p => p.PriceTypeId == f.PriceType).Price);
+        }
+
         // Право: Старший кладовщик переоценку не проводит; чужая организация не видит вид цены.
         await using (var s = host.As(f.Senior, f.Org.OrganizationId))
         {

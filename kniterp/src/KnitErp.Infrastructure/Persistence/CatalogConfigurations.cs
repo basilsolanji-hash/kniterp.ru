@@ -99,3 +99,25 @@ internal sealed class PriceRevaluationConfiguration : IEntityTypeConfiguration<P
         b.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc }).HasDatabaseName("ix_price_revaluations_org_time");
     }
 }
+
+internal sealed class ItemPackConfiguration : IEntityTypeConfiguration<ItemPack>
+{
+    public void Configure(EntityTypeBuilder<ItemPack> b)
+    {
+        b.ToTable("item_packs", t => t.HasCheckConstraint("ck_item_packs_factor", "[Factor] > 0"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Factor).HasColumnType("decimal(18,6)");
+        b.Property(x => x.Barcode).HasColumnType("varchar(64)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_item_packs_item");
+        b.HasOne<UnitOfMeasure>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.UnitId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_item_packs_unit");
+        // У позиции одна упаковка каждой единицы; штрихкод упаковки уникален в организации (и не совпадает со штрихкодами позиций — сервис).
+        b.HasIndex(x => new { x.ItemId, x.UnitId }).IsUnique().HasDatabaseName("ux_item_packs_item_unit");
+        b.HasIndex(x => new { x.OrganizationId, x.Barcode }).IsUnique().HasFilter("[Barcode] IS NOT NULL").HasDatabaseName("ux_item_packs_org_barcode");
+    }
+}

@@ -469,6 +469,12 @@ public sealed class ItemExchangeService(
                     .Join(db.Items.AsNoTracking(), b => b.ItemId, i => i.Id, (b, i) => new { Barcode = b.Code, b.ItemId, ItemCode = i.Code })
                     .ToListAsync(ct))
                 .Select(x => (x.Barcode, x.ItemId, x.ItemCode)).ToList();
+            // D307: штрихкоды упаковок заняты для любой позиции (ItemId = long.MinValue — не совпадает ни с одной).
+            barcodeOwners.AddRange((await db.ItemPacks.AsNoTracking()
+                    .Where(p => p.OrganizationId == org && p.Barcode != null && fileBarcodes.Contains(p.Barcode))
+                    .Join(db.Items.AsNoTracking(), p => p.ItemId, i => i.Id, (p, i) => new { Barcode = p.Barcode!, ItemCode = i.Code })
+                    .ToListAsync(ct))
+                .Select(x => (x.Barcode, long.MinValue, x.ItemCode)));
             currentPrices = (await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == org && ids.Contains(p.ItemId)).ToListAsync(ct))
                 .ToLookup(p => p.ItemId);
             parentKeys = (await db.Items.AsNoTracking()
@@ -497,6 +503,7 @@ public sealed class ItemExchangeService(
             : (await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == org && convertIds.Contains(m.ItemId)).Select(m => m.ItemId)
                 .Concat(db.StockBatches.AsNoTracking().Where(b => b.OrganizationId == org && convertIds.Contains(b.ItemId)).Select(b => b.ItemId))
                 .Concat(db.BundleComponents.AsNoTracking().Where(c => c.OrganizationId == org && convertIds.Contains(c.ComponentItemId)).Select(c => c.ComponentItemId))
+                .Concat(db.ItemPacks.AsNoTracking().Where(p => p.OrganizationId == org && convertIds.Contains(p.ItemId)).Select(p => p.ItemId))
                 .Concat(db.Items.AsNoTracking().Where(i => i.OrganizationId == org && i.ParentItemId != null && convertIds.Contains(i.ParentItemId.Value))
                     .Select(i => i.ParentItemId!.Value))
                 .Distinct().ToListAsync(ct)).ToHashSet();

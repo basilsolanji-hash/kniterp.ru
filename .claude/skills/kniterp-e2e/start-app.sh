@@ -13,9 +13,10 @@ export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__KnitErp="Server=localhost,1433;Database=$db;User Id=sa;Password=${KNITERP_SA_PASSWORD:?задайте KNITERP_SA_PASSWORD};TrustServerCertificate=true;Encrypt=false"
 dotnet build "$root/src/KnitErp.Web" -v q -nologo >/dev/null
 nohup dotnet run --no-build --project "$root/src/KnitErp.Web" --urls "https://localhost:5443" >"$E2E_DIR/app.log" 2>&1 &
-for i in $(seq 1 120); do
-  if grep -q "account/invite?token=" "$E2E_DIR/app.log" 2>/dev/null; then break; fi
-  if grep -q "Now listening" "$E2E_DIR/app.log" 2>/dev/null && [ "$i" -gt 60 ]; then break; fi
+# Ссылка приглашения пишется при старте раньше, чем Kestrel слушает порт: ждём «Now listening» (и ссылку, если база новая).
+for i in $(seq 1 180); do
+  if grep -q "Now listening" "$E2E_DIR/app.log" 2>/dev/null; then break; fi
+  if grep -qE "Unhandled exception|fail: " "$E2E_DIR/app.log" 2>/dev/null; then echo "сбой запуска — см. $E2E_DIR/app.log" >&2; exit 1; fi
   sleep 1
 done
 token="$(grep -o 'account/invite?token=[^ ]*' "$E2E_DIR/app.log" | head -1 | sed 's/.*token=//')"

@@ -225,6 +225,12 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             await EnsureTypeChangeAsync(ctx, item, cmd.Type, ct);
         }
 
+        if (cmd.UnitId != item.UnitId && await db.ItemPacks.AnyAsync(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == id, ct))
+        {
+            // D307: коэффициенты упаковок заданы в основной единице — при её смене они потеряли бы смысл.
+            throw new BusinessRuleException("catalog.pack.unit_change", "У позиции есть упаковки: их коэффициенты заданы в основной единице. Уберите упаковки, затем меняйте единицу.");
+        }
+
         var changes = item.Update(cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description);
         if (cmd.VatRateId != oldVat)
         {
@@ -279,6 +285,13 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             throw service
                 ? new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать услугой.")
                 : new BusinessRuleException("catalog.service.variants", "Позицию с модификациями (или модификацию) нельзя сделать комплектом.");
+        }
+
+        if (await db.ItemPacks.AnyAsync(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == item.Id, ct))
+        {
+            throw service
+                ? new BusinessRuleException("catalog.pack.exists", $"У позиции {item.Code} есть упаковки — уберите их, затем делайте услугой.")
+                : new BusinessRuleException("catalog.pack.exists", $"У позиции {item.Code} есть упаковки — уберите их, затем делайте комплектом.");
         }
 
         if (await db.BundleComponents.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.ComponentItemId == item.Id, ct))

@@ -27,6 +27,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<BundleComponent> BundleComponents => Set<BundleComponent>();
     public DbSet<ItemPriceHistory> ItemPriceHistory => Set<ItemPriceHistory>();
     public DbSet<PriceRevaluation> PriceRevaluations => Set<PriceRevaluation>();
+    public DbSet<ItemPack> ItemPacks => Set<ItemPack>();
     public DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations => Set<KnitErp.Domain.Finance.MoneyOperation>();
     public DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens => Set<KnitErp.Domain.Integrations.ApiToken>();
     public DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions => Set<KnitErp.Domain.Integrations.WebhookSubscription>();

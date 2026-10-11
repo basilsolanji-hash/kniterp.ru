@@ -893,6 +893,56 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPack", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Barcode")
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<decimal>("Factor")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long>("UnitId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId", "UnitId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_item_packs_item_unit");
+
+                    b.HasIndex("OrganizationId", "Barcode")
+                        .IsUnique()
+                        .HasDatabaseName("ux_item_packs_org_barcode")
+                        .HasFilter("[Barcode] IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "ItemId");
+
+                    b.HasIndex("OrganizationId", "UnitId");
+
+                    b.ToTable("item_packs", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_item_packs_factor", "[Factor] > 0");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPhoto", b =>
                 {
                     b.Property<long>("Id")
@@ -4993,6 +5043,25 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_item_groups_parent");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPack", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_packs_item");
+
+                    b.HasOne("KnitErp.Domain.Catalog.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "UnitId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_packs_unit");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPhoto", b =>

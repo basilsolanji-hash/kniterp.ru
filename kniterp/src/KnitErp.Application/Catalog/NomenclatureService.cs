@@ -177,6 +177,20 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
     public async Task SaveItemDetailsAsync(long id, ItemDetails details, IReadOnlyDictionary<long, string?> customFields, byte[] rowVersion,
         CancellationToken ct = default)
     {
+        try
+        {
+            await SaveItemDetailsCoreAsync(id, details, customFields, rowVersion, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // D304: отклонённая правка не остаётся в DbContext вкладки (сведения меняются до проверки доп. полей)
+            throw;
+        }
+    }
+
+    private async Task SaveItemDetailsCoreAsync(long id, ItemDetails details, IReadOnlyDictionary<long, string?> customFields, byte[] rowVersion,
+        CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         var item = await db.Items.SingleOrDefaultAsync(i => i.Id == id && i.OrganizationId == ctx.OrganizationId, ct)
                    ?? throw new NotFoundException("Номенклатура");
@@ -237,7 +251,10 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         var barcode = ItemBarcode.Create(ctx.OrganizationId, itemId, type ?? ItemBarcode.Detect(trimmed.Replace(" ", string.Empty, StringComparison.Ordinal)),
             trimmed);
         var owner = await db.ItemBarcodes.AsNoTracking().Where(b => b.OrganizationId == ctx.OrganizationId && b.Code == barcode.Code)
-            .Join(db.Items.AsNoTracking(), b => b.ItemId, i => i.Id, (b, i) => i.Code + " " + i.Name).FirstOrDefaultAsync(ct);
+                        .Join(db.Items.AsNoTracking(), b => b.ItemId, i => i.Id, (b, i) => i.Code + " " + i.Name).FirstOrDefaultAsync(ct)
+                    // D307: штрихкод упаковки тоже занят — сканер должен находить одно.
+                    ?? await db.ItemPacks.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.Barcode == barcode.Code)
+                        .Join(db.Items.AsNoTracking(), p => p.ItemId, i => i.Id, (p, i) => i.Code + " " + i.Name).FirstOrDefaultAsync(ct);
         if (owner is not null)
         {
             throw new BusinessRuleException("catalog.barcode.duplicate", $"Штрихкод {barcode.Code} уже у позиции {owner}.");
@@ -271,6 +288,19 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
 
     /// <summary>Цены позиции по видам цен: значение — задать, null — убрать. Нужны права на номенклатуру и на цены.</summary>
     public async Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct = default)
+    {
+        try
+        {
+            await SetPricesCoreAsync(itemId, prices, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // D304: цены меняются по одной — при отказе на середине ничего не остаётся в DbContext вкладки
+            throw;
+        }
+    }
+
+    private async Task SetPricesCoreAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         await guard.DemandAsync(Permissions.PriceView, ct);
