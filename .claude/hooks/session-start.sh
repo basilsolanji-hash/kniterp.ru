@@ -49,9 +49,7 @@ if command -v docker >/dev/null 2>&1; then
   fi
 fi
 
-# 5. Playwright для e2e: браузер уже стоит в /opt/pw-browsers.
+# 5. Playwright для e2e (tests/KnitErp.E2ETests, .NET): браузер уже стоит в /opt/pw-browsers.
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers" >> "$CLAUDE_ENV_FILE"
 fi
-cd "$ROOT/kniterp/tests/e2e"
-npm install --no-audit --no-fund --silent

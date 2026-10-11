@@ -13,8 +13,10 @@ description: Как собрать knitERP и запустить его тест
 2. `dotnet test tests/KnitErp.UnitTests` — сюда входит `TranslationCoverageTests`.
 3. `dotnet test tests/KnitErp.IntegrationTests` — около 2 минут, каждый тест-класс получает свою базу. Убедиться, что Skipped = 0.
 4. Если менялась модель: `dotnet ef migrations has-pending-model-changes -p src/KnitErp.Infrastructure` → «No changes».
-5. Если менялся интерфейс: `dotnet build src/KnitErp.Web`, затем `cd tests/e2e && npx playwright test` (около минуты; приложение
-   поднимается на новой базе `kniterp_e2e_*`, вход Владельца с 2FA выполняется автоматически).
+5. Если менялся интерфейс: `dotnet test tests/KnitErp.E2ETests` (единый .NET-набор кадров и производства, около 2 минут; каждая
+   фикстура поднимает приложение на своей тестовой базе, Владелец кадров входит с 2FA сам). Только кадры: `--filter "FullyQualifiedName~HrE2ETests"`.
+   Снимки упавших сценариев — в `KNITERP_E2E_ARTIFACTS`. Новый сценарий кадров — метод в `HrE2ETests` (помощники `StructureAsync`,
+   `StaffAsync`, `HireOrderAsync`, `OpenAsync`), запуск приложения — общий `WebAppProcess`.
 
 Узкий прогон: `dotnet test tests/KnitErp.IntegrationTests --filter "FullyQualifiedName~Hr"`.
 
@@ -27,7 +29,7 @@ description: Как собрать knitERP и запустить его тест
 ## Проверка слияния веток (до настоящего слияния)
 1. `git worktree add --detach <scratch>/trial <своя-ветка>`, затем в ней `git merge --no-commit --no-ff origin/<другая-ветка>`.
 2. `python3 .claude/skills/kniterp-tests/resolve-merge.py` — типовые конфликты: значения TaggedEntity, ветки ObjectDirectory, CHECK «1–29», снапшот.
-3. Сборка, `has-pending-model-changes`, все тесты, включая e2e обеих веток (`tests/e2e` на Node и `tests/KnitErp.E2ETests` на .NET, если она есть).
+3. Сборка, `has-pending-model-changes`, все тесты, включая e2e (`tests/KnitErp.E2ETests`; набор на Node `tests/e2e` удалён 11.10.2026 — если слияние его вернуло, удалите).
 4. Проверить порядок миграций по времени: миграция, которая выполняется позже, не должна сужать ограничение, расширенное другой.
 5. `git worktree remove --force <scratch>/trial`; в чужие ветки не пушить.
 
@@ -57,4 +59,4 @@ description: Как собрать knitERP и запустить его тест
 ## Ссылки на файлы в Blazor
 Ссылка на выгрузку (xlsx, xml, pdf) — с `download data-enhance-nav="false"`, иначе улучшенная навигация Blazor перехватывает её и файл
 не скачивается. Не давайте ссылку на файл, которого может не быть (404 скачивается как пустой «.txt»): показывайте только существующие
-варианты. В e2e проверяйте скачивание через `page.waitForEvent('download')` и имя файла.
+варианты. В e2e проверяйте скачивание через `page.RunAndWaitForDownloadAsync` и имя файла.
