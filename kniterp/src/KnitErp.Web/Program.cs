@@ -100,6 +100,8 @@ if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
     builder.Services.AddHostedService<KnitErp.Web.Api.WebhookWorker>();
 }
 
+// D102: тело запросов API — как и ответы: перечисления строками («Receipt»), имена в camelCase.
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddOpenApi("v1", o =>
 {
     o.ShouldInclude = d => d.RelativePath?.StartsWith("api/v1/", StringComparison.Ordinal) == true;
@@ -240,14 +242,31 @@ app.UseRequestLocalization(o =>
     o.RequestCultureProviders = [new Microsoft.AspNetCore.Localization.CookieRequestCultureProvider()];
 });
 // D88: тело изменяющих запросов API читается дважды — для действия и для хэша Idempotency-Key.
-app.Use((http, next) =>
+app.Use(async (http, next) =>
 {
-    if (http.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(http.Request.Method))
+    if (!http.Request.Path.StartsWithSegments("/api"))
+    {
+        await next();
+        return;
+    }
+
+    if (!HttpMethods.IsGet(http.Request.Method))
     {
         http.Request.EnableBuffering();
     }
 
-    return next();
+    try
+    {
+        await next();
+    }
+    catch (BadHttpRequestException ex) when (!http.Response.HasStarted)
+    {
+        // Неразборчивый JSON или параметр — 400 problem+json, а не страница ошибки.
+        http.Response.Clear();
+        http.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await http.Response.WriteAsJsonAsync(KnitErp.Web.Api.ApiErrors.Problem(400, "format", ex.InnerException?.Message ?? ex.Message),
+            KnitErp.Web.Api.ApiJson.Options, "application/problem+json");
+    }
 });
 app.UseRateLimiter();
 app.UseAuthentication();

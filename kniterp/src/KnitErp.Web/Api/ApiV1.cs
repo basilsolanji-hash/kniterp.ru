@@ -9,12 +9,15 @@ using KnitErp.Application.Common;
 using KnitErp.Application.Finance;
 using KnitErp.Application.Purchasing;
 using KnitErp.Application.Sales;
+using KnitErp.Application.Tagging;
 using KnitErp.Application.Warehousing;
 using KnitErp.Domain.Catalog;
 using KnitErp.Domain.Common;
 using KnitErp.Domain.Integrations;
 using KnitErp.Domain.Purchasing;
 using KnitErp.Domain.Sales;
+using KnitErp.Domain.Tagging;
+using KnitErp.Domain.Warehousing;
 using KnitErp.Web.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
@@ -108,6 +111,25 @@ public static class ApiV1
     public sealed record CustomerPaymentInput(
         DateOnly Date, long CustomerId, long? OrderId, decimal Amount, string? Comment, string? DocumentNumber, long? MoneyAccountId);
 
+    // D102: складские документы, заказы поставщикам, партии и теги.
+    public sealed record BatchPartInput(long BatchId, decimal Quantity, int? Packages, decimal? GrossWeightKg);
+
+    public sealed record StockLineInput(long ItemId, decimal Quantity, IReadOnlyList<BatchPartInput>? Batches);
+
+    public sealed record StockDocumentInput(
+        StockOperationKind Kind, long WarehouseId, long? TargetWarehouseId, long? CounterpartyId, long? ReasonId, DateOnly DocumentDate, string? Comment,
+        long? PurchaseOrderId, long? SalesOrderId, IReadOnlyList<StockLineInput> Lines, bool Post = false);
+
+    public sealed record ReverseInput(string RowVersion, string? Reason);
+
+    public sealed record PurchaseOrderInput(
+        DateOnly OrderDate, long SupplierId, long WarehouseId, DateOnly? ExpectedDate, string? SupplierInvoice, bool PricesIncludeVat, string? Comment,
+        long? LegalEntityId, IReadOnlyList<OrderLineInput> Lines, bool Confirm = false);
+
+    public sealed record BatchInput(long ItemId, string? Number, string? Color, string? DyeLot, long? SupplierId, decimal? PackageWeightKg, string? Comment);
+
+    public sealed record TagLinkInput(TaggedEntity Entity, long EntityId);
+
     public static void MapApiV1(this WebApplication app)
     {
         var api = app.MapGroup("/api/v1")
@@ -192,6 +214,106 @@ public static class ApiV1
 
         api.MapGet("/purchase-orders/{id:long}", async (PurchaseService purchases, long id, CancellationToken ct) =>
             ApiResult.Ok(await purchases.GetOrderAsync(id, ct))).WithSummary("Заказ поставщику");
+
+        api.MapPost("/purchase-orders", async (PurchaseService purchases, PurchaseOrderInput body, CancellationToken ct) =>
+        {
+            // Заказ, строки и подтверждение — одной транзакцией.
+            var id = await purchases.CreateOrderAsync(new PurchaseOrderHeader(body.OrderDate, body.SupplierId, body.WarehouseId, body.ExpectedDate,
+                body.SupplierInvoice, body.PricesIncludeVat, body.Comment, body.LegalEntityId), ct);
+            foreach (var line in body.Lines ?? [])
+            {
+                await purchases.SetOrderLineAsync(id, line.ItemId, line.Quantity, line.Price, line.VatPercent, (await purchases.GetOrderAsync(id, ct)).RowVersion, ct);
+            }
+
+            if (body.Confirm)
+            {
+                await purchases.ConfirmOrderAsync(id, (await purchases.GetOrderAsync(id, ct)).RowVersion, ct);
+            }
+
+            return ApiResult.Created(await purchases.GetOrderAsync(id, ct));
+        }).AddEndpointFilter(IdempotencyAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый заказ поставщику со строками");
+
+        api.MapPost("/purchase-orders/{id:long}/confirm", async (PurchaseService purchases, long id, RowVersionInput body, CancellationToken ct) =>
+        {
+            await purchases.ConfirmOrderAsync(id, Convert.FromBase64String(body.RowVersion), ct);
+            return ApiResult.Ok(await purchases.GetOrderAsync(id, ct));
+        }).AddEndpointFilter(IdempotencyAsync).WithSummary("Подтвердить заказ поставщику");
+
+        api.MapGet("/stock-documents", async (StockDocumentService documents, StockOperationKind? kind, StockDocumentStatus? status, DateOnly? from,
+                DateOnly? to, long? warehouseId, string? search, int? offset, int? limit, CancellationToken ct) =>
+            ApiResult.Ok(Paged(await documents.ListAsync(new StockDocumentListFilter(kind, status, from, to, warehouseId, search), ct), offset, limit)))
+            .WithSummary("Складские документы (в области складов токена)");
+
+        api.MapGet("/stock-documents/options", async (StockDocumentService documents, StockOperationKind kind, CancellationToken ct) =>
+            ApiResult.Ok(await documents.GetOptionsAsync(kind, ct))).WithSummary("Склады, контрагенты и причины для нового документа этого вида");
+
+        api.MapGet("/stock-documents/{id:long}", async (StockDocumentService documents, StockBatchService batches, long id, CancellationToken ct) =>
+        {
+            var doc = await documents.GetAsync(id, ct);
+            var parts = await batches.ForDocumentAsync(id, ct);
+            return ApiResult.Ok(new { document = doc, batches = parts.Items.Select(i => new { i.ItemId, rows = i.Rows }), batchMovements = parts.Movements });
+        }).WithSummary("Складской документ со строками и партиями");
+
+        api.MapPost("/stock-documents", async (StockDocumentService documents, StockBatchService batches, StockDocumentInput body, CancellationToken ct) =>
+        {
+            // Документ, строки, разбивка по партиям и проведение — одной транзакцией: ошибка в любой части — документа нет.
+            var lines = (body.Lines ?? []).Select(l => (l.ItemId, l.Quantity)).ToList();
+            var id = await documents.CreateWithLinesAsync(body.Kind, new StockDocumentHeader(body.WarehouseId, body.TargetWarehouseId, body.CounterpartyId,
+                body.ReasonId, body.DocumentDate, body.Comment, body.PurchaseOrderId, body.SalesOrderId), lines, ct);
+            foreach (var line in body.Lines ?? [])
+            {
+                foreach (var part in line.Batches ?? [])
+                {
+                    await batches.SetDocumentBatchAsync(id, line.ItemId, part.BatchId, part.Quantity, part.Packages, part.GrossWeightKg,
+                        (await documents.GetAsync(id, ct)).RowVersion, ct);
+                }
+            }
+
+            if (body.Post)
+            {
+                await documents.PostAsync(id, (await documents.GetAsync(id, ct)).RowVersion, ct);
+            }
+
+            return ApiResult.Created(await documents.GetAsync(id, ct));
+        }).AddEndpointFilter(IdempotencyAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый складской документ (поступление, отгрузка, перемещение…)");
+
+        api.MapPost("/stock-documents/{id:long}/post", async (StockDocumentService documents, long id, RowVersionInput body, CancellationToken ct) =>
+        {
+            await documents.PostAsync(id, Convert.FromBase64String(body.RowVersion), ct);
+            return ApiResult.Ok(await documents.GetAsync(id, ct));
+        }).AddEndpointFilter(IdempotencyAsync).WithSummary("Провести складской документ");
+
+        api.MapPost("/stock-documents/{id:long}/reverse", async (StockDocumentService documents, long id, ReverseInput body, CancellationToken ct) =>
+        {
+            await documents.ReverseAsync(id, body.Reason, Convert.FromBase64String(body.RowVersion), ct);
+            return ApiResult.Ok(await documents.GetAsync(id, ct));
+        }).AddEndpointFilter(IdempotencyAsync).WithSummary("Сторнировать складской документ");
+
+        api.MapGet("/batches", async (StockBatchService batches, long? itemId, string? search, bool? withBalance, int? offset, int? limit, CancellationToken ct) =>
+            ApiResult.Ok(Paged((await batches.ListAsync(new StockBatchFilter(itemId, search, false, withBalance == true), ct))
+                .Select(b => new { b.Id, code = b.Label, barcode = StockBatch.Code(b.Id), b.ItemId, b.ItemCode, b.Number, b.Color, b.DyeLot, b.SupplierId,
+                    b.PackageWeightKg, b.Balance, b.UnitSymbol, b.BalanceKg, b.BalancePackages }).ToList(), offset, limit)))
+            .WithSummary("Партии (цвет, крашение) с остатком");
+
+        api.MapGet("/batches/balances", async (StockBatchService batches, long? warehouseId, string? search, CancellationToken ct) =>
+            ApiResult.Ok(await batches.BalancesAsync(warehouseId, search, ct))).WithSummary("Остатки по складам с разбивкой по партиям");
+
+        api.MapPost("/batches", async (StockBatchService batches, BatchInput body, CancellationToken ct) =>
+            ApiResult.Created(new IdDto(await batches.CreateAsync(body.ItemId,
+                new StockBatchData(body.Number, body.Color, body.DyeLot, body.SupplierId, body.PackageWeightKg, body.Comment), ct))))
+            .AddEndpointFilter(IdempotencyAsync).WithSummary("Новая партия");
+
+        api.MapGet("/tags", async (TagService tags, CancellationToken ct) =>
+            ApiResult.Ok((await tags.ListAsync(false, ct)).Select(t => new { t.Id, t.Name, t.Color, t.Count }))).WithSummary("Теги организации");
+
+        api.MapGet("/tags/{id:long}/objects", async (TagService tags, long id, CancellationToken ct) =>
+            ApiResult.Ok((await tags.ObjectsAsync(id, ct)).Objects)).WithSummary("Объекты с тегом (в пределах прав токена)");
+
+        api.MapPost("/tags/{id:long}/objects", async (TagService tags, long id, TagLinkInput body, CancellationToken ct) =>
+        {
+            await tags.AssignAsync(body.Entity, body.EntityId, id, ct: ct);
+            return ApiResult.Ok(await tags.ForEntityAsync(body.Entity, body.EntityId, ct));
+        }).WithSummary("Поставить тег на объект (повтор безопасен)");
 
         api.MapGet("/money/balances", async (MoneyService money, DateOnly? asOf, CancellationToken ct) => ApiResult.Ok(await money.BalancesAsync(asOf, ct)))
             .WithSummary("Остатки на счетах и в кассах");

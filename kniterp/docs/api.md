@@ -57,6 +57,15 @@ curl -X POST https://erp.example.ru/api/v1/customer-payments \
 | GET | `/api/v1/money/balances?asOf=` | просмотр денег |
 | GET | `/api/v1/reports/cash-flow?from=&to=&legalEntityId=` | просмотр денег |
 | GET | `/api/v1/webhook-events` | — |
+| POST | `/api/v1/purchase-orders`, `/api/v1/purchase-orders/{id}/confirm` | создание / подтверждение заказов поставщику |
+| GET | `/api/v1/stock-documents?kind=&status=&from=&to=&warehouseId=&search=`, `/api/v1/stock-documents/{id}` | просмотр складских документов (в области складов) |
+| GET | `/api/v1/stock-documents/options?kind=Receipt` | склады, контрагенты и причины для нового документа |
+| POST | `/api/v1/stock-documents` | создание складских документов; `post: true` — ещё и проведение |
+| POST | `/api/v1/stock-documents/{id}/post`, `/api/v1/stock-documents/{id}/reverse` | проведение и сторно |
+| GET, POST | `/api/v1/batches?itemId=&search=&withBalance=true` | партии (цвет, крашение), новая партия |
+| GET | `/api/v1/batches/balances?warehouseId=&search=` | остатки с разбивкой по партиям |
+| GET | `/api/v1/tags`, `/api/v1/tags/{id}/objects` | теги и отмеченные объекты (в пределах прав) |
+| POST | `/api/v1/tags/{id}/objects` | поставить тег: `{"entity":"StockDocument","entityId":15}` |
 
 Новый заказ со строками и подтверждением — одной транзакцией (ошибка в строке — заказа нет):
 
@@ -70,12 +79,23 @@ curl -X POST https://erp.example.ru/api/v1/sales-orders \
        "confirm":true}'
 ```
 
+Поступление по заказу поставщику с разбивкой по партиям и проведением — одной транзакцией (виды: `Receipt`, `WriteOff`, `Transfer`, `ReturnToSupplier`, `Shipment`, `CustomerReturn`):
+
+```bash
+curl -X POST https://erp.example.ru/api/v1/stock-documents \
+  -H "Authorization: Bearer knt_XXXX…" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 1c-receipt-000457" \
+  -d '{"kind":"Receipt","warehouseId":1,"counterpartyId":12,"reasonId":3,"documentDate":"2026-10-11","purchaseOrderId":7,
+       "lines":[{"itemId":40,"quantity":20,"batches":[{"batchId":5,"quantity":20,"packages":8,"grossWeightKg":20.8}]}],
+       "post":true}'
+```
+
 Подтвердить ранее созданный заказ: `POST /api/v1/sales-orders/{id}/confirm` с телом `{"rowVersion":"<из последнего ответа>"}`.
 
 ## Вебхуки
 Подписка — «Настройки → Интеграции (API) → Вебхуки»: адрес (только HTTPS, не внутренняя сеть и не localhost — проверяется и после разрешения DNS), список событий. Секрет подписи `whsec_…` показывается один раз.
 
-События: `sales_order.confirmed`, `purchase_order.confirmed`, `stock_document.posted`, `customer_payment.created`, `supplier_payment.created`, `money_operation.created`, `expense_report.approved`, тестовое `ping`.
+События: `sales_order.created`, `sales_order.confirmed`, `sales_order.cancelled`, `purchase_order.created`, `purchase_order.confirmed`, `stock_document.posted` (в том числе инвентаризация), `stock_document.reversed`, `stock_batch.created`, `customer_payment.created`, `supplier_payment.created`, `money_operation.created`, `expense_report.approved`, тестовое `ping`.
 
 Запрос knitERP — `POST`, тело:
 

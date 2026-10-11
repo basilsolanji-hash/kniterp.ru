@@ -317,6 +317,12 @@ public static class WebhookEvents
         [Audit.AuditActions.SupplierPaymentCreated] = ("supplier_payment.created", "Оплата поставщику записана"),
         [Audit.AuditActions.MoneyOperationCreated] = ("money_operation.created", "Денежная операция проведена"),
         [Audit.AuditActions.ExpenseReportApproved] = ("expense_report.approved", "Авансовый отчёт утверждён"),
+        // D102: события для обмена с 1С и магазином — создание и отмена заказов, сторно, новые партии.
+        [Audit.AuditActions.SalesOrderCreated] = ("sales_order.created", "Заказ покупателя создан"),
+        [Audit.AuditActions.SalesOrderCancelled] = ("sales_order.cancelled", "Заказ покупателя отменён"),
+        [Audit.AuditActions.PurchaseOrderCreated] = ("purchase_order.created", "Заказ поставщику создан"),
+        [Audit.AuditActions.StockDocumentReversed] = ("stock_document.reversed", "Складской документ сторнирован"),
+        [Audit.AuditActions.StockBatchCreated] = ("stock_batch.created", "Партия заведена"),
     };
 
     public static IReadOnlyList<(string Event, string Title)> All => ByAuditAction.Values.OrderBy(v => v.Event, StringComparer.Ordinal).ToList();
