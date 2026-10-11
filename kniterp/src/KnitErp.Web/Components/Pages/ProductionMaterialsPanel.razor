@@ -1,0 +1,228 @@
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ProductionMaterialService Materials
+
+@* Материалы заказа (D93, D94): баланс «выдано = израсходовано + отходы + возвращено + остаток в НЗП», выдача, возврат, отходы. *@
+@if (_data is not null)
+{
+    <h2 style="margin-top: 24px">@L("Материалы и баланс")</h2>
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    @foreach (var w in _data.Warnings)
+    {
+        <div class="notice warning" role="note">@w</div>
+    }
+
+    <div class="scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>@L("Код")</th><th>@L("Материал")</th><th class="num">@L("План")</th><th class="num">@L("Выдано")</th><th class="num">@L("Израсходовано")</th>
+                    <th class="num">@L("Отходы")</th><th class="num">@L("Возвращено")</th><th class="num">@L("В цехе (НЗП)")</th>
+                    <th class="opt num">@L("Норма на сделанное")</th><th class="opt num">@L("Отклонение, %")</th><th>@L("Ед.")</th>
+                    @if (_data.CanMove) { <th class="num">@L("Количество")</th> }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in _data.Lines)
+                {
+                    <tr class="@(l.Warning ? "short" : "")">
+                        <td>@l.Code</td>
+                        <td>@l.Name</td>
+                        <td class="num">@Quantities.Format(l.Planned)</td>
+                        <td class="num">@Quantities.Format(l.Issued)</td>
+                        <td class="num">@Quantities.Format(l.Consumed)</td>
+                        <td class="num">@Quantities.Format(l.Waste)</td>
+                        <td class="num">@Quantities.Format(l.Returned)</td>
+                        <td class="num"><b>@Quantities.Format(l.Remaining)</b></td>
+                        <td class="num">@(l.Normative is { } n ? Quantities.Format(decimal.Round(n, l.Precision)) : "—")</td>
+                        <td class="num">@(l.DeviationPercent?.ToString("0.##") ?? "—")</td>
+                        <td>@l.UnitSymbol</td>
+                        @if (_data.CanMove)
+                        {
+                            <td class="num"><input @bind="_quantities[l.ItemId]" inputmode="decimal" size="8" aria-label="@L("Количество: {0}", l.Code)" /></td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <p class="muted">@L("Допуск отклонения расхода от нормы — {0}%. Норма на сделанное — потребность с отходом на выпущенные изделия и брак.", _data.TolerancePercent.ToString("0.##"))</p>
+
+    @if (_data.CanMove)
+    {
+        <form class="inline-form" @onsubmit="MoveAsync">
+            <label>
+                @L("Операция")
+                <select @bind="_purpose" @bind:after="PurposeChanged" aria-label="@L("Операция")">
+                    <option value="@ProductionDocumentPurpose.Issue">@L(ProductionOrderDocument.PurposeName(ProductionDocumentPurpose.Issue))</option>
+                    <option value="@ProductionDocumentPurpose.Return">@L(ProductionOrderDocument.PurposeName(ProductionDocumentPurpose.Return))</option>
+                    <option value="@ProductionDocumentPurpose.Waste">@L(ProductionOrderDocument.PurposeName(ProductionDocumentPurpose.Waste))</option>
+                </select>
+            </label>
+            @if (_purpose == ProductionDocumentPurpose.Waste)
+            {
+                <label>
+                    @L("Причина")
+                    <select @bind="_reason" aria-label="@L("Причина списания")">
+                        <option value="">@L("— выберите —")</option>
+                        @foreach (var r in _data.WasteReasons)
+                        {
+                            <option value="@r.Id">@r.Name@(r.RequiresComment ? " " + L("(нужно пояснение)") : "")</option>
+                        }
+                    </select>
+                </label>
+            }
+            else
+            {
+                <label>
+                    @(_purpose == ProductionDocumentPurpose.Issue ? L("Со склада") : L("На склад"))
+                    <select @bind="_warehouse" aria-label="@L("Склад материалов")">
+                        <option value="">@L("— выберите —")</option>
+                        @foreach (var w in _data.Warehouses)
+                        {
+                            <option value="@w.Id">@w.Name</option>
+                        }
+                    </select>
+                </label>
+            }
+            <label>@L("Комментарий") <input @bind="_comment" size="24" aria-label="@L("Комментарий к документу")" /></label>
+            <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата документа")" /></label>
+            <button type="submit" disabled="@_busy">@L("Провести")</button>
+        </form>
+        <p class="muted">@L("Выдача — перемещение на склад цеха «{0}», возврат — обратное перемещение, отходы — списание из цеха. Документ проводится сразу.", _data.WipWarehouseName)</p>
+    }
+
+    @if (_data.Documents.Count > 0)
+    {
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Документ")</th><th>@L("Дата")</th><th>@L("Операция")</th><th>@L("Статус")</th></tr></thead>
+                <tbody>
+                    @foreach (var d in _data.Documents)
+                    {
+                        <tr>
+                            <td><a href="stock-documents/@d.Id">@d.Number</a></td>
+                            <td>@d.DocumentDate.ToString("dd.MM.yyyy")</td>
+                            <td>@L(d.PurposeName)</td>
+                            <td>@L(d.StatusName)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long OrderId { get; set; }
+
+    /// <summary>Материалы загружает карточка — по очереди с заказом и ходом работ (у вкладки один DbContext).</summary>
+    [Parameter, EditorRequired]
+    public ProductionMaterialsDto? Data { get; set; }
+
+    [Parameter]
+    public DateOnly Today { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private ProductionMaterialsDto? _data;
+    private bool _keepInput;
+    private readonly Dictionary<long, string> _quantities = [];
+    private ProductionDocumentPurpose _purpose = ProductionDocumentPurpose.Issue;
+    private string _warehouse = string.Empty;
+    private string _reason = string.Empty;
+    private string? _comment;
+    private DateTime _date = DateTime.Today;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override void OnInitialized() => _date = Today.ToDateTime(TimeOnly.MinValue);
+
+    /// <summary>Новые данные с карточки: подсказки количеств пересчитываются, кроме случая ошибки — введённое остаётся.</summary>
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Data, _data))
+        {
+            return;
+        }
+
+        _data = Data;
+        if (_data is not null && !_keepInput)
+        {
+            PurposeChanged();
+        }
+
+        _keepInput = false;
+    }
+
+    /// <summary>Подсказка количеств: для выдачи — сколько ещё не выдано по плану, для возврата и отходов — пусто.</summary>
+    private void PurposeChanged()
+    {
+        foreach (var l in _data!.Lines)
+        {
+            _quantities[l.ItemId] = _purpose == ProductionDocumentPurpose.Issue && l.Planned > l.Issued - l.Returned
+                ? Quantities.Format(l.Planned - (l.Issued - l.Returned))
+                : string.Empty;
+        }
+    }
+
+    private async Task MoveAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            var lines = new List<MaterialLineCommand>();
+            foreach (var l in _data!.Lines)
+            {
+                var text = _quantities.GetValueOrDefault(l.ItemId);
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    continue;
+                }
+
+                if (!Quantities.TryParse(text, out var q))
+                {
+                    throw new BusinessRuleException("production.material.quantity_invalid", L("Количество {0} — укажите числом, например 0,5.", l.Code));
+                }
+
+                lines.Add(new MaterialLineCommand(l.ItemId, q));
+            }
+
+            await Materials.MoveAsync(OrderId, new MaterialMoveCommand(_purpose, long.TryParse(_warehouse, out var w) ? w : null,
+                long.TryParse(_reason, out var r) ? r : null, _comment, DateOnly.FromDateTime(_date), lines));
+            _message = L("Документ проведён.");
+            _comment = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                _keepInput = _messageIsError;
+                await OnChanged.InvokeAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

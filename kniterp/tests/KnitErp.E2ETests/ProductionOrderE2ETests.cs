@@ -117,10 +117,53 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByRole(AriaRole.Cell, new() { Name = "Начальник цеха" })).ToHaveCountAsync(2);
     }
 
-    private async Task LoginAsync(IPage page)
+    /// <summary>D93: кладовщик склада пряжи выдаёт пряжу в цех из карточки заказа; склад цеха ему не подвластен.</summary>
+    [SqlFact]
+    public async Task Storekeeper_issues_yarn_to_workshop()
+    {
+        var order = await app.CreateReleasedOrderAsync(20);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page, AppFixture.StorekeeperEmail);
+        await page.GotoAsync($"production-orders/{order}");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Материалы и баланс" })).ToBeVisibleAsync();
+        // Количество подставлено по плану: 6,592 кг на 20 свитеров.
+        await Assertions.Expect(page.GetByLabel("Количество: ПР-1")).ToHaveValueAsync("6,592");
+
+        for (var i = 0; i < 20 && !await page.GetByText("Документ проведён.").IsVisibleAsync(); i++)
+        {
+            await page.GetByLabel("Склад материалов").SelectOptionAsync(new SelectOptionValue { Label = "Склад пряжи" });
+            await page.GetByRole(AriaRole.Button, new() { Name = "Провести" }).ClickAsync();
+            try
+            {
+                await page.Locator(".flash").First.WaitForAsync(new() { Timeout = 2000 });
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        await Assertions.Expect(page.GetByText("Документ проведён.")).ToBeVisibleAsync();
+        // Ячейки таблицы баланса — по подписи колонки (data-label), в карточке две таблицы с этой пряжей.
+        await Assertions.Expect(page.Locator("td[data-label='Выдано']")).ToHaveTextAsync("6,592");
+        await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("6,592");
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^ПМ-") })).ToHaveCountAsync(1);
+
+        // Возврат из цеха — склад цеха не в области кладовщика пряжи.
+        await page.GetByLabel("Операция").SelectOptionAsync(new SelectOptionValue { Label = "Возврат из цеха" });
+        await page.GetByLabel("Количество: ПР-1").FillAsync("1");
+        await page.GetByLabel("Склад материалов").SelectOptionAsync(new SelectOptionValue { Label = "Склад пряжи" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Провести" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator("td[data-label='Возвращено']")).ToHaveTextAsync("0");
+    }
+
+    private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);
+
+    private async Task LoginAsync(IPage page, string email)
     {
         await page.GotoAsync("account/login");
-        await page.GetByLabel("Эл. почта").FillAsync(AppFixture.UserEmail);
+        await page.GetByLabel("Эл. почта").FillAsync(email);
         await page.GetByLabel("Пароль").FillAsync(app.Password);
         await page.GetByRole(AriaRole.Button, new() { Name = "Войти" }).ClickAsync();
         await page.WaitForURLAsync(url => !url.Contains("/account/"), new() { Timeout = 30_000 });

@@ -310,9 +310,10 @@ public sealed class ProductionOrderService(IKnitErpDbContext db, IAccessGuard gu
         await tx.CommitAsync(ct);
     }
 
-    /// <summary>Есть ли по заказу движения, после которых отмена запрещена: отметки этапов (D92).</summary>
-    private Task<bool> HasMovementsAsync(ProductionOrder order, CancellationToken ct) =>
-        db.ProductionOperations.AnyAsync(o => o.OrganizationId == order.OrganizationId && o.ProductionOrderId == order.Id, ct);
+    /// <summary>Есть ли по заказу движения, после которых отмена запрещена: отметки этапов (D92) и складские документы (D93, D95).</summary>
+    private async Task<bool> HasMovementsAsync(ProductionOrder order, CancellationToken ct) =>
+        await db.ProductionOperations.AnyAsync(o => o.OrganizationId == order.OrganizationId && o.ProductionOrderId == order.Id, ct)
+        || await db.ProductionOrderDocuments.AnyAsync(d => d.OrganizationId == order.OrganizationId && d.ProductionOrderId == order.Id, ct);
 
     /// <summary>Изделие, склады, заказ покупателя и техкарта — своей организации и действующие. Возвращает изделие и техкарту для запуска.</summary>
     private async Task<(ItemRow Product, TechCard Card)> ValidateAsync(AccessContext ctx, ProductionOrderCommand c, CancellationToken ct)

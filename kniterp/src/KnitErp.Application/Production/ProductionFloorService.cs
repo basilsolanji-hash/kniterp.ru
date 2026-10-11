@@ -119,6 +119,13 @@ internal static class ProductionLocks
         return await db.ProductionOrders.Include(o => o.Materials).SingleAsync(o => o.Id == orderId, ct);
     }
 
-    /// <summary>Выпущено по заказу. До появления выпуска (D95) — ноль.</summary>
-    public static Task<decimal> ReleasedAsync(IKnitErpDbContext db, ProductionOrder order, CancellationToken ct) => Task.FromResult(0m);
+    /// <summary>Выпущено по заказу: изделие в проведённых документах выпуска (сторнированный выпуск не считается).</summary>
+    public static async Task<decimal> ReleasedAsync(IKnitErpDbContext db, ProductionOrder order, CancellationToken ct) =>
+        await (from link in db.ProductionOrderDocuments.AsNoTracking()
+               where link.OrganizationId == order.OrganizationId && link.ProductionOrderId == order.Id && link.Purpose == ProductionDocumentPurpose.Output
+               join d in db.StockDocuments.AsNoTracking() on link.StockDocumentId equals d.Id
+               where d.Status == KnitErp.Domain.Warehousing.StockDocumentStatus.Posted
+               from l in d.Lines
+               where l.ItemId == order.ItemId
+               select (decimal?)l.Quantity).SumAsync(ct) ?? 0m;
 }

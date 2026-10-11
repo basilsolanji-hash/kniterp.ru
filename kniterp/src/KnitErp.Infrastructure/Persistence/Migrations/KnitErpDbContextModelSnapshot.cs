@@ -2454,6 +2454,55 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrderDocument", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ProductionOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Purpose")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("StockDocumentId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("StockDocumentId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_production_order_documents_stock_document");
+
+                    b.HasIndex("OrganizationId", "ProductionOrderId")
+                        .HasDatabaseName("ix_production_order_documents_org_order");
+
+                    b.HasIndex("OrganizationId", "StockDocumentId");
+
+                    b.ToTable("production_order_documents", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_production_order_documents_immutable");
+
+                            t.HasCheckConstraint("ck_production_order_documents_purpose", "[Purpose] IN (1, 2, 3, 4, 5)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrderMaterial", b =>
                 {
                     b.Property<long>("Id")
@@ -5390,6 +5439,37 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_production_orders_wip_warehouse");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrderDocument", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Production.ProductionOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProductionOrderId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_order_documents_order");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.StockDocument", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "StockDocumentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_order_documents_stock_document");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Production.ProductionOrderMaterial", b =>

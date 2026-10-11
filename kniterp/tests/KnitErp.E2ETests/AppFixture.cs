@@ -22,6 +22,7 @@ namespace KnitErp.E2ETests;
 public sealed class AppFixture : IAsyncLifetime
 {
     public const string UserEmail = "nachalnik-ceha@e2e.local";
+    public const string StorekeeperEmail = "kladovshik@e2e.local";
 
     private readonly SqlTestHost _host = new();
     private readonly List<string> _log = [];
@@ -82,7 +83,7 @@ public sealed class AppFixture : IAsyncLifetime
                 "Europe/Moscow", "owner@e2e.local", "Владелец", "RU"));
         }
 
-        string token;
+        string token, storekeeperToken;
         await using (var s = _host.As(org.OwnerUserId, org.OrganizationId))
         {
             var units = await s.Catalog.ListUnitsAsync();
@@ -90,11 +91,23 @@ public sealed class AppFixture : IAsyncLifetime
             var kg = units.Single(u => u.Symbol == "кг").Id;
             await s.Warehouses.CreateWarehouseAsync(ProductionOrderService.DefaultWipWarehouseName, null);
             await s.Warehouses.CreateWarehouseAsync("Склад готовой продукции", null);
+            var yarnStore = await s.Warehouses.CreateWarehouseAsync("Склад пряжи", null);
             Sweater = await s.Catalog.CreateItemAsync(new ItemCommand("СВ-1", "Свитер", ItemType.Finished, pcs, null));
             var yarn = await s.Catalog.CreateItemAsync(new ItemCommand("ПР-1", "Пряжа шерсть", ItemType.RawMaterial, kg, null));
             var card = await s.TechCards.CreateAsync(Sweater, 10, null);
             await s.TechCards.SetLineAsync(card, yarn, 3.2m, 3m, (await s.TechCards.GetAsync(card)).RowVersion);
             await s.TechCards.ActivateAsync(card, (await s.TechCards.GetAsync(card)).RowVersion);
+
+            // На складе пряжи 50 кг (поступление без заказа).
+            var receiptReason = await s.Db.OperationReasons
+                .Where(r => r.OrganizationId == org.OrganizationId && r.Kind == KnitErp.Domain.Warehousing.StockOperationKind.Receipt)
+                .Select(r => (long?)r.Id).FirstAsync();
+            var receipt = await s.Documents.CreateWithLinesAsync(KnitErp.Domain.Warehousing.StockOperationKind.Receipt,
+                new KnitErp.Domain.Warehousing.StockDocumentHeader(yarnStore, null, null, receiptReason, DateOnly.FromDateTime(DateTime.UtcNow), null),
+                [(yarn, 50m)]);
+            await s.Documents.PostAsync(receipt, (await s.Documents.GetAsync(receipt)).RowVersion);
+            storekeeperToken = (await s.Access.InviteAsync(new InviteUserCommand(StorekeeperEmail, "Кладовщик пряжи", SystemRoles.SeniorStorekeeper, null,
+                WarehouseId: yarnStore))).SetupToken!;
             var invitation = await s.Access.InviteAsync(new InviteUserCommand(UserEmail, "Начальник цеха", SystemRoles.DepartmentHead, null));
             token = invitation.SetupToken!;
             _userId = invitation.UserId;
@@ -104,6 +117,7 @@ public sealed class AppFixture : IAsyncLifetime
         await using (var s = _host.As(null, null))
         {
             await s.SignIn.AcceptInvitationAsync(token, Password, Password);
+            await s.SignIn.AcceptInvitationAsync(storekeeperToken, Password, Password);
         }
     }
 

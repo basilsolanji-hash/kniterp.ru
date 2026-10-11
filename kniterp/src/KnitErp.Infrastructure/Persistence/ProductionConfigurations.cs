@@ -129,3 +129,30 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
         b.HasIndex(x => new { x.OrganizationId, x.ProductionOrderId }).HasDatabaseName("ix_production_operations_org_order");
     }
 }
+
+internal sealed class ProductionOrderDocumentConfiguration : IEntityTypeConfiguration<ProductionOrderDocument>
+{
+    public void Configure(EntityTypeBuilder<ProductionOrderDocument> b)
+    {
+        b.ToTable("production_order_documents", t =>
+        {
+            t.HasCheckConstraint("ck_production_order_documents_purpose", "[Purpose] IN (1, 2, 3, 4, 5)");
+            // Связь только добавляется — триггер в миграции AddProductionMaterials.
+            t.HasTrigger("tr_production_order_documents_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Purpose).HasConversion<byte>();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<ProductionOrder>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionOrderId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_order_documents_order");
+        b.HasOne<StockDocument>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.StockDocumentId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_production_order_documents_stock_document");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        // Документ принадлежит одному заказу и одной цели.
+        b.HasIndex(x => x.StockDocumentId).IsUnique().HasDatabaseName("ux_production_order_documents_stock_document");
+        b.HasIndex(x => new { x.OrganizationId, x.ProductionOrderId }).HasDatabaseName("ix_production_order_documents_org_order");
+    }
+}

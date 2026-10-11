@@ -148,6 +148,7 @@ public static class AuditActions
     public const string ProductionOrderReleased = "production.order.released";
     public const string ProductionOrderCancelled = "production.order.cancelled";
     public const string ProductionStageMarked = "production.stage.marked";
+    public const string ProductionMaterialMoved = "production.material.moved";
     public const string PurchaseOrderCreated = "purchase.order.created";
     public const string PurchaseOrderChanged = "purchase.order.changed";
     public const string PurchaseOrderConfirmed = "purchase.order.confirmed";

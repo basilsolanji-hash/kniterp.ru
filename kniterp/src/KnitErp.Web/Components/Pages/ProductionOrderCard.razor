@@ -2,6 +2,8 @@
 @using KnitErp.Application.Production
 @using KnitErp.Domain.Production
 @inject ProductionOrderService Orders
+@inject ProductionFloorService Floor
+@inject ProductionMaterialService Materials
 
 <PageTitle>@(_order is null ? L("Производственный заказ") : _order.Number) — knitERP</PageTitle>
 
@@ -141,7 +143,8 @@ else
     </div>
     @if (_order.Status is not (ProductionOrderStatus.Draft or ProductionOrderStatus.Cancelled))
     {
-        <ProductionStagesPanel OrderId="_order.Id" Today="Today" OnChanged="LoadAsync" />
+        <ProductionStagesPanel OrderId="_order.Id" Progress="_progress" Today="Today" OnChanged="LoadAsync" />
+        <ProductionMaterialsPanel OrderId="_order.Id" Data="_materials" Today="Today" OnChanged="LoadAsync" />
     }
 
     @if (_order.PricesVisible && _order.Materials.Count > 0)
@@ -167,6 +170,8 @@ else
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
     private ProductionOrderDto? _order;
+    private ProductionProgressDto? _progress;
+    private ProductionMaterialsDto? _materials;
     private ProductionOrderOptions? _options;
     private bool _busy;
     private bool _notFound;
@@ -194,7 +199,14 @@ else
         }
     }
 
-    private async Task LoadAsync() => _order = await Orders.GetAsync(Id);
+    /// <summary>Заказ, ход работ и материалы — по очереди: у вкладки один DbContext.</summary>
+    private async Task LoadAsync()
+    {
+        _order = await Orders.GetAsync(Id);
+        var inProduction = _order.Status is not (ProductionOrderStatus.Draft or ProductionOrderStatus.Cancelled);
+        _progress = inProduction ? await Floor.ProgressAsync(Id) : null;
+        _materials = inProduction ? await Materials.MaterialsAsync(Id) : null;
+    }
 
     private ProductionProductOptionDto FixedItem() =>
         _options!.Products.FirstOrDefault(p => p.Id == _order!.ItemId)

@@ -11,6 +11,7 @@ using KnitErp.Domain.Common;
 using KnitErp.Domain.Production;
 using KnitErp.Domain.Purchasing;
 using KnitErp.Domain.Sales;
+using KnitErp.Domain.Warehousing;
 using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.IntegrationTests;
@@ -268,6 +269,88 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
 
     private static ProductionOperationCommand Mark(ProductionStage stage, decimal quantity) =>
         new(stage, ProductionOperationKind.Done, quantity, null, null, Day);
+
+    /// <summary>D93, D94: выдача в цех перемещением, возврат и отходы не больше остатка заказа, баланс, области прав, откат при ошибке.</summary>
+    [SqlFact]
+    public async Task Materials_issue_return_and_waste_keep_order_balance()
+    {
+        var f = await SetUpAsync();
+        long order, second;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 30));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            second = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10));
+            await s.ProductionOrders.ReleaseAsync(second, (await s.ProductionOrders.GetAsync(second)).RowVersion);
+
+            var issue = await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 10m), (f.Buttons, 150m)));
+            var doc = await s.Documents.GetAsync(issue);
+            Assert.Equal((StockOperationKind.Transfer, StockDocumentStatus.Posted, f.YarnStore, f.Wip, "Выдача в производство"),
+                (doc.Kind, doc.Status, doc.WarehouseId, doc.TargetWarehouseId!.Value, doc.ReasonName));
+            Assert.Contains("ПЗ-", doc.Comment);
+            await s.Materials.MoveAsync(second, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 5m)));
+
+            // Ошибки не оставляют ни черновика, ни связи: материала нет в нормах, не хватает на складе, склад цеха как источник.
+            var before = await s.Db.StockDocuments.CountAsync();
+            Assert.Equal("production.material.not_in_order", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Hat, 1m))))).Code);
+            Assert.Equal("stock.balance.insufficient", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 1000m))))).Code);
+            Assert.Equal("production.material.same_warehouse", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.Wip, (f.Yarn, 1m))))).Code);
+            Assert.Equal(before, await s.Db.StockDocuments.CountAsync());
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var reasons = (await s.Materials.MaterialsAsync(order)).WasteReasons;
+            var defect = reasons.Single(r => r.Name == "Брак");
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Return, f.YarnStore, (f.Yarn, 0.5m)));
+            Assert.Equal("stock.document.comment_required", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Waste, null, (f.Yarn, 0.2m)) with { ReasonId = defect.Id }))).Code);
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Waste, null, (f.Yarn, 0.2m)) with { ReasonId = defect.Id, Comment = "Распуск полотна" });
+
+            // В цехе 15 кг пряжи (10 + 5 второго заказа), но у первого заказа осталось только 9,3 — больше не вернуть и не списать.
+            Assert.Equal("production.material.exceeds_remaining", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Return, f.YarnStore, (f.Yarn, 9.4m))))).Code);
+            var m = await s.Materials.MaterialsAsync(order);
+            var yarn = m.Lines.Single(l => l.ItemId == f.Yarn);
+            Assert.Equal((9.888m, 10m, 0m, 0.2m, 0.5m, 9.3m), (yarn.Planned, yarn.Issued, yarn.Consumed, yarn.Waste, yarn.Returned, yarn.Remaining));
+            Assert.Null(yarn.Normative); // ничего не выпущено — нормы на сделанное ещё нет
+            Assert.Equal(3, m.Documents.Count);
+            Assert.True(m.CanMove);
+            var stock = await s.Db.StockMovements.Where(x => x.WarehouseId == f.Wip && x.ItemId == f.Yarn).SumAsync(x => x.Quantity);
+            Assert.Equal(14.3m, stock);
+
+            var dto = await s.ProductionOrders.GetAsync(order);
+            Assert.False(dto.CanCancel);
+            await Assert.ThrowsAsync<BusinessRuleException>(() => s.ProductionOrders.CancelAsync(order, "нет", dto.RowVersion));
+        }
+
+        // Старший кладовщик склада пряжи выдаёт со своего склада, но не распоряжается складом цеха.
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            await s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 1m)));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Return, f.YarnStore, (f.Yarn, 1m))));
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Materials.MaterialsAsync(order));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Materials.MoveAsync(order, Move(ProductionDocumentPurpose.Issue, f.YarnStore, (f.Yarn, 1m))));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            Assert.Equal(4, await db.AuditEntries.CountAsync(e => e.EntityId == order.ToString() && e.Action == "production.material.moved"));
+            await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM [kniterp].[production_order_documents] WHERE [ProductionOrderId] = {0}", order));
+        }
+    }
+
+    private static MaterialMoveCommand Move(ProductionDocumentPurpose purpose, long? warehouse, params (long Item, decimal Quantity)[] lines) =>
+        new(purpose, warehouse, null, null, Day, lines.Select(l => new MaterialLineCommand(l.Item, l.Quantity)).ToList());
 
     private static ProductionOrderCommand Command(Fixture f, long item, decimal quantity) =>
         new(item, quantity, Day, null, ProductionSource.Plan, null, f.Wip, f.Store, null);

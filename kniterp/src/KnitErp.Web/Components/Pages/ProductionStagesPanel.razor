@@ -102,14 +102,18 @@
     [Parameter, EditorRequired]
     public long OrderId { get; set; }
 
+    /// <summary>Ход работ загружает карточка — по очереди с заказом и материалами (у вкладки один DbContext).</summary>
+    [Parameter, EditorRequired]
+    public ProductionProgressDto? Progress { get; set; }
+
     [Parameter]
     public DateOnly Today { get; set; }
 
-    /// <summary>После отметки карточка перечитывает заказ (можно ли отменить, сколько готово к выпуску).</summary>
+    /// <summary>После отметки карточка перечитывает заказ, ход работ и материалы.</summary>
     [Parameter]
     public EventCallback OnChanged { get; set; }
 
-    private ProductionProgressDto? _progress;
+    private ProductionProgressDto? _progress => Progress;
     private bool _busy;
     private string? _message;
     private bool _messageIsError;
@@ -120,14 +124,7 @@
     private string? _reason;
     private DateTime _date = DateTime.Today;
 
-    // Загрузка один раз: перерисовка карточки после отметки не должна запускать второй запрос параллельно (один DbContext у вкладки).
-    protected override async Task OnInitializedAsync()
-    {
-        _date = Today.ToDateTime(TimeOnly.MinValue);
-        await LoadAsync();
-    }
-
-    public async Task LoadAsync() => _progress = await Floor.ProgressAsync(OrderId);
+    protected override void OnInitialized() => _date = Today.ToDateTime(TimeOnly.MinValue);
 
     private static IEnumerable<ProductionOperationKind> KindsFor(ProductionStage stage) =>
         stage == ProductionStage.QualityControl
@@ -171,7 +168,6 @@
         {
             try
             {
-                await LoadAsync();
                 await OnChanged.InvokeAsync();
             }
             finally
