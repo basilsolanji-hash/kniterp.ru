@@ -331,7 +331,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("Исполнитель: Петрова А. С.")).ToBeVisibleAsync();
 
         await page.GetByLabel("Код операции").FillAsync($"оп-{order}-1");
-        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Открыть" }), page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" }));
+        await ClickUntilAsync(page.GetByRole(AriaRole.Button, new() { Name = "Открыть", Exact = true }), page.GetByRole(AriaRole.Heading, new() { Name = "Вязание" }));
         await page.WaitForURLAsync(new Regex($@"/shop/op/{order}/1$"));
         await Assertions.Expect(page.Locator(".shop-big div").First).ToContainTextAsync("10");
 
