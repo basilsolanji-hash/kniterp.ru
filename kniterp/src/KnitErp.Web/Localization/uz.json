@@ -2459,5 +2459,19 @@
   "Упомянуть коллегу": "Hamkasbni eslatish",
   "Упомянуть можно не больше {0} коллег.": "{0} tadan ortiq hamkasbni eslatib bo'lmaydi.",
   "Этот объект нельзя обсуждать.": "Bu obyektni muhokama qilib bo'lmaydi.",
-  "Пользователь работает и в другой организации: пароль и вход он восстанавливает сам — «Забыли пароль» или аварийная процедура.": "Foydalanuvchi boshqa tashkilotda ham ishlaydi: parol va kirishni o'zi tiklaydi — «Parolni unutdingizmi» yoki favqulodda tartib."
+  "Пользователь работает и в другой организации: пароль и вход он восстанавливает сам — «Забыли пароль» или аварийная процедура.": "Foydalanuvchi boshqa tashkilotda ham ishlaydi: parol va kirishni o'zi tiklaydi — «Parolni unutdingizmi» yoki favqulodda tartib.",
+  "— не менять —": "— o'zgartirmaslik —",
+  "Автоматическая смена этапа": "Bosqichni avtomatik almashtirish",
+  "Выставлен счёт": "Hisob taqdim etildi",
+  "Заказ подтверждён": "Buyurtma tasdiqlandi",
+  "Когда событие произошло, этап заказа меняется сам — только вперёд по списку этапов выше: поздняя оплата не вернёт заказ из «В работе» назад. Вручную этап можно поменять всегда. Каждая смена — в журнале заказа.": "Hodisa yuz berganda buyurtma bosqichi o'zi almashadi — faqat yuqoridagi bosqichlar ro'yxati bo'yicha oldinga: kechikkan to'lov buyurtmani «Ishda» bosqichidan orqaga qaytarmaydi. Bosqichni qo'lda har doim almashtirish mumkin. Har bir almashtirish buyurtma jurnalida.",
+  "Неизвестное событие.": "Noma'lum hodisa.",
+  "Оплачен полностью (100 %)": "To'liq to'landi (100 %)",
+  "Оплачен частично": "Qisman to'landi",
+  "Отгружен полностью": "To'liq jo'natildi",
+  "Отгружен частично": "Qisman jo'natildi",
+  "Правило сохранено.": "Qoida saqlandi.",
+  "Производство завершено": "Ishlab chiqarish yakunlandi",
+  "Производство начато": "Ishlab chiqarish boshlandi",
+  "Этап для события «{0}»": "«{0}» hodisasi uchun bosqich"
 }

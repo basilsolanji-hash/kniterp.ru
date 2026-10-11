@@ -407,6 +407,13 @@ public sealed class StockDocumentService(
         StockBatchLedger.Write(db, ctx, doc, batchMoves, StockSource.StockDocument, clock.UtcNow);
         Audit(ctx, AuditActions.StockDocumentPosted, doc, "Черновик", "Проведён", $"строк: {doc.Lines.Count}");
         await ClosedPeriod.SaveAsync(db, ct);
+        // D110: отгрузка по заказу покупателя двигает его этап («Отгружен частично / полностью»).
+        if (doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } shippedOrder)
+        {
+            await KnitErp.Application.Sales.StageAutomation.ApplyAsync(db, ctx, [shippedOrder], clock.UtcNow, currentUser.CorrelationId, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
         await tx.CommitAsync(ct);
     }
 

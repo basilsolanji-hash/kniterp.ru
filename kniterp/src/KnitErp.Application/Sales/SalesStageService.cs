@@ -8,6 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.Application.Sales;
 
+/// <summary>D110: правило «событие → этап»; StageId = null — событие этап не меняет.</summary>
+public sealed record StageRuleDto(StageTrigger Trigger, string Event, long? StageId);
+
 public sealed record SalesStageDto(long Id, string Name, string Color, int SortOrder, bool IsArchived, int Orders, byte[] RowVersion);
 
 /// <summary>
@@ -95,6 +98,50 @@ public sealed class SalesStageService(IKnitErpDbContext db, IAccessGuard guard, 
         await EnsureFreeAsync(ctx, stage.Name, id, ct);
         stage.Restore();
         Audit(ctx, AuditActions.CatalogRestored, id, "в архиве", stage.Name, "Этап заказа покупателя");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>D110: правила автоматической смены этапа — по всем событиям, в порядке процесса.</summary>
+    public async Task<IReadOnlyList<StageRuleDto>> RulesAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
+        var rules = await db.SalesStageRules.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(r => r.Trigger, ct);
+        return SalesStageAutomation.All.Select(t => new StageRuleDto(t, SalesStageAutomation.Name(t), rules.GetValueOrDefault(t)?.StageId)).ToList();
+    }
+
+    /// <summary>D110: задать этап для события (null — не менять этап по этому событию).</summary>
+    public async Task SetRuleAsync(StageTrigger trigger, long? stageId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.SalesEdit, ct);
+        string? stageName = null;
+        if (stageId is { } sid)
+        {
+            var stage = await db.SalesOrderStages.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sid && x.OrganizationId == ctx.OrganizationId, ct)
+                        ?? throw new NotFoundException("Этап заказа");
+            if (stage.IsArchived)
+            {
+                throw new BusinessRuleException("catalog.archived", $"Этап «{stage.Name}» в архиве.");
+            }
+
+            stageName = stage.Name;
+        }
+
+        var rule = await db.SalesStageRules.SingleOrDefaultAsync(r => r.OrganizationId == ctx.OrganizationId && r.Trigger == trigger, ct);
+        var before = rule?.StageId is { } old
+            ? await db.SalesOrderStages.AsNoTracking().Where(x => x.Id == old).Select(x => x.Name).SingleOrDefaultAsync(ct)
+            : null;
+        if (rule is null)
+        {
+            db.SalesStageRules.Add(SalesStageRule.Create(ctx.OrganizationId, trigger, stageId));
+        }
+        else
+        {
+            rule.SetStage(stageId);
+        }
+
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CatalogChanged, nameof(SalesStageRule),
+            ((byte)trigger).ToString(), before ?? "не менять", stageName ?? "не менять", $"Автосмена этапа: {SalesStageAutomation.Name(trigger)}",
+            currentUser.CorrelationId));
         await db.SaveOrConflictAsync(ct);
     }
 
