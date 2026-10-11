@@ -126,6 +126,7 @@
     private static readonly NavGroup[] Groups =
     [
         new("home", "Главная", [new("", "Главная", a => true)]),
+        new("discussions", "Обсуждения", [new("discussions", "Обсуждения", a => true)]),
         new("sales", "Продажи",
         [
             new("sales-orders", "Заказы покупателей", a => a.Has(Permissions.SalesView)),

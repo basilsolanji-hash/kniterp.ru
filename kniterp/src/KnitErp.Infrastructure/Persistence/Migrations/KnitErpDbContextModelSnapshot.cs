@@ -1195,6 +1195,95 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Collaboration.DiscussionComment", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AuthorUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("DeletedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("DeletedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("EditedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Target")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("TargetId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("DeletedByUserId");
+
+                    b.HasIndex("OrganizationId", "Id")
+                        .HasDatabaseName("ix_discussion_comments_org_recent");
+
+                    b.HasIndex("OrganizationId", "Target", "TargetId", "Id")
+                        .HasDatabaseName("ix_discussion_comments_target");
+
+                    b.ToTable("discussion_comments", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_discussion_comments_deleted", "([DeletedAtUtc] IS NULL AND [DeletedByUserId] IS NULL AND LEN([Text]) > 0) OR ([DeletedAtUtc] IS NOT NULL AND [DeletedByUserId] IS NOT NULL AND [Text] = N'')");
+
+                            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 10");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Collaboration.DiscussionMention", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("CommentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("ix_discussion_mentions_user");
+
+                    b.HasIndex("CommentId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_discussion_mentions_comment_user");
+
+                    b.ToTable("discussion_mentions", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Common.CustomFieldDefinition", b =>
                 {
                     b.Property<long>("Id")
@@ -3766,7 +3855,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("tag_links", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 7");
+                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 10");
                         });
                 });
 
@@ -5078,6 +5167,41 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasOne("KnitErp.Domain.Catalog.VatRate", null)
                         .WithMany("Periods")
                         .HasForeignKey("VatRateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Collaboration.DiscussionComment", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DeletedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Collaboration.DiscussionMention", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Collaboration.DiscussionComment", null)
+                        .WithMany()
+                        .HasForeignKey("CommentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

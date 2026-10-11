@@ -308,6 +308,12 @@ else
     }
 }
 
+
+@if (_order is not null)
+{
+    <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.PurchaseOrder" TargetId="Id" />
+}
+
 @code {
     [Parameter]
     public long Id { get; set; }

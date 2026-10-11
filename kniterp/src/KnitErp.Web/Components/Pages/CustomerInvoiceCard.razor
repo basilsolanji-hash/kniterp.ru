@@ -91,6 +91,12 @@ else
     }
 }
 
+
+@if (_invoice is not null)
+{
+    <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.CustomerInvoice" TargetId="Id" />
+}
+
 @code {
     [Parameter]
     public long Id { get; set; }

@@ -69,6 +69,7 @@ public static class DependencyInjection
         services.AddScoped<StockBatchService>();
         services.AddScoped<StockBatchBreakdownService>();
         services.AddScoped<KnitErp.Application.Tagging.TagService>();
+        services.AddScoped<KnitErp.Application.Collaboration.DiscussionService>();
         services.AddScoped<KnitErp.Application.Exchange.EnterpriseDataExportService>();
         services.AddScoped<InventoryService>();
         services.AddScoped<PeriodService>();

@@ -1,0 +1,211 @@
+@using KnitErp.Application.Collaboration
+@using KnitErp.Domain.Collaboration
+@using KnitErp.Domain.Tagging
+@inject DiscussionService Discussions
+
+@*
+    D107: обсуждение документа или объекта — лента комментариев с упоминанием коллег. Свой контекст базы (DiscussionService),
+    поэтому лента не мешает операциям карточки. Якорь #discussion — для ссылок из уведомлений.
+*@
+<section class="discussion" id="discussion" aria-label="@L("Обсуждение")">
+    <h2>@L("Обсуждение") @if (_thread is { Comments.Count: > 0 } t) { <span class="muted">@t.Comments.Count(c => !c.IsDeleted)</span> }</h2>
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+    @if (_thread is null)
+    {
+        <p class="muted small">@L("Загрузка…")</p>
+    }
+    else
+    {
+        @if (_thread.Comments.Count == 0)
+        {
+            <p class="muted small">@L("Комментариев пока нет. Напишите вопрос или пояснение — коллеги увидят его здесь, упомянутые получат уведомление.")</p>
+        }
+        <ol class="comments">
+            @foreach (var c in _thread.Comments)
+            {
+                <li class="comment @(c.IsMine ? "mine" : null) @(c.IsDeleted ? "deleted" : null)" @key="c.Id">
+                    <span class="avatar" aria-hidden="true">@c.Initials</span>
+                    <div class="comment-body">
+                        <div class="comment-head">
+                            <b>@c.Author</b>
+                            <span class="muted small" title="@Local(c.CreatedAtUtc).ToString("dd.MM.yyyy HH:mm:ss")">@When(c.CreatedAtUtc)</span>
+                            @if (c.EditedAtUtc is not null && !c.IsDeleted)
+                            {
+                                <span class="muted small">@L("изменено")</span>
+                            }
+                        </div>
+                        @if (c.IsDeleted)
+                        {
+                            <div class="muted small">@L("Комментарий удалён.")</div>
+                        }
+                        else if (_editId == c.Id)
+                        {
+                            <textarea @bind="_editText" rows="3" maxlength="@DiscussionComment.TextMaxLength" aria-label="@L("Текст комментария")"></textarea>
+                            <div class="actions">
+                                <button type="button" @onclick="() => SaveEditAsync(c)" disabled="@_busy">@L("Сохранить")</button>
+                                <button type="button" class="secondary" @onclick="() => _editId = null">@L("Отмена")</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="comment-text">@c.Text</div>
+                            @if (c.Mentions.Count > 0)
+                            {
+                                <div class="comment-mentions">@foreach (var m in c.Mentions) { <span class="mention">@@@m</span> }</div>
+                            }
+                            @if (c.CanEdit || c.CanDelete)
+                            {
+                                <div class="comment-actions">
+                                    @if (c.CanEdit)
+                                    {
+                                        <button type="button" class="link" @onclick="() => StartEdit(c)" disabled="@_busy">@L("Изменить")</button>
+                                    }
+                                    @if (c.CanDelete)
+                                    {
+                                        <ConfirmButton Class="link" Disabled="_busy" Question="@L("Удалить комментарий?")" OnConfirm="() => DeleteAsync(c)">@L("Удалить")</ConfirmButton>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </li>
+            }
+        </ol>
+
+        <form class="composer" @onsubmit="AddAsync">
+            <textarea @bind="_text" @bind:event="oninput" rows="2" maxlength="@DiscussionComment.TextMaxLength"
+                      placeholder="@L("Написать комментарий…")" aria-label="@L("Новый комментарий")"></textarea>
+            @if (_mentions.Count > 0)
+            {
+                <div class="comment-mentions">
+                    @foreach (var id in _mentions)
+                    {
+                        var userId = id;
+                        <span class="mention">@@@(_thread.Colleagues.FirstOrDefault(x => x.UserId == userId)?.Name)
+                            <button type="button" class="tag-x" @onclick="() => _mentions.Remove(userId)" aria-label="@L("Убрать упоминание")">×</button></span>
+                    }
+                </div>
+            }
+            <div class="composer-bar">
+                @if (_thread.Colleagues.Count > 0)
+                {
+                    <select value="" @onchange="AddMention" aria-label="@L("Упомянуть коллегу")">
+                        <option value="">@@ @L("Упомянуть коллегу")</option>
+                        @foreach (var u in _thread.Colleagues.Where(u => !_mentions.Contains(u.UserId)))
+                        {
+                            <option value="@u.UserId">@u.Name</option>
+                        }
+                    </select>
+                }
+                <button type="submit" disabled="@(_busy || string.IsNullOrWhiteSpace(_text))">@L("Отправить")</button>
+            </div>
+        </form>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public TaggedEntity Target { get; set; }
+
+    [Parameter, EditorRequired]
+    public long TargetId { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private DiscussionThreadDto? _thread;
+    private string? _text;
+    private readonly List<long> _mentions = [];
+    private long? _editId;
+    private string? _editText;
+    private bool _busy;
+    private string? _error;
+    private (TaggedEntity, long) _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != (Target, TargetId))
+        {
+            _loaded = (Target, TargetId);
+            await RunAsync(LoadAsync);
+        }
+    }
+
+    private async Task LoadAsync() => _thread = await Discussions.ThreadAsync(Target, TargetId);
+
+    private void AddMention(ChangeEventArgs e)
+    {
+        if (long.TryParse(e.Value?.ToString(), out var id) && !_mentions.Contains(id) && _mentions.Count < DiscussionService.MaxMentions)
+        {
+            _mentions.Add(id);
+        }
+    }
+
+    private Task AddAsync() => RunAsync(async () =>
+    {
+        await Discussions.AddAsync(Target, TargetId, _text, _mentions);
+        _text = null;
+        _mentions.Clear();
+        await LoadAsync();
+    });
+
+    private void StartEdit(CommentDto c)
+    {
+        _editId = c.Id;
+        _editText = c.Text;
+    }
+
+    private Task SaveEditAsync(CommentDto c) => RunAsync(async () =>
+    {
+        await Discussions.EditAsync(c.Id, _editText, c.RowVersion);
+        _editId = null;
+        await LoadAsync();
+    });
+
+    private Task DeleteAsync(CommentDto c) => RunAsync(async () =>
+    {
+        await Discussions.DeleteAsync(c.Id, c.RowVersion);
+        await LoadAsync();
+    });
+
+    private DateTime Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId);
+
+    /// <summary>«только что», «12 мин назад», «сегодня 14:05», «вчера 09:10», «03.10.2026 16:40».</summary>
+    private string When(DateTime utc)
+    {
+        var age = DateTime.UtcNow - utc;
+        var local = Local(utc);
+        var today = Local(DateTime.UtcNow).Date;
+        return age.TotalMinutes < 1 ? L("только что")
+            : age.TotalMinutes < 60 ? L("{0} мин назад", (int)age.TotalMinutes)
+            : local.Date == today ? L("сегодня {0}", local.ToString("HH:mm"))
+            : local.Date == today.AddDays(-1) ? L("вчера {0}", local.ToString("HH:mm"))
+            : local.ToString("dd.MM.yyyy HH:mm");
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
