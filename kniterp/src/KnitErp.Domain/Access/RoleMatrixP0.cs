@@ -63,6 +63,10 @@ public static class RoleMatrixP0
         // Сотрудник видит только свой табель (уровень «С»); Кадровик заполняет, но не закрывает — см. HrRoleMatrix.
         (Permissions.TimesheetEdit,           [Full, None, Scoped, None, None, None, None, OwnOnly]),
         (Permissions.TimesheetClose,          [Full, None, Scoped, None, None, None, None, None]),
+        // Допущение D212: заработок считает Владелец; Бухгалтеру — «по отдельному праву» (выдаёт Владелец: роль Бухгалтера может
+        // выдать и Администратор, а зарплатных данных у него нет); Аудитор смотрит; Сотрудник — только свой расчётный листок.
+        (Permissions.PayrollView,             [Full, None, None, None, None, ByGrant, ReadOnly, OwnOnly]),
+        (Permissions.PayrollCalculate,        [Full, None, None, None, None, ByGrant, None, None]),
         (Permissions.UserView,                [Full, Full, None, None, None, None, ReadOnly, None]),
         (Permissions.UserManage,              [Full, Full, None, None, None, None, None, None]),
         (Permissions.AdminGrant,              [Full, None, None, None, None, None, None, None]),

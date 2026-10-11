@@ -101,6 +101,7 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(KnitErp.Domain.Hr.LeaveKinds.All.Select(KnitErp.Domain.Hr.LeaveKinds.Name));
         keys.UnionWith(KnitErp.Domain.Hr.DismissalGrounds.All.Select(g => g.Title));
         keys.UnionWith(KnitErp.Domain.Hr.TimesheetCodes.All.Select(c => c.Name));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.PayrollLineKind>().Select(KnitErp.Domain.Hr.PayrollRules.KindName));
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.Select(c => c.Name));
         keys.UnionWith(["без НДС", "ещё не действует", "Без роли", "Вся организация"]);

@@ -290,3 +290,74 @@ internal sealed class TimesheetDayConfiguration : IEntityTypeConfiguration<Times
         b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.Date }).HasDatabaseName("ix_hr_timesheet_days_employee");
     }
 }
+
+internal sealed class PieceRateConfiguration : IEntityTypeConfiguration<PieceRate>
+{
+    public void Configure(EntityTypeBuilder<PieceRate> b)
+    {
+        b.ToTable("hr_piece_rates", t =>
+        {
+            t.HasCheckConstraint("ck_hr_piece_rates_price", "[Price] > 0");
+            t.HasCheckConstraint("ck_hr_piece_rates_unit", "[Unit] IN (N'шт', N'кг')");
+            t.HasTrigger("tr_hr_piece_rates_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.OperationName).HasMaxLength(PieceRate.NameMaxLength).IsRequired();
+        b.Property(x => x.Unit).HasMaxLength(5).IsRequired();
+        b.Property(x => x.Price).HasPrecision(19, 4);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.OperationId, x.ItemId, x.ValidFrom }).IsUnique().HasDatabaseName("ux_hr_piece_rates_from");
+    }
+}
+
+internal sealed class PayrollRunConfiguration : IEntityTypeConfiguration<PayrollRun>
+{
+    public void Configure(EntityTypeBuilder<PayrollRun> b)
+    {
+        b.ToTable("hr_payroll_runs", t =>
+        {
+            t.HasCheckConstraint("ck_hr_payroll_runs_status", "[Status] IN (1, 2)");
+            t.HasCheckConstraint("ck_hr_payroll_runs_period", "[Month] BETWEEN 1 AND 12 AND [Year] BETWEEN 2000 AND 2100");
+            t.HasCheckConstraint("ck_hr_payroll_runs_approved",
+                "([Status] = 2 AND [ApprovedAtUtc] IS NOT NULL AND [ApprovedByUserId] IS NOT NULL AND [TimesheetsClosed] = 1) OR ([Status] = 1 AND [ApprovedAtUtc] IS NULL AND [ApprovedByUserId] IS NULL)");
+            t.HasTrigger("tr_hr_payroll_runs_approved_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.From);
+        b.Ignore(x => x.To);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CalculatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_hr_payroll_runs_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.Year, x.Month }).IsUnique().HasDatabaseName("ux_hr_payroll_runs_period");
+    }
+}
+
+internal sealed class PayrollLineConfiguration : IEntityTypeConfiguration<PayrollLine>
+{
+    public void Configure(EntityTypeBuilder<PayrollLine> b)
+    {
+        b.ToTable("hr_payroll_lines", t =>
+        {
+            t.HasCheckConstraint("ck_hr_payroll_lines_kind", "[Kind] BETWEEN 1 AND 5");
+            t.HasTrigger("tr_hr_payroll_lines_approved_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.Description).HasMaxLength(PayrollLine.DescriptionMaxLength).IsRequired();
+        b.Property(x => x.Quantity).HasPrecision(18, 6);
+        b.Property(x => x.Rate).HasPrecision(19, 4);
+        b.Property(x => x.Amount).HasPrecision(19, 4);
+        b.HasOne<PayrollRun>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.RunId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_payroll_lines_run");
+        b.HasOne<Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_hr_payroll_lines_employee");
+        b.HasIndex(x => new { x.RunId, x.EmployeeId }).HasDatabaseName("ix_hr_payroll_lines_run_employee");
+    }
+}

@@ -17,6 +17,8 @@ public static class Permissions
     public const string HrOrderPost = "hr.order.post";
     public const string TimesheetEdit = "hr.timesheet.edit";
     public const string TimesheetClose = "hr.timesheet.close";
+    public const string PayrollView = "hr.payroll.view";
+    public const string PayrollCalculate = "hr.payroll.calculate";
     public const string UserView = "access.user.view";
     public const string UserManage = "access.user.manage";
     public const string AdminGrant = "access.admin.grant";
@@ -51,6 +53,8 @@ public static class Permissions
         [HrOrderPost] = "Кадровые приказы: проведение, штатное расписание: изменение",
         [TimesheetEdit] = "Табель и графики работы: заполнение",
         [TimesheetClose] = "Табель: закрытие",
+        [PayrollView] = "Заработок и расчётные листки: просмотр",
+        [PayrollCalculate] = "Заработок: расценки, расчёт и утверждение",
         [UserView] = "Пользователи и роли: просмотр",
         [UserManage] = "Пользователи и роли: изменение",
         [AdminGrant] = "Выдача административных прав",

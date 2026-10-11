@@ -214,7 +214,12 @@ public sealed class DiscussionService(IKnitErpDbContextFactory factory, ICurrent
             .OrderByDescending(a => a.CreatedAtUtc).ToList();
     }
 
-    public static string Excerpt(string text) => text.Length <= 80 ? text : text[..80].TrimEnd() + "…";
+    /// <summary>Выдержка для журнала и уведомлений; длинные номера (СНИЛС, паспорт, телефон) скрыты — D210.</summary>
+    public static string Excerpt(string text)
+    {
+        var masked = KnitErp.Domain.Hr.PersonalDataMask.Mask(text);
+        return masked.Length <= 80 ? masked : masked[..80].TrimEnd() + "…";
+    }
 
     private async Task<IReadOnlyList<CommentDto>> LoadAsync(IKnitErpDbContext db, AccessContext ctx, IQueryable<DiscussionComment> query, CancellationToken ct) =>
         await ToDtosAsync(db, ctx, await query.ToListAsync(ct), ct);

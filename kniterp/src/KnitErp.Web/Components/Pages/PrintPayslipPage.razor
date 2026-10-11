@@ -1,0 +1,81 @@
+@page "/print/payslip/{Year:int}/{Month:int}"
+@page "/print/payslip/{Year:int}/{Month:int}/{EmployeeId:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using System.Globalization
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@inject PayrollService Payroll
+
+@*
+    Расчётный листок (ст. 136 ТК РФ): составные части заработной платы за месяц. Форму утверждает работодатель с учётом мнения
+    представительного органа работников; НДФЛ и удержания здесь не считаются — их показывает листок 1С ЗУП (D213).
+*@
+<PageTitle>Расчётный листок — knitERP</PageTitle>
+<style>@@media print { @@page { size: A5 portrait; margin: 8mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="hr/payroll">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_slip is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var s = _slip;
+    <div class="sheet portrait">
+        @if (s.Status != PayrollStatus.Approved)
+        {
+            <div class="stamp">ЧЕРНОВИК</div>
+        }
+        <p><b>@s.Organization</b></p>
+        <h1 style="text-align: center">РАСЧЁТНЫЙ ЛИСТОК за @Ru.DateTimeFormat.GetMonthName(s.Month) @s.Year г.</h1>
+        <table class="plain fields">
+            <tr><td style="width: 180px">Работник</td><td class="fill">@s.FullName, табельный № @s.PersonnelNumber</td></tr>
+            <tr><td>Подразделение, должность</td><td class="fill">@s.Department, @s.Position</td></tr>
+            <tr><td>Отработано</td><td class="fill">@s.DaysWorked дн., @s.HoursWorked.ToString("0.##", Ru) ч</td></tr>
+        </table>
+        <table style="margin-top: 8px">
+            <tr><th>Вид начисления</th><th>Расчёт</th><th>Кол-во</th><th>Сумма, руб.</th></tr>
+            @foreach (var l in s.Lines)
+            {
+                <tr><td>@l.KindName</td><td>@l.Description</td><td class="num">@l.Quantity.ToString("0.###", Ru)</td><td class="num">@l.Amount.ToString("N2", Ru)</td></tr>
+            }
+            <tr><td colspan="3"><b>Всего начислено</b></td><td class="num"><b>@s.Total.ToString("N2", Ru)</b></td></tr>
+        </table>
+        <p class="small">Удержания (НДФЛ и др.) и сумма к выплате — по расчётному листку 1С: Зарплата и управление персоналом.</p>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Year { get; set; }
+
+    [Parameter]
+    public int Month { get; set; }
+
+    [Parameter]
+    public long? EmployeeId { get; set; }
+
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private PayslipDto? _slip;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _slip = EmployeeId is { } id ? await Payroll.PayslipAsync(Year, Month, id) : await Payroll.MyPayslipAsync(Year, Month);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

@@ -370,6 +370,44 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
             latest.Count > 0 && latest.All(t => t.Status == TimesheetStatus.Closed));
     }
 
+    /// <summary>Дни последних версий табелей за период — для расчёта заработка; Closed — все ли версии закрыты.</summary>
+    internal async Task<(List<TimesheetDay> Days, bool Closed)> DaysAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct)
+    {
+        var latest = await LatestVersionsAsync(organizationId, from, to, ct);
+        var ids = latest.Select(t => t.Id).ToList();
+        var days = await db.TimesheetDays.AsNoTracking().Where(d => ids.Contains(d.TimesheetId) && d.Date >= from && d.Date <= to).ToListAsync(ct);
+        return (days, latest.Count > 0 && latest.All(t => t.Status == TimesheetStatus.Closed));
+    }
+
+    /// <summary>
+    /// Норма часов месяца по графику сотрудника (без учёта отпусков и дат приёма), умноженная на ставку, — знаменатель оплаты по окладу (D212).
+    /// </summary>
+    internal async Task<Dictionary<long, decimal>> NormHoursAsync(long organizationId, IReadOnlyCollection<long> employeeIds, DateOnly from, DateOnly to,
+        IReadOnlyDictionary<long, decimal> rates, CancellationToken ct)
+    {
+        var country = await db.Organizations.AsNoTracking().Where(o => o.Id == organizationId).Select(o => o.CountryCode).SingleAsync(ct);
+        var holidays = ProductionCalendar.Holidays(country, from, to.AddDays(1)).Select(h => h.Date).ToHashSet();
+        var assignments = await (from a in db.EmployeeSchedules.AsNoTracking()
+                                 join s in db.WorkSchedules.AsNoTracking() on a.ScheduleId equals s.Id
+                                 where a.OrganizationId == organizationId && employeeIds.Contains(a.EmployeeId) && a.ValidFrom <= to
+                                 select new { a.EmployeeId, a.ValidFrom, Schedule = s }).ToListAsync(ct);
+        var result = new Dictionary<long, decimal>();
+        foreach (var id in employeeIds)
+        {
+            var own = assignments.Where(a => a.EmployeeId == id).OrderBy(a => a.ValidFrom).ToList();
+            decimal sum = 0;
+            for (var date = from; date <= to; date = date.AddDays(1))
+            {
+                var plan = own.LastOrDefault(a => a.ValidFrom <= date)?.Schedule.PlanFor(date, holidays) ?? WorkSchedule.DefaultPlan(date, holidays);
+                sum += plan.Work ? plan.Hours : 0;
+            }
+
+            result[id] = decimal.Round(sum * rates.GetValueOrDefault(id, 1m), 2);
+        }
+
+        return result;
+    }
+
     private async Task<List<Timesheet>> LatestVersionsAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct)
     {
         var fromKey = from.Year * 12 + from.Month;
@@ -385,7 +423,7 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
         var from = new DateOnly(year, month, 1);
         var to = from.AddMonths(1).AddDays(-1);
         var org = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => new { o.FullName, o.CountryCode, o.TimeZoneId }).SingleAsync(ct);
-        var holidays = ProductionCalendar.Holidays(org.CountryCode, from, to).Select(h => h.Date).ToHashSet();
+        var holidays = ProductionCalendar.Holidays(org.CountryCode, from, to.AddDays(1)).Select(h => h.Date).ToHashSet();
         var days = Enumerable.Range(0, to.Day).Select(from.AddDays).ToList();
         var rows = new List<TimesheetRowDto>();
         if (ts is not null)
@@ -445,7 +483,7 @@ public sealed class TimesheetService(IKnitErpDbContext db, IAccessGuard guard, I
         var from = ts.From;
         var to = ts.To;
         var country = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.CountryCode).SingleAsync(ct);
-        var holidays = ProductionCalendar.Holidays(country, from, to).Select(h => h.Date).ToHashSet();
+        var holidays = ProductionCalendar.Holidays(country, from, to.AddDays(1)).Select(h => h.Date).ToHashSet();
         var employees = await db.Employees.AsNoTracking()
             .Where(e => e.OrganizationId == ctx.OrganizationId && e.DepartmentId == ts.DepartmentId && e.HiredOn <= to
                         && (e.DismissedOn == null || e.DismissedOn >= from)).ToListAsync(ct);

@@ -1,0 +1,207 @@
+@page "/hr/payroll"
+@using System.Globalization
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Access
+@using KnitErp.Domain.Hr
+@inject PayrollService Payroll
+
+<PageTitle>@L("Заработок") — knitERP</PageTitle>
+
+@* D211–D213: расчёт заработка за месяц — сдельно по выработке, оклад по табелю, доплаты по ст. 152–154 ТК РФ; НДФЛ — в 1С ЗУП. *@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_own)
+{
+    <div class="page-head"><h1>@L("Мой расчётный листок")</h1></div>
+    <form class="inline-form" @onsubmit="LoadMineAsync">
+        <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+    @if (_mine is null)
+    {
+        <p class="muted">@L("Расчётный листок за этот месяц ещё не утверждён.")</p>
+    }
+    else
+    {
+        <a class="button secondary" href="print/payslip/@_month.Year/@_month.Month" target="_blank" rel="noopener">@L("Печать листка")</a>
+        <PayslipTable Slip="_mine" />
+    }
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Заработок")</h1>
+        <div class="row-actions"><a class="button secondary" href="hr/piece-rates">@L("Сдельные расценки")</a></div>
+    </div>
+
+    <form class="inline-form" @onsubmit="LoadAsync">
+        <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_warnings.Count > 0)
+    {
+        <div class="flash error" role="alert">
+            <ul style="margin: 0">@foreach (var w in _warnings) { <li>@w</li> }</ul>
+        </div>
+    }
+
+    @if (_data is not null)
+    {
+        var d = _data;
+        <div class="row-actions" style="margin: 8px 0">
+            @if (d.Status is { } st)
+            {
+                <span class="tag @(st == PayrollStatus.Approved ? "ok" : "warn")">@(st == PayrollStatus.Approved ? L("Утверждён") : L("Черновик"))</span>
+                @if (!d.TimesheetsClosed)
+                {
+                    <span class="muted">@L("Табели месяца не закрыты — утвердить нельзя.")</span>
+                }
+            }
+            @if (d.CanCalculate)
+            {
+                <button type="button" @onclick="CalculateAsync" disabled="@_busy">@(d.Id is null ? L("Рассчитать") : L("Пересчитать"))</button>
+                @if (d.Id is not null && d.TimesheetsClosed)
+                {
+                    <button type="button" class="secondary" @onclick="ApproveAsync" disabled="@_busy">@L("Утвердить")</button>
+                }
+            }
+            @if (d.Status == PayrollStatus.Approved && CurrentAccess.Has(Permissions.PayrollCalculate))
+            {
+                <a class="button secondary" href="hr/payroll/@d.Id/zup.xml">@L("Выгрузить в 1С: ЗУП")</a>
+            }
+        </div>
+
+        @if (d.Id is null)
+        {
+            <p class="muted">@L("Расчёта за этот месяц ещё нет.")</p>
+        }
+        else
+        {
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>@L("Сотрудник")</th><th class="num">@L("Сдельно")</th><th class="num">@L("Оклад")</th><th class="num opt">@L("Доплаты")</th><th class="num">@L("Итого")</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var e in d.Employees)
+                        {
+                            <tr>
+                                <td>@e.FullName<div class="muted">@e.PersonnelNumber · @e.Position</div></td>
+                                <td class="num">@e.Piece.ToString("N2", Ru)</td>
+                                <td class="num">@e.Salary.ToString("N2", Ru)</td>
+                                <td class="num">@e.Premiums.ToString("N2", Ru)</td>
+                                <td class="num"><b>@e.Total.ToString("N2", Ru)</b></td>
+                                <td><a href="print/payslip/@d.Year/@d.Month/@e.EmployeeId" target="_blank" rel="noopener">@L("Листок")</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot><tr><th>@L("Итого")</th><th colspan="3"></th><th class="num">@d.Total.ToString("N2", Ru)</th><th></th></tr></tfoot>
+                </table>
+            </div>
+            <p class="muted">@L("НДФЛ, страховые взносы и удержания рассчитываются в 1С: Зарплата и управление персоналом.")</p>
+        }
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private PayrollDto? _data;
+    private PayslipDto? _mine;
+    private IReadOnlyList<string> _warnings = [];
+    private DateTime _month;
+    private bool _own;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId);
+        _month = new DateTime(today.Year, today.Month, 1);
+        if (!CurrentAccess.Has(Permissions.PayrollView) && CurrentAccess.HasOwnOnly(Permissions.PayrollView))
+        {
+            _own = true;
+            await LoadMineAsync();
+            return;
+        }
+
+        try
+        {
+            _data = await Payroll.GetAsync(_month.Year, _month.Month);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadMineAsync()
+    {
+        try
+        {
+            _mine = await Payroll.MyPayslipAsync(_month.Year, _month.Month);
+        }
+        catch (NotFoundException)
+        {
+            _mine = null;
+        }
+    }
+
+    private Task LoadAsync() => RunAsync(() => Task.CompletedTask);
+
+    private Task CalculateAsync() => RunAsync(async () =>
+    {
+        var result = await Payroll.CalculateAsync(_month.Year, _month.Month);
+        _warnings = result.Warnings;
+        _message = L("Рассчитано: сотрудников {0}, сумма {1}.", result.Employees, result.Total.ToString("N2", Ru));
+    });
+
+    private Task ApproveAsync() => RunAsync(async () =>
+    {
+        await Payroll.ApproveAsync(_data!.Id!.Value, _data.RowVersion!);
+        _message = L("Расчёт утверждён: сотрудники видят расчётные листки.");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _warnings = [];
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _data = await Payroll.GetAsync(_month.Year, _month.Month);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

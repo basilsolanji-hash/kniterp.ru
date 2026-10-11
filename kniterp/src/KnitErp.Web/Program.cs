@@ -100,6 +100,12 @@ if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
     builder.Services.AddHostedService<KnitErp.Web.Api.WebhookWorker>();
 }
 
+// Модуль «Сотрудники»: статус «В отпуске» по приказам Т-6 (D210).
+if (!builder.Configuration.GetValue<bool>("Hr:StatusWorkerDisabled"))
+{
+    builder.Services.AddHostedService<KnitErp.Web.Api.HrStatusWorker>();
+}
+
 // D102: тело запросов API — как и ответы: перечисления строками («Receipt»), имена в camelCase.
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddOpenApi("v1", o =>
@@ -354,6 +360,28 @@ app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, Kn
     catch (NotFoundException)
     {
         return Results.NotFound();
+    }
+});
+
+// Утверждённые начисления месяца для 1С: ЗУП (D213): право — в сервисе.
+app.MapGet("/hr/payroll/{id:long}/zup.xml", async (long id, KnitErp.Application.Hr.PayrollEnterpriseDataExport export, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, content) = await export.ExportAsync(id, ct);
+        return Results.File(content, "application/xml", fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+    catch (KnitErp.Domain.Common.BusinessRuleException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
     }
 });
 

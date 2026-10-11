@@ -12,3 +12,5 @@ KNITERP_TEST_SQL='Server=localhost,1433;User Id=sa;Password=…;TrustServerCerti
 
 Браузер — Chromium версии Playwright 1.56.1; если он установлен в другом месте, укажите `PLAYWRIGHT_BROWSERS_PATH`
 или `PLAYWRIGHT_CHROMIUM_PATH`. Проект `phone` проверяет экраны с отметкой `@phone` в ширине 390 px.
+
+В CI тесты запускает отдельный workflow `.github/workflows/kniterp-e2e.yml` (браузер ставится `npx playwright install --with-deps chromium`).

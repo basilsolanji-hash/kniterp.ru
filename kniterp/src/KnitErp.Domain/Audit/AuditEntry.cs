@@ -147,6 +147,11 @@ public static class AuditActions
     public const string TimesheetCreated = "hr.timesheet.created";
     public const string TimesheetDayChanged = "hr.timesheet.day_changed";
     public const string TimesheetClosed = "hr.timesheet.closed";
+    public const string PieceRateAdded = "hr.piece_rate.added";
+    public const string PayrollCalculated = "hr.payroll.calculated";
+    public const string PayrollApproved = "hr.payroll.approved";
+    public const string PayslipViewed = "hr.payslip.viewed";
+    public const string PayrollExported = "hr.payroll.exported";
     public const string CatalogCreated = "catalog.created";
     public const string CatalogChanged = "catalog.changed";
     public const string CatalogArchived = "catalog.archived";

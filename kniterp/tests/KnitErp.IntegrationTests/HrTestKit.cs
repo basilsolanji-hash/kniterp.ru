@@ -10,7 +10,8 @@ namespace KnitErp.IntegrationTests;
 
 /// <summary>Сервисы модуля «Сотрудники» от имени пользователя — отдельно от общего набора, чтобы не мешать другим модулям.</summary>
 public sealed class HrServices(
-    KnitErpDbContext db, PersonalDataService personalData, StaffingService staffing, PersonnelOrderService orders, TimesheetService timesheets)
+    KnitErpDbContext db, PersonalDataService personalData, StaffingService staffing, PersonnelOrderService orders, TimesheetService timesheets,
+    PayrollService payroll, PayrollEnterpriseDataExport payrollExport, LeaveStatusSync leaveSync)
     : IAsyncDisposable
 {
     public KnitErpDbContext Db { get; } = db;
@@ -18,6 +19,9 @@ public sealed class HrServices(
     public StaffingService Staffing { get; } = staffing;
     public PersonnelOrderService Orders { get; } = orders;
     public TimesheetService Timesheets { get; } = timesheets;
+    public PayrollService Payroll { get; } = payroll;
+    public PayrollEnterpriseDataExport PayrollExport { get; } = payrollExport;
+    public LeaveStatusSync LeaveSync { get; } = leaveSync;
 
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }
@@ -28,15 +32,17 @@ public static class HrTestKit
     private static int _innSeed = 600_000_000;
     private static int _personSeed = 100_200_300;
 
-    public static HrServices Hr(this SqlTestHost host, long userId, long organizationId)
+    public static HrServices Hr(this SqlTestHost host, long userId, long organizationId, IWorkOutputSource? output = null)
     {
         var db = host.NewDb();
         var user = new TestUser { UserId = userId, OrganizationId = organizationId };
         var guard = new AccessGuard(db, user, host.Clock);
         var access = new UserAccessService(db, guard, user, host.Clock);
+        var timesheets = new TimesheetService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet);
         return new HrServices(db, new PersonalDataService(db, guard, user, host.Clock), new StaffingService(db, guard, user, host.Clock),
-            new PersonnelOrderService(db, guard, access, user, host.Clock),
-            new TimesheetService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet));
+            new PersonnelOrderService(db, guard, access, user, host.Clock), timesheets,
+            new PayrollService(db, guard, user, host.Clock, timesheets, output ?? new EmptyWorkOutputSource()),
+            new PayrollEnterpriseDataExport(db, guard, user, host.Clock), new LeaveStatusSync(db, host.Clock));
     }
 
     public static async Task<CreatedOrganization> CreateOrganizationAsync(this SqlTestHost host)
@@ -124,4 +130,11 @@ public static class HrTestKit
 
         return body + (sum % 11 % 10);
     }
+}
+
+/// <summary>Выработка для тестов расчёта — вместо реализации производства (ТЗ §6: «до слияния тестируется на заглушке с тестовыми данными»).</summary>
+public sealed class FakeWorkOutputSource(params WorkOutputDto[] rows) : IWorkOutputSource
+{
+    public Task<IReadOnlyList<WorkOutputDto>> OutputAsync(long organizationId, DateOnly from, DateOnly to, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<WorkOutputDto>>(rows.Where(r => r.Date >= from && r.Date <= to).ToList());
 }

@@ -2111,6 +2111,130 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.PayrollLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("Rate")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<long>("RunId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "EmployeeId");
+
+                    b.HasIndex("OrganizationId", "RunId");
+
+                    b.HasIndex("RunId", "EmployeeId")
+                        .HasDatabaseName("ix_hr_payroll_lines_run_employee");
+
+                    b.ToTable("hr_payroll_lines", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_payroll_lines_approved_immutable");
+
+                            t.HasCheckConstraint("ck_hr_payroll_lines_kind", "[Kind] BETWEEN 1 AND 5");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.PayrollRun", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("ApprovedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CalculatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CalculatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Month")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<bool>("TimesheetsClosed")
+                        .HasColumnType("bit");
+
+                    b.Property<short>("Year")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_hr_payroll_runs_org_id");
+
+                    b.HasIndex("ApprovedByUserId");
+
+                    b.HasIndex("CalculatedByUserId");
+
+                    b.HasIndex("OrganizationId", "Year", "Month")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_payroll_runs_period");
+
+                    b.ToTable("hr_payroll_runs", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_payroll_runs_approved_immutable");
+
+                            t.HasCheckConstraint("ck_hr_payroll_runs_approved", "([Status] = 2 AND [ApprovedAtUtc] IS NOT NULL AND [ApprovedByUserId] IS NOT NULL AND [TimesheetsClosed] = 1) OR ([Status] = 1 AND [ApprovedAtUtc] IS NULL AND [ApprovedByUserId] IS NULL)");
+
+                            t.HasCheckConstraint("ck_hr_payroll_runs_period", "[Month] BETWEEN 1 AND 12 AND [Year] BETWEEN 2000 AND 2100");
+
+                            t.HasCheckConstraint("ck_hr_payroll_runs_status", "[Status] IN (1, 2)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.PersonnelOrder", b =>
                 {
                     b.Property<long>("Id")
@@ -2240,6 +2364,67 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_hr_orders_rate", "[Rate] IS NULL OR ([Rate] > 0 AND [Rate] <= 1.5)");
 
                             t.HasCheckConstraint("ck_hr_orders_status", "[Status] IN (1, 2, 9)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.PieceRate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OperationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OperationName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Price")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(5)
+                        .HasColumnType("nvarchar(5)");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "OperationId", "ItemId", "ValidFrom")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_piece_rates_from")
+                        .HasFilter("[ItemId] IS NOT NULL");
+
+                    b.ToTable("hr_piece_rates", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_piece_rates_immutable");
+
+                            t.HasCheckConstraint("ck_hr_piece_rates_price", "[Price] > 0");
+
+                            t.HasCheckConstraint("ck_hr_piece_rates_unit", "[Unit] IN (N'шт', N'кг')");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -5860,6 +6045,45 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_hr_employment_history_order");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.PayrollLine", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_payroll_lines_employee");
+
+                    b.HasOne("KnitErp.Domain.Hr.PayrollRun", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "RunId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_payroll_lines_run");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.PayrollRun", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CalculatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.PersonnelOrder", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -5899,6 +6123,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_hr_orders_position");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.PieceRate", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Hr.StaffingPosition", b =>

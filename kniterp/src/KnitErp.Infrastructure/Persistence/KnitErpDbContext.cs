@@ -97,6 +97,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules => Set<KnitErp.Domain.Hr.EmployeeSchedule>();
     public DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets => Set<KnitErp.Domain.Hr.Timesheet>();
     public DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays => Set<KnitErp.Domain.Hr.TimesheetDay>();
+    public DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates => Set<KnitErp.Domain.Hr.PieceRate>();
+    public DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns => Set<KnitErp.Domain.Hr.PayrollRun>();
+    public DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines => Set<KnitErp.Domain.Hr.PayrollLine>();
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней

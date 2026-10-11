@@ -205,6 +205,8 @@
             new("hr/staffing", "Штатное расписание", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
             new("hr/timesheet", "Табель", a => a.HasOwnOnly(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
             new("hr/schedules", "Графики работы", a => a.Has(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
+            new("hr/payroll", "Заработок", a => a.HasOwnOnly(Permissions.PayrollView)),
+            new("hr/piece-rates", "Сдельные расценки", a => a.Has(Permissions.PayrollView) || a.Has(Permissions.PayrollCalculate)),
         ]),
         new("reports", "Отчёты",
         [
