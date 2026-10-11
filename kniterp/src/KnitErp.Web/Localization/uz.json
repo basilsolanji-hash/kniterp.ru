@@ -3702,5 +3702,9 @@
   "выключен": "o‘chirilgan",
   "только в наличии": "faqat mavjudlari",
   "Неверная сделка.": "Bitim noto‘g‘ri.",
-  "Блоки модулей (CRM, разработка)": "Modul bloklari (CRM, ishlab chiqish)"
+  "Блоки модулей (CRM, разработка)": "Modul bloklari (CRM, ishlab chiqish)",
+  "В выписке больше {0} документов — выгрузите её за меньший период.": "Ko‘chirmada {0} tadan ortiq hujjat bor — uni qisqaroq davr uchun yuklab oling.",
+  "Файл выписки пустой или больше 5 МБ.": "Ko‘chirma fayli bo‘sh yoki 5 MB dan katta.",
+  "Это не выписка в формате 1С «Клиент-банк». В интернет-банке выберите выгрузку «в 1С» (файл kl_to_1c.txt).": "Bu 1C «Mijoz-bank» formatidagi ko‘chirma emas. Internet-bankda «1C ga» yuklashni tanlang (kl_to_1c.txt fayli).",
+  "Документ № {0} в выписке без даты, суммы или счёта. Выгрузите выписку из банка заново.": "Ko‘chirmadagi № {0} hujjatda sana, summa yoki hisob yo‘q. Ko‘chirmani bankdan qaytadan yuklab oling."
 }
