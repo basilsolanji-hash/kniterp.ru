@@ -91,6 +91,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.CustomerPayment> CustomerPayments { get; }
     DbSet<KnitErp.Domain.Sales.CustomerInvoice> CustomerInvoices { get; }
     DbSet<KnitErp.Domain.Sales.SalesOrderStage> SalesOrderStages { get; }
+    DbSet<KnitErp.Domain.Sales.SalesStageRule> SalesStageRules { get; }
     DbSet<KnitErp.Domain.Catalog.Lookup> Lookups { get; }
     DbSet<KnitErp.Domain.Organizations.LegalEntity> LegalEntities { get; }
     DbSet<KnitErp.Domain.Catalog.ItemGroup> ItemGroups { get; }

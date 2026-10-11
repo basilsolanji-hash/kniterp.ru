@@ -1106,6 +1106,23 @@ internal sealed class CustomFieldValueConfiguration : IEntityTypeConfiguration<C
     }
 }
 
+/// <summary>D110: правила автоматической смены этапа — одно на событие в организации, этап — своей организации.</summary>
+internal sealed class SalesStageRuleConfiguration : IEntityTypeConfiguration<SalesStageRule>
+{
+    public void Configure(EntityTypeBuilder<SalesStageRule> b)
+    {
+        b.ToTable("sales_stage_rules", t => t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 8"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Trigger).HasConversion<byte>();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<SalesOrderStage>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.StageId })
+            .HasPrincipalKey(s => new { s.OrganizationId, s.Id }).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.OrganizationId, x.Trigger }).IsUnique().HasDatabaseName("ux_sales_stage_rules_org_trigger");
+    }
+}
+
 internal sealed class SalesOrderStageConfiguration : IEntityTypeConfiguration<SalesOrderStage>
 {
     public void Configure(EntityTypeBuilder<SalesOrderStage> b)

@@ -146,6 +146,54 @@ public sealed class AccessFormsTests(SqlTestHost host) : IClassFixture<SqlTestHo
         }
     }
 
+    [SqlFact]
+    public async Task Account_wide_actions_stay_inside_own_organization_and_admins_are_managed_by_owner()
+    {
+        // Аудит 11.10.2026 (D109): пароль, 2FA и ссылка входа — общие для всех организаций пользователя.
+        var a = await CreateOrganizationAsync();
+        var b = await CreateOrganizationAsync();
+        var shared = await InviteActiveAsync(a, SystemRoles.Storekeeper);
+        var email = await host.NewDb().Users.Where(u => u.Id == shared).Select(u => u.Email).SingleAsync();
+        long pendingId;
+        await using (var s = host.As(a.OwnerUserId, a.OrganizationId))
+        {
+            pendingId = (await s.Access.InviteAsync(new InviteUserCommand($"pending-{Guid.NewGuid():N}@test.local", "Ждёт входа", SystemRoles.Storekeeper, null))).UserId;
+        }
+
+        var pendingEmail = await host.NewDb().Users.Where(u => u.Id == pendingId).Select(u => u.Email).SingleAsync();
+        await using (var s = host.As(b.OwnerUserId, b.OrganizationId))
+        {
+            await s.Access.InviteAsync(new InviteUserCommand(email, "Общий", SystemRoles.Storekeeper, null));
+            // Учётная запись, приглашённая другой организацией и ещё без пароля: новая ссылка отсюда не выдаётся.
+            var again = await s.Access.InviteAsync(new InviteUserCommand(pendingEmail, "Ждёт входа", SystemRoles.Storekeeper, null));
+            Assert.Null(again.SetupToken);
+            Assert.Equal("access.account.shared", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Access.ResetTwoFactorAsync(shared, "Потерял телефон"))).Code);
+            Assert.Equal("access.account.shared", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Access.IssuePasswordResetAsync(shared, "Забыл пароль"))).Code);
+            Assert.Equal("access.account.shared", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Access.ReissueInvitationAsync(pendingId))).Code);
+        }
+
+        // Администратор не перевыпускает ссылку приглашённому Администратору и не разблокирует Владельца или Администратора.
+        var admin = await InviteActiveAsync(a, SystemRoles.Administrator);
+        long pendingAdmin;
+        await using (var s = host.As(a.OwnerUserId, a.OrganizationId))
+        {
+            pendingAdmin = (await s.Access.InviteAsync(new InviteUserCommand($"admin2-{Guid.NewGuid():N}@test.local", "Второй админ", SystemRoles.Administrator, "Тест"))).UserId;
+            await s.Access.BlockAsync(pendingAdmin, "Тест");
+        }
+
+        await using (var s = host.As(admin, a.OrganizationId))
+        {
+            Assert.Equal("access.admin_grant_denied", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Access.ReissueInvitationAsync(pendingAdmin))).Code);
+            Assert.Equal("access.admin_grant_denied", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Access.UnblockAsync(pendingAdmin, "Тест"))).Code);
+        }
+
+        await using (var s = host.As(a.OwnerUserId, a.OrganizationId))
+        {
+            await s.Access.UnblockAsync(pendingAdmin, "Тест");
+            Assert.NotNull((await s.Access.ReissueInvitationAsync(pendingAdmin)).SetupToken);
+        }
+    }
+
     private async Task<CreatedOrganization> CreateOrganizationAsync()
     {
         var inn = NextValidInn();

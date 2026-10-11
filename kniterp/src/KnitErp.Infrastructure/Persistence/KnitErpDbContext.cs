@@ -58,6 +58,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.CustomerPayment> CustomerPayments => Set<KnitErp.Domain.Sales.CustomerPayment>();
     public DbSet<KnitErp.Domain.Sales.CustomerInvoice> CustomerInvoices => Set<KnitErp.Domain.Sales.CustomerInvoice>();
     public DbSet<KnitErp.Domain.Sales.SalesOrderStage> SalesOrderStages => Set<KnitErp.Domain.Sales.SalesOrderStage>();
+    public DbSet<KnitErp.Domain.Sales.SalesStageRule> SalesStageRules => Set<KnitErp.Domain.Sales.SalesStageRule>();
     public DbSet<Lookup> Lookups => Set<Lookup>();
     public DbSet<LegalEntity> LegalEntities => Set<LegalEntity>();
     public DbSet<ItemGroup> ItemGroups => Set<ItemGroup>();

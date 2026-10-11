@@ -625,6 +625,63 @@ public sealed class SalesTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         }
     }
 
+    [SqlFact]
+    public async Task Stage_changes_itself_on_confirm_invoice_full_payment_production_and_shipment_only_forward()
+    {
+        // D110: «выставлен счёт → Ждём оплату», «оплачено 100 % → Оплачен — в производство» и т. д.; только вперёд.
+        var f = await SetUpAsync();
+        await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+        var rules = await s.Stages.RulesAsync();
+        Assert.Equal(6, rules.Count(r => r.StageId != null));
+        Assert.Null(rules.Single(r => r.Trigger == StageTrigger.PartiallyPaid).StageId);
+
+        var receipt = await s.Documents.CreateWithLinesAsync(StockOperationKind.Receipt,
+            new StockDocumentHeader(f.Store, null, null, await ReasonAsync(f.Org.OrganizationId, StockOperationKind.Receipt), Day, null), [(f.Sweater, 10m)]);
+        await s.Documents.PostAsync(receipt, (await s.Documents.GetAsync(receipt)).RowVersion);
+        var order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, f.Customer, f.Store, Day.AddDays(2), null, true, null));
+        await s.Sales.SetOrderLineAsync(order, f.Sweater, 4, 2500m, 20m, (await s.Sales.GetOrderAsync(order)).RowVersion);
+        Assert.Null(await StageAsync(s, order));
+        await s.Sales.ConfirmOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion);
+        Assert.Equal("В обработке", await StageAsync(s, order));
+
+        await s.Invoices.CreateAsync(order, Day.AddDays(5), null);
+        Assert.Equal("Ждём оплату", await StageAsync(s, order));
+
+        // Частичная оплата — правила нет, этап прежний; доплата до 100 % — «Оплачен — в производство».
+        await s.Sales.CreatePaymentAsync(Day, f.Customer, order, 4_000m, "п/п 1");
+        Assert.Equal("Ждём оплату", await StageAsync(s, order));
+        await s.Sales.CreatePaymentAsync(Day, f.Customer, order, 6_000m, "п/п 2");
+        Assert.Equal("Оплачен — в производство", await StageAsync(s, order));
+
+        await s.Sales.NotifyProductionAsync(order, completed: false);
+        Assert.Equal("В работе", await StageAsync(s, order));
+        await s.Sales.NotifyProductionAsync(order, completed: true);
+        Assert.Equal("Собран", await StageAsync(s, order));
+
+        // Своё правило: частичная оплата → «Ждём оплату» — не откатит этап назад.
+        var waiting = (await s.Stages.ListAsync()).Single(x => x.Name == "Ждём оплату").Id;
+        await s.Stages.SetRuleAsync(StageTrigger.PartiallyPaid, waiting);
+        await s.Sales.NotifyProductionAsync(order, completed: false);
+        Assert.Equal("Собран", await StageAsync(s, order));
+
+        var ship = await s.Sales.CreateShipmentAsync(order);
+        await s.Documents.PostAsync(ship, (await s.Documents.GetAsync(ship)).RowVersion);
+        Assert.Equal("Отгружен", await StageAsync(s, order));
+        Assert.Contains(await s.Db.AuditEntries.Where(a => a.EntityType == nameof(SalesOrder) && a.EntityId == order.ToString()).Select(a => a.Reason).ToListAsync(),
+            r => r != null && r.Contains("автоматически — Отгружен полностью"));
+
+        // Правило выключено — событие этап не меняет; чужой этап — «не найдено».
+        await s.Stages.SetRuleAsync(StageTrigger.Invoiced, null);
+        Assert.Null((await s.Stages.RulesAsync()).Single(r => r.Trigger == StageTrigger.Invoiced).StageId);
+        await Assert.ThrowsAsync<NotFoundException>(() => s.Stages.SetRuleAsync(StageTrigger.Invoiced, 999_999_999));
+    }
+
+    private static async Task<string?> StageAsync(Services s, long order) =>
+        await (from o in s.Db.SalesOrders.AsNoTracking()
+               join st in s.Db.SalesOrderStages.AsNoTracking() on o.StageId equals st.Id
+               where o.Id == order
+               select st.Name).SingleOrDefaultAsync();
+
     private async Task<long?> ReasonAsync(long organizationId, StockOperationKind kind)
     {
         await using var db = host.NewDb();

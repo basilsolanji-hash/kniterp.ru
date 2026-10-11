@@ -537,7 +537,12 @@ public sealed class SalesService(
         await ValidateHeaderAsync(ctx, Header(order) with { LegalEntityId = order.LegalEntityId }, null, ct);
         order.Confirm(ctx.UserId, clock.UtcNow);
         Audit(ctx, AuditActions.SalesOrderConfirmed, nameof(SalesOrder), id, "Черновик", "Подтверждён", $"{order.Number}: {order.Total:0.00}");
+        await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveOrConflictAsync(ct);
+        // D110: этап по событию «заказ подтверждён» — после сохранения статуса, в той же транзакции.
+        await StageAutomation.ApplyAsync(db, ctx, [id], clock.UtcNow, currentUser.CorrelationId, ct);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task CloseOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default)
@@ -683,6 +688,12 @@ public sealed class SalesService(
         Audit(ctx, AuditActions.CustomerPaymentCreated, nameof(CustomerPayment), payment.Id, null, $"{payment.Amount:0.00}",
             $"{number}: {customer.Name}");
         await db.SaveChangesAsync(ct);
+        if (orderId is { } paidOrder)
+        {
+            await StageAutomation.ApplyAsync(db, ctx, [paidOrder], clock.UtcNow, currentUser.CorrelationId, ct);
+            await db.SaveChangesAsync(ct);
+        }
+
         await tx.CommitAsync(ct);
         return payment.Id;
     }
@@ -708,19 +719,55 @@ public sealed class SalesService(
         return await Allocator.GetAsync(ctx, paymentId, ct);
     }
 
-    public async Task AllocatePaymentAsync(long paymentId, long orderId, decimal amount, CancellationToken ct = default) =>
-        await Allocator.AllocateAsync(await DemandEditAsync(ct), paymentId, orderId, amount, ct);
+    public async Task AllocatePaymentAsync(long paymentId, long orderId, decimal amount, CancellationToken ct = default)
+    {
+        var ctx = await DemandEditAsync(ct);
+        await Allocator.AllocateAsync(ctx, paymentId, orderId, amount, ct);
+        await AutoStageAsync(ctx, [orderId], ct);
+    }
 
     /// <summary>Разнести остаток оплаты по открытым заказам покупателя — сначала с ранним сроком. Возвращает разнесённую сумму.</summary>
-    public async Task<decimal> AutoAllocatePaymentAsync(long paymentId, CancellationToken ct = default) =>
-        await Allocator.AutoAllocateAsync(await DemandEditAsync(ct), paymentId, ct);
+    public async Task<decimal> AutoAllocatePaymentAsync(long paymentId, CancellationToken ct = default)
+    {
+        var ctx = await DemandEditAsync(ct);
+        var sum = await Allocator.AutoAllocateAsync(ctx, paymentId, ct);
+        var orders = await db.CustomerPaymentAllocations.AsNoTracking()
+            .Where(a => a.OrganizationId == ctx.OrganizationId && a.PaymentId == paymentId && a.RemovedAtUtc == null).Select(a => a.OrderId).ToListAsync(ct);
+        await AutoStageAsync(ctx, orders, ct);
+        return sum;
+    }
+
+    /// <summary>D110: автоматическая смена этапа после разноски оплаты (разноска уже сохранена своей транзакцией).</summary>
+    private async Task AutoStageAsync(AccessContext ctx, IReadOnlyCollection<long> orderIds, CancellationToken ct)
+    {
+        await StageAutomation.ApplyAsync(db, ctx, orderIds, clock.UtcNow, currentUser.CorrelationId, ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// D110: событие производства по заказу покупателя (начато / завершено) — для модуля производства. Этап меняется по правилам
+    /// организации, только вперёд; право — изменение заказов покупателей.
+    /// </summary>
+    public async Task NotifyProductionAsync(long orderId, bool completed, CancellationToken ct = default)
+    {
+        var ctx = await DemandEditAsync(ct);
+        await LoadOrderAsync(ctx, orderId, ct);
+        await StageAutomation.ApplyAsync(db, ctx, [orderId], clock.UtcNow, currentUser.CorrelationId, ct,
+            completed ? StageTrigger.ProductionCompleted : StageTrigger.ProductionStarted);
+        await db.SaveChangesAsync(ct);
+    }
 
     public async Task RemovePaymentAllocationAsync(long allocationId, byte[] rowVersion, CancellationToken ct = default) =>
         await Allocator.RemoveAsync(await DemandEditAsync(ct), allocationId, rowVersion, ct);
 
     /// <summary>Зачесть авансы покупателя (не разнесённые остатки его оплат) в заказ. Возвращает зачтённую сумму.</summary>
-    public async Task<decimal> ApplyAdvancesAsync(long orderId, CancellationToken ct = default) =>
-        await Allocator.ApplyAdvancesAsync(await DemandEditAsync(ct), orderId, ct);
+    public async Task<decimal> ApplyAdvancesAsync(long orderId, CancellationToken ct = default)
+    {
+        var ctx = await DemandEditAsync(ct);
+        var sum = await Allocator.ApplyAdvancesAsync(ctx, orderId, ct);
+        await AutoStageAsync(ctx, [orderId], ct);
+        return sum;
+    }
 
     /// <summary>Сколько авансов покупателя можно зачесть в заказ — подсказка в карточке заказа.</summary>
     public async Task<decimal> AvailableAdvancesAsync(long orderId, CancellationToken ct = default)

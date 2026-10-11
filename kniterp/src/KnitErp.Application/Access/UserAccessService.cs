@@ -314,7 +314,11 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             throw new BusinessRuleException("access.user.exists", "Этот пользователь уже есть в организации.");
         }
 
-        var token = user.HasPassword ? null : user.IssueSetupToken(now);
+        // Аудит 11.10.2026 (D109): учётная запись, приглашённая другой организацией и ещё без пароля, получает пароль по своей
+        // первой ссылке; новая ссылка отсюда дала бы этой организации вход в чужую учётную запись.
+        var invitedElsewhere = !user.HasPassword && user.Id != 0
+                               && await db.OrganizationMembers.AnyAsync(m => m.UserId == user.Id && m.OrganizationId != ctx.OrganizationId, ct);
+        var token = user.HasPassword || invitedElsewhere ? null : user.IssueSetupToken(now);
         db.OrganizationMembers.Add(OrganizationMember.Join(ctx.OrganizationId, user.Id, now));
         db.RoleAssignments.Add(RoleAssignment.ForRole(ctx.OrganizationId, user.Id, role.Id, ctx.UserId, now, cmd.Reason,
             departmentId: cmd.DepartmentId, warehouseId: cmd.WarehouseId));
@@ -342,6 +346,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
         await RequireMemberAsync(ctx, userId, ct);
+        await EnsureAccountActionAllowedAsync(ctx, userId, ct);
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         var token = user.IssueSetupToken(clock.UtcNow);
         db.AuditEntries.Add(Audit(ctx, AuditActions.InvitationIssued, userId, null, $"до {user.SetupTokenExpiresAtUtc:yyyy-MM-dd HH:mm} UTC", "повторная ссылка"));
@@ -364,9 +369,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         }
 
         GrantPolicy.EnsureReason(required: true, reason);
-        var targetIsAdmin = await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Owner, ct)
-                            || await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Administrator, ct);
-        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, targetIsAdmin);
+        await EnsureAccountActionAllowedAsync(ctx, userId, ct);
 
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         var token = user.IssuePasswordResetToken(clock.UtcNow, SignInPolicy.AdminPasswordResetLifetime);
@@ -389,9 +392,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         }
 
         GrantPolicy.EnsureReason(required: true, reason);
-        var targetIsAdmin = await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Owner, ct)
-                            || await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Administrator, ct);
-        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, targetIsAdmin);
+        await EnsureAccountActionAllowedAsync(ctx, userId, ct);
 
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         user.ResetTwoFactor();
@@ -488,6 +489,8 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
         var member = await RequireMemberAsync(ctx, userId, ct);
+        // Аудит 11.10.2026 (D109): разблокировать Владельца или Администратора может только Владелец — как и заблокировать.
+        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, await IsAdministratorHereAsync(ctx, userId, ct));
         member.Unblock();
         db.AuditEntries.Add(Audit(ctx, AuditActions.UserUnblocked, userId, "заблокирован", "активен", reason));
         await db.SaveChangesAsync(ct);
@@ -535,6 +538,26 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         ?? throw new NotFoundException("Роль");
 
     /// <summary>Пользователь чужой организации — «не найдено» (ТЗ §4.12).</summary>
+    /// <summary>
+    /// Аудит 11.10.2026 (D109): учётная запись (пароль, 2FA, ссылка входа) общая для всех организаций пользователя. Менять её
+    /// отсюда можно, только если пользователь не состоит в другой организации, иначе администратор одной организации получил бы
+    /// вход в чужую. Для Владельца и Администратора — только Владелец.
+    /// </summary>
+    private async Task EnsureAccountActionAllowedAsync(AccessContext ctx, long userId, CancellationToken ct)
+    {
+        if (await db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.OrganizationId != ctx.OrganizationId, ct))
+        {
+            throw new BusinessRuleException("access.account.shared",
+                "Пользователь работает и в другой организации: пароль и вход он восстанавливает сам — «Забыли пароль» или аварийная процедура.");
+        }
+
+        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, await IsAdministratorHereAsync(ctx, userId, ct));
+    }
+
+    private async Task<bool> IsAdministratorHereAsync(AccessContext ctx, long userId, CancellationToken ct) =>
+        await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Owner, ct)
+        || await HasActiveRoleAsync(ctx.OrganizationId, userId, SystemRoles.Administrator, ct);
+
     private async Task<OrganizationMember> RequireMemberAsync(AccessContext ctx, long userId, CancellationToken ct) =>
         await db.OrganizationMembers.SingleOrDefaultAsync(m => m.OrganizationId == ctx.OrganizationId && m.UserId == userId, ct)
         ?? throw new NotFoundException("Пользователь");

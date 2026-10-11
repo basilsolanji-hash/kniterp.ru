@@ -77,6 +77,47 @@ else
             </tbody>
         </table>
     </div>
+
+    @if (_rules is not null)
+    {
+        @* D110: события заказа меняют этап сами — только вперёд по списку этапов; вручную этап можно поменять всегда. *@
+        <h2 id="automation">@L("Автоматическая смена этапа")</h2>
+        <p class="muted small">@L("Когда событие произошло, этап заказа меняется сам — только вперёд по списку этапов выше: поздняя оплата не вернёт заказ из «В работе» назад. Вручную этап можно поменять всегда. Каждая смена — в журнале заказа.")</p>
+        <div class="scroll">
+            <table class="compact stage-rules">
+                <thead><tr><th>@L("Событие")</th><th>@L("Этап")</th></tr></thead>
+                <tbody>
+                    @foreach (var r in _rules)
+                    {
+                        <tr @key="r.Trigger">
+                            <td>@EventTitle(r.Trigger)</td>
+                            <td>
+                                @if (CanEdit)
+                                {
+                                    <select value="@(r.StageId?.ToString() ?? "")" disabled="@_busy" aria-label="@L("Этап для события «{0}»", EventTitle(r.Trigger))"
+                                            @onchange="e => SetRuleAsync(r.Trigger, e.Value?.ToString())">
+                                        <option value="">@L("— не менять —")</option>
+                                        @foreach (var s in _rows.Where(x => !x.IsArchived))
+                                        {
+                                            <option value="@s.Id">@s.Name</option>
+                                        }
+                                    </select>
+                                }
+                                else if (r.StageId is { } sid && _rows.FirstOrDefault(x => x.Id == sid) is { } st)
+                                {
+                                    <StageChip Stage="@(new SalesStageRefDto(st.Id, st.Name, st.Color))" />
+                                }
+                                else
+                                {
+                                    <span class="muted">@L("— не менять —")</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
 }
 
 @code {
@@ -118,7 +159,30 @@ else
         </select>
     };
 
-    private async Task LoadAsync() => _rows = await Stages.ListAsync(includeArchived: true);
+    private IReadOnlyList<StageRuleDto>? _rules;
+
+    private async Task LoadAsync()
+    {
+        _rows = await Stages.ListAsync(includeArchived: true);
+        _rules = await Stages.RulesAsync();
+    }
+
+    private Task SetRuleAsync(StageTrigger trigger, string? value) =>
+        RunAsync(() => Stages.SetRuleAsync(trigger, long.TryParse(value, out var id) ? id : null), L("Правило сохранено."));
+
+    /// <summary>Названия событий — литералами для перевода.</summary>
+    private string EventTitle(StageTrigger t) => t switch
+    {
+        StageTrigger.Confirmed => L("Заказ подтверждён"),
+        StageTrigger.Invoiced => L("Выставлен счёт"),
+        StageTrigger.PartiallyPaid => L("Оплачен частично"),
+        StageTrigger.Paid => L("Оплачен полностью (100 %)"),
+        StageTrigger.ProductionStarted => L("Производство начато"),
+        StageTrigger.ProductionCompleted => L("Производство завершено"),
+        StageTrigger.PartiallyShipped => L("Отгружен частично"),
+        StageTrigger.Shipped => L("Отгружен полностью"),
+        _ => t.ToString(),
+    };
 
     private void StartEdit(SalesStageDto s)
     {
