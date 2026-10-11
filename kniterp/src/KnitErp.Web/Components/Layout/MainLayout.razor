@@ -198,6 +198,7 @@
             new("production-orders", "Производственные заказы", a => a.Has(Permissions.ProductionOrderView)),
             new("tech-cards", "Техкарты", a => a.Has(Permissions.CatalogView)),
             new("production/planning", "Потребность в материалах", a => a.Has(Permissions.ProductionOrderView)),
+            new("production/shift-tasks", "Сменные задания", a => a.Has(Permissions.ProductionOrderView)),
             new("shop", "Терминал цеха", a => a.Has(Permissions.ProductionStageMark)),
             new("reports/production", "Отчёт по производству", a => a.Has(Permissions.ProductionOrderView)),
         ]),

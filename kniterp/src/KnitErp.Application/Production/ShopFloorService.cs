@@ -46,7 +46,8 @@ public sealed record ShopTaskDto(long OrderId, string OrderNumber, string ItemNa
 
 /// <summary>Мой день на терминале: мои отметки за дату и доступная работа.</summary>
 public sealed record ShopDayDto(
-    DateOnly Date, DateOnly Today, string? EmployeeName, ShopHint Hint, IReadOnlyList<ShopEntryDto> Entries, IReadOnlyList<ShopTaskDto> Tasks);
+    DateOnly Date, DateOnly Today, string? EmployeeName, ShopHint Hint, IReadOnlyList<ShopEntryDto> Entries, IReadOnlyList<ShopTaskDto> Tasks,
+    IReadOnlyList<ShiftTaskDto>? Shift = null);
 
 /// <summary>
 /// Терминал цеха (телефон рабочего, допущение D92, дополнение): по коду операции с маршрутного листа рабочий открывает этап заказа
@@ -173,7 +174,10 @@ public sealed class ShopFloorService(IKnitErpDbContext db, IAccessGuard guard, I
         }
 
         var hint = employee is null ? ShopHint.NoEmployee : employee.Status != EmploymentStatus.Working ? ShopHint.NotWorking : ShopHint.None;
-        return new ShopDayDto(day, today, employee?.ShortName, hint, entries, tasks);
+        var shift = employee is null
+            ? []
+            : (await ShiftTaskService.ListAsync(db, ctx.OrganizationId, day, employee.Id, ct)).Where(t => !t.IsCancelled).ToList();
+        return new ShopDayDto(day, today, employee?.ShortName, hint, entries, tasks, shift);
     }
 
     /// <summary>Местное время, остаток каждой отметки «Сделано» после исправлений и можно ли её уменьшить сейчас.</summary>

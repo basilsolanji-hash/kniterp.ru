@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Production
 @inject ShopFloorService Shop
 @inject ProductionFloorService Floor
+@inject ShiftTaskService Shifts
 @inject NavigationManager Nav
 
 @* Терминал цеха на телефоне рабочего (D92, дополнение): код операции, мои отметки за сегодня, доступная работа. *@
@@ -36,6 +37,54 @@ else
                 <div class="flash error" role="alert">@_codeError</div>
             }
         </form>
+
+        @if (_day.Shift is { Count: > 0 } shift)
+        {
+            <h2>@L("Задания на смену")</h2>
+            <ul class="shop-list">
+                @foreach (var t in shift)
+                {
+                    <li>
+                        <a href="@ShopFloorCode.Path(t.OrderId, t.Stage)">@t.OrderNumber · @L(t.StageName)</a>
+                        <span>@t.ItemName — @L("норма {0}, сделано {1} {2}", Quantities.Format(t.Planned), Quantities.Format(t.Fact), t.UnitSymbol)</span>
+                        <progress max="100" value="@Math.Min(t.Percent, 100)" aria-label="@L("Выполнено {0}%", t.Percent)"></progress>
+                        <b>@L("Выполнено {0}%", t.Percent)</b>
+                        @if (t.Comment is not null)
+                        {
+                            <span class="muted">@t.Comment</span>
+                        }
+                        @if (t.ShortfallReason is not null)
+                        {
+                            <span>@L("Причина: {0}", L(t.ShortfallReason))@(t.ShortfallComment is null ? "" : $". {t.ShortfallComment}")</span>
+                        }
+                        else if (!t.Done && _day.Date <= _day.Today && _shortfallTask != t.Id)
+                        {
+                            <button type="button" class="secondary" disabled="@_busy" @onclick="() => StartShortfall(t.Id)"
+                                    aria-label="@L("Почему не выполнено задание {0}", t.Id)">@L("Почему не выполнено")</button>
+                        }
+                        @if (_shortfallTask == t.Id)
+                        {
+                            <form @onsubmit="() => ShortfallAsync(t)">
+                                <label>@L("Причина")
+                                    <select @bind="_shortfallReason" aria-label="@L("Причина невыполнения")">
+                                        <option value="">@L("— выберите —")</option>
+                                        @foreach (var r in ShopFloorShortfall.Reasons)
+                                        {
+                                            <option value="@r">@L(r)</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label>@L("Комментарий") <textarea @bind="_shortfallComment" maxlength="300" aria-label="@L("Комментарий к причине")"></textarea></label>
+                                <div class="shop-quick">
+                                    <button type="submit" disabled="@_busy">@L("Сообщить")</button>
+                                    <button type="button" class="secondary" @onclick="() => _shortfallTask = null">@L("Отмена")</button>
+                                </div>
+                            </form>
+                        }
+                    </li>
+                }
+            </ul>
+        }
 
         <h2>@L("Мои отметки за {0}", _day.Date.ToString("dd.MM.yyyy"))</h2>
         @if (_message is not null)
@@ -119,6 +168,57 @@ else
     private string? _correctReason;
     private string? _message;
     private bool _messageIsError;
+
+    private long? _shortfallTask;
+    private string _shortfallReason = string.Empty;
+    private string? _shortfallComment;
+
+    private void StartShortfall(long id)
+    {
+        _shortfallTask = id;
+        _shortfallReason = string.Empty;
+        _shortfallComment = null;
+    }
+
+    /// <summary>Причина, почему задание на смену не выполнено, — видит мастер в «Сменных заданиях».</summary>
+    private async Task ShortfallAsync(ShiftTaskDto task)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (_shortfallReason.Length == 0)
+            {
+                throw new BusinessRuleException("production.shop.reason", L("Выберите причину из списка."));
+            }
+
+            await Shifts.ReportShortfallAsync(task.Id, _shortfallReason, _shortfallComment, task.RowVersion);
+            _message = L("Причина передана мастеру.");
+            _shortfallTask = null;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                _day = await Shop.MyDayAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
 
     private void StartCorrect(long id)
     {

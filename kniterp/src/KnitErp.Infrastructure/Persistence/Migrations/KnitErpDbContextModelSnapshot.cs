@@ -2680,6 +2680,95 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Production.ShiftTask", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("CancelledByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("PlannedQuantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("ProductionOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("ShortfallAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("ShortfallComment")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("ShortfallReason")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte>("Stage")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CancelledByUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "Date")
+                        .HasDatabaseName("ix_production_shift_tasks_org_date");
+
+                    b.HasIndex("OrganizationId", "EmployeeId");
+
+                    b.HasIndex("OrganizationId", "ProductionOrderId");
+
+                    b.HasIndex("OrganizationId", "Date", "EmployeeId", "ProductionOrderId", "Stage")
+                        .IsUnique()
+                        .HasDatabaseName("ux_production_shift_tasks_active")
+                        .HasFilter("[CancelledAtUtc] IS NULL");
+
+                    b.ToTable("production_shift_tasks", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_production_shift_tasks_cancelled", "([CancelledAtUtc] IS NULL AND [CancelledByUserId] IS NULL) OR ([CancelledAtUtc] IS NOT NULL AND [CancelledByUserId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_production_shift_tasks_planned", "[PlannedQuantity] > 0");
+
+                            t.HasCheckConstraint("ck_production_shift_tasks_shortfall", "([ShortfallReason] IS NULL AND [ShortfallAtUtc] IS NULL) OR ([ShortfallReason] IS NOT NULL AND [ShortfallAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_production_shift_tasks_stage", "[Stage] IN (1, 2, 3, 4, 5)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Production.TechCard", b =>
                 {
                     b.Property<long>("Id")
@@ -5672,6 +5761,42 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ProductionOrderId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Production.ShiftTask", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CancelledByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_shift_tasks_employee");
+
+                    b.HasOne("KnitErp.Domain.Production.ProductionOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProductionOrderId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_production_shift_tasks_order");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Production.TechCard", b =>

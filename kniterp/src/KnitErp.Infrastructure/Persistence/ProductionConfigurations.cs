@@ -176,3 +176,37 @@ internal sealed class ProductionOrderDocumentConfiguration : IEntityTypeConfigur
         b.HasIndex(x => new { x.OrganizationId, x.ProductionOrderId }).HasDatabaseName("ix_production_order_documents_org_order");
     }
 }
+
+internal sealed class ShiftTaskConfiguration : IEntityTypeConfiguration<ShiftTask>
+{
+    public void Configure(EntityTypeBuilder<ShiftTask> b)
+    {
+        b.ToTable("production_shift_tasks", t =>
+        {
+            t.HasCheckConstraint("ck_production_shift_tasks_stage", "[Stage] IN (1, 2, 3, 4, 5)");
+            t.HasCheckConstraint("ck_production_shift_tasks_planned", "[PlannedQuantity] > 0");
+            t.HasCheckConstraint("ck_production_shift_tasks_cancelled", "([CancelledAtUtc] IS NULL AND [CancelledByUserId] IS NULL) OR ([CancelledAtUtc] IS NOT NULL AND [CancelledByUserId] IS NOT NULL)");
+            t.HasCheckConstraint("ck_production_shift_tasks_shortfall", "([ShortfallReason] IS NULL AND [ShortfallAtUtc] IS NULL) OR ([ShortfallReason] IS NOT NULL AND [ShortfallAtUtc] IS NOT NULL)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Stage).HasConversion<byte>();
+        b.Property(x => x.PlannedQuantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.Comment).HasMaxLength(ShiftTask.CommentMaxLength);
+        b.Property(x => x.ShortfallReason).HasMaxLength(ShiftTask.ReasonMaxLength);
+        b.Property(x => x.ShortfallComment).HasMaxLength(ShiftTask.CommentMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.IsCancelled);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<ProductionOrder>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionOrderId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_production_shift_tasks_order");
+        b.HasOne<KnitErp.Domain.Structure.Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_production_shift_tasks_employee");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CancelledByUserId).OnDelete(DeleteBehavior.Restrict);
+        // Одно действующее задание на сотрудника, заказ и этап в день; отменённые не мешают назначить заново.
+        b.HasIndex(x => new { x.OrganizationId, x.Date, x.EmployeeId, x.ProductionOrderId, x.Stage }).IsUnique()
+            .HasFilter("[CancelledAtUtc] IS NULL").HasDatabaseName("ux_production_shift_tasks_active");
+        b.HasIndex(x => new { x.OrganizationId, x.Date }).HasDatabaseName("ix_production_shift_tasks_org_date");
+    }
+}

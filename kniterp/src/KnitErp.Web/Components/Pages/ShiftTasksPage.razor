@@ -1,0 +1,200 @@
+@page "/production/shift-tasks"
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ShiftTaskService Shifts
+
+@* Сменные задания (D92, дополнение): мастер назначает сотруднику этап заказа и количество на смену, видит факт и процент выполнения. *@
+<PageTitle>@L("Сменные задания") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_board is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head"><h1>@L("Сменные задания")</h1></div>
+    <form class="inline-form" @onsubmit="LoadAsync">
+        <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата")" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="scroll">
+        <table>
+            <thead>
+                <tr><th>@L("Сотрудник")</th><th>@L("Заказ")</th><th>@L("Этап")</th><th class="num">@L("План")</th><th class="num">@L("Факт")</th>
+                    <th class="num">%</th><th>@L("Причина невыполнения")</th><th></th></tr>
+            </thead>
+            <tbody>
+                @if (_board.Tasks.Count == 0)
+                {
+                    <tr><td colspan="8" class="muted">@L("На эту дату заданий нет.")</td></tr>
+                }
+                @foreach (var t in _board.Tasks)
+                {
+                    <tr class="@(t.IsCancelled ? "muted" : t.Done ? "" : "short")">
+                        <td data-label="@L("Сотрудник")">@t.EmployeeName <span class="muted">@L("таб. № {0}", t.PersonnelNumber)</span></td>
+                        <td data-label="@L("Заказ")"><a href="production-orders/@t.OrderId">@t.OrderNumber</a> @t.ItemName</td>
+                        <td data-label="@L("Этап")">@L(t.StageName)</td>
+                        <td class="num" data-label="@L("План")">@Quantities.Format(t.Planned) @t.UnitSymbol</td>
+                        <td class="num" data-label="@L("Факт")">@Quantities.Format(t.Fact)</td>
+                        <td class="num" data-label="%">@(t.IsCancelled ? L("отменено") : $"{t.Percent}%")</td>
+                        <td data-label="@L("Причина невыполнения")">@(t.ShortfallReason is null ? "" : L(t.ShortfallReason))@(t.ShortfallComment is null ? "" : $". {t.ShortfallComment}")</td>
+                        <td>
+                            @if (_board.CanAssign && !t.IsCancelled)
+                            {
+                                <ConfirmButton Class="secondary" OnConfirm="() => CancelAsync(t)" Disabled="@_busy" Question='@L("Отменить задание?")'
+                                               AriaLabel="@L("Отменить задание {0}", t.Id)">@L("Отменить")</ConfirmButton>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_board.CanAssign && _board.Date >= _board.Today)
+    {
+        <h2>@L("Назначить задание")</h2>
+        <form class="inline-form" @onsubmit="AssignAsync">
+            <label>@L("Сотрудник")
+                <select @bind="_employee" aria-label="@L("Сотрудник")">
+                    <option value="">@L("— выберите —")</option>
+                    @foreach (var e in _board.Employees)
+                    {
+                        <option value="@e.Id">@e.Name (@e.PersonnelNumber)</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Заказ")
+                <select @bind="_order" aria-label="@L("Заказ")">
+                    <option value="">@L("— выберите —")</option>
+                    @foreach (var o in _board.Orders)
+                    {
+                        <option value="@o.Id">@o.Number — @o.ItemName</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Этап")
+                <select @bind="_stage" aria-label="@L("Этап")">
+                    @foreach (var s in ProductionFlow.Stages)
+                    {
+                        <option value="@s">@L(ProductionFlow.StageName(s))</option>
+                    }
+                </select>
+            </label>
+            <label>@L("План на смену") <input @bind="_plannedText" inputmode="decimal" size="6" aria-label="@L("План на смену")" /></label>
+            <label>@L("Комментарий") <input @bind="_comment" maxlength="300" aria-label="@L("Комментарий")" /></label>
+            <button type="submit" disabled="@_busy">@L("Назначить")</button>
+        </form>
+    }
+}
+
+@code {
+    private ShiftBoardDto? _board;
+    private DateOnly? _date;
+    private string? _denied;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+    private string _employee = string.Empty;
+    private string _order = string.Empty;
+    private ProductionStage _stage = ProductionStage.Knitting;
+    private string _plannedText = string.Empty;
+    private string? _comment;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _board = await Shifts.BoardAsync();
+            _date = _board.Date;
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _board = await Shifts.BoardAsync(_date);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task AssignAsync() => RunAsync(async () =>
+    {
+        if (!long.TryParse(_employee, out var employee) || !long.TryParse(_order, out var order))
+        {
+            throw new BusinessRuleException("production.shift.select", L("Выберите сотрудника и заказ."));
+        }
+
+        if (!Quantities.TryParse(_plannedText, out var planned))
+        {
+            throw new BusinessRuleException("production.stage.quantity_invalid", L("Укажите количество числом, например 100."));
+        }
+
+        await Shifts.AssignAsync(new ShiftTaskCommand(_board!.Date, employee, order, _stage, planned, _comment));
+        _plannedText = string.Empty;
+        _comment = null;
+        return L("Задание назначено.");
+    });
+
+    private Task CancelAsync(ShiftTaskDto task) => RunAsync(async () =>
+    {
+        await Shifts.CancelAsync(task.Id, task.RowVersion);
+        return L("Задание отменено.");
+    });
+
+    private async Task RunAsync(Func<Task<string>> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            _message = await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            try
+            {
+                _board = await Shifts.BoardAsync(_board?.Date);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}
