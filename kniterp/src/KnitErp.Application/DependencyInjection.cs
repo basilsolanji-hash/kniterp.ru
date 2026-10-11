@@ -41,6 +41,16 @@ public static class DependencyInjection
         services.AddScoped<CounterpartyExchangeService>();
         services.AddScoped<VatRateService>();
         services.AddScoped<Production.TechCardService>();
+        services.AddScoped<Production.ProductionOrderService>();
+        services.AddScoped<Production.ProductionFloorService>();
+        services.AddScoped<Production.ProductionMaterialService>();
+        services.AddScoped<Production.ProductionPrintService>();
+        services.AddScoped<Production.ProductionReportService>();
+        services.AddScoped<Production.SalesProductionService>();
+        services.AddScoped<Production.MaterialPlanningService>();
+        services.AddScoped<Production.ShopFloorService>();
+        // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
+        services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();
         services.AddScoped<Sales.SalesService>();
         services.AddScoped<Sales.CustomerInvoiceService>();

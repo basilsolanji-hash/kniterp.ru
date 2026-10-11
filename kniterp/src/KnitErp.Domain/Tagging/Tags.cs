@@ -29,6 +29,8 @@ public enum TaggedEntity : byte
     CustomerInvoice = 9,
     ExpenseReport = 10,
 
+    /// <summary>Производственный заказ (D99).</summary>
+    ProductionOrder = 11,
     // 11–19 — производство и другие модули; 20–29 — модуль «Сотрудники» (D202).
     Employee = 20,
 }
@@ -75,6 +77,7 @@ public static class TagColors
         TaggedEntity.OpeningBalance => "Начальные остатки",
         TaggedEntity.CustomerInvoice => "Счета покупателям",
         TaggedEntity.ExpenseReport => "Авансовые отчёты",
+        TaggedEntity.ProductionOrder => "Производственные заказы",
         TaggedEntity.Employee => "Сотрудники",
         _ => entity.ToString(),
     };

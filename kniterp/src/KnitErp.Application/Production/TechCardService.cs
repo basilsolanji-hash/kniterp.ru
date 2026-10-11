@@ -162,6 +162,16 @@ public sealed class TechCardService(IKnitErpDbContext db, IAccessGuard guard, IC
         var (ctx, card) = await LoadForEditAsync(id, rowVersion, ct);
         var material = await Options(ctx, id: materialItemId).SingleOrDefaultAsync(ct)
                        ?? throw new BusinessRuleException("techcard.material_missing", "Материал не найден или в архиве.");
+        // Многоуровневые карты (D90, дополнение): полуфабрикат не может содержать само изделие ни на каком уровне.
+        var graph = (await db.TechCards.AsNoTracking()
+                .Where(c => c.OrganizationId == ctx.OrganizationId && c.Status != TechCardStatus.Archived)
+                .SelectMany(c => c.Lines.Select(l => new { c.ItemId, Material = l.ItemId })).ToListAsync(ct))
+            .GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => (IReadOnlyCollection<long>)g.Select(x => x.Material).Distinct().ToList());
+        if (BillOfMaterials.Contains(materialItemId, card.ItemId, id => graph.GetValueOrDefault(id) ?? []))
+        {
+            throw new BusinessRuleException("techcard.cycle", $"«{material.Name}» сам содержит это изделие в своём составе — получился бы замкнутый круг.");
+        }
+
         var before = card.Lines.FirstOrDefault(l => l.ItemId == materialItemId) is { } old ? Norm(old.Quantity, old.WastePercent, material) : null;
         card.SetLine(materialItemId, quantity, wastePercent);
         Audit(ctx, AuditActions.CatalogChanged, id, before, Norm(quantity, wastePercent, material), $"Техкарта: {material.Code} {material.Name}");
@@ -225,15 +235,37 @@ public sealed class TechCardService(IKnitErpDbContext db, IAccessGuard guard, IC
     /// Сколько материалов нужно на выпуск <paramref name="quantity"/> изделий и хватает ли их на складе.
     /// Остаток показывается только тем, кому доступны отчёты склада, и в пределах их складов.
     /// </summary>
-    public async Task<IReadOnlyList<RequirementRowDto>> RequirementAsync(long id, decimal quantity, long? warehouseId = null, CancellationToken ct = default)
+    /// <param name="explode">
+    /// По уровням (D90, дополнение): полуфабрикаты с действующей техкартой раскрываются до материалов их карт — потребность в пряже
+    /// на изделие через все уровни; без раскрытия полуфабрикат — обычная строка (его берут со склада).
+    /// </param>
+    public async Task<IReadOnlyList<RequirementRowDto>> RequirementAsync(
+        long id, decimal quantity, long? warehouseId = null, bool explode = false, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
         var card = await db.TechCards.AsNoTracking().Include(c => c.Lines)
                        .SingleOrDefaultAsync(c => c.Id == id && c.OrganizationId == ctx.OrganizationId, ct)
                    ?? throw new NotFoundException("Техкарта");
-        var ids = card.Lines.Select(l => l.ItemId).ToList();
+        IReadOnlyList<(long ItemId, decimal Net, decimal Gross)> need;
+        List<long> ids;
+        if (explode)
+        {
+            var active = await db.TechCards.AsNoTracking().Include(c => c.Lines)
+                .Where(c => c.OrganizationId == ctx.OrganizationId && c.Status == TechCardStatus.Active && c.ItemId != card.ItemId)
+                .ToDictionaryAsync(c => c.ItemId, ct);
+            var precisions = await Options(ctx, includeArchived: true).ToDictionaryAsync(o => o.Id, o => (int)o.Precision, ct);
+            var totals = BillOfMaterials.Explode(card, quantity, active, itemId => precisions.GetValueOrDefault(itemId, TechCard.NormPrecision));
+            need = totals.Select(t => (t.Key, t.Value, t.Value)).ToList();
+            ids = totals.Keys.ToList();
+        }
+        else
+        {
+            ids = card.Lines.Select(l => l.ItemId).ToList();
+            var precisions = await Options(ctx, includeArchived: true, ids: ids).ToDictionaryAsync(o => o.Id, o => (int)o.Precision, ct);
+            need = card.Requirement(quantity, itemId => precisions[itemId]);
+        }
+
         var materials = await Options(ctx, includeArchived: true, ids: ids).ToDictionaryAsync(o => o.Id, ct);
-        var need = card.Requirement(quantity, itemId => materials[itemId].Precision);
 
         Dictionary<long, decimal>? stock = null;
         if (ctx.Permissions.Has(Permissions.WarehouseReportView))

@@ -196,7 +196,9 @@ public sealed class StockDocumentService(
 
         var canEdit = doc.Status == StockDocumentStatus.Draft && WarehouseScope.Covers(ctx, Permissions.WarehouseDocumentCreate, doc.WarehouseId);
         var canPost = doc.Status == StockDocumentStatus.Draft && WarehouseScope.Covers(ctx, Permissions.WarehouseDocumentPost, doc.WarehouseId);
-        var canReverse = doc.Status == StockDocumentStatus.Posted && WarehouseScope.Covers(ctx, Permissions.WarehouseDocumentPost, doc.WarehouseId);
+        // D97: документ производственного заказа сторнируется из карточки заказа — там пересчитываются баланс и статус.
+        var canReverse = doc.Status == StockDocumentStatus.Posted && WarehouseScope.Covers(ctx, Permissions.WarehouseDocumentPost, doc.WarehouseId)
+                         && !await db.ProductionOrderDocuments.AnyAsync(l => l.StockDocumentId == doc.Id, ct);
         return new StockDocumentDto(doc.Id, doc.Number, doc.Kind, doc.Status, doc.DocumentDate,
             doc.WarehouseId, warehouses[doc.WarehouseId], doc.TargetWarehouseId,
             doc.TargetWarehouseId is { } tw ? warehouses[tw] : null,
@@ -403,11 +405,18 @@ public sealed class StockDocumentService(
     /// Сторно: движения с обратным знаком той же датой — документ как будто не проводился (допущение D41).
     /// Нельзя, если товар уже ушёл со склада и остаток стал бы отрицательным.
     /// </summary>
-    public async Task ReverseAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct = default)
+    public Task ReverseAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct = default) =>
+        ReverseAsync(id, reason, rowVersion, fromProduction: false, ct);
+
+    /// <summary>Сторно документа производственного заказа — только из сервиса производства (D97), который сам проверяет заказ.</summary>
+    internal Task ReverseForProductionAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct) =>
+        ReverseAsync(id, reason, rowVersion, fromProduction: true, ct);
+
+    private async Task ReverseAsync(long id, string? reason, byte[] rowVersion, bool fromProduction, CancellationToken ct)
     {
         try
         {
-            await ReverseCoreAsync(id, reason, rowVersion, ct);
+            await ReverseCoreAsync(id, reason, rowVersion, fromProduction, ct);
         }
         catch
         {
@@ -416,9 +425,15 @@ public sealed class StockDocumentService(
         }
     }
 
-    private async Task ReverseCoreAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct)
+    private async Task ReverseCoreAsync(long id, string? reason, byte[] rowVersion, bool fromProduction, CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentPost, ct);
+        if (!fromProduction && await db.ProductionOrderDocuments.AnyAsync(l => l.StockDocumentId == id && l.OrganizationId == ctx.OrganizationId, ct))
+        {
+            throw new BusinessRuleException("stock.document.production_linked",
+                "Документ оформлен по производственному заказу — сторнируйте его в карточке заказа: так пересчитаются баланс материалов и статус заказа.");
+        }
+
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.DocumentDate, ct);

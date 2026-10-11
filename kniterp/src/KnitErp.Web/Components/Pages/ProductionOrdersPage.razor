@@ -1,0 +1,177 @@
+@page "/production-orders"
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@inject ProductionOrderService Orders
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Производственные заказы") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Производственные заказы")</h1>
+        @if (CurrentAccess.Has(Permissions.ProductionOrderEdit) && _options is null)
+        {
+            <button type="button" @onclick="OpenCreateAsync" disabled="@_busy">@L("Новый заказ")</button>
+        }
+    </div>
+    <p class="muted">
+        @L("Выпуск изделия по техкарте: черновик → «Запустить» (версия техкарты и нормы фиксируются) → этапы и выпуск → закрытие. Отменить можно только заказ без движений.")
+    </p>
+
+    @if (_error is not null)
+    {
+        <div class="error" role="alert">@_error</div>
+    }
+
+    @if (_options is not null)
+    {
+        <div class="panel">
+            <h2>@L("Новый производственный заказ")</h2>
+            @if (_options.Products.Count == 0)
+            {
+                <p class="muted">@L("Нет изделий: заказ оформляется на позицию типа «Готовая продукция» или «Полуфабрикаты» с действующей техкартой.")</p>
+                <button type="button" class="secondary" @onclick="() => _options = null">@L("Закрыть")</button>
+            }
+            else
+            {
+                <ProductionOrderForm Options="_options" Today="Today" Busy="_busy" SubmitText="@L("Создать черновик")"
+                                     OnSubmit="CreateAsync" OnCancel="() => _options = null" />
+            }
+        </div>
+    }
+
+    <form class="inline-form" @onsubmit="ReloadAsync">
+        <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, код или изделие")" /></label>
+        <label>
+            @L("Статус")
+            <select @bind="_status">
+                <option value="">@L("Все")</option>
+                @foreach (var s in Statuses)
+                {
+                    <option value="@((byte)s)">@L(ProductionOrder.StatusName(s))</option>
+                }
+            </select>
+        </label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    <div class="scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>@L("Номер")</th><th>@L("Дата")</th><th>@L("Изделие")</th><th class="num">@L("Количество")</th><th class="opt">@L("Срок")</th>
+                    <th class="opt">@L("Источник")</th><th class="opt num">@L("Техкарта")</th><th>@L("Статус")</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_rows.Count == 0)
+                {
+                    <tr><td colspan="8" class="muted">@L("Производственных заказов пока нет.")</td></tr>
+                }
+                @foreach (var o in _rows)
+                {
+                    <tr>
+                        <td><a href="production-orders/@o.Id">@o.Number</a></td>
+                        <td>@o.OrderDate.ToString("dd.MM.yyyy")</td>
+                        <td>@o.ItemCode @o.ItemName</td>
+                        <td class="num">@Quantities.Format(o.Quantity) @o.UnitSymbol</td>
+                        <td>@(o.DueDate?.ToString("dd.MM.yyyy") ?? "—")</td>
+                        <td>@L(o.SourceName)@(o.SalesOrderNumber is null ? "" : $" {o.SalesOrderNumber}")</td>
+                        <td class="num">@o.TechCardVersion</td>
+                        <td><span class="tag @StatusClass(o.Status)">@L(o.StatusName)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private static readonly ProductionOrderStatus[] Statuses =
+    [
+        ProductionOrderStatus.Draft, ProductionOrderStatus.Released, ProductionOrderStatus.PartiallyDone, ProductionOrderStatus.Done,
+        ProductionOrderStatus.Closed, ProductionOrderStatus.Cancelled,
+    ];
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public int? StatusQuery { get; set; }
+
+    private IReadOnlyList<ProductionOrderRowDto>? _rows;
+    private ProductionOrderOptions? _options;
+    private bool _busy;
+    private string? _denied;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _status = string.Empty;
+
+    private DateOnly Today => DateOnly.FromDateTime(TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _status = StatusQuery?.ToString() ?? string.Empty;
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync() =>
+        _rows = await Orders.ListAsync(new ProductionOrderListFilter(
+            byte.TryParse(_status, out var s) ? (ProductionOrderStatus)s : null, _search));
+
+    private Task ReloadAsync() => RunAsync(LoadAsync);
+
+    private Task OpenCreateAsync() => RunAsync(async () => _options = await Orders.OptionsAsync());
+
+    private Task CreateAsync(ProductionOrderCommand command) => RunAsync(async () =>
+    {
+        var id = await Orders.CreateAsync(command);
+        Navigation.NavigateTo($"production-orders/{id}");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public static string StatusClass(ProductionOrderStatus status) => status switch
+    {
+        ProductionOrderStatus.Released or ProductionOrderStatus.PartiallyDone => "warn",
+        ProductionOrderStatus.Done or ProductionOrderStatus.Closed => "ok",
+        _ => "",
+    };
+}

@@ -1,0 +1,83 @@
+@page "/print/production-orders/{Id:long}/route"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Production
+@using KnitErp.Domain.Production
+@using KnitErp.Web.Security
+@inject ProductionOrderService Orders
+@inject NavigationManager Nav
+@inject KnitErp.Application.Common.IEmailSender Email
+
+@*
+    Маршрутный лист производственного заказа (D92, дополнение): по QR-коду этапа рабочий открывает терминал цеха на телефоне.
+    Внутренний документ цеха, не первичный учётный документ (402-ФЗ не применяется); печатается по-русски, как остальные формы (D68).
+*@
+<PageTitle>@(_order is null ? "Маршрутный лист" : $"Маршрутный лист {_order.Number}") — knitERP</PageTitle>
+<style>
+    @@media print { @@page { size: A4 portrait; margin: 10mm; } }
+    .route td.qr { width: 150px; text-align: center; }
+    .route td.qr img { width: 130px; height: 130px; image-rendering: pixelated; }
+    .route .code { font-family: monospace; font-size: 14px; }
+</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="production-orders/@Id">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet"><p>@_error</p></div>
+}
+else if (_order is null)
+{
+    <div class="sheet"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var o = _order;
+    <div class="sheet">
+        <h1 style="text-align: center; margin: 0 0 4px">Маршрутный лист к производственному заказу № @o.Number</h1>
+        <p style="text-align: center">от @o.OrderDate.ToString("dd.MM.yyyy")@(o.DueDate is { } due ? $", срок — {due:dd.MM.yyyy}" : "")</p>
+        <p>Изделие: <b>@o.ItemCode @o.ItemName</b>; количество: <b>@Quantities.Format(o.Quantity) @o.UnitSymbol</b>@(o.TechCardVersion is { } v ? $"; техкарта, версия {v}" : "").</p>
+        <p class="small">Отсканируйте QR-код этапа камерой рабочего телефона или введите код вручную в «Терминале цеха», отметьте сделанное.
+            Если сделано не всё — укажите причину.</p>
+        <table class="route">
+            <thead><tr><th>QR-код этапа</th><th>Этап и код</th><th>Сделано</th><th>Исполнитель</th><th>Подпись мастера</th></tr></thead>
+            <tbody>
+                @foreach (var stage in ProductionFlow.Stages)
+                {
+                    <tr>
+                        <td class="qr"><img src="@QrCodes.PngDataUri(BaseUrl + ShopFloorCode.Path(o.Id, stage))" alt="QR-код этапа «@ProductionFlow.StageName(stage)»" /></td>
+                        <td><b>@ProductionFlow.StageName(stage)</b><div class="code">@ShopFloorCode.Text(o.Id, stage)</div></td>
+                        <td></td>
+                        <td></td>
+                        <td></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private ProductionOrderDto? _order;
+
+    /// <summary>Адрес в QR-коде — из настройки публичного адреса (как ссылки в письмах), а не из заголовка Host запроса; без настройки — адрес страницы.</summary>
+    private string BaseUrl => string.IsNullOrWhiteSpace(Email.PublicUrl) ? Nav.BaseUri : Email.PublicUrl.TrimEnd('/') + "/";
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _order = await Orders.GetAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}
