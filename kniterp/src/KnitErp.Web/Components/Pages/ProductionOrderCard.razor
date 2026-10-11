@@ -26,6 +26,7 @@ else
     <div class="page-head">
         <h1>@_order.Number · @_order.ItemCode @_order.ItemName <span class="tag @ProductionOrdersPage.StatusClass(_order.Status)">@L(_order.StatusName)</span></h1>
     </div>
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.ProductionOrder" EntityId="Id" />
 
     @if (_message is not null)
     {
@@ -190,6 +191,11 @@ else
             }
         </p>
     }
+}
+
+@if (_order is not null)
+{
+    <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.ProductionOrder" TargetId="Id" />
 }
 
 @code {

@@ -1254,7 +1254,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_discussion_comments_deleted", "([DeletedAtUtc] IS NULL AND [DeletedByUserId] IS NULL AND LEN([Text]) > 0) OR ([DeletedAtUtc] IS NOT NULL AND [DeletedByUserId] IS NOT NULL AND [Text] = N'')");
 
-                            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 10");
+                            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 11");
                         });
                 });
 
@@ -3855,7 +3855,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("tag_links", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 10");
+                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 11");
                         });
                 });
 

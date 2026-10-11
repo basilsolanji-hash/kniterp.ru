@@ -11,6 +11,7 @@ using KnitErp.Domain.Common;
 using KnitErp.Domain.Production;
 using KnitErp.Domain.Purchasing;
 using KnitErp.Domain.Sales;
+using KnitErp.Domain.Tagging;
 using KnitErp.Domain.Warehousing;
 using Microsoft.EntityFrameworkCore;
 
@@ -612,6 +613,44 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
             var report = await s.ProductionReports.BuildAsync(new ProductionReportFilter(Day.AddDays(-7), Day));
             Assert.Empty(report.InWork);
             Assert.Empty(report.Defects);
+        }
+    }
+
+    /// <summary>D99: теги и обсуждение производственного заказа — видят те, кому виден заказ; чужая организация — «не найдено».</summary>
+    [SqlFact]
+    public async Task Production_order_has_tags_and_discussion()
+    {
+        var f = await SetUpAsync();
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 10));
+            await s.Tags.AssignAsync(TaggedEntity.ProductionOrder, order, null, "Срочно", TagColor.Red);
+            var tag = Assert.Single(await s.Tags.ForEntityAsync(TaggedEntity.ProductionOrder, order));
+            var (_, objects) = await s.Tags.ObjectsAsync(tag.Id);
+            var obj = Assert.Single(objects);
+            Assert.Equal(($"production-orders/{order}", "СВ-1 — Свитер"), (obj.Href, obj.Subtitle));
+            Assert.StartsWith("ПЗ-", obj.Title);
+            await s.Discussions.AddAsync(TaggedEntity.ProductionOrder, order, "Пряжу на этот заказ привезут в среду", [f.Senior]);
+        }
+
+        // Старший кладовщик видит заказ — видит и обсуждение, может ответить.
+        await using (var s = host.As(f.Senior, f.Org.OrganizationId))
+        {
+            Assert.Single((await s.Discussions.ThreadAsync(TaggedEntity.ProductionOrder, order)).Comments);
+            await s.Discussions.AddAsync(TaggedEntity.ProductionOrder, order, "Принято, выдам в четверг", null);
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Discussions.ThreadAsync(TaggedEntity.ProductionOrder, order));
+            await Assert.ThrowsAnyAsync<Exception>(() => s.Tags.AssignAsync(TaggedEntity.ProductionOrder, order, null, "Чужой", TagColor.Blue));
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            Assert.Equal(2, (await s.Discussions.ThreadAsync(TaggedEntity.ProductionOrder, order)).Comments.Count);
         }
     }
 

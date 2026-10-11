@@ -235,6 +235,28 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         Assert.StartsWith("application/vnd.openxmlformats", response.Headers["content-type"]);
     }
 
+    /// <summary>D99: на карточке производственного заказа есть теги и обсуждение; комментарий виден после отправки.</summary>
+    [SqlFact]
+    public async Task Workshop_head_comments_on_production_order()
+    {
+        var order = await app.CreateReleasedOrderAsync(3);
+        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        var page = await context.NewPageAsync();
+        await LoginAsync(page);
+        await page.GotoAsync($"production-orders/{order}");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Обсуждение" })).ToBeVisibleAsync();
+        var text = page.GetByLabel("Новый комментарий");
+        // Ввод с событием oninput: до подключения интерактивного режима кнопка «Отправить» не включится — повторяем ввод.
+        for (var i = 0; i < 20 && !await page.GetByRole(AriaRole.Button, new() { Name = "Отправить" }).IsEnabledAsync(); i++)
+        {
+            await text.FillAsync("Нитки для манжет — с партии 12");
+            await page.WaitForTimeoutAsync(500);
+        }
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отправить" }).ClickAsync();
+        await Assertions.Expect(page.Locator("section.discussion")).ToContainTextAsync("Нитки для манжет — с партии 12");
+    }
+
     private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);
 
     private async Task LoginAsync(IPage page, string email)

@@ -98,6 +98,14 @@ public static class ObjectDirectory
                         .Select(r => new { r.Id, r.Number, r.ReportDate }).ToListAsync(ct))
                     .Select(r => new TaggedObjectDto(entity, r.Id, $"Авансовый отчёт {r.Number}", r.ReportDate.ToString("dd.MM.yyyy"), $"expense-reports/{r.Id}"))
                     .ToList();
+            case TaggedEntity.ProductionOrder when has(Permissions.ProductionOrderView):
+                // D99: заказ, изделие и количество — без цен.
+                return (await (from o in db.ProductionOrders.AsNoTracking()
+                               join i in db.Items.AsNoTracking() on o.ItemId equals i.Id
+                               where o.OrganizationId == org && ids.Contains(o.Id)
+                               select new { o.Id, o.Number, o.OrderDate, i.Code, i.Name }).ToListAsync(ct))
+                    .Select(o => new TaggedObjectDto(entity, o.Id, $"{o.Number} от {o.OrderDate:dd.MM.yyyy}", $"{o.Code} — {o.Name}", $"production-orders/{o.Id}"))
+                    .ToList();
             default:
                 return [];
         }
