@@ -1,0 +1,349 @@
+@page "/hr/timesheet"
+@using System.Globalization
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Access
+@using KnitErp.Domain.Hr
+@inject TimesheetService Timesheets
+
+<PageTitle>@L("Табель учёта рабочего времени") — knitERP</PageTitle>
+
+@* D207–D209: табель подразделения за месяц (Т-12/Т-13): заполнение по графику, правки с журналом, закрытие, исправительный табель. *@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_own)
+{
+    <div class="page-head"><h1>@L("Мой табель")</h1></div>
+    <form class="inline-form" @onsubmit="LoadMineAsync">
+        <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+    @if (_mine is not null)
+    {
+        <p class="muted">@_mine.FullName — @(_mine.Closed ? L("табель закрыт") : L("табель ещё не закрыт"))</p>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr>@foreach (var d in _mine.Days) { <th class="num">@d.Day</th> }</tr></thead>
+                <tbody><tr>@foreach (var d in _mine.Days) { <td class="num">@(_mine.Cells.TryGetValue(d, out var c) ? c.Short : "")</td> }</tr></tbody>
+            </table>
+        </div>
+        <dl class="facts">
+            <dt>@L("Отработано дней")</dt><dd>@_mine.Totals.DaysWorked</dd>
+            <dt>@L("Часов")</dt><dd>@_mine.Totals.Hours.ToString("0.##", Ru)</dd>
+            <dt>@L("Ночных часов")</dt><dd>@_mine.Totals.NightHours.ToString("0.##", Ru)</dd>
+            <dt>@L("Сверхурочных часов")</dt><dd>@_mine.Totals.OvertimeHours.ToString("0.##", Ru)</dd>
+        </dl>
+    }
+}
+else if (_departments is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Табель учёта рабочего времени")</h1>
+        <div class="row-actions">
+            <a class="button secondary" href="hr/schedules">@L("Графики работы")</a>
+        </div>
+    </div>
+
+    <form class="inline-form" @onsubmit="LoadAsync">
+        <label>
+            @L("Подразделение")
+            <select @bind="_department">
+                <option value="0">@L("— выберите —")</option>
+                @foreach (var d in _departments)
+                {
+                    <option value="@d.Id">@d.Name</option>
+                }
+            </select>
+        </label>
+        <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_grid is not null)
+    {
+        var g = _grid;
+        <div class="row-actions" style="margin: 8px 0">
+            @if (g.Id is null)
+            {
+                @if (g.CanEdit)
+                {
+                    <button type="button" @onclick="CreateAsync" disabled="@_busy">@L("Составить табель по графикам")</button>
+                }
+                else
+                {
+                    <span class="muted">@L("Табель за этот месяц ещё не составлен.")</span>
+                }
+            }
+            else
+            {
+                <span class="tag @(g.IsOpen ? "warn" : "ok")">@(g.IsOpen ? L("Открыт") : L("Закрыт"))</span>
+                @if (g.Version > 0)
+                {
+                    <span class="tag">@L("Исправительный № {0}", g.Version)</span>
+                }
+                @if (g.IsOpen && g.CanEdit)
+                {
+                    <button type="button" class="secondary" @onclick="RefillAsync" disabled="@_busy">@L("Перезаполнить по графикам")</button>
+                }
+                @if (g.IsOpen && g.CanClose)
+                {
+                    <button type="button" @onclick="CloseAsync" disabled="@_busy">@L("Закрыть табель")</button>
+                }
+                @if (g.CanCorrect)
+                {
+                    <button type="button" class="secondary" @onclick="CorrectAsync" disabled="@_busy">@L("Исправительный табель")</button>
+                }
+                <a class="button secondary" href="print/timesheet/@g.Id" target="_blank" rel="noopener">@L("Печать Т-13")</a>
+                <a class="button secondary" href="hr/timesheet.xlsx?department=@g.DepartmentId&year=@g.Year&month=@g.Month">@L("Excel")</a>
+            }
+        </div>
+
+        @if (g.Versions.Count > 1)
+        {
+            <p class="muted">
+                @L("Версии:")
+                @foreach (var v in g.Versions)
+                {
+                    <button type="button" class="link" @onclick="() => LoadVersionAsync(v.Id)" disabled="@_busy">@(v.Version == 0 ? L("первичный") : L("исправительный № {0}", v.Version))</button>
+                }
+            </p>
+        }
+
+        @if (_edit is { } cell)
+        {
+            <div class="panel">
+                <h2>@L("{0}, {1}", cell.Name, cell.Date.ToString("dd.MM.yyyy"))</h2>
+                <div class="inline-form">
+                    <label>
+                        @L("Код")
+                        <select @bind="_code">
+                            @foreach (var c in TimesheetCodes.All)
+                            {
+                                <option value="@c.Letter">@c.Letter (@c.Digit) — @L(c.Name)</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Часов") <input type="number" step="0.5" min="0" max="24" @bind="_hours" /></label>
+                    <label>@L("Из них ночных") <input type="number" step="0.5" min="0" max="24" @bind="_night" /></label>
+                    <label>@L("Сверхурочных") <input type="number" step="0.5" min="0" max="24" @bind="_overtime" /></label>
+                    <button type="button" @onclick="SaveDayAsync" disabled="@_busy">@L("Сохранить")</button>
+                    <button type="button" class="secondary" @onclick="() => _edit = null" disabled="@_busy">@L("Отмена")</button>
+                </div>
+            </div>
+        }
+
+        @if (g.Rows.Count > 0)
+        {
+            <p class="muted">@L("Нажмите на день, чтобы исправить. * — ручная правка; подсказка у дня — время первого входа в систему.")</p>
+            <div class="scroll">
+                <table class="compact timesheet">
+                    <thead>
+                        <tr>
+                            <th>@L("Сотрудник")</th>
+                            @foreach (var d in g.Days)
+                            {
+                                <th class="num @(g.Holidays.Contains(d) || d.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday ? "muted" : "")">@d.Day</th>
+                            }
+                            <th class="num">@L("Дней")</th><th class="num">@L("Часов")</th><th class="num">@L("Ночных")</th><th class="num">@L("Сверхурочных")</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in g.Rows)
+                        {
+                            <tr>
+                                <td style="white-space: nowrap">@r.FullName<div class="muted">@r.PersonnelNumber · @r.Position</div></td>
+                                @foreach (var d in g.Days)
+                                {
+                                    var has = r.Cells.TryGetValue(d, out var c);
+                                    <td class="num" title="@(c?.FirstSignIn is { } t ? L("Первый вход: {0}", t.ToString("HH:mm")) : null)">
+                                        @if (has && g.IsOpen && g.CanEdit)
+                                        {
+                                            <button type="button" class="link" @onclick="() => OpenDay(r, d, c!)" disabled="@_busy">@c!.Short@(c.Manual ? "*" : "")</button>
+                                        }
+                                        else if (has)
+                                        {
+                                            @(c!.Short + (c.Manual ? "*" : ""))
+                                        }
+                                    </td>
+                                }
+                                <td class="num">@r.Totals.DaysWorked</td>
+                                <td class="num">@r.Totals.Hours.ToString("0.##", Ru)</td>
+                                <td class="num">@r.Totals.NightHours.ToString("0.##", Ru)</td>
+                                <td class="num">@r.Totals.OvertimeHours.ToString("0.##", Ru)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        else if (g.Id is not null)
+        {
+            <p class="muted">@L("В подразделении нет сотрудников за этот месяц.")</p>
+        }
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "department")]
+    public long? DepartmentQuery { get; set; }
+
+    private sealed record EditCell(long EmployeeId, string Name, DateOnly Date);
+
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto>? _departments;
+    private TimesheetGridDto? _grid;
+    private MyTimesheetDto? _mine;
+    private long _department;
+    private DateTime _month;
+    private EditCell? _edit;
+    private string _code = TimesheetCodes.Day;
+    private decimal _hours;
+    private decimal _night;
+    private decimal _overtime;
+    private bool _own;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId);
+        _month = new DateTime(today.Year, today.Month, 1);
+        var canSee = CurrentAccess.Has(Permissions.TimesheetEdit) || CurrentAccess.Has(Permissions.TimesheetClose);
+        try
+        {
+            if (!canSee && CurrentAccess.HasOwnOnly(Permissions.TimesheetEdit))
+            {
+                _own = true;
+                await LoadMineAsync();
+                return;
+            }
+
+            _departments = await Timesheets.DepartmentsAsync();
+            if (DepartmentQuery is { } q || _departments.Count == 1)
+            {
+                _department = DepartmentQuery ?? _departments[0].Id;
+                await LoadAsync();
+            }
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private Task LoadAsync() => RunAsync(() => Task.CompletedTask);
+
+    private async Task LoadMineAsync()
+    {
+        try
+        {
+            _mine = await Timesheets.MyAsync(_month.Year, _month.Month);
+        }
+        catch (NotFoundException)
+        {
+            _mine = null;
+            _message = L("Карточка сотрудника не привязана к вашей учётной записи.");
+        }
+    }
+
+    private Task LoadVersionAsync(long id) => RunAsync(async () =>
+        _grid = await Timesheets.GetAsync(_department, _month.Year, _month.Month, id), reload: false);
+
+    private Task CreateAsync() => RunAsync(async () =>
+    {
+        await Timesheets.CreateAsync(_department, _month.Year, _month.Month);
+        _message = L("Табель составлен по графикам работы и приказам об отпусках.");
+    });
+
+    private Task RefillAsync() => RunAsync(async () =>
+    {
+        await Timesheets.RefillAsync(_grid!.Id!.Value, _grid.RowVersion!);
+        _message = L("Табель перезаполнен; ручные правки сохранены.");
+    });
+
+    private Task CloseAsync() => RunAsync(async () =>
+    {
+        await Timesheets.CloseAsync(_grid!.Id!.Value, _grid.RowVersion!);
+        _message = L("Табель закрыт.");
+    });
+
+    private Task CorrectAsync() => RunAsync(async () =>
+    {
+        await Timesheets.CorrectAsync(_grid!.Id!.Value);
+        _message = L("Составлен исправительный табель.");
+    });
+
+    private void OpenDay(TimesheetRowDto row, DateOnly date, DayCellDto cell)
+    {
+        _edit = new EditCell(row.EmployeeId, row.FullName, date);
+        _code = cell.Code;
+        _hours = cell.Hours;
+        _night = cell.NightHours;
+        _overtime = cell.OvertimeHours;
+    }
+
+    private Task SaveDayAsync() => RunAsync(async () =>
+    {
+        var e = _edit!;
+        await Timesheets.SetDayAsync(_grid!.Id!.Value, e.EmployeeId, e.Date, _code, _hours, _night, _overtime);
+        _edit = null;
+        _message = L("День исправлен.");
+    });
+
+    /// <summary>Одна операция за раз, затем свежий табель: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, bool reload = true)
+    {
+        if (_busy || _department == 0)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                if (reload)
+                {
+                    _grid = await Timesheets.GetAsync(_department, _month.Year, _month.Month);
+                }
+            }
+            catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+            {
+                _message = UiErrors.Message(ex);
+                _isError = true;
+                _grid = null;
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

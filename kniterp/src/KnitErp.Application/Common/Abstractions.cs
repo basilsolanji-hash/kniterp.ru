@@ -123,6 +123,20 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Workspace.SupportTicket> SupportTickets { get; }
     DbSet<DocumentCounter> DocumentCounters { get; }
 
+    // Модуль «Сотрудники» (D200–D299).
+    DbSet<KnitErp.Domain.Hr.EmployeePersonalData> EmployeePersonalData { get; }
+    DbSet<KnitErp.Domain.Hr.ConsentScan> ConsentScans { get; }
+    DbSet<KnitErp.Domain.Hr.StaffingPosition> StaffingPositions { get; }
+    DbSet<KnitErp.Domain.Hr.PersonnelOrder> PersonnelOrders { get; }
+    DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory { get; }
+    DbSet<KnitErp.Domain.Hr.WorkSchedule> WorkSchedules { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules { get; }
+    DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets { get; }
+    DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays { get; }
+    DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates { get; }
+    DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns { get; }
+    DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
+
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);

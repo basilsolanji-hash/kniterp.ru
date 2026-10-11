@@ -109,6 +109,12 @@ public sealed class Employee
             throw new BusinessRuleException("hr.employee.birth_date", "Дата рождения: возраст от 14 до 100 лет.");
         }
 
+        // D201: к дате приёма сотруднику не меньше 14 лет (ст. 63 ТК РФ).
+        if (birthDate is { } b && b > HiredOn.AddYears(-14))
+        {
+            throw new BusinessRuleException("hr.employee.too_young", "На дату приёма сотруднику меньше 14 лет (ст. 63 ТК РФ).");
+        }
+
         if (share && birthDate is null)
         {
             throw new BusinessRuleException("hr.employee.birthday_share", "Чтобы показывать день рождения, укажите дату рождения.");
@@ -119,6 +125,31 @@ public sealed class Employee
         BirthDate = birthDate;
         ShareBirthday = share;
         return before == after ? null : new FieldChange("Дата рождения", before, after);
+    }
+
+    /// <summary>Перевод по приказу Т-5 (D204): новое подразделение и (или) должность.</summary>
+    public IReadOnlyList<FieldChange> Transfer(long departmentId, long positionId)
+    {
+        EnsureNotDismissed();
+        if (departmentId == DepartmentId && positionId == PositionId)
+        {
+            throw new BusinessRuleException("hr.employee.transfer_same", "Перевод не меняет ни подразделение, ни должность.");
+        }
+
+        var changes = new List<FieldChange>();
+        if (departmentId != DepartmentId)
+        {
+            changes.Add(new FieldChange(nameof(DepartmentId), DepartmentId.ToString(), departmentId.ToString()));
+            DepartmentId = departmentId;
+        }
+
+        if (positionId != PositionId)
+        {
+            changes.Add(new FieldChange(nameof(PositionId), PositionId.ToString(), positionId.ToString()));
+            PositionId = positionId;
+        }
+
+        return changes;
     }
 
     public FieldChange SetOnLeave(bool onLeave)

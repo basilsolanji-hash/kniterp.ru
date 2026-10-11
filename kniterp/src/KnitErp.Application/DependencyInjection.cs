@@ -25,6 +25,15 @@ public static class DependencyInjection
         services.AddScoped<AuditQueryService>();
         services.AddScoped<StructureService>();
         services.AddScoped<EmployeeService>();
+        services.AddScoped<KnitErp.Application.Hr.PersonalDataService>();
+        services.AddScoped<KnitErp.Application.Hr.StaffingService>();
+        services.AddScoped<KnitErp.Application.Hr.PersonnelOrderService>();
+        services.AddScoped<KnitErp.Application.Hr.TimesheetService>();
+        services.AddScoped<KnitErp.Application.Hr.LeaveStatusSync>();
+        services.AddScoped<KnitErp.Application.Hr.PayrollService>();
+        services.AddScoped<KnitErp.Application.Hr.PayrollEnterpriseDataExport>();
+        // Граница с производством: настоящая выработка регистрируется модулем производства и заменяет заглушку.
+        services.TryAddScoped<KnitErp.Application.Hr.IWorkOutputSource, KnitErp.Application.Hr.EmptyWorkOutputSource>();
         services.AddScoped<CatalogService>();
         services.AddScoped<WarehouseService>();
         services.AddScoped<CounterpartyService>();

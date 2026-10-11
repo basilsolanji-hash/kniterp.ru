@@ -14,9 +14,12 @@ public static class SystemRoles
     public const string Auditor = "auditor";
     public const string Employee = "employee";
 
+    /// <summary>Кадровик (D205) — роль модуля «Сотрудники», её права заданы в <see cref="HrRoleMatrix"/>, а не столбцом матрицы P0.</summary>
+    public const string HrOfficer = "hr_officer";
+
     /// <summary>Порядок столбцов матрицы ТЗ §4.8.</summary>
     public static readonly IReadOnlyList<string> Ordered =
-        [Owner, Administrator, DepartmentHead, SeniorStorekeeper, Storekeeper, Accountant, Auditor, Employee];
+        [Owner, Administrator, DepartmentHead, SeniorStorekeeper, Storekeeper, Accountant, Auditor, Employee, HrOfficer];
 
     public static string NameOf(string code) => code switch
     {
@@ -28,6 +31,7 @@ public static class SystemRoles
         Accountant => "Бухгалтер",
         Auditor => "Аудитор",
         Employee => "Сотрудник",
+        HrOfficer => "Кадровик",
         _ => code,
     };
 
@@ -50,6 +54,19 @@ public static class RoleMatrixP0
         (Permissions.EmployeeView,            [Full, Full, Scoped, ReadOnly, ReadOnly, ReadOnly, ReadOnly, OwnOnly]),
         (Permissions.EmployeeEdit,            [Full, Full, None, None, None, None, None, None]),
         (Permissions.PersonalDataView,        [Full, ByGrant, None, None, None, None, ByGrant, OwnOnly]),
+        // Допущение D200: изменяет ПДн Владелец; Администратору — только индивидуальной выдачей, как и чтение.
+        (Permissions.PersonalDataEdit,        [Full, ByGrant, None, None, None, None, None, None]),
+        // Допущение D205: кадровые приказы и штатное расписание — Владелец; Кадровик — см. HrRoleMatrix; Аудитор и Бухгалтер видят приказы.
+        (Permissions.HrOrderCreate,           [Full, None, None, None, None, None, None, None]),
+        (Permissions.HrOrderPost,             [Full, None, None, None, None, None, None, None]),
+        // Допущение D208: табель своего подразделения заполняет и закрывает Руководитель подразделения (мастер цеха);
+        // Сотрудник видит только свой табель (уровень «С»); Кадровик заполняет, но не закрывает — см. HrRoleMatrix.
+        (Permissions.TimesheetEdit,           [Full, None, Scoped, None, None, None, None, OwnOnly]),
+        (Permissions.TimesheetClose,          [Full, None, Scoped, None, None, None, None, None]),
+        // Допущение D212: заработок считает Владелец; Бухгалтеру — «по отдельному праву» (выдаёт Владелец: роль Бухгалтера может
+        // выдать и Администратор, а зарплатных данных у него нет); Аудитор смотрит; Сотрудник — только свой расчётный листок.
+        (Permissions.PayrollView,             [Full, None, None, None, None, ByGrant, ReadOnly, OwnOnly]),
+        (Permissions.PayrollCalculate,        [Full, None, None, None, None, ByGrant, None, None]),
         (Permissions.UserView,                [Full, Full, None, None, None, None, ReadOnly, None]),
         (Permissions.UserManage,              [Full, Full, None, None, None, None, None, None]),
         (Permissions.AdminGrant,              [Full, None, None, None, None, None, None, None]),
@@ -90,6 +107,11 @@ public static class RoleMatrixP0
 
     public static PermissionLevel LevelOf(string roleCode, string permissionCode)
     {
+        if (roleCode == SystemRoles.HrOfficer)
+        {
+            return HrRoleMatrix.LevelOf(permissionCode);
+        }
+
         var col = IndexOfRole(roleCode);
         foreach (var row in Rows)
         {
@@ -105,13 +127,18 @@ public static class RoleMatrixP0
     /// <summary>Все ненулевые права роли, включая «П» и «С» — они хранятся, но доступа сами не дают.</summary>
     public static IReadOnlyList<(string PermissionCode, PermissionLevel Level)> PermissionsOf(string roleCode)
     {
+        if (roleCode == SystemRoles.HrOfficer)
+        {
+            return HrRoleMatrix.HrOfficer.Select(p => (p.Key, p.Value)).ToArray();
+        }
+
         var col = IndexOfRole(roleCode);
         return Rows.Where(r => r.Cells[col] != None).Select(r => (r.Code, r.Cells[col])).ToArray();
     }
 
     private static int IndexOfRole(string roleCode)
     {
-        for (var i = 0; i < SystemRoles.Ordered.Count; i++)
+        for (var i = 0; i < Rows[0].Cells.Length; i++)
         {
             if (SystemRoles.Ordered[i] == roleCode)
             {
@@ -121,4 +148,26 @@ public static class RoleMatrixP0
 
         throw new ArgumentOutOfRangeException(nameof(roleCode), roleCode, "Неизвестная системная роль.");
     }
+}
+
+/// <summary>
+/// Права роли «Кадровик» (D205): сотрудники, персональные данные, кадровые приказы и штатное расписание организации.
+/// Отдельный список, а не девятый столбец матрицы P0: так модули добавляют строки матрицы, не задевая друг друга.
+/// </summary>
+public static class HrRoleMatrix
+{
+    public static readonly IReadOnlyDictionary<string, PermissionLevel> HrOfficer = new Dictionary<string, PermissionLevel>(StringComparer.Ordinal)
+    {
+        [Permissions.DepartmentView] = Full,
+        [Permissions.EmployeeView] = Full,
+        [Permissions.EmployeeEdit] = Full,
+        [Permissions.PersonalDataView] = Full,
+        [Permissions.PersonalDataEdit] = Full,
+        [Permissions.HrOrderCreate] = Full,
+        [Permissions.HrOrderPost] = Full,
+        [Permissions.TimesheetEdit] = Full,
+        [Permissions.AuditLogView] = OwnOnly,
+    };
+
+    public static PermissionLevel LevelOf(string permissionCode) => HrOfficer.TryGetValue(permissionCode, out var level) ? level : None;
 }

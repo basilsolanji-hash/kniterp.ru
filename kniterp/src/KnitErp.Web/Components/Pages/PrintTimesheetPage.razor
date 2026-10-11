@@ -1,0 +1,138 @@
+@page "/print/timesheet/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using System.Globalization
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@inject TimesheetService Timesheets
+
+@*
+    Табель учёта рабочего времени — унифицированная форма № Т-13 (ОКУД 0301008), постановление Госкомстата России от 05.01.2004 № 1.
+    По каждому сотруднику две строки на половину месяца: верхняя — код явки или неявки, нижняя — часы. Российская форма — по-русски (D68).
+*@
+<PageTitle>Табель Т-13 — knitERP</PageTitle>
+<style>
+    @@media print { @@page { size: A4 landscape; margin: 8mm; } }
+    .t13 td, .t13 th { text-align: center; padding: 1px 2px; }
+    .t13 td.name { text-align: left; }
+</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="hr/timesheet">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet"><p>@_error</p></div>
+}
+else if (_g is null)
+{
+    <div class="sheet"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var g = _g;
+    var first = g.Days.Where(d => d.Day <= 15).ToList();
+    var second = g.Days.Where(d => d.Day > 15).ToList();
+    <div class="sheet">
+        @if (g.Status == TimesheetStatus.Open)
+        {
+            <div class="stamp">ТАБЕЛЬ НЕ ЗАКРЫТ</div>
+        }
+        <div class="small" style="text-align: right">
+            Унифицированная форма № Т-13<br />
+            Утверждена постановлением Госкомстата России от 05.01.2004 № 1
+        </div>
+        <table class="plain">
+            <tr><td></td><td style="width: 120px; text-align: right">Форма по ОКУД</td><td class="code">0301008</td></tr>
+            <tr><td><b>@g.Organization</b><div class="small">наименование организации</div></td><td style="text-align: right">по ОКПО</td><td class="code"></td></tr>
+            <tr><td>@g.DepartmentName<div class="small">структурное подразделение</div></td><td></td><td></td></tr>
+        </table>
+        <table style="width: auto; margin: 8px 0 8px auto">
+            <tr><th>Номер документа</th><th>Дата составления</th><th colspan="2">Отчётный период</th></tr>
+            <tr><td>@g.Month.ToString("00")/@g.Year@(g.Version > 0 ? $"-И{g.Version}" : "")</td><td>@g.Days[^1].ToString("dd.MM.yyyy")</td>
+                <td>с @g.Days[0].ToString("dd.MM.yyyy")</td><td>по @g.Days[^1].ToString("dd.MM.yyyy")</td></tr>
+        </table>
+        <h1 style="text-align: center">ТАБЕЛЬ УЧЁТА РАБОЧЕГО ВРЕМЕНИ@(g.Version > 0 ? $" (ИСПРАВИТЕЛЬНЫЙ № {g.Version})" : "")</h1>
+
+        <table class="t13">
+            <tr>
+                <th rowspan="2">№ п/п</th><th rowspan="2">Фамилия, инициалы, должность</th><th rowspan="2">Табельный номер</th>
+                <th colspan="16">Отметки о явках и неявках на работу по числам месяца</th>
+                <th colspan="2">Отработано за</th><th rowspan="2">Неявки (код, дни)</th>
+            </tr>
+            <tr>
+                @for (var i = 1; i <= 16; i++)
+                {
+                    <th>@(i <= 15 ? i.ToString() : "X")</th>
+                }
+                <th>половину месяца (дни / часы)</th><th>месяц (дни / часы)</th>
+            </tr>
+            @{ var n = 0; }
+            @foreach (var r in g.Rows)
+            {
+                n++;
+                var t1 = TimesheetTotalsDto.Of(first.Where(r.Cells.ContainsKey).Select(d => (d, r.Cells[d].Code, r.Cells[d].Hours, r.Cells[d].NightHours, r.Cells[d].OvertimeHours)));
+                var t2 = TimesheetTotalsDto.Of(second.Where(r.Cells.ContainsKey).Select(d => (d, r.Cells[d].Code, r.Cells[d].Hours, r.Cells[d].NightHours, r.Cells[d].OvertimeHours)));
+                foreach (var (half, totals, rowIndex) in new[] { (first, t1, 0), (second, t2, 1) })
+                {
+                    <tr>
+                        @if (rowIndex == 0)
+                        {
+                            <td rowspan="4">@n</td><td rowspan="4" class="name">@Short(r.FullName)<br />@r.Position</td><td rowspan="4">@r.PersonnelNumber</td>
+                        }
+                        @for (var i = 0; i < 16; i++)
+                        {
+                            <td>@(i < half.Count && r.Cells.TryGetValue(half[i], out var c) ? c.Code : i < half.Count ? "" : "X")</td>
+                        }
+                        <td rowspan="2">@totals.DaysWorked / @totals.Hours.ToString("0.##", Ru)</td>
+                        @if (rowIndex == 0)
+                        {
+                            <td rowspan="4">@r.Totals.DaysWorked / @r.Totals.Hours.ToString("0.##", Ru)@(r.Totals.NightHours > 0 ? $" (Н {r.Totals.NightHours.ToString("0.##", Ru)})" : "")@(r.Totals.OvertimeHours > 0 ? $" (С {r.Totals.OvertimeHours.ToString("0.##", Ru)})" : "")</td>
+                            <td rowspan="4">@string.Join(", ", r.Totals.AbsenceDays.Select(a => $"{a.Key} {a.Value}"))</td>
+                        }
+                    </tr>
+                    <tr>
+                        @for (var i = 0; i < 16; i++)
+                        {
+                            <td>@(i < half.Count && r.Cells.TryGetValue(half[i], out var c) && (c.Hours > 0 || c.OvertimeHours > 0) ? (c.Hours + c.OvertimeHours).ToString("0.##", Ru) : "")</td>
+                        }
+                    </tr>
+                }
+            }
+        </table>
+        <div class="sign">
+            <div>Ответственное лицо <span class="line"></span> <span class="line"></span></div>
+            <div>Руководитель структурного подразделения <span class="line"></span> <span class="line"></span></div>
+            <div>Работник кадровой службы <span class="line"></span> <span class="line"></span></div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private TimesheetGridDto? _g;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _g = await Timesheets.GetByIdAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+
+    /// <summary>«Иванова Мария Петровна» → «Иванова М. П.».</summary>
+    private static string Short(string fullName)
+    {
+        var parts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 0 ? fullName : parts[0] + " " + string.Join(" ", parts.Skip(1).Select(p => p[0] + "."));
+    }
+}

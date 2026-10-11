@@ -1,0 +1,165 @@
+@page "/hr/piece-rates"
+@using System.Globalization
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Access
+@inject PayrollService Payroll
+
+<PageTitle>@L("Сдельные расценки") — knitERP</PageTitle>
+
+@* D211: расценки по операциям производства — история по датам, новая цена добавляется новой строкой. *@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rates is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Сдельные расценки")</h1>
+        <div class="row-actions"><a class="button secondary" href="hr/payroll">@L("Заработок")</a></div>
+    </div>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (CurrentAccess.Has(Permissions.PayrollCalculate))
+    {
+        <form class="inline-form" @onsubmit="AddAsync">
+            <label>@L("Код операции") <input type="number" min="1" @bind="_operationId" /></label>
+            <label>@L("Операция") <input @bind="_operationName" maxlength="200" /></label>
+            <label>@L("Код изделия (необязательно)") <input type="number" min="1" @bind="_itemId" /></label>
+            <label>@L("Единица") <input @bind="_unit" maxlength="10" list="rate-units" /></label>
+            <datalist id="rate-units">@foreach (var u in KnitErp.Domain.Hr.PieceRate.CommonUnits) { <option value="@u"></option> }</datalist>
+            <label>@L("Цена, руб.") <input type="number" step="0.0001" min="0.0001" @bind="_price" /></label>
+            <label>@L("Действует с") <input type="date" @bind="_validFrom" /></label>
+            <button type="submit" disabled="@_busy">@L("Добавить расценку")</button>
+        </form>
+        <p class="muted">@L("Код операции — из производства (техкарта, операция). Расценка изделия важнее общей расценки операции.")</p>
+    }
+
+    @if (_operations is { Count: > 0 })
+    {
+        <h2>@L("Операции из производства за 3 месяца")</h2>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Операция")</th><th class="num">@L("Код")</th><th class="opt">@L("Изделие")</th><th class="num">@L("Выработка")</th><th>@L("Расценка")</th></tr></thead>
+                <tbody>
+                    @foreach (var o in _operations)
+                    {
+                        <tr>
+                            <td>@o.OperationName</td><td class="num">@o.OperationId</td><td>@(o.ItemId?.ToString() ?? L("любое"))</td>
+                            <td class="num">@o.Quantity.ToString("0.###", Ru) @o.Unit</td>
+                            <td>
+                                @if (o.HasRate)
+                                {
+                                    <span class="tag ok">@L("есть")</span>
+                                }
+                                else
+                                {
+                                    <span class="tag warn">@L("нет — не оплачивается")</span>
+                                    @if (CurrentAccess.Has(Permissions.PayrollCalculate))
+                                    {
+                                        <button type="button" class="link" @onclick="() => Prefill(o)">@L("Задать расценку")</button>
+                                    }
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Операция")</th><th class="num">@L("Код")</th><th class="opt">@L("Изделие")</th><th class="num">@L("Цена")</th><th>@L("Действует с")</th></tr></thead>
+            <tbody>
+                @if (_rates.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">@L("Расценок пока нет.")</td></tr>
+                }
+                @foreach (var r in _rates)
+                {
+                    <tr><td>@r.OperationName</td><td class="num">@r.OperationId</td><td>@(r.ItemId?.ToString() ?? L("любое"))</td>
+                        <td class="num">@r.Price.ToString("0.00##", Ru) / @r.Unit</td><td>@r.ValidFrom.ToString("dd.MM.yyyy")</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+    private IReadOnlyList<PieceRateDto>? _rates;
+    private IReadOnlyList<WorkOperationDto>? _operations;
+    private long _operationId;
+    private string _operationName = string.Empty;
+    private long? _itemId;
+    private string _unit = "шт";
+    private decimal _price;
+    private DateOnly _validFrom;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId);
+        _validFrom = new DateOnly(today.Year, today.Month, 1);
+        try
+        {
+            _rates = await Payroll.RatesAsync();
+            _operations = await Payroll.OperationsAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    /// <summary>Заполнить форму из операции производства: код, название, изделие и единица — как в выработке.</summary>
+    private void Prefill(WorkOperationDto o)
+    {
+        _operationId = o.OperationId;
+        _operationName = o.OperationName;
+        _itemId = o.ItemId;
+        _unit = o.Unit;
+        _message = L("Укажите цену и дату — остальное заполнено из производства.");
+        _isError = false;
+    }
+
+    private async Task AddAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Payroll.AddRateAsync(new PieceRateCommand(_operationId, _operationName, _itemId, _unit, _price, _validFrom));
+            _message = L("Расценка добавлена.");
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _rates = await Payroll.RatesAsync();
+            _operations = await Payroll.OperationsAsync();
+            _busy = false;
+        }
+    }
+}

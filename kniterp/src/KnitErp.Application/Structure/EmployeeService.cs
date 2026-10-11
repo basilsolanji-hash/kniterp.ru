@@ -86,6 +86,31 @@ public sealed class EmployeeService(
         return new EmployeeListDto(rows, ctx.Permissions.Has(Permissions.EmployeeEdit), ownOnly, visible is not null);
     }
 
+    /// <summary>Карточка сотрудника: в области просмотра пользователя или своя; иначе «не найдено».</summary>
+    public async Task<EmployeeRowDto> GetAsync(long id, CancellationToken ct = default)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        var query = db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && e.Id == id);
+        if (ctx.Permissions.Has(Permissions.EmployeeView))
+        {
+            var visible = await StructureScope.VisibleDepartmentsAsync(db, ctx, Permissions.EmployeeView, ct);
+            if (visible is not null)
+            {
+                query = query.Where(e => visible.Contains(e.DepartmentId));
+            }
+        }
+        else if (ctx.Permissions.HasOwnOnly(Permissions.EmployeeView))
+        {
+            query = query.Where(e => e.UserId == ctx.UserId);
+        }
+        else
+        {
+            await guard.DenyAsync(ctx, Permissions.EmployeeView, ct);
+        }
+
+        return await Project(query).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Сотрудник");
+    }
+
     /// <summary>Действующие подразделения и должности для формы сотрудника.</summary>
     public async Task<EmployeeOptionsDto> GetOptionsAsync(CancellationToken ct = default)
     {
@@ -118,8 +143,10 @@ public sealed class EmployeeService(
         var employee = Employee.Hire(ctx.OrganizationId, cmd.PersonnelNumber, cmd.LastName, cmd.FirstName, cmd.MiddleName,
             cmd.DepartmentId, cmd.PositionId, cmd.HiredOn);
         await EnsureNumberFreeAsync(ctx, employee.PersonnelNumber, null, ct);
-        db.Employees.Add(employee);
         await using var tx = await db.BeginTransactionAsync(ct);
+        await Hr.StaffingRules.LockAsync(db, ctx.OrganizationId, ct);
+        await Hr.StaffingRules.EnsureVacancyAsync(db, ctx.OrganizationId, cmd.DepartmentId, cmd.PositionId, 1m, null, ct); // D203
+        db.Employees.Add(employee);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.EmployeeHired, employee.Id, null, $"{employee.PersonnelNumber} {employee.FullName}", null);
         await db.SaveChangesAsync(ct);
@@ -132,6 +159,13 @@ public sealed class EmployeeService(
         var ctx = await guard.DemandAsync(Permissions.EmployeeEdit, ct);
         var employee = await LoadForEditAsync(ctx, id, rowVersion, ct);
         await RequireAssignableAsync(ctx, cmd.DepartmentId, cmd.PositionId, ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        if (cmd.DepartmentId != employee.DepartmentId || cmd.PositionId != employee.PositionId)
+        {
+            await Hr.StaffingRules.LockAsync(db, ctx.OrganizationId, ct);
+            await Hr.StaffingRules.EnsureVacancyAsync(db, ctx.OrganizationId, cmd.DepartmentId, cmd.PositionId, 1m, id, ct); // D203
+        }
+
         var names = await NamesAsync(ctx, employee.DepartmentId, employee.PositionId, cmd.DepartmentId, cmd.PositionId, ct);
         var changes = employee.Update(cmd.PersonnelNumber, cmd.LastName, cmd.FirstName, cmd.MiddleName, cmd.DepartmentId, cmd.PositionId);
         await EnsureNumberFreeAsync(ctx, employee.PersonnelNumber, id, ct);
@@ -142,6 +176,7 @@ public sealed class EmployeeService(
         }
 
         await SaveAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     /// <summary>Дата рождения и согласие показывать день рождения коллегам (D83). Согласие даёт сам сотрудник — кадровик его отмечает.</summary>

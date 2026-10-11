@@ -73,6 +73,7 @@ public sealed class EmployeeExchangeService(
         TableImport.EnsureApplicable(rows);
 
         await using var tx = await db.BeginTransactionAsync(ct);
+        await Hr.StaffingRules.LockAsync(db, ctx.OrganizationId, ct);
         var plan = await PlanAsync(ctx, rows, ct);
         if (plan.ErrorRows > 0)
         {
@@ -83,6 +84,7 @@ public sealed class EmployeeExchangeService(
         var existing = await db.Employees.Where(e => e.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(e => e.PersonnelNumber, ct);
         var created = new List<Employee>();
         var updated = 0;
+        var affected = new List<(long DepartmentId, long PositionId)>();
         foreach (var row in plan.Rows.Where(r => r.Action is ImportAction.Create or ImportAction.Update))
         {
             var department = Find(departments, row.Cell(4)).Single();
@@ -94,10 +96,16 @@ public sealed class EmployeeExchangeService(
                     department.Id, position.Id, TableImport.ParseDate(row.Cell(6))!.Value);
                 db.Employees.Add(e);
                 created.Add(e);
+                affected.Add((department.Id, position.Id));
                 continue;
             }
 
             var current = existing[number];
+            if (current.DepartmentId != department.Id || current.PositionId != position.Id)
+            {
+                affected.Add((department.Id, position.Id));
+            }
+
             var before = (Department: departments.FirstOrDefault(d => d.Id == current.DepartmentId)?.Name, Position: positions.FirstOrDefault(p => p.Id == current.PositionId)?.Name);
             foreach (var change in current.Update(number, row.Cell(1), row.Cell(2), TableImport.Optional(row.Cell(3)), department.Id, position.Id))
             {
@@ -114,6 +122,18 @@ public sealed class EmployeeExchangeService(
         }
 
         await db.SaveChangesAsync(ct);
+
+        // D203: импорт не обходит штатное расписание — итоговая занятость проверяется до фиксации, при нарушении откатывается вся загрузка.
+        try
+        {
+            await Hr.StaffingRules.EnsureWithinAsync(db, ctx.OrganizationId, affected, ct);
+        }
+        catch (BusinessRuleException)
+        {
+            db.DiscardChanges();
+            throw;
+        }
+
         foreach (var e in created)
         {
             Audit(ctx, AuditActions.EmployeeHired, e.Id.ToString(), null, $"{e.PersonnelNumber} {e.FullName}", "Импорт");

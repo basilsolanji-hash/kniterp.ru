@@ -93,6 +93,20 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<DocumentCounter> DocumentCounters => Set<DocumentCounter>();
 
+    // Модуль «Сотрудники» (D200–D299).
+    public DbSet<KnitErp.Domain.Hr.EmployeePersonalData> EmployeePersonalData => Set<KnitErp.Domain.Hr.EmployeePersonalData>();
+    public DbSet<KnitErp.Domain.Hr.ConsentScan> ConsentScans => Set<KnitErp.Domain.Hr.ConsentScan>();
+    public DbSet<KnitErp.Domain.Hr.StaffingPosition> StaffingPositions => Set<KnitErp.Domain.Hr.StaffingPosition>();
+    public DbSet<KnitErp.Domain.Hr.PersonnelOrder> PersonnelOrders => Set<KnitErp.Domain.Hr.PersonnelOrder>();
+    public DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory => Set<KnitErp.Domain.Hr.EmploymentRecord>();
+    public DbSet<KnitErp.Domain.Hr.WorkSchedule> WorkSchedules => Set<KnitErp.Domain.Hr.WorkSchedule>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules => Set<KnitErp.Domain.Hr.EmployeeSchedule>();
+    public DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets => Set<KnitErp.Domain.Hr.Timesheet>();
+    public DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays => Set<KnitErp.Domain.Hr.TimesheetDay>();
+    public DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates => Set<KnitErp.Domain.Hr.PieceRate>();
+    public DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns => Set<KnitErp.Domain.Hr.PayrollRun>();
+    public DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines => Set<KnitErp.Domain.Hr.PayrollLine>();
+
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней
     /// транзакции: фиксирует и откатывает её только внешний сценарий.

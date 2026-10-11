@@ -1,0 +1,199 @@
+@page "/hr/orders/{Id:long}"
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@using KnitErp.Web.Components.Shared
+@inject PersonnelOrderService Orders
+
+<PageTitle>@(_order is null ? L("Кадровый приказ") : L("Приказ № {0}", _order.Number)) — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <p>@L("Приказ не найден.") <a href="hr/orders">@L("К приказам")</a></p>
+}
+else if (_order is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var o = _order;
+    var v = o.Values;
+    <div class="page-head">
+        <h1>@L("Приказ № {0}", o.Number) <span class="tag @(o.Status == PersonnelOrderStatus.Posted ? "ok" : o.Status == PersonnelOrderStatus.Draft ? "warn" : "")">@L(o.StatusName)</span></h1>
+        <div class="row-actions">
+            <a class="button secondary" href="print/hr-order/@o.Id" target="_blank" rel="noopener">@L("Печать {0}", PersonnelOrder.FormName(v.Kind))</a>
+            <a class="button secondary" href="hr/orders">@L("← К приказам")</a>
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <dl class="facts">
+        <dt>@L("Вид")</dt><dd>@PersonnelOrder.FormName(v.Kind) — @L(PersonnelOrder.KindName(v.Kind))</dd>
+        <dt>@L("Дата приказа")</dt><dd>@v.OrderDate.ToString("dd.MM.yyyy")</dd>
+        <dt>@L("Сотрудник")</dt>
+        <dd>
+            @if (v.EmployeeId is { } eid)
+            {
+                <a href="employees/@eid">@o.EmployeeName</a>
+            }
+            else
+            {
+                @o.EmployeeName
+            }
+        </dd>
+        <dt>@L("Действует с")</dt><dd>@v.EffectiveFrom.ToString("dd.MM.yyyy")@(v.EffectiveTo is { } to ? $" – {to:dd.MM.yyyy}" : "")</dd>
+        @if (o.CurrentDepartment is not null && v.Kind == PersonnelOrderKind.Transfer)
+        {
+            <dt>@L("Прежнее место работы")</dt><dd>@o.CurrentDepartment, @o.CurrentPosition</dd>
+        }
+        @if (o.NewDepartment is not null)
+        {
+            <dt>@L("Подразделение и должность")</dt><dd>@o.NewDepartment, @o.NewPosition, @L("ставка {0}", v.Rate?.ToString("0.##") ?? "1")</dd>
+        }
+        @if (v.LeaveKind is { } lk)
+        {
+            <dt>@L("Вид отпуска")</dt><dd>@L(LeaveKinds.Name(lk))</dd>
+        }
+        @if (DismissalGrounds.Find(v.DismissalGround) is { } g)
+        {
+            <dt>@L("Основание по ТК РФ")</dt><dd>@g.Article — @L(g.Title)</dd>
+        }
+        <dt>@L("Основание (документ)")</dt><dd>@(v.Basis ?? "—")</dd>
+    </dl>
+
+    @if (o.CanEdit && _form is not null && _options is not null)
+    {
+        <div class="panel">
+            <h2>@L("Черновик")</h2>
+            <EditForm Model="_form" OnValidSubmit="SaveAsync" FormName="edit-order">
+                <PersonnelOrderForm Model="_form" Options="_options" KindLocked="true" />
+                <div class="actions">
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Сохранить черновик")</button>
+                    @if (o.CanPost)
+                    {
+                        <button type="button" @onclick="PostAsync" disabled="@_busy">@L("Провести")</button>
+                    }
+                    <button type="button" class="secondary" @onclick="CancelAsync" disabled="@_busy">@L("Аннулировать")</button>
+                </div>
+            </EditForm>
+        </div>
+    }
+    else if (o.CanPost)
+    {
+        <div class="actions"><button type="button" @onclick="PostAsync" disabled="@_busy">@L("Провести")</button></div>
+    }
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private PersonnelOrderDto? _order;
+    private PersonnelOrderOptionsDto? _options;
+    private PersonnelOrderFormModel? _form;
+    private bool _busy;
+    private bool _notFound;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _order = await Orders.GetAsync(Id);
+        if (_order.CanEdit)
+        {
+            _options ??= await Orders.OptionsAsync();
+            _form = PersonnelOrderFormModel.From(_order.Values);
+        }
+        else
+        {
+            _form = null;
+        }
+    }
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        await Orders.UpdateAsync(Id, _form!.ToValues(), _order!.RowVersion);
+        _message = L("Черновик сохранён.");
+    });
+
+    private Task PostAsync() => RunAsync(async () =>
+    {
+        if (_form is not null)
+        {
+            await Orders.UpdateAsync(Id, _form.ToValues(), _order!.RowVersion);
+            _order = await Orders.GetAsync(Id);
+        }
+
+        await Orders.PostAsync(Id, _order!.RowVersion);
+        _message = L("Приказ проведён.");
+    });
+
+    private Task CancelAsync() => RunAsync(async () =>
+    {
+        await Orders.CancelAsync(Id, _order!.RowVersion);
+        _message = L("Приказ аннулирован.");
+    });
+
+    /// <summary>Одна операция за раз, затем свежий приказ: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                var keepForm = _isError ? _form : null;
+                await LoadAsync();
+                if (keepForm is not null && _form is not null)
+                {
+                    _form = keepForm;
+                }
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}
