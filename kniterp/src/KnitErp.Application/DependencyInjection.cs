@@ -46,6 +46,8 @@ public static class DependencyInjection
         services.AddScoped<Finance.CashFlowItemService>();
         services.AddScoped<Finance.AccountableService>();
         services.AddScoped<Finance.CashReportsService>();
+        services.AddScoped<Integrations.IntegrationService>();
+        services.AddScoped<Integrations.WebhookDispatcher>();
         services.AddScoped<Common.RequisitesLookupService>();
         services.AddScoped<Sales.SalesAnalyticsService>();
         services.AddScoped<Taxes.VatInvoiceService>();

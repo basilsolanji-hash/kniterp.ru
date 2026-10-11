@@ -115,6 +115,20 @@ public sealed class EffectivePermissionSet
         return new EffectivePermissionSet(levels, denied, ownOnly, scopes);
     }
 
+    /// <summary>
+    /// Права, ограниченные списком кодов (токен API, D88): остаются только перечисленные, с их уровнем и областью; запреты сохраняются.
+    /// Пересечение не может дать больше, чем было.
+    /// </summary>
+    public EffectivePermissionSet Restrict(IEnumerable<string> codes)
+    {
+        var allowed = codes.ToHashSet(StringComparer.Ordinal);
+        return new EffectivePermissionSet(
+            _levels.Where(l => allowed.Contains(l.Key)).ToDictionary(l => l.Key, l => l.Value, StringComparer.Ordinal),
+            new HashSet<string>(_denied, StringComparer.Ordinal),
+            _ownOnly.Where(allowed.Contains).ToHashSet(StringComparer.Ordinal),
+            _scopes.Where(s => allowed.Contains(s.Key)).ToDictionary(s => s.Key, s => s.Value, StringComparer.Ordinal));
+    }
+
     public bool Has(string permissionCode) =>
         !_denied.Contains(permissionCode) && _levels.TryGetValue(permissionCode, out var l) && l.Grants();
 

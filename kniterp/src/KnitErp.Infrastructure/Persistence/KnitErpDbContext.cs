@@ -25,6 +25,10 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<ItemCharacteristicValue> ItemCharacteristicValues => Set<ItemCharacteristicValue>();
     public DbSet<ItemPhoto> ItemPhotos => Set<ItemPhoto>();
     public DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations => Set<KnitErp.Domain.Finance.MoneyOperation>();
+    public DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens => Set<KnitErp.Domain.Integrations.ApiToken>();
+    public DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions => Set<KnitErp.Domain.Integrations.WebhookSubscription>();
+    public DbSet<KnitErp.Domain.Integrations.WebhookDelivery> WebhookDeliveries => Set<KnitErp.Domain.Integrations.WebhookDelivery>();
+    public DbSet<KnitErp.Domain.Integrations.ApiIdempotencyRecord> ApiIdempotency => Set<KnitErp.Domain.Integrations.ApiIdempotencyRecord>();
     public DbSet<KnitErp.Domain.Finance.CashFlowItem> CashFlowItems => Set<KnitErp.Domain.Finance.CashFlowItem>();
     public DbSet<KnitErp.Domain.Finance.ExpenseReport> ExpenseReports => Set<KnitErp.Domain.Finance.ExpenseReport>();
     public DbSet<KnitErp.Domain.Finance.CustomerPaymentAllocation> CustomerPaymentAllocations => Set<KnitErp.Domain.Finance.CustomerPaymentAllocation>();

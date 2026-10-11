@@ -1608,3 +1608,80 @@ internal sealed class ExpenseReportLineConfiguration : IEntityTypeConfiguration<
         b.HasOne<KnitErp.Domain.Finance.CashFlowItem>().WithMany().HasForeignKey(x => x.CashFlowItemId).OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+internal sealed class ApiTokenConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Integrations.ApiToken>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Integrations.ApiToken> b)
+    {
+        b.ToTable("api_tokens");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(KnitErp.Domain.Integrations.ApiToken.NameMaxLength).IsRequired();
+        b.Property(x => x.Prefix).HasMaxLength(KnitErp.Domain.Integrations.ApiToken.PrefixLength).IsRequired();
+        b.Property(x => x.TokenHash).HasColumnType("binary(32)").IsRequired();
+        b.Property(x => x.Permissions).HasMaxLength(2000).IsRequired();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.PermissionList);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.RevokedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.TokenHash).IsUnique().HasDatabaseName("ux_api_tokens_hash");
+        b.HasIndex(x => x.OrganizationId).HasDatabaseName("ix_api_tokens_org");
+    }
+}
+
+internal sealed class WebhookSubscriptionConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Integrations.WebhookSubscription>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Integrations.WebhookSubscription> b)
+    {
+        b.ToTable("webhook_subscriptions");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Url).HasMaxLength(KnitErp.Domain.Integrations.WebhookSubscription.UrlMaxLength).IsRequired();
+        b.Property(x => x.Events).HasMaxLength(1000).IsRequired();
+
+        // Секрет подписи нужен для отправки — хранится зашифрованным мастер-ключом (AES-256-GCM), как секреты 2FA.
+        b.Property(x => x.Secret).HasMaxLength(400).IsRequired()
+            .HasConversion(v => KnitErp.Infrastructure.Security.SecretCipher.Encrypt(v), v => KnitErp.Infrastructure.Security.SecretCipher.Decrypt(v));
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.EventList);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_webhook_subscriptions_org_id");
+    }
+}
+
+internal sealed class WebhookDeliveryConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Integrations.WebhookDelivery>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Integrations.WebhookDelivery> b)
+    {
+        b.ToTable("webhook_deliveries", t => t.HasCheckConstraint("ck_webhook_deliveries_status", "[Status] IN (1, 2, 9)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.EventType).HasMaxLength(60).IsRequired();
+        b.Property(x => x.Payload).IsRequired();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.LastError).HasMaxLength(KnitErp.Domain.Integrations.WebhookDelivery.ErrorMaxLength);
+        b.HasOne<KnitErp.Domain.Integrations.WebhookSubscription>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SubscriptionId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_webhook_deliveries_subscription");
+        b.HasIndex(x => new { x.Status, x.NextAttemptAtUtc }).HasDatabaseName("ix_webhook_deliveries_due");
+        b.HasIndex(x => new { x.SubscriptionId, x.Id }).HasDatabaseName("ix_webhook_deliveries_subscription");
+        b.HasIndex(x => new { x.SubscriptionId, x.EventId }).IsUnique().HasDatabaseName("ux_webhook_deliveries_event");
+    }
+}
+
+internal sealed class ApiIdempotencyRecordConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Integrations.ApiIdempotencyRecord>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Integrations.ApiIdempotencyRecord> b)
+    {
+        b.ToTable("api_idempotency");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Key).HasMaxLength(KnitErp.Domain.Integrations.ApiIdempotencyRecord.KeyMaxLength).IsRequired();
+        b.Property(x => x.RequestHash).HasMaxLength(64).IsRequired();
+        b.Property(x => x.ResponseBody).IsRequired();
+        b.HasOne<KnitErp.Domain.Integrations.ApiToken>().WithMany().HasForeignKey(x => x.TokenId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => new { x.TokenId, x.Key }).IsUnique().HasDatabaseName("ux_api_idempotency_token_key");
+        b.HasIndex(x => x.CreatedAtUtc).HasDatabaseName("ix_api_idempotency_created");
+    }
+}

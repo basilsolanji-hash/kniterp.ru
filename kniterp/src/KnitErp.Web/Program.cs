@@ -87,7 +87,40 @@ builder.Services.AddAuthentication(AuthSchemes.Session)
         o.Cookie.SameSite = SameSiteMode.Strict;
         o.ExpireTimeSpan = TimeSpan.FromMinutes(5);
         o.SlidingExpiration = false;
+    })
+    // D88: собственный API — только по токену в заголовке Authorization; cookie сессии для API не действуют.
+    .AddScheme<AuthenticationSchemeOptions, KnitErp.Web.Api.ApiTokenAuthenticationHandler>(KnitErp.Web.Api.ApiTokenAuthenticationHandler.SchemeName, null);
+
+// D88: интеграции — вебхуки (внутренняя сеть и HTTP — только для разработки и тестов), описание API OpenAPI.
+var integrationSettings = new KnitErp.Application.Integrations.IntegrationSettings(builder.Configuration.GetValue<bool>("Webhooks:AllowPrivateNetworks"));
+builder.Services.AddSingleton(integrationSettings);
+builder.Services.AddSingleton<KnitErp.Application.Integrations.IWebhookSender, KnitErp.Web.Api.HttpWebhookSender>();
+if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
+{
+    builder.Services.AddHostedService<KnitErp.Web.Api.WebhookWorker>();
+}
+
+builder.Services.AddOpenApi("v1", o =>
+{
+    o.ShouldInclude = d => d.RelativePath?.StartsWith("api/v1/", StringComparison.Ordinal) == true;
+    o.AddDocumentTransformer((document, _, _) =>
+    {
+        document.Info = new Microsoft.OpenApi.OpenApiInfo
+        {
+            Title = "knitERP API",
+            Version = "v1",
+            Description = "Собственный API knitERP. Вход — заголовок Authorization: Bearer knt_… (токен выпускается в разделе «Интеграции»). "
+                          + "Изменяющие запросы принимают Idempotency-Key. Ошибки — application/problem+json с полем code. Лимит — 100 запросов за 5 секунд на токен.",
+        };
+        document.Components ??= new Microsoft.OpenApi.OpenApiComponents();
+        document.Components.SecuritySchemes ??= new Dictionary<string, Microsoft.OpenApi.IOpenApiSecurityScheme>();
+        document.Components.SecuritySchemes["bearer"] = new Microsoft.OpenApi.OpenApiSecurityScheme
+        {
+            Type = Microsoft.OpenApi.SecuritySchemeType.Http, Scheme = "bearer", Description = "Токен knitERP: knt_…",
+        };
+        return Task.CompletedTask;
     });
+});
 
 // Запрет по умолчанию: любая страница требует входа, кроме явно открытых страниц входа.
 builder.Services.AddAuthorizationBuilder()
@@ -126,13 +159,26 @@ builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http =>
-        HttpMethods.IsPost(http.Request.Method) && http.Request.Path.StartsWithSegments("/account")
-                                                && !http.Request.Path.StartsWithSegments("/account/logout")
-            ? RateLimitPartition.GetFixedWindowLimiter(http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })
-            : RateLimitPartition.GetNoLimiter("other"));
+        // D88: API — 100 запросов за 5 секунд на токен (ключ — отпечаток заголовка Authorization, без самого секрета).
+        http.Request.Path.StartsWithSegments("/api")
+            ? RateLimitPartition.GetFixedWindowLimiter("api:" + KnitErp.Web.Api.ApiErrors.RateKey(http),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 100, Window = TimeSpan.FromSeconds(5), QueueLimit = 0 })
+            : HttpMethods.IsPost(http.Request.Method) && http.Request.Path.StartsWithSegments("/account")
+                                                      && !http.Request.Path.StartsWithSegments("/account/logout")
+                ? RateLimitPartition.GetFixedWindowLimiter(http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })
+                : RateLimitPartition.GetNoLimiter("other"));
     o.OnRejected = async (context, ct) =>
     {
+        if (context.HttpContext.Request.Path.StartsWithSegments("/api"))
+        {
+            context.HttpContext.Response.Headers.RetryAfter = "5";
+            await context.HttpContext.Response.WriteAsJsonAsync(
+                KnitErp.Web.Api.ApiErrors.Problem(429, "rate_limit", "Не больше 100 запросов за 5 секунд на токен — повторите через 5 секунд."),
+                KnitErp.Web.Api.ApiJson.Options, "application/problem+json", ct);
+            return;
+        }
+
         context.HttpContext.Response.ContentType = "text/plain; charset=utf-8";
         await context.HttpContext.Response.WriteAsync("Слишком много попыток входа с этого адреса. Подождите минуту и попробуйте снова.", ct);
     };
@@ -193,11 +239,23 @@ app.UseRequestLocalization(o =>
     o.SupportedUICultures = KnitErp.Domain.Access.UiLanguages.All.Select(l => new System.Globalization.CultureInfo(l.Culture)).ToList();
     o.RequestCultureProviders = [new Microsoft.AspNetCore.Localization.CookieRequestCultureProvider()];
 });
+// D88: тело изменяющих запросов API читается дважды — для действия и для хэша Idempotency-Key.
+app.Use((http, next) =>
+{
+    if (http.Request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(http.Request.Method))
+    {
+        http.Request.EnableBuffering();
+    }
+
+    return next();
+});
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets().AllowAnonymous();
+KnitErp.Web.Api.ApiV1.MapApiV1(app);
+app.MapOpenApi("/api/{documentName}/openapi.json").AllowAnonymous();
 app.MapHealthChecks("/health").AllowAnonymous();
 
 app.MapPost("/account/logout", async (HttpContext http, IAntiforgery antiforgery, SignInService signIn) =>
@@ -477,3 +535,4 @@ static async Task SeedDevelopmentAsync(WebApplication app)
 }
 
 public partial class Program;
+

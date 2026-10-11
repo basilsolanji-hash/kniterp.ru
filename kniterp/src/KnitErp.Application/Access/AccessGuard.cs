@@ -41,6 +41,13 @@ public sealed class AccessGuard(IKnitErpDbContext db, ICurrentUser currentUser, 
         }
 
         var permissions = await LoadAsync(userId, orgId, ct);
+
+        // D88: по токену API — не больше прав токена и не больше текущих прав его создателя.
+        if (currentUser.ApiScope is { } scope)
+        {
+            permissions = permissions.Restrict(scope);
+        }
+
         return new AccessContext(userId, orgId, permissions);
     }
 

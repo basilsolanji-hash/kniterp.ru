@@ -1,0 +1,279 @@
+@page "/integrations"
+@using KnitErp.Application.Integrations
+@using KnitErp.Domain.Integrations
+@inject IntegrationService Integrations
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Интеграции (API)") — knitERP</PageTitle>
+
+@*
+    D88: токены собственного API и подписки на события (вебхуки). Секрет показывается один раз — после закрытия его не увидеть,
+    только выпустить новый. Управляет Владелец или Администратор (право изменения реквизитов организации).
+*@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_tokens is null || _webhooks is null || _options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Интеграции (API)")</h1>
+    <p class="muted">
+        @L("Собственный API knitERP для интернет-магазина, 1С, маркетплейсов и своих программ. Описание:")
+        <a href="@ApiDocs" target="_blank" rel="noopener">@ApiDocs</a>.
+        @L("Запросы — с заголовком Authorization: Bearer и токеном; повтор изменяющего запроса с тем же Idempotency-Key не выполнит действие дважды; не больше 100 запросов за 5 секунд.")
+    </p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_secret is not null)
+    {
+        <div class="panel secret-once" role="alert">
+            <h2>@L("Сохраните секрет сейчас")</h2>
+            <p>@L("Он показывается один раз: в knitERP хранится только его отпечаток. Потеряли — отзовите и выпустите новый.")</p>
+            <input readonly value="@_secret" aria-label="@L("Секрет")" style="width: 100%; font-family: monospace" />
+            <div class="actions"><button type="button" @onclick="() => _secret = null">@L("Я сохранил, скрыть")</button></div>
+        </div>
+    }
+
+    <h2>@L("Токены API")</h2>
+    <form class="panel" @onsubmit="IssueAsync">
+        <div class="grid">
+            <label>@L("Название") <input @bind="_tokenName" maxlength="@ApiToken.NameMaxLength" placeholder="@L("Интернет-магазин")" required /></label>
+            <label>
+                @L("Срок действия")
+                <select @bind="_tokenDays">
+                    <option value="30">@L("30 дней")</option>
+                    <option value="90">@L("90 дней")</option>
+                    <option value="180">@L("180 дней")</option>
+                    <option value="365">@L("1 год")</option>
+                </select>
+            </label>
+        </div>
+        <fieldset>
+            <legend>@L("Права токена — только из ваших; управление пользователями, реквизитами, интеграциями и персональные данные через API не выдаются")</legend>
+            @foreach (var (code, title) in _options.Permissions)
+            {
+                <label class="check"><input type="checkbox" checked="@_tokenRights.Contains(code)" @onchange="e => Toggle(_tokenRights, code, e)" /> @L(title)</label>
+            }
+        </fieldset>
+        <div class="actions"><button type="submit" disabled="@_busy">@L("Выпустить токен")</button></div>
+    </form>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Название")</th><th>@L("Начало токена")</th><th class="opt">@L("Права")</th><th>@L("Действует до")</th><th class="opt">@L("Последний запрос")</th><th></th></tr></thead>
+            <tbody>
+                @if (_tokens.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Токенов пока нет.")</td></tr>
+                }
+                @foreach (var t in _tokens)
+                {
+                    <tr class="@(t.IsActive ? null : "archived")">
+                        <td>@t.Name<div class="muted small">@t.CreatedBy, @Local(t.CreatedAtUtc)</div></td>
+                        <td><code>@(t.Prefix)…</code></td>
+                        <td class="small">@string.Join(", ", t.Permissions.Select(p => L(Permissions.Describe(p))))</td>
+                        <td>@(t.RevokedAtUtc is { } r ? L("отозван {0}", Local(r)) : t.ExpiresAtUtc is { } e ? Local(e) : L("бессрочно"))</td>
+                        <td>@(t.LastUsedAtUtc is { } u ? Local(u) : "—")</td>
+                        <td>
+                            @if (t.IsActive)
+                            {
+                                <ConfirmButton Class="secondary" Disabled="_busy" Question="@L("Отозвать токен? Программы с ним перестанут работать сразу.")"
+                                               OnConfirm="() => RevokeAsync(t)">@L("Отозвать")</ConfirmButton>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h2 style="margin-top: 24px">@L("Вебхуки — уведомления о событиях")</h2>
+    <p class="muted small">@L("knitERP отправляет POST с JSON на ваш адрес (только HTTPS, не внутренняя сеть). Подпись — заголовок X-KnitErp-Signature: v1=HMAC-SHA256(секрет, «метка.тело»), метка — X-KnitErp-Timestamp. Не дошло — повтор с паузой до суток. Дубли отбрасывайте по X-KnitErp-Delivery, порядок — по полю sequence.")</p>
+    <form class="panel" @onsubmit="CreateWebhookAsync">
+        <label>@L("Адрес") <input @bind="_url" maxlength="@WebhookSubscription.UrlMaxLength" placeholder="https://shop.example.ru/knit-erp/events" required style="width: 100%" /></label>
+        <fieldset>
+            <legend>@L("События")</legend>
+            @foreach (var (ev, title) in _options.Events)
+            {
+                <label class="check"><input type="checkbox" checked="@_events.Contains(ev)" @onchange="e => Toggle(_events, ev, e)" /> @L(title) <code class="muted small">@ev</code></label>
+            }
+        </fieldset>
+        <div class="actions"><button type="submit" disabled="@_busy">@L("Подписаться")</button></div>
+    </form>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Адрес")</th><th class="opt">@L("События")</th><th>@L("Состояние")</th><th class="num">@L("В очереди")</th><th class="num">@L("Не доставлено")</th><th></th></tr></thead>
+            <tbody>
+                @if (_webhooks.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Подписок пока нет.")</td></tr>
+                }
+                @foreach (var w in _webhooks)
+                {
+                    <tr class="@(w.IsActive ? null : "archived")">
+                        <td>@w.Url<div class="muted small">@(w.LastDeliveredAtUtc is { } d ? L("последняя доставка {0}", Local(d)) : L("доставок ещё не было"))</div></td>
+                        <td class="small">@string.Join(", ", w.Events)</td>
+                        <td>@(w.IsActive ? L("включена") : L("выключена"))</td>
+                        <td class="num">@w.Pending</td>
+                        <td class="num @(w.Failed > 0 ? "neg" : null)">@w.Failed</td>
+                        <td>
+                            <div class="row-actions">
+                                <button type="button" class="secondary" @onclick="() => TestAsync(w)" disabled="@(_busy || !w.IsActive)">@L("Тест")</button>
+                                <button type="button" class="secondary" @onclick="() => ShowDeliveriesAsync(w)" disabled="@_busy">@L("Журнал")</button>
+                                <button type="button" class="secondary" @onclick="() => SetActiveAsync(w, !w.IsActive)" disabled="@_busy">@(w.IsActive ? L("Выключить") : L("Включить"))</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_deliveries is not null)
+    {
+        <h2 style="margin-top: 16px">@L("Журнал доставок")</h2>
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Событие")</th><th>@L("Создано")</th><th>@L("Состояние")</th><th class="num">@L("Попыток")</th><th class="opt">@L("Ответ")</th></tr></thead>
+                <tbody>
+                    @if (_deliveries.Count == 0)
+                    {
+                        <tr><td colspan="5" class="muted">@L("Доставок пока не было.")</td></tr>
+                    }
+                    @foreach (var d in _deliveries)
+                    {
+                        <tr>
+                            <td><code>@d.EventType</code> <span class="muted small">#@d.Sequence</span></td>
+                            <td>@Local(d.CreatedAtUtc)</td>
+                            <td>@(d.Status switch { WebhookDeliveryStatus.Delivered => L("доставлено"), WebhookDeliveryStatus.Failed => L("не доставлено"), _ => L("в очереди, попытка {0}", Local(d.NextAttemptAtUtc)) })</td>
+                            <td class="num">@d.Attempts</td>
+                            <td class="small">@(d.LastStatusCode?.ToString() ?? "")@(d.LastError is null ? "" : " " + d.LastError)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<ApiTokenDto>? _tokens;
+    private IReadOnlyList<WebhookDto>? _webhooks;
+    private IReadOnlyList<WebhookDeliveryDto>? _deliveries;
+    private IntegrationOptionsDto? _options;
+    private readonly HashSet<string> _tokenRights = [];
+    private readonly HashSet<string> _events = [];
+    private string? _tokenName;
+    private int _tokenDays = 90;
+    private string? _url;
+    private string? _secret;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private string ApiDocs => Navigation.BaseUri + "api/v1/openapi.json";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _options = await Integrations.OptionsAsync();
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _tokens = await Integrations.ListTokensAsync();
+        _webhooks = await Integrations.ListWebhooksAsync();
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+
+    private static void Toggle(HashSet<string> set, string code, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            set.Add(code);
+        }
+        else
+        {
+            set.Remove(code);
+        }
+    }
+
+    private Task IssueAsync() => RunAsync(async () =>
+    {
+        var issued = await Integrations.IssueTokenAsync(_tokenName, _tokenRights.ToList(), _tokenDays);
+        _secret = issued.Secret;
+        _tokenName = null;
+        _tokenRights.Clear();
+    }, L("Токен выпущен."));
+
+    private Task RevokeAsync(ApiTokenDto t) => RunAsync(() => Integrations.RevokeTokenAsync(t.Id), L("Токен отозван — запросы с ним больше не принимаются."));
+
+    private Task CreateWebhookAsync() => RunAsync(async () =>
+    {
+        var issued = await Integrations.CreateWebhookAsync(_url, _events.ToList());
+        _secret = issued.Secret;
+        _url = null;
+        _events.Clear();
+    }, L("Подписка создана."));
+
+    private Task SetActiveAsync(WebhookDto w, bool active) => RunAsync(() => Integrations.SetWebhookActiveAsync(w.Id, active, w.RowVersion),
+        active ? L("Подписка включена.") : L("Подписка выключена."));
+
+    private Task TestAsync(WebhookDto w) => RunAsync(() => Integrations.SendTestAsync(w.Id), L("Тестовое событие «ping» поставлено в очередь — отправится в течение нескольких секунд."));
+
+    private Task ShowDeliveriesAsync(WebhookDto w) => RunAsync(async () => _deliveries = await Integrations.DeliveriesAsync(w.Id), null);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

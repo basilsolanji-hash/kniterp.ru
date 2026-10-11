@@ -100,6 +100,10 @@ public static class AuditActions
     public const string ExpenseReportChanged = "expense_report.changed";
     public const string ExpenseReportApproved = "expense_report.approved";
     public const string ExpenseReportCancelled = "expense_report.cancelled";
+    public const string ApiTokenIssued = "api.token.issued";
+    public const string ApiTokenRevoked = "api.token.revoked";
+    public const string WebhookCreated = "webhook.created";
+    public const string WebhookChanged = "webhook.changed";
     public const string DeviceRevoked = "auth.device.revoked";
     public const string PasswordResetRequested = "auth.password_reset.requested";
     public const string PasswordReset = "auth.password.reset";

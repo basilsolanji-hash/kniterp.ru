@@ -68,6 +68,8 @@ public sealed class TestUser : ICurrentUser
     public long? OrganizationId { get; set; }
     public string? CorrelationId => "test";
     public string? ClientAddress { get; set; }
+    public IReadOnlyCollection<string>? ApiScope { get; set; }
+    public long? ApiTokenId { get; set; }
 }
 
 /// <summary>Отдельная база на каждый тест-класс; создаётся с нуля теми же миграциями, что и рабочая, и удаляется после.</summary>
@@ -128,10 +130,10 @@ public sealed class SqlTestHost : IAsyncLifetime
             .UseSqlServer(_connectionString, KnitErp.Infrastructure.DependencyInjection.ConfigureSqlServer).AddInterceptors(interceptors).Options);
 
     /// <summary>Набор сервисов от имени пользователя. Каждый вызов — новый DbContext, как отдельный HTTP-запрос.</summary>
-    public Services As(long? userId, long? organizationId)
+    public Services As(long? userId, long? organizationId, IReadOnlyCollection<string>? apiScope = null)
     {
         var db = NewDb();
-        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = ClientAddress };
+        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = ClientAddress, ApiScope = apiScope };
         var guard = new AccessGuard(db, user, Clock);
         var access = new UserAccessService(db, guard, user, Clock);
         return new Services(db,
@@ -185,7 +187,8 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Finance.SettlementStatementService(db, guard),
             new KnitErp.Application.Finance.CashFlowItemService(db, guard, user, Clock),
             new KnitErp.Application.Finance.AccountableService(db, guard, user, Clock),
-            new KnitErp.Application.Finance.CashReportsService(db, guard));
+            new KnitErp.Application.Finance.CashReportsService(db, guard),
+            new KnitErp.Application.Integrations.IntegrationService(db, guard, user, Clock, new KnitErp.Application.Integrations.IntegrationSettings()));
     }
 
     private static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
@@ -268,7 +271,8 @@ public sealed record Services(
     KnitErp.Application.Finance.SettlementStatementService Settlements,
     KnitErp.Application.Finance.CashFlowItemService CashFlowItems,
     KnitErp.Application.Finance.AccountableService Accountables,
-    KnitErp.Application.Finance.CashReportsService CashReports) : IAsyncDisposable
+    KnitErp.Application.Finance.CashReportsService CashReports,
+    KnitErp.Application.Integrations.IntegrationService Integrations) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

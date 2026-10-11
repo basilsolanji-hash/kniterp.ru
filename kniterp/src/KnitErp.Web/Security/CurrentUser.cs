@@ -17,6 +17,15 @@ public sealed class ClaimsCurrentUser(AuthenticationStateProvider authentication
 
     public string? ClientAddress => httpContext.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
+    /// <summary>Запрос по токену API (D88): права ограничены правами токена. У сессии в браузере этих утверждений нет.</summary>
+    public IReadOnlyCollection<string>? ApiScope =>
+        Principal.FindFirstValue(KnitErp.Web.Api.ApiTokenAuthenticationHandler.ScopeClaim) is { } scope
+            ? scope.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            : null;
+
+    public long? ApiTokenId =>
+        long.TryParse(Principal.FindFirstValue(KnitErp.Web.Api.ApiTokenAuthenticationHandler.TokenClaim), out var id) ? id : null;
+
     private ClaimsPrincipal Principal
     {
         get

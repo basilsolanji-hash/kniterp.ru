@@ -31,6 +31,12 @@ public interface ICurrentUser
 
     /// <summary>IP-адрес клиента обычного HTTP-запроса (страницы входа) — для журнала входов. В Blazor-цепи и тестах — null.</summary>
     string? ClientAddress => null;
+
+    /// <summary>Запрос по токену API (D88): права ограничены этими кодами (пересечение с правами пользователя). null — обычная сессия.</summary>
+    IReadOnlyCollection<string>? ApiScope => null;
+
+    /// <summary>Токен API, от имени которого идёт запрос; null — обычная сессия.</summary>
+    long? ApiTokenId => null;
 }
 
 /// <summary>
@@ -52,6 +58,10 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<ItemCharacteristicValue> ItemCharacteristicValues { get; }
     DbSet<ItemPhoto> ItemPhotos { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
+    DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
+    DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }
+    DbSet<KnitErp.Domain.Integrations.WebhookDelivery> WebhookDeliveries { get; }
+    DbSet<KnitErp.Domain.Integrations.ApiIdempotencyRecord> ApiIdempotency { get; }
     DbSet<KnitErp.Domain.Finance.CashFlowItem> CashFlowItems { get; }
     DbSet<KnitErp.Domain.Finance.ExpenseReport> ExpenseReports { get; }
     DbSet<KnitErp.Domain.Finance.CustomerPaymentAllocation> CustomerPaymentAllocations { get; }
