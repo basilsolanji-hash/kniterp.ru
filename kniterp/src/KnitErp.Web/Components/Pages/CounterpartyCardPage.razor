@@ -75,6 +75,12 @@ else
         {
             <button type="button" role="tab" class="@TabClass(Tab.Documents)" aria-selected="@Selected(Tab.Documents)" @onclick="() => OpenTabAsync(Tab.Documents)" disabled="@_busy">@L("Документы")</button>
         }
+        @foreach (var module in KnitErp.Web.Modules.ModuleUi.CounterpartyTabs.Where(t => t.Permission is null || CurrentAccess.HasOwnOnly(t.Permission)))
+        {
+            @* D117: вкладки модулей (CRM — «Контакты и сделки»). *@
+            <button type="button" role="tab" class="@(_tab == Tab.Module && _module == module ? "tab active" : "tab secondary")"
+                    aria-selected="@(_tab == Tab.Module && _module == module ? "true" : "false")" @onclick="() => OpenModule(module)" disabled="@_busy">@L(module.Title)</button>
+        }
         <button type="button" role="tab" class="@TabClass(Tab.Discussion)" aria-selected="@Selected(Tab.Discussion)" @onclick="() => OpenTabAsync(Tab.Discussion)" disabled="@_busy">@L("Обсуждение")</button>
     </div>
 
@@ -92,6 +98,9 @@ else
         case Tab.Discussion:
             <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.Counterparty" TargetId="Id" />
             break;
+        case Tab.Module when _module is not null:
+            <DynamicComponent Type="_module.Component" Parameters="@(new Dictionary<string, object> { ["CounterpartyId"] = Id })" />
+            break;
     }
 }
 
@@ -102,7 +111,15 @@ else
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
-    private enum Tab { Contracts, Orders, Documents, Discussion }
+    private enum Tab { Contracts, Orders, Documents, Discussion, Module }
+
+    private KnitErp.Web.Modules.ModuleUi.CounterpartyTab? _module;
+
+    private void OpenModule(KnitErp.Web.Modules.ModuleUi.CounterpartyTab module)
+    {
+        _module = module;
+        _tab = Tab.Module;
+    }
 
     private CounterpartyCardDto? _card;
     private IReadOnlyList<ContractDto>? _contracts;

@@ -137,7 +137,8 @@ public sealed record CustomerBalanceDto(long CustomerId, string Customer, decima
 /// цены и суммы видны только с правом «Цены и суммы».
 /// </summary>
 public sealed class SalesService(
-    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, StockDocumentService documents)
+    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, StockDocumentService documents,
+    IEnumerable<ISalesOrderEvents>? orderEvents = null)
 {
     public const int MaxRows = 2000;
 
@@ -552,6 +553,14 @@ public sealed class SalesService(
         await db.SaveOrConflictAsync(ct);
         // D110: этап по событию «заказ подтверждён» — после сохранения статуса, в той же транзакции.
         await StageAutomation.ApplyAsync(db, ctx, [id], clock.UtcNow, currentUser.CorrelationId, ct);
+        await db.SaveChangesAsync(ct);
+
+        // D117: модули (CRM — «сделка выиграна») — в той же транзакции.
+        foreach (var handler in orderEvents ?? [])
+        {
+            await handler.OnConfirmedAsync(db, ctx, id, ct);
+        }
+
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
     }

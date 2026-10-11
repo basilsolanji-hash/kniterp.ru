@@ -2092,7 +2092,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasCheckConstraint("ck_discussion_comments_deleted", "([DeletedAtUtc] IS NULL AND [DeletedByUserId] IS NULL AND LEN([Text]) > 0) OR ([DeletedAtUtc] IS NOT NULL AND [DeletedByUserId] IS NOT NULL AND [Text] = N'')");
 
-                            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 29");
+                            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 99");
                         });
                 });
 
@@ -5353,6 +5353,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("CreatedByUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("CrmDealId")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("CustomerId")
                         .HasColumnType("bigint");
 
@@ -5426,6 +5429,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrganizationId", "ChannelId")
                         .HasDatabaseName("ix_sales_orders_org_channel");
+
+                    b.HasIndex("OrganizationId", "CrmDealId")
+                        .HasDatabaseName("ix_sales_orders_org_crm_deal")
+                        .HasFilter("[CrmDealId] IS NOT NULL");
 
                     b.HasIndex("OrganizationId", "LegalEntityId")
                         .HasDatabaseName("ix_sales_orders_org_legal_entity");
@@ -5872,7 +5879,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("tag_links", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 29");
+                            t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 99");
                         });
                 });
 

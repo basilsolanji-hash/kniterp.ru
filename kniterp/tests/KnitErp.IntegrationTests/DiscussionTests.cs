@@ -146,7 +146,7 @@ public sealed class DiscussionTests(SqlTestHost host) : IClassFixture<SqlTestHos
 
         await using var db = host.NewDb();
         await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE kniterp.discussion_comments SET Target = 99 WHERE Id = {id}"));
+            $"UPDATE kniterp.discussion_comments SET Target = 100 WHERE Id = {id}"));
         await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(
             $"UPDATE kniterp.discussion_comments SET DeletedAtUtc = SYSUTCDATETIME(), DeletedByUserId = AuthorUserId WHERE Id = {id}"));
         await Assert.ThrowsAsync<SqlException>(() => db.Database.ExecuteSqlInterpolatedAsync(

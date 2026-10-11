@@ -3700,5 +3700,7 @@
   "включён": "yoqilgan",
   "все склады": "barcha omborlar",
   "выключен": "o‘chirilgan",
-  "только в наличии": "faqat mavjudlari"
+  "только в наличии": "faqat mavjudlari",
+  "Неверная сделка.": "Bitim noto‘g‘ri.",
+  "Блоки модулей (CRM, разработка)": "Modul bloklari (CRM, ishlab chiqish)"
 }

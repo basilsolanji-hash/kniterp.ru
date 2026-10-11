@@ -5,7 +5,7 @@
 Правила:
 - Tags.cs, ObjectDirectory.cs, Abstractions.cs, KnitErpDbContext.cs, DependencyInjection.cs, Labels.cs, Permissions.cs,
   RoleMatrixP0.cs, AuditEntry.cs, MainLayout.razor, TranslationCoverageTests.cs — обе стороны (новые значения, ветки, строки);
-- CHECK тегов и обсуждений — «BETWEEN 1 AND 29» (D202: диапазоны модулей, ограничение не переписывается);
+- CHECK тегов и обсуждений — «BETWEEN 1 AND 99» (D202, D117: диапазоны модулей, ограничение не переписывается);
 - снапшот модели — обе стороны, кроме строк с этими CHECK;
 - словари Localization/{be,kk,uz}.json — трёхстороннее слияние ключей: наша версия + ключи, добавленные их стороной,
   − ключи, удалённые их стороной (порядок наших ключей сохраняется, их новые — в конце).
@@ -25,7 +25,7 @@ HUNK = re.compile(r"<<<<<<< [^\n]*\n(.*?)=======\n(.*?)>>>>>>> [^\n]*\n", re.S)
 
 def resolve(ours: str, theirs: str) -> str:
     if "ck_tag_links_entity" in ours + theirs or "ck_discussion_comments_target" in ours + theirs:
-        return CHECK.sub("BETWEEN 1 AND 29", ours)
+        return CHECK.sub("BETWEEN 1 AND 99", ours)
     return theirs + ours
 
 
