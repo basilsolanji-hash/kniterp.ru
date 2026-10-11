@@ -23,9 +23,16 @@ public sealed record ItemDto(
 /// GroupId — группа с подгруппами (D79), 0 — позиции без группы. Search — по коду, названию, артикулу и штрихкоду.
 /// Kind — «Товары / Услуги» (D300).
 /// </summary>
+/// <summary>Вычисляемый столбец поиска позиций: UPPER(код|наименование|артикул) с двоичным сравнением (сессия 4).</summary>
+public static class ItemSearch
+{
+    public const string Column = "SearchKey";
+}
+
+/// <summary>Отбор списка номенклатуры. Skip/Take — серверная страница (сессия 4): список на 50 000 позиций не читается целиком.</summary>
 public sealed record ItemFilter(
     ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null,
-    ItemKind? Kind = null);
+    ItemKind? Kind = null, int Skip = 0);
 
 public sealed record ItemListDto(IReadOnlyList<ItemDto> Items, int Total, bool CanEdit, bool CanArchive);
 
@@ -121,8 +128,13 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var s = filter.Search.Trim();
-            query = query.Where(i => i.Name.Contains(s) || i.Code.Contains(s) || (i.Article != null && i.Article.Contains(s))
-                                     || db.ItemBarcodes.Any(b => b.ItemId == i.Id && b.Code == s));
+            // Штрихкод — точное совпадение по индексу (организация, код): позиции находятся одним поиском, а не подзапросом на каждую строку.
+            var byBarcode = await db.ItemBarcodes.AsNoTracking().Where(b => b.OrganizationId == ctx.OrganizationId && b.Code == s)
+                .Select(b => b.ItemId).ToListAsync(ct);
+            // Код, наименование, артикул — по вычисляемому столбцу поиска (верхний регистр, двоичное сравнение): на 50 000 позиций
+            // ~40 мс вместо ~700 мс у LIKE по трём столбцам; регистр не важен (замер сессии 4, CatListPerformanceTests).
+            var u = s.ToUpperInvariant();
+            query = query.Where(i => EF.Property<string>(i, ItemSearch.Column).Contains(u) || byBarcode.Contains(i.Id));
         }
 
         if (filter.GroupId == 0)
@@ -145,7 +157,8 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
         var total = await query.CountAsync(ct);
         var items = await query
-            .OrderBy(i => i.Type).ThenBy(i => i.Name)
+            .OrderBy(i => i.Type).ThenBy(i => i.Name).ThenBy(i => i.Id) // Id — устойчивый порядок страниц при одинаковых названиях
+            .Skip(Math.Max(0, filter.Skip))
             .Take(Math.Clamp(filter.Take, 1, 2000))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i, u.Symbol })
             .GroupJoin(db.VatRates.AsNoTracking(), x => x.i.VatRateId, r => (long?)r.Id, (x, rates) => new { x.i, x.Symbol, rates })
@@ -183,9 +196,32 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
     public async Task<long> CreateItemAsync(ItemCommand cmd, CancellationToken ct = default)
     {
+        try
+        {
+            return await CreateItemCoreAsync(cmd, ct);
+        }
+        catch
+        {
+            // Отказ после сдвига номера автокода или добавления позиции не должен оставить изменения в контексте вкладки Blazor.
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    private async Task<long> CreateItemCoreAsync(ItemCommand cmd, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         await RequireActiveUnitAsync(ctx, cmd.UnitId, ct);
-        var item = Item.Create(ctx.OrganizationId, cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description, clock.UtcNow);
+        // D312: выключенный вид не создаётся; пустой код — следующий номер автокода (если он включён).
+        var settings = await db.CatalogSettings.SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct);
+        settings?.EnsureEnabled(cmd.Type);
+        var code = cmd.Code;
+        if (string.IsNullOrWhiteSpace(code) && settings is { AutoCode: true })
+        {
+            code = await NextAutoCodeAsync(ctx, settings, ct);
+        }
+
+        var item = Item.Create(ctx.OrganizationId, code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description, clock.UtcNow);
         await RequireActiveVatRateAsync(ctx, cmd.VatRateId, ct);
         ServiceRules.EnsureVat(item.Type, cmd.VatRateId);
         item.SetVatRate(cmd.VatRateId);
@@ -222,6 +258,7 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         ServiceRules.EnsureVat(cmd.Type, cmd.VatRateId);
         if (cmd.Type != item.Type)
         {
+            (await db.CatalogSettings.AsNoTracking().SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct))?.EnsureEnabled(cmd.Type);
             await EnsureTypeChangeAsync(ctx, item, cmd.Type, ct);
         }
 
@@ -386,6 +423,21 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
                     ? $"Код {code} занят архивной позицией «{existing.Name}». Верните её из архива или выберите другой код."
                     : $"Код {code} уже занят: «{existing.Name}».");
         }
+    }
+
+    /// <summary>D312: следующий свободный код автонумерации (занятые вручную номера пропускаются; код уникален навсегда, включая архив).</summary>
+    private async Task<string> NextAutoCodeAsync(AccessContext ctx, CatalogSettings settings, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < 1000; attempt++)
+        {
+            var code = settings.TakeCode();
+            if (!await db.Items.AnyAsync(i => i.OrganizationId == ctx.OrganizationId && i.Code == code, ct))
+            {
+                return code;
+            }
+        }
+
+        throw new BusinessRuleException("catalog.code.auto_exhausted", "Не удалось подобрать свободный код: увеличьте следующий номер в настройках каталога.");
     }
 
     private void Audit(AccessContext ctx, string action, string entityType, long id, string? before, string? after, string? reason) =>

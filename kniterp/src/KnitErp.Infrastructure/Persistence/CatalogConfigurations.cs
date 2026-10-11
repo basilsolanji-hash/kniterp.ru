@@ -43,6 +43,11 @@ internal static class ItemTradeConfiguration
         b.Property(x => x.Gtin).HasColumnType("varchar(14)");
         b.Property(x => x.MinPrice).HasColumnType("decimal(19,4)");
         b.Ignore(x => x.Trade);
+
+        // Сессия 4, поиск в списке на 50 000 позиций: код, наименование и артикул в верхнем регистре, двоичное сравнение.
+        // LIKE '%…%' по одному такому столбцу в 15–20 раз быстрее, чем по трём столбцам в языковом сравнении; регистр не важен.
+        b.Property<string>(KnitErp.Application.Catalog.ItemSearch.Column)
+            .HasComputedColumnSql("UPPER(CONCAT([Code], N'|', [Name], N'|', [Article])) COLLATE Latin1_General_100_BIN2", stored: true);
         // GTIN — один товар: уникален в организации.
         b.HasIndex(x => new { x.OrganizationId, x.Gtin }).IsUnique().HasFilter("[Gtin] IS NOT NULL").HasDatabaseName("ux_items_org_gtin");
     }
@@ -227,5 +232,27 @@ internal sealed class ExternalImportIssueConfiguration : IEntityTypeConfiguratio
         b.Property(x => x.Text).HasMaxLength(ExternalImportIssue.TextMaxLength).IsRequired();
         b.HasOne<ExternalImportRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.RunId, x.Id }).HasDatabaseName("ix_external_import_issues_run");
+    }
+}
+
+/// <summary>D312: общие настройки каталога организации — одна строка на организацию.</summary>
+internal sealed class CatalogSettingsConfiguration : IEntityTypeConfiguration<CatalogSettings>
+{
+    public void Configure(EntityTypeBuilder<CatalogSettings> b)
+    {
+        b.ToTable("catalog_settings", t =>
+        {
+            t.HasCheckConstraint("ck_catalog_settings_digits", "[AutoCodeDigits] BETWEEN 3 AND 8");
+            t.HasCheckConstraint("ck_catalog_settings_next", "[NextNumber] >= 1");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.AutoCodePrefix).HasMaxLength(CatalogSettings.PrefixMaxLength);
+        b.Property(x => x.DefaultItemType).HasConversion<byte>();
+        b.Property(x => x.UpdatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.AutoCode);
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_catalog_settings_org");
     }
 }

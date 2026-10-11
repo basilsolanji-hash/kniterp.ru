@@ -502,6 +502,59 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CatalogSettings", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<byte>("AutoCodeDigits")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("AutoCodePrefix")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<bool>("BundlesEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("DefaultItemType")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("NextNumber")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<bool>("ServicesEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_catalog_settings_org");
+
+                    b.ToTable("catalog_settings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_catalog_settings_digits", "[AutoCodeDigits] BETWEEN 3 AND 8");
+
+                            t.HasCheckConstraint("ck_catalog_settings_next", "[NextNumber] >= 1");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.Characteristic", b =>
                 {
                     b.Property<long>("Id")
@@ -932,6 +985,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<string>("SearchKey")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("nvarchar(max)")
+                        .HasComputedColumnSql("UPPER(CONCAT([Code], N'|', [Name], N'|', [Article])) COLLATE Latin1_General_100_BIN2", true);
 
                     b.Property<string>("TnVedCode")
                         .HasColumnType("varchar(10)");
@@ -5227,6 +5285,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_bundle_components_component");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CatalogSettings", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.Characteristic", b =>

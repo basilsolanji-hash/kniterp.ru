@@ -7,6 +7,7 @@
 @inject ItemExchangeService Exchange
 @inject VatRateService VatRates
 @inject NomenclatureService Nomenclature
+@inject CatalogSettingsService Settings
 
 <PageTitle>@L("Номенклатура") — knitERP</PageTitle>
 
@@ -37,7 +38,7 @@ else
 
     @if (_flash is not null)
     {
-        <div class="@(_flashIsError ? "flash error" : "flash")" role="@(_flashIsError ? "alert" : "status")"><span>@_flash</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _flash = null">×</button></div>
+        <div class="@(_flashIsError ? "flash error" : "flash")" role="@(_flashIsError ? "alert" : "status")"><span>@_flash@if (_created is { } created && !_flashIsError) { <text> </text><a href="catalog/items/@created.Id">@created.Name</a> }</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _flash = null">×</button></div>
     }
 
     @if (_mode is Mode.Create or Mode.Edit)
@@ -46,12 +47,19 @@ else
             <h2>@(_mode == Mode.Create ? L("Новая позиция") : L("Позиция {0}", _target!.Code))</h2>
             <EditForm Model="_form" OnValidSubmit="SaveItemAsync" FormName="item">
                 <div class="grid">
-                    <label>@L("Код (артикул)") <InputText @bind-Value="_form.Code" maxlength="40" required /></label>
+                    @if (_mode == Mode.Create && _settings.NextCode is { } next)
+                    {
+                        <label>@L("Код (артикул)") <InputText @bind-Value="_form.Code" maxlength="40" placeholder="@L("авто: {0}", next)" /></label>
+                    }
+                    else
+                    {
+                        <label>@L("Код (артикул)") <InputText @bind-Value="_form.Code" maxlength="40" required /></label>
+                    }
                     <label>@L("Наименование") <InputText @bind-Value="_form.Name" maxlength="300" required /></label>
                     <label>
                         @L("Тип")
                         <InputSelect @bind-Value="_form.Type" @bind-Value:after="TypeChanged">
-                            @foreach (var t in ItemTypes.All)
+                            @foreach (var t in ItemTypes.All.Where(t => _settings.IsEnabled(t) || t == _form.Type))
                             {
                                 <option value="@t">@L(ItemTypes.Name(t))</option>
                             }
@@ -210,15 +218,21 @@ else
             <select @bind="_kindFilter">
                 <option value="">@L("Все виды")</option>
                 <option value="@((byte)ItemKind.Goods)">@L("Товары")</option>
-                <option value="@((byte)ItemKind.Service)">@L("Услуги")</option>
-                <option value="@((byte)ItemKind.Bundle)">@L("Комплекты")</option>
+                @if (_settings.ServicesEnabled)
+                {
+                    <option value="@((byte)ItemKind.Service)">@L("Услуги")</option>
+                }
+                @if (_settings.BundlesEnabled)
+                {
+                    <option value="@((byte)ItemKind.Bundle)">@L("Комплекты")</option>
+                }
             </select>
         </label>
         <label>
             @L("Тип")
             <select @bind="_typeFilter">
                 <option value="">@L("Все типы")</option>
-                @foreach (var t in ItemTypes.All)
+                @foreach (var t in ItemTypes.All.Where(t => _settings.IsEnabled(t) || _typeFilter == ((byte)t).ToString()))
                 {
                     <option value="@((byte)t)">@L(ItemTypes.Name(t))</option>
                 }
@@ -289,9 +303,14 @@ else
             </tbody>
         </table>
     </div>
-    @if (_list.Total > _list.Items.Count)
+    @if (_list.Total > PageSize)
     {
-        <p class="muted">@L("Показано {0} из {1}. Уточните поиск или тип.", _list.Items.Count, _list.Total)</p>
+        @* Серверные страницы (сессия 4): список на десятки тысяч позиций читается по PageSize строк. *@
+        <nav class="pager" aria-label="@L("Страницы списка")">
+            <button type="button" class="secondary" @onclick="() => GoToPageAsync(_page - 1)" disabled="@(_busy || _page == 0)">@L("← Назад")</button>
+            <span>@L("Позиции {0}–{1} из {2}", _page * PageSize + 1, _page * PageSize + _list.Items.Count, _list.Total)</span>
+            <button type="button" class="secondary" @onclick="() => GoToPageAsync(_page + 1)" disabled="@(_busy || (_page + 1) * PageSize >= _list.Total)">@L("Далее →")</button>
+        </nav>
     }
     </div>
     </div>
@@ -319,6 +338,8 @@ else
     private enum Mode { None, Create, Edit }
 
     private ItemListDto? _list;
+    private (long Id, string Name)? _created;
+    private CatalogSettingsDto _settings = new(true, true, null, 5, 1, ItemType.Finished, null, false, []);
     private IReadOnlyList<UnitDto> _units = [];
     private IReadOnlyList<VatRateDto> _vatRates = [];
     private ItemForm _form = new();
@@ -366,14 +387,36 @@ else
     {
         ItemType? type = byte.TryParse(_typeFilter, out var t) ? (ItemType)t : null;
         ItemKind? kind = byte.TryParse(_kindFilter, out var k) ? (ItemKind)k : null;
-        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, GroupId: _groupId, TagId: _tagId, Kind: kind));
+        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, PageSize, _groupId, _tagId, kind, _page * PageSize));
+        if (_list.Items.Count == 0 && _page > 0)
+        {
+            // Последнюю страницу опустошили (архив, смена отбора) — на последнюю непустую.
+            _page = Math.Max(0, (_list.Total - 1) / PageSize);
+            _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, PageSize, _groupId, _tagId, kind, _page * PageSize));
+        }
+
         await LoadTagsAsync();
         _groups = await Nomenclature.GroupsAsync();
         _units = await Catalog.ListUnitsAsync(_includeArchived);
         _vatRates = await VatRates.ActiveAsync();
+        _settings = await Settings.GetAsync();
     }
 
-    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
+    private const int PageSize = 100;
+    private int _page;
+
+    /// <summary>Новый отбор — с первой страницы.</summary>
+    private Task ReloadAsync()
+    {
+        _page = 0;
+        return RunAsync(() => Task.CompletedTask, null);
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _page = Math.Max(0, page);
+        return RunAsync(() => Task.CompletedTask, null);
+    }
 
     /// <summary>Группа слева — фильтр списка (с подгруппами); null — все, 0 — без группы.</summary>
     private Task SelectGroupAsync(long? groupId)
@@ -393,7 +436,9 @@ else
             UnitId = _units.FirstOrDefault(u => u.Code == "796")?.Id ?? 0,
             VatRateId = _vatRates.FirstOrDefault(r => r.Kind == KnitErp.Domain.Catalog.VatRateKind.Standard)?.Id,
             GroupId = _groupId is > 0 ? _groupId : null,
+            Type = _settings.DefaultItemType,
         };
+        TypeChanged();
         _mode = Mode.Create;
     }
 
@@ -439,7 +484,8 @@ else
         var cmd = new ItemCommand(_form.Code, _form.Name, _form.Type, _form.UnitId, _form.Description, _form.VatRateId, _form.GroupId);
         if (_mode == Mode.Create)
         {
-            await Catalog.CreateItemAsync(cmd);
+            // Список листается страницами — новая позиция может быть не на текущей: ссылка на неё — в сообщении.
+            _created = (await Catalog.CreateItemAsync(cmd), _form.Name);
         }
         else
         {
@@ -508,6 +554,7 @@ else
         _flash = null;
         _flashIsError = false;
         _formError = null;
+        _created = null;
         try
         {
             await action();

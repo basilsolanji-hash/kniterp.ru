@@ -145,8 +145,14 @@ public static class ApiV1
                 ctx.Permissions.GrantedCodes.Order(StringComparer.Ordinal).ToList()));
         }).WithSummary("Кто я: организация, создатель токена и действующие права запроса");
 
+        // Сессия 4: страница — в запросе к базе (раньше читались первые 2000 позиций и листались в памяти: дальше 2000-й API ничего не отдавал).
         api.MapGet("/items", async (CatalogService catalog, string? search, ItemType? type, long? tagId, int? offset, int? limit, CancellationToken ct) =>
-            ApiResult.Ok(Paged((await catalog.ListItemsAsync(new ItemFilter(type, search, Take: 5000, TagId: tagId), ct)).Items, offset, limit)))
+            {
+                var o = Math.Max(0, offset ?? 0);
+                var l = Math.Clamp(limit ?? 100, 1, MaxLimit);
+                var list = await catalog.ListItemsAsync(new ItemFilter(type, search, Take: l, TagId: tagId, Skip: o), ct);
+                return ApiResult.Ok(new Page<ItemDto>(list.Items, o, l, o + list.Items.Count < list.Total ? o + list.Items.Count : null));
+            })
             .WithSummary("Номенклатура");
 
         api.MapGet("/counterparties", async (CounterpartyService counterparties, string? search, string? role, long? tagId, int? offset, int? limit, CancellationToken ct) =>
