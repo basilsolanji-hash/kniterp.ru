@@ -60,7 +60,8 @@ else
             {
                 <div class="crm-chat-head"><b>@_current.Client</b> <span class="crm-channel crm-channel-@_current.Channel.ToLowerInvariant()">@_current.Channel</span> <a class="small" href="@_current.Href">@L("Карточка")</a></div>
                 <ol class="crm-chat-messages">
-                    @foreach (var m in _messages)
+                    @* Новые снизу: колонка развёрнута (column-reverse), поэтому прокрутка сразу у последнего сообщения. *@
+                    @foreach (var m in _messages.Reverse())
                     {
                         <li class="@(m.Incoming ? "in" : "out")">
                             <div class="crm-chat-text">@m.Text</div>
