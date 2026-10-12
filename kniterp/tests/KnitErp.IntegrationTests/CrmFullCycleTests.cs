@@ -377,17 +377,18 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
     {
         var org = await host.CreateCrmOrganizationAsync();
         var manager = await host.CrmUserAsync(org, SystemRoles.SalesManager);
-        CrmMaxConnectResult connected;
+        CrmMessengerConnectResult connected;
         await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
         {
-            Assert.Equal("crm.max.bad_token", (await Assert.ThrowsAsync<BusinessRuleException>(() => crm.Messenger.ConnectAsync("bad"))).Code);
-            connected = await crm.Messenger.ConnectAsync("max-token-test");
+            Assert.Equal("crm.messenger.bad_token", (await Assert.ThrowsAsync<BusinessRuleException>(() => crm.Messenger.ConnectAsync(CrmMessengerKind.Max, "bad"))).Code);
+            connected = await crm.Messenger.ConnectAsync(CrmMessengerKind.Max, "max-token-test");
             Assert.True(connected.Subscribed);
             Assert.Contains(connected.WebhookUrl, CrmTestKit.Max.Subscriptions);
-            Assert.True((await crm.Messenger.StatusAsync()).Connected);
+            Assert.Contains("/hooks/crm/max/", connected.WebhookUrl);
+            Assert.True((await crm.Messenger.StatusAsync()).Channels.Single(c => c.Kind == CrmMessengerKind.Max).Connected);
             // Токен в базе зашифрован, секрет — только хэшем.
             await using var raw = host.NewDb();
-            var stored = await raw.Database.SqlQueryRaw<string>("SELECT [MaxToken] AS [Value] FROM [kniterp].[crm_settings] WHERE [OrganizationId] = {0}",
+            var stored = await raw.Database.SqlQueryRaw<string>("SELECT [Token] AS [Value] FROM [kniterp].[crm_messenger_channels] WHERE [OrganizationId] = {0}",
                 org.OrganizationId).SingleAsync();
             Assert.DoesNotContain("max-token-test", stored);
         }
@@ -395,11 +396,13 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
         var secret = connected.WebhookUrl.Split('/')[^1];
         await using (var db = host.NewDb())
         {
-            Assert.False(await CrmMessengerService.InboundAsync(db, host.Clock, "wrong", new CrmMaxUpdate("1", null, null, "x", null)));
-            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, secret,
-                new CrmMaxUpdate("770001", "Анна Клиентова", "anna_max", "Здравствуйте! Нужно 150 шарфов к ноябрю. Тел. +7 900 000-00-61", "mid-1")));
-            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, secret, new CrmMaxUpdate("770001", "Анна Клиентова", null, "Повтор", "mid-1")));
-            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, secret, new CrmMaxUpdate("770001", "Анна Клиентова", null, "И ещё 50 шапок", "mid-2")));
+            Assert.Null(await CrmMessengerService.FindHookAsync(db, CrmMessengerKind.Max, "wrong"));
+            Assert.Null(await CrmMessengerService.FindHookAsync(db, CrmMessengerKind.Telegram, secret)); // секрет MAX не открывает Telegram
+            var hook = (await CrmMessengerService.FindHookAsync(db, CrmMessengerKind.Max, secret))!;
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, hook,
+                new CrmMessengerUpdate("770001", "Анна Клиентова", "anna_max", "Здравствуйте! Нужно 150 шарфов к ноябрю. Тел. +7 900 000-00-61", "mid-1")));
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, hook, new CrmMessengerUpdate("770001", "Анна Клиентова", null, "Повтор", "mid-1")));
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, hook, new CrmMessengerUpdate("770001", "Анна Клиентова", null, "И ещё 50 шапок", "mid-2")));
         }
 
         await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
@@ -407,7 +410,7 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
             var lead = (await crm.Leads.ListAsync(new CrmLeadFilter())).Rows.Single();
             Assert.Equal(("150 шарфов", "Анна Клиентова"), (lead.Title, lead.ContactName));
             var chat = (await crm.Messenger.ChatsAsync()).Single();
-            Assert.Equal(("MAX", 2, true), (chat.Channel, chat.Messages, chat.AwaitingReply)); // повтор mid-1 не задвоился
+            Assert.Equal(("MAX", "MAX:770001", 2, true), (chat.Channel, chat.Peer, chat.Messages, chat.AwaitingReply)); // повтор mid-1 не задвоился
             await crm.Messenger.ReplyToPeerAsync(chat.Peer, "Добрый день! Посчитаем к вечеру.");
             Assert.Contains(CrmTestKit.Max.Sent, m => m.UserId == "770001" && m.Text == "Добрый день! Посчитаем к вечеру.");
             var messages = await crm.Messenger.MessagesAsync(chat.Peer);
@@ -419,18 +422,65 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
         {
             // Лид распределён Владельцу (подключившему) — менеджер чужой чат не видит.
             Assert.Empty(await m.Messenger.ChatsAsync());
-            await Assert.ThrowsAsync<NotFoundException>(() => m.Messenger.ReplyToPeerAsync("770001", "x"));
-            await Assert.ThrowsAsync<AccessDeniedException>(() => m.Messenger.ConnectAsync("max-token-test"));
+            await Assert.ThrowsAsync<NotFoundException>(() => m.Messenger.ReplyToPeerAsync("MAX:770001", "x"));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => m.Messenger.ConnectAsync(CrmMessengerKind.Max, "max-token-test"));
         }
 
         await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
         {
-            await crm.Messenger.DisconnectAsync();
+            await crm.Messenger.DisconnectAsync(CrmMessengerKind.Max);
+            Assert.False((await crm.Messenger.StatusAsync()).AnyConnected);
         }
 
         await using (var db = host.NewDb())
         {
-            Assert.False(await CrmMessengerService.InboundAsync(db, host.Clock, secret, new CrmMaxUpdate("770001", null, null, "после отключения", "mid-3")));
+            Assert.Null(await CrmMessengerService.FindHookAsync(db, CrmMessengerKind.Max, secret));
+        }
+    }
+
+    [SqlFact]
+    public async Task Telegram_and_WhatsApp_chats_are_separate_and_reply_through_own_bot()
+    {
+        var org = await host.CreateCrmOrganizationAsync();
+        CrmMessengerConnectResult tg, wa;
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            Assert.Equal("crm.messenger.whatsapp",
+                (await Assert.ThrowsAsync<BusinessRuleException>(() => crm.Messenger.ConnectAsync(CrmMessengerKind.WhatsApp, "wa-token"))).Code);
+            tg = await crm.Messenger.ConnectAsync(CrmMessengerKind.Telegram, "123456:tg-token-test");
+            wa = await crm.Messenger.ConnectAsync(CrmMessengerKind.WhatsApp, "wa-token-test", "1098765432", "app-secret-test");
+            Assert.True(tg.Subscribed);
+            Assert.Null(tg.VerifyToken);
+            // WhatsApp: вебхук задаётся в кабинете Meta — адрес и Verify token показываются один раз.
+            Assert.False(wa.Subscribed);
+            Assert.Equal(wa.WebhookUrl.Split('/')[^1], wa.VerifyToken);
+            Assert.Equal(2, (await crm.Messenger.StatusAsync()).Channels.Count(c => c.Connected));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var tgHook = (await CrmMessengerService.FindHookAsync(db, CrmMessengerKind.Telegram, tg.WebhookUrl.Split('/')[^1]))!;
+            var waHook = (await CrmMessengerService.FindHookAsync(db, CrmMessengerKind.WhatsApp, wa.VerifyToken))!;
+            Assert.Equal("app-secret-test", waHook.AppSecret);
+            // Один и тот же id в разных мессенджерах — разные собеседники.
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, tgHook, new CrmMessengerUpdate("79000000071", "Ольга", "@olga", "Нужны 40 свитеров", "79000000071:1")));
+            Assert.True(await CrmMessengerService.InboundAsync(db, host.Clock, waHook,
+                new CrmMessengerUpdate("79000000071", "Ольга", null, "Это Ольга из WhatsApp", "wamid.1", "+79000000071")));
+        }
+
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            var chats = await crm.Messenger.ChatsAsync();
+            Assert.Equal(new[] { "Telegram:79000000071", "WhatsApp:79000000071" }, chats.Select(c => c.Peer).Order());
+            await crm.Messenger.ReplyToPeerAsync("WhatsApp:79000000071", "Здравствуйте!");
+            await crm.Messenger.ReplyToPeerAsync("Telegram:79000000071", "Привет из Telegram");
+            Assert.Contains(CrmTestKit.WhatsApp.Sent, m => m == ("79000000071", "Здравствуйте!"));
+            Assert.Contains(CrmTestKit.Telegram.Sent, m => m == ("79000000071", "Привет из Telegram"));
+            Assert.DoesNotContain(CrmTestKit.Telegram.Sent, m => m.Text == "Здравствуйте!");
+            Assert.All(await crm.Messenger.ChatsAsync(), c => Assert.False(c.AwaitingReply));
+            await crm.Messenger.DisconnectAsync(CrmMessengerKind.WhatsApp);
+            var ex = await Assert.ThrowsAsync<BusinessRuleException>(() => crm.Messenger.ReplyToPeerAsync("WhatsApp:79000000071", "ещё"));
+            Assert.Equal("crm.messenger.not_connected", ex.Code);
         }
     }
 

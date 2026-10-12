@@ -19,62 +19,76 @@ public static class CrmEndpoints
         app.MapGet("/crm/report.xlsx", (CrmReportService reports, DateOnly from, DateOnly to, long? pipeline, long? responsible, CancellationToken ct) =>
             FileAsync(() => reports.ExportAsync(new CrmReportFilter(from, to, pipeline, responsible), ct), $"crm-otchet-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.xlsx"));
 
-        // D648: вебхук MAX — без входа, организация по секрету в адресе (хранится хэшем) и заголовку X-Max-Bot-Api-Secret. Обрабатывается только
-        // message_created; ответ 200 — чтобы MAX не повторял доставку; неизвестный секрет — 404. Тело — не больше 64 КБ.
-        app.MapPost("/hooks/crm/max/{secret}", async (HttpContext http, string secret, IKnitErpDbContextFactory factory, IClock clock, CancellationToken ct) =>
+        // D648, D670: вебхуки мессенджеров — без входа. Канал — по мессенджеру и секрету в адресе (хранится хэшем); дополнительно MAX и
+        // Telegram присылают секрет в заголовке, WhatsApp подписывает тело HMAC-SHA256 секретом приложения. Ответ 200 — чтобы мессенджер не
+        // повторял доставку; неизвестный секрет или неверная подпись — 404. Тело — не больше 64 КБ.
+        app.MapPost("/hooks/crm/{messenger}/{secret}", async (HttpContext http, string messenger, string secret, IKnitErpDbContextFactory factory, IClock clock,
+            CancellationToken ct) =>
         {
-            if (http.Request.Headers.TryGetValue("X-Max-Bot-Api-Secret", out var header) && header.ToString() != secret)
+            if (CrmMessengerHooks.Kind(messenger) is not { } kind)
             {
                 return Results.NotFound();
             }
 
-            if (http.Request.ContentLength is > 65_536)
+            if (http.Request.ContentLength is > CrmMessengerHooks.MaxBody)
             {
                 return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            }
+
+            var body = await CrmMessengerHooks.ReadBodyAsync(http.Request.Body, ct);
+            if (body is null)
+            {
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            }
+
+            await using var db = factory.Create();
+            var hook = await CrmMessengerService.FindHookAsync(db, kind, secret, ct);
+            if (hook is null || !CrmMessengerHooks.Authentic(kind, h => http.Request.Headers.TryGetValue(h, out var v) ? v.ToString() : null, secret, hook.AppSecret, body))
+            {
+                return Results.NotFound();
             }
 
             System.Text.Json.JsonElement doc;
             try
             {
-                doc = await System.Text.Json.JsonSerializer.DeserializeAsync<System.Text.Json.JsonElement>(http.Request.Body, cancellationToken: ct);
+                doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(body);
             }
             catch (System.Text.Json.JsonException)
             {
                 return Results.BadRequest();
             }
 
-            await using var db = factory.Create();
-            if (ParseMax(doc) is not { } update)
+            foreach (var update in CrmMessengerHooks.Parse(kind, doc))
             {
-                // Другие события (бот добавлен, сообщение изменено) — подтверждаем, если секрет известен.
-                return await KnitErp.Application.Crm.CrmMessengerService.KnownSecretAsync(db, secret, ct) ? Results.Ok() : Results.NotFound();
+                if (!await CrmMessengerService.InboundAsync(db, clock, hook, update, ct))
+                {
+                    return Results.NotFound();
+                }
             }
 
-            return await KnitErp.Application.Crm.CrmMessengerService.InboundAsync(db, clock, secret, update, ct) ? Results.Ok() : Results.NotFound();
+            // Другие события (бот добавлен, статус доставки) — подтверждаются без обработки.
+            return Results.Ok();
         }).AllowAnonymous().DisableAntiforgery();
+
+        // WhatsApp (Meta): проверка адреса при настройке вебхука — hub.verify_token должен совпасть с секретом, в ответ — hub.challenge.
+        app.MapGet("/hooks/crm/{messenger}/{secret}", async (HttpContext http, string messenger, string secret, IKnitErpDbContextFactory factory,
+            CancellationToken ct) =>
+        {
+            var q = http.Request.Query;
+            if (CrmMessengerHooks.Kind(messenger) != KnitErp.Domain.Crm.CrmMessengerKind.WhatsApp || q["hub.mode"] != "subscribe"
+                || !CrmMessengerHooks.SameSecret(q["hub.verify_token"].ToString(), secret) || q["hub.challenge"].ToString() is not { Length: > 0 and <= 200 } challenge)
+            {
+                return Results.NotFound();
+            }
+
+            await using var db = factory.Create();
+            return await CrmMessengerService.FindHookAsync(db, KnitErp.Domain.Crm.CrmMessengerKind.WhatsApp, secret, ct) is null
+                ? Results.NotFound()
+                : Results.Text(challenge, "text/plain");
+        }).AllowAnonymous();
 
         app.MapGet("/crm/import-template.xlsx", (CrmImportService import, CrmImportKind kind, CancellationToken ct) =>
             FileAsync(() => import.TemplateAsync(kind, ct), $"shablon-crm-{kind.ToString().ToLowerInvariant()}.xlsx"));
-    }
-
-    /// <summary>message_created: message.sender.user_id, name, username; message.body.text, mid.</summary>
-    internal static CrmMaxUpdate? ParseMax(System.Text.Json.JsonElement doc)
-    {
-        if (doc.ValueKind != System.Text.Json.JsonValueKind.Object || !doc.TryGetProperty("update_type", out var type) || type.GetString() != "message_created"
-            || !doc.TryGetProperty("message", out var m) || !m.TryGetProperty("sender", out var sender) || !m.TryGetProperty("body", out var body))
-        {
-            return null;
-        }
-
-        var userId = sender.TryGetProperty("user_id", out var u) ? u.ToString() : null;
-        var text = body.TryGetProperty("text", out var t) ? t.GetString() : null;
-        if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(text))
-        {
-            return null;
-        }
-
-        return new CrmMaxUpdate(userId, sender.TryGetProperty("name", out var n) ? n.GetString() : null,
-            sender.TryGetProperty("username", out var un) ? un.GetString() : null, text, body.TryGetProperty("mid", out var mid) ? mid.GetString() : null);
     }
 
     private static async Task<IResult> FileAsync(Func<Task<byte[]>> build, string fileName)

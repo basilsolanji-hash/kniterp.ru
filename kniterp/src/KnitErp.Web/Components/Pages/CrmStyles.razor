@@ -55,6 +55,14 @@
     .crm-chat-messages li { max-width: 80%; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; }
     .crm-chat-messages li.out { align-self: flex-end; background: var(--accent-soft-2); }
     .crm-chat-text { white-space: pre-wrap; }
+    .crm-channel { display: inline-block; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 600; color: #fff; background: #6b7280; }
+    .crm-channel-telegram { background: #229ed9; }
+    .crm-channel-whatsapp { background: #1f9d55; }
+    .crm-channel-max { background: #6a4cff; }
+    .crm-messengers { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+    .crm-messenger { border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .crm-messenger form { display: flex; flex-direction: column; gap: 6px; }
+    .crm-messenger code { overflow-wrap: anywhere; }
     .crm-chat-reply { display: flex; gap: 8px; align-items: flex-end; }
     .crm-chat-reply textarea { flex: 1 1 auto; min-width: 0; }
     @@media (max-width: 599px) {

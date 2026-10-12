@@ -3,7 +3,6 @@
 @using KnitErp.Domain.Crm
 @inject CrmSettingsService Settings
 @inject CrmDealService Deals
-@inject CrmMessengerService Messenger
 
 <PageTitle>@L("Настройки CRM") — knitERP</PageTitle>
 <CrmStyles />
@@ -71,34 +70,7 @@ else
         </form>
     }
 
-    @if (_max is not null)
-    {
-        <section class="panel" id="max" aria-label="@L("Чаты с клиентами в MAX")">
-            <h2>@L("Чаты с клиентами в MAX")</h2>
-            <p class="muted small">@L("Клиенты пишут фабрике в MAX, переписка идёт в разделе «Чаты» и в ленте карточки, незнакомый клиент становится лидом. Технически переписка идёт через бота организации в MAX: создайте его в MAX и вставьте токен.")</p>
-            @if (_max.Connected)
-            {
-                <p>@L("Подключено: {0}, {1}", _max.ConnectedBy ?? "—", _max.ConnectedAtUtc is { } at ? TimeZones.ToLocal(at, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm") : "")</p>
-            }
-            @if (_maxResult is { } r)
-            {
-                <div class="flash" role="status">
-                    <span>@L("Бот «{0}» подключён.", r.BotName) @(r.Subscribed ? L("Входящие сообщения настроены автоматически.") : L("Укажите в настройках бота адрес вебхука:")) @if (!r.Subscribed) { <code>@r.WebhookUrl</code> }</span>
-                </div>
-            }
-            @if (_data.CanEdit)
-            {
-                <form class="inline-form" @onsubmit="ConnectMaxAsync">
-                    <label>@L("Токен бота MAX") <input type="password" @bind="_maxToken" autocomplete="off" required /></label>
-                    <button type="submit" disabled="@_busy">@(_max.Connected ? L("Переподключить") : L("Подключить"))</button>
-                    @if (_max.Connected)
-                    {
-                        <ConfirmButton Class="secondary" OnConfirm="DisconnectMaxAsync" Disabled="@_busy" Question='@L("Отключить MAX?")'>@L("Отключить")</ConfirmButton>
-                    }
-                </form>
-            }
-        </section>
-    }
+    <CrmMessengersPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
 
     <h2>@L("Воронки")</h2>
     @if (_data.CanEdit)
@@ -239,26 +211,9 @@ else
     private string? _editStepSubject;
     private int? _editStepDays;
     private AutoForm? _auto;
-    private CrmMaxStatusDto? _max;
-    private CrmMaxConnectResult? _maxResult;
-    private string? _maxToken;
-
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
-    private Task ConnectMaxAsync() => RunAsync(async () =>
-    {
-        _maxResult = await Messenger.ConnectAsync(_maxToken);
-        _maxToken = null;
-        _max = await Messenger.StatusAsync();
-    }, null);
-
-    private Task DisconnectMaxAsync() => RunAsync(async () =>
-    {
-        await Messenger.DisconnectAsync();
-        _maxResult = null;
-        _max = await Messenger.StatusAsync();
-    }, L("MAX отключён."));
     private IReadOnlyList<KnitErp.Application.Structure.LookupDto> _users = [];
     private readonly Dictionary<CrmReferenceKind, string?> _newRef = [];
 
@@ -295,7 +250,6 @@ else
         {
             _data = await Settings.GetAsync();
             _users = (await Deals.OptionsAsync()).Users;
-            _max = await Messenger.StatusAsync();
             FillAuto();
         }
         catch (AccessDeniedException ex)

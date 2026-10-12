@@ -51,37 +51,6 @@ public sealed class CrmSettings
     public string? OfferTerms { get; private set; }
     public int OfferValidDays { get; private set; } = 14;
 
-    /// <summary>Токен бота MAX (D648) — хранится зашифрованным мастер-ключом, наружу не отдаётся.</summary>
-    public string? MaxToken { get; private set; }
-
-    /// <summary>SHA-256 секрета вебхука MAX: по нему входящий запрос находит организацию, сам секрет не хранится.</summary>
-    public byte[]? MaxSecretHash { get; private set; }
-
-    /// <summary>Кто подключил бота: входящие сообщения создаются с его правами (как запросы токена API, D88).</summary>
-    public long? MaxConnectedByUserId { get; private set; }
-
-    public DateTime? MaxConnectedAtUtc { get; private set; }
-
-    public bool MaxConnected => MaxToken is not null && MaxSecretHash is not null;
-
-    public void ConnectMax(string token, byte[] secretHash, long userId, DateTime nowUtc)
-    {
-        MaxToken = string.IsNullOrWhiteSpace(token) || token.Length > 300
-            ? throw new BusinessRuleException("crm.max.token", "Укажите токен бота MAX.")
-            : token.Trim();
-        MaxSecretHash = secretHash;
-        MaxConnectedByUserId = userId;
-        MaxConnectedAtUtc = nowUtc;
-    }
-
-    public void DisconnectMax()
-    {
-        MaxToken = null;
-        MaxSecretHash = null;
-        MaxConnectedByUserId = null;
-        MaxConnectedAtUtc = null;
-    }
-
     /// <summary>Курсор распределения по очереди: id последнего назначенного менеджера.</summary>
     public long? LastAssignedUserId { get; private set; }
 

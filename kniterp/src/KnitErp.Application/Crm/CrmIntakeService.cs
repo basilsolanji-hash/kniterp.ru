@@ -216,8 +216,9 @@ public sealed class CrmIntakeService(IKnitErpDbContext db, IAccessGuard guard, I
         }
 
         var activity = CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Message, target, targetId, $"Сообщение в {channel} от {msg.Name ?? sender}", text, null,
-            assignee, ctx.UserId, clock.UtcNow, done: true, source: CrmActivitySource.Messenger, externalRef: externalId);
-        activity.SetPeer(sender);
+            assignee, ctx.UserId, clock.UtcNow, done: true, source: CrmActivitySource.Messenger,
+            externalRef: externalId ?? $"{channel}:in:{Guid.NewGuid():N}"); // входящее всегда с внешним номером — по нему чаты отличают входящие от ответов
+        activity.SetPeer($"{channel}:{sender}"); // D670: собеседник с мессенджером — id разных мессенджеров не смешиваются
         db.CrmActivities.Add(activity);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.CrmActivityCreated, nameof(CrmActivity), activity.Id, null, $"сообщение {channel}", "мессенджер");

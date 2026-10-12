@@ -444,12 +444,6 @@ internal sealed class CrmSettingsConfiguration : IEntityTypeConfiguration<CrmSet
         b.Property(x => x.AssignMode).HasConversion<byte>();
         b.Property(x => x.PlanFact).HasConversion<byte>();
         b.Property(x => x.OfferTerms).HasMaxLength(CrmSettings.OfferTermsMaxLength);
-        b.Property(x => x.MaxToken).HasConversion(PersonalDataColumns.Text).HasMaxLength(PersonalDataColumns.Cipher(300)); // D648: шифрование мастер-ключом
-        b.Property(x => x.MaxSecretHash).HasColumnType("binary(32)");
-        b.Property(x => x.MaxConnectedAtUtc).HasColumnType("datetime2(3)");
-        b.Ignore(x => x.MaxConnected);
-        b.HasIndex(x => x.MaxSecretHash).IsUnique().HasFilter("[MaxSecretHash] IS NOT NULL").HasDatabaseName("ux_crm_settings_max_secret");
-        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.MaxConnectedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_settings_max_user");
         b.Property(x => x.RowVersion).IsRowVersion();
         b.Ignore(x => x.Values);
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
@@ -522,5 +516,30 @@ internal sealed class CrmExternalLinkConfiguration : IEntityTypeConfiguration<Cr
         b.Property(x => x.Entity).HasConversion<byte>();
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.System, x.Entity, x.ExternalId }).IsUnique().HasDatabaseName("ux_crm_external_links");
+    }
+}
+
+internal sealed class CrmMessengerChannelConfiguration : IEntityTypeConfiguration<CrmMessengerChannel>
+{
+    public void Configure(EntityTypeBuilder<CrmMessengerChannel> b)
+    {
+        b.ToTable("crm_messenger_channels", t => t.HasCheckConstraint("ck_crm_messenger_channels_kind", "[Kind] IN (1, 2, 3)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        // D670: токены и секрет приложения — шифрованием мастер-ключом, секрет адреса вебхука — только хэшем.
+        b.Property(x => x.Token).HasConversion(PersonalDataColumns.Text).HasMaxLength(PersonalDataColumns.Cipher(CrmMessengerChannel.TokenMaxLength));
+        b.Property(x => x.AppSecret).HasConversion(PersonalDataColumns.Text).HasMaxLength(PersonalDataColumns.Cipher(CrmMessengerChannel.AppSecretMaxLength));
+        b.Property(x => x.AccountId).HasMaxLength(CrmMessengerChannel.AccountIdMaxLength);
+        b.Property(x => x.AccountName).HasMaxLength(CrmMessengerChannel.NameMaxLength);
+        b.Property(x => x.SecretHash).HasColumnType("binary(32)");
+        b.Property(x => x.ConnectedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.DisconnectedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.IsConnected);
+        b.HasIndex(x => new { x.OrganizationId, x.Kind }).IsUnique().HasDatabaseName("ux_crm_messenger_channels_org_kind");
+        b.HasIndex(x => x.SecretHash).IsUnique().HasFilter("[SecretHash] IS NOT NULL").HasDatabaseName("ux_crm_messenger_channels_secret");
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ConnectedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }

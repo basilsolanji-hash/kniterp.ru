@@ -37,7 +37,9 @@ public static class CrmTestKit
     private static int _innSeed = 960_000_000;
 
     /// <summary>MAX без сети: запоминает отправленные сообщения и подписки.</summary>
-    public static FakeMaxClient Max { get; } = new();
+    public static FakeMessengerClient Max { get; } = new(KnitErp.Domain.Crm.CrmMessengerKind.Max);
+    public static FakeMessengerClient Telegram { get; } = new(KnitErp.Domain.Crm.CrmMessengerKind.Telegram);
+    public static FakeMessengerClient WhatsApp { get; } = new(KnitErp.Domain.Crm.CrmMessengerKind.WhatsApp);
     private static int _counterpartySeed = 961_000_000;
 
     public static CrmServices Crm(this SqlTestHost host, long userId, long organizationId,
@@ -60,7 +62,7 @@ public static class CrmTestKit
             Intake = new CrmIntakeService(db, guard, user, host.Clock),
             Mailings = new CrmMailingService(db, guard, user, host.Clock, host.Mail),
             Import = new CrmImportService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet),
-            Messenger = new CrmMessengerService(db, guard, user, host.Clock, Max, host.Mail),
+            Messenger = new CrmMessengerService(db, guard, user, host.Clock, [Max, Telegram, WhatsApp], host.Mail),
         };
     }
 
@@ -105,25 +107,29 @@ public static class CrmTestKit
     }
 }
 
-public sealed class FakeMaxClient : ICrmMaxClient
+public sealed class FakeMessengerClient(KnitErp.Domain.Crm.CrmMessengerKind kind) : ICrmMessengerClient
 {
+    public KnitErp.Domain.Crm.CrmMessengerKind Kind => kind;
+
     public bool IsAvailable => true;
 
+    /// <summary>Отправленные сообщения: собеседник без префикса мессенджера (как уходит в API) и текст.</summary>
     public System.Collections.Concurrent.ConcurrentQueue<(string UserId, string Text)> Sent { get; } = new();
 
     public System.Collections.Concurrent.ConcurrentQueue<string> Subscriptions { get; } = new();
 
-    public Task<string?> BotNameAsync(string token, CancellationToken ct = default) => Task.FromResult<string?>(token == "bad" ? null : "Фабрика-бот");
+    public Task<string?> AccountNameAsync(CrmMessengerCredentials c, CancellationToken ct = default) =>
+        Task.FromResult<string?>(c.Token == "bad" ? null : $"Фабрика-бот {kind}");
 
-    public Task<bool> SubscribeAsync(string token, string url, string secret, CancellationToken ct = default)
+    public Task<bool> SubscribeAsync(CrmMessengerCredentials c, string url, string secret, CancellationToken ct = default)
     {
         Subscriptions.Enqueue(url);
         return Task.FromResult(true);
     }
 
-    public Task<bool> SendAsync(string token, string userId, string text, CancellationToken ct = default)
+    public Task<bool> SendAsync(CrmMessengerCredentials c, string peer, string text, CancellationToken ct = default)
     {
-        Sent.Enqueue((userId, text));
+        Sent.Enqueue((peer, text));
         return Task.FromResult(true);
     }
 }

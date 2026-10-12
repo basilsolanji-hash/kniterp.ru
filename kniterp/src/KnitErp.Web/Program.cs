@@ -48,7 +48,10 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddKnitErpApplication();
 // D648 (сессия CRM): адрес MAX Bot API для чатов с клиентами; пустая строка в настройках — MAX выключен.
-builder.Services.AddSingleton(new KnitErp.Infrastructure.External.MaxOptions(builder.Configuration["Max:BaseUrl"] ?? "https://platform-api.max.ru"));
+builder.Services.AddSingleton(new KnitErp.Infrastructure.External.MessengerOptions(
+    builder.Configuration["Messengers:MaxUrl"] ?? builder.Configuration["Max:BaseUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.MaxUrl,
+    builder.Configuration["Messengers:TelegramUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.TelegramUrl,
+    builder.Configuration["Messengers:WhatsAppUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.WhatsAppUrl));
 builder.Services.AddKnitErpInfrastructure(
     connectionString,
     // ИИ-помощник включается ключом из секретов сервера; без ключа он отвечает по справочному центру.
@@ -177,7 +180,11 @@ builder.Services.AddRateLimiter(o =>
                                                       && !http.Request.Path.StartsWithSegments("/account/logout")
                 ? RateLimitPartition.GetFixedWindowLimiter(http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })
-                : RateLimitPartition.GetNoLimiter("other"));
+                // D673: вебхуки мессенджеров (без входа) — 120 запросов за 10 секунд на адрес с одного IP: поток мусора не забьёт базу.
+                : http.Request.Path.StartsWithSegments("/hooks")
+                    ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromSeconds(10), QueueLimit = 0 })
+                    : RateLimitPartition.GetNoLimiter("other"));
     o.OnRejected = async (context, ct) =>
     {
         if (context.HttpContext.Request.Path.StartsWithSegments("/api"))

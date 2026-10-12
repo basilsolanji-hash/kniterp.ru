@@ -1,6 +1,7 @@
 @page "/crm/chats"
 @using KnitErp.Application.Crm
 @inject CrmMessengerService Messenger
+@implements IDisposable
 
 <PageTitle>@L("Чаты с клиентами") — knitERP</PageTitle>
 <CrmStyles />
@@ -19,12 +20,16 @@ else
         <h1>@L("Чаты с клиентами")</h1>
         <button type="button" class="secondary" @onclick="RefreshAsync" disabled="@_busy">@L("Обновить")</button>
     </div>
-    @if (!_status.Connected)
+    @if (!_status.AnyConnected)
     {
         <div class="flash warn" role="status">
-            <span>@L("MAX не подключён: клиенты не смогут писать фабрике. Подключите бота организации в «Настройках CRM».")</span>
-            <a class="button secondary" href="crm/settings#max">@L("Настройки CRM")</a>
+            <span>@L("Мессенджеры не подключены: клиенты не смогут писать фабрике. Подключите Telegram, WhatsApp или MAX в «Настройках CRM».")</span>
+            <a class="button secondary" href="crm/settings#messengers">@L("Настройки CRM")</a>
         </div>
+    }
+    else
+    {
+        <p class="muted small">@L("Подключено:") @string.Join(", ", _status.Channels.Where(c => c.Connected).Select(c => $"{c.Name} ({c.AccountName})")) · @L("список обновляется сам")</p>
     }
     @if (_error is not null)
     {
@@ -35,13 +40,13 @@ else
         <nav class="crm-chat-list" aria-label="@L("Диалоги")">
             @if (_chats.Count == 0)
             {
-                <p class="muted small">@L("Диалогов пока нет. Когда клиент напишет в MAX, диалог появится здесь, а лид — в списке лидов.")</p>
+                <p class="muted small">@L("Диалогов пока нет. Когда клиент напишет в мессенджер, диалог появится здесь, а лид — в списке лидов.")</p>
             }
             @foreach (var c in _chats)
             {
                 <button type="button" class="crm-chat-item @(c.Peer == _peer ? "current" : null)" @onclick="() => OpenAsync(c)" aria-current="@(c.Peer == _peer ? "true" : null)">
                     <b>@c.Client</b> @if (c.AwaitingReply) { <span class="tag warn">@L("ждёт ответа")</span> }
-                    <span class="muted small">@c.Channel · @TimeZones.ToLocal(c.LastAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM HH:mm")</span>
+                    <span class="muted small"><span class="crm-channel crm-channel-@c.Channel.ToLowerInvariant()">@c.Channel</span> · @TimeZones.ToLocal(c.LastAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM HH:mm")</span>
                     <span class="crm-chat-last">@c.LastText</span>
                 </button>
             }
@@ -53,7 +58,7 @@ else
             }
             else
             {
-                <div class="crm-chat-head"><b>@_current.Client</b> <a class="small" href="@_current.Href">@L("Карточка")</a></div>
+                <div class="crm-chat-head"><b>@_current.Client</b> <span class="crm-channel crm-channel-@_current.Channel.ToLowerInvariant()">@_current.Channel</span> <a class="small" href="@_current.Href">@L("Карточка")</a></div>
                 <ol class="crm-chat-messages">
                     @foreach (var m in _messages)
                     {
@@ -66,8 +71,8 @@ else
                 @if (CurrentAccess.Has(Permissions.CrmEdit))
                 {
                     <form class="crm-chat-reply" @onsubmit="SendAsync">
-                        <textarea rows="2" @bind="_text" aria-label="@L("Сообщение клиенту")" placeholder="@L("Сообщение клиенту")" maxlength="4000"></textarea>
-                        <button type="submit" disabled="@(_busy || !_status.Connected)">@L("Отправить")</button>
+                        <textarea rows="2" @bind="_text" @bind:event="oninput" @onkeydown="KeyAsync" aria-label="@L("Сообщение клиенту")" placeholder="@L("Сообщение клиенту — Ctrl+Enter отправит")" maxlength="4000"></textarea>
+                        <button type="submit" disabled="@(_busy || !Connected(_current) || string.IsNullOrWhiteSpace(_text))">@L("Отправить")</button>
                     </form>
                 }
             }
@@ -85,7 +90,8 @@ else
     private IReadOnlyList<CrmChatDto>? _chats;
     private IReadOnlyList<CrmChatMessageDto> _messages = [];
     private CrmChatDto? _current;
-    private CrmMaxStatusDto? _status;
+    private CrmMessengersDto? _status;
+    private System.Threading.Timer? _timer;
     private string? _peer;
     private string? _text;
     private string? _denied;
@@ -102,12 +108,55 @@ else
             {
                 await LoadAsync(first);
             }
+
+            // Новые сообщения подтягиваются сами раз в 15 секунд; пока идёт действие — пропуск (один DbContext на вкладку).
+            _timer = new System.Threading.Timer(_ => _ = InvokeAsync(PollAsync), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
         }
         catch (AccessDeniedException ex)
         {
             _denied = UiErrors.Message(ex);
         }
     }
+
+    private bool Connected(CrmChatDto chat) => _status!.Channels.Any(c => c.Connected && c.Name == chat.Channel);
+
+    private async Task PollAsync()
+    {
+        if (_busy || _denied is not null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _chats = await Messenger.ChatsAsync();
+            if (_peer is not null && _chats.FirstOrDefault(c => c.Peer == _peer) is { } current && current.LastAtUtc != _current?.LastAtUtc)
+            {
+                await LoadAsync(current);
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            // Фоновое обновление молчит: ошибка покажется при следующем действии пользователя.
+        }
+        finally
+        {
+            _busy = false;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task KeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey) && !string.IsNullOrWhiteSpace(_text))
+        {
+            await SendAsync();
+        }
+    }
+
+    public void Dispose() => _timer?.Dispose();
 
     private async Task LoadAsync(CrmChatDto chat)
     {
