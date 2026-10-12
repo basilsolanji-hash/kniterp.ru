@@ -1,0 +1,91 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Application.Sales
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject ISpreadsheetFormat Spreadsheet
+
+@*
+    D616: вкладка «Контакты и сделки» карточки контрагента базы — контакты и сделки CRM, видимые пользователю (без crm.all — свои).
+    Свой контекст базы, чтобы не мешать операциям карточки.
+*@
+@if (_error is not null)
+{
+    <div class="error" role="alert">@_error</div>
+}
+else if (_contacts is null || _deals is null)
+{
+    <p class="muted small">@L("Загрузка…")</p>
+}
+else
+{
+    <h2>@L("Контакты")</h2>
+    @if (_contacts.Rows.Count == 0)
+    {
+        <p class="muted small">@L("Контактов нет.")</p>
+    }
+    else
+    {
+        <ul>
+            @foreach (var c in _contacts.Rows)
+            {
+                <li><a href="crm/contacts/@c.Id">@c.FullName</a> <span class="muted">@c.Position @(c.Phone is { } p ? KnitErp.Domain.Crm.CrmText.FormatPhone(p) : null) @c.Email</span></li>
+            }
+        </ul>
+    }
+    <h2>@L("Сделки")</h2>
+    @if (_deals.Rows.Count == 0)
+    {
+        <p class="muted small">@L("Сделок нет.")</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Сделка")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th>@L("Ответственный")</th></tr></thead>
+                <tbody>
+                    @foreach (var d in _deals.Rows)
+                    {
+                        <tr>
+                            <td><a href="crm/deals/@d.Id">@d.Number</a> @d.Title</td>
+                            <td><span class="stage stage-@d.StageColor">@d.Stage</span></td>
+                            <td class="num">@(d.Amount is { } a ? $"{Amounts.Format(a)} {d.CurrencyCode}" : "—")</td>
+                            <td>@d.Responsible</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public long CounterpartyId { get; set; }
+
+    private CrmPage<CrmContactRowDto>? _contacts;
+    private CrmPage<CrmDealRowDto>? _deals;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await using (var db = Factory.Create())
+            {
+                var guard = new AccessGuard(db, CurrentUser, Clock);
+                _contacts = await new CrmContactService(db, guard, CurrentUser, Clock, Spreadsheet).ListAsync(null, CounterpartyId);
+            }
+
+            await using (var db = Factory.Create())
+            {
+                var guard = new AccessGuard(db, CurrentUser, Clock);
+                var sales = new SalesService(db, guard, CurrentUser, Clock, new KnitErp.Application.Warehousing.StockDocumentService(db, guard, Spreadsheet, CurrentUser, Clock));
+                _deals = await new CrmDealService(db, guard, CurrentUser, Clock, sales).ListAsync(new CrmDealFilter(CounterpartyId: CounterpartyId));
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

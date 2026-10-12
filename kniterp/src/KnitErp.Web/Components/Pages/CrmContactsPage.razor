@@ -62,6 +62,18 @@ else
         </div>
     }
 
+    @if (CurrentAccess.Has(Permissions.CrmExport))
+    {
+        <div class="actions">
+            <a class="button secondary" href="crm/contacts.xlsx" download data-enhance-nav="false">@L("Выгрузить в Excel")</a>
+            <a class="button secondary" href="crm/contacts.xlsx?mailing=true" download data-enhance-nav="false">@L("Выгрузить для рассылки (с согласием)")</a>
+        </div>
+    }
+    @if (CurrentAccess.Has(Permissions.CrmAll) && CurrentAccess.Has(Permissions.CrmEdit))
+    {
+        <CrmImportPanel Kind="KnitErp.Application.Crm.CrmImportKind.Contacts" Applied="ReloadAsync" />
+    }
+
     <form class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("ФИО, компания, телефон, почта")" /></label>
         <label class="inline"><input type="checkbox" @bind="_archived" /> @L("С архивом")</label>

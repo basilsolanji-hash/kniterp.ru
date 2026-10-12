@@ -47,6 +47,8 @@ if (!builder.Environment.IsDevelopment())
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddKnitErpApplication();
+// D648 (сессия CRM): адрес MAX Bot API для чатов с клиентами; пустая строка в настройках — MAX выключен.
+builder.Services.AddSingleton(new KnitErp.Infrastructure.External.MaxOptions(builder.Configuration["Max:BaseUrl"] ?? "https://platform-api.max.ru"));
 builder.Services.AddKnitErpInfrastructure(
     connectionString,
     // ИИ-помощник включается ключом из секретов сервера; без ключа он отвечает по справочному центру.
@@ -215,6 +217,10 @@ builder.Services.AddSingleton<KnitErp.Web.Exchange.FeedCache>(); // D314: кэш
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.ModuleUi.Text("Условия продаж"),
     typeof(KnitErp.Web.Components.Pages.SalesCustomerTermsTab), KnitErp.Domain.Access.Permissions.SalesView);
 
+// D616 (CRM): вкладка «Контакты и сделки» в карточке контрагента — через точку подключения D117.
+KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("crm", KnitErp.Web.Modules.ModuleUi.Text("Контакты и сделки"),
+    typeof(KnitErp.Web.Components.Shared.CrmCounterpartyPanel), KnitErp.Domain.Access.Permissions.CrmView);
+
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);
 // D914: индекс базы знаний помощника строится один раз при запуске, в фоне — первый вопрос не ждёт.
@@ -369,6 +375,7 @@ app.MapGet("/employees.xlsx", (KnitErp.Application.Structure.EmployeeExchangeSer
     FileOrForbid(() => exchange.ExportAsync(ct), $"sotrudniki-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
 app.MapGet("/employees-template.xlsx", (KnitErp.Application.Structure.EmployeeExchangeService exchange, CancellationToken ct) =>
     FileOrForbid(() => exchange.TemplateAsync(ct), "shablon-sotrudnikov.xlsx"));
+KnitErp.Web.Crm.CrmEndpoints.MapCrm(app); // D614, D630, D645 (сессия CRM): выгрузки и шаблоны CRM
 
 // Табель подразделения за месяц в Excel (D209): право и область — в сервисе.
 app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, KnitErp.Application.Hr.TimesheetService timesheets, CancellationToken ct) =>

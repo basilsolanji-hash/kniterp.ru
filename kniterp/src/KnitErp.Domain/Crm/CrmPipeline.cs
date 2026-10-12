@@ -93,6 +93,15 @@ public sealed class CrmStage
     public int Probability { get; private set; }
 
     public CrmStageKind Kind { get; private set; }
+
+    /// <summary>
+    /// Правило следующего шага (D622): при переходе на этап система предлагает задачу «NextStepSubject» через NextStepDays дней.
+    /// null — не предлагать. Только предложение — пользователь подтверждает.
+    /// </summary>
+    public int? NextStepDays { get; private set; }
+
+    public string? NextStepSubject { get; private set; }
+
     public bool IsArchived { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
@@ -134,6 +143,33 @@ public sealed class CrmStage
     }
 
     public void MoveTo(int sortOrder) => SortOrder = sortOrder;
+
+    /// <summary>Правило следующего шага; days null — выключено.</summary>
+    public void SetNextStep(int? days, string? subject)
+    {
+        if (days is null)
+        {
+            NextStepDays = null;
+            NextStepSubject = null;
+            return;
+        }
+
+        if (days is < 0 or > 365)
+        {
+            throw new BusinessRuleException("crm.stage.next_step_days", "Срок следующего шага — от 0 до 365 дней.");
+        }
+
+        NextStepDays = days;
+        NextStepSubject = DomainText.Require(subject, CrmActivity.SubjectMaxLength, "Задача");
+    }
+
+    /// <summary>Правила по умолчанию (ТЗ §5: включены для двух этапов).</summary>
+    public static (int Days, string Subject)? DefaultNextStep(string stageName) => stageName switch
+    {
+        "КП отправлено" => (3, "Позвонить: обсудить КП"),
+        "Образцы / расчёт" => (5, "Уточнить получение образцов"),
+        _ => null,
+    };
 
     public void Archive()
     {

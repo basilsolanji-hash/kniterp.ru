@@ -1,0 +1,170 @@
+@page "/crm/mailings"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject CrmMailingService Mailings
+@inject KnitErp.Application.Tagging.TagService TagList
+
+<PageTitle>@L("Рассылки") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Рассылки")</h1>
+    <p class="muted small">@L("Письма уходят только контактам с согласием на рекламные рассылки (38-ФЗ) и почтой; в каждом письме — ссылка для отписки. Деловые письма клиенту отправляются из карточек.")</p>
+    @if (!Mailings.MailConfigured)
+    {
+        <div class="flash warn" role="status">@L("Почта сервера не настроена — обратитесь к администратору.")</div>
+    }
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <form class="panel" @onsubmit="SaveAsync" aria-label="@L("Новая рассылка")">
+        <h2>@(_edit is null ? L("Новая рассылка") : L("Черновик: {0}", _edit.Subject))</h2>
+        <div class="grid">
+            <label class="wide">@L("Тема") <input @bind="_subject" maxlength="@CrmMailing.SubjectMaxLength" required /></label>
+            <label class="wide">@L("Текст") <textarea rows="6" @bind="_text" maxlength="@CrmMailing.TextMaxLength" required></textarea></label>
+            <label>
+                @L("Кому")
+                <select @bind="_tag" @bind:after="CountAsync">
+                    <option value="">@L("Все с согласием")</option>
+                    @foreach (var t in _tags)
+                    {
+                        <option value="@t.Id">@L("с тегом «{0}»", t.Name)</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <p class="muted small">@L("Получателей сейчас: {0}", _audience)</p>
+        <div class="actions">
+            <button type="submit" disabled="@_busy">@L("Сохранить черновик")</button>
+            @if (_edit is not null)
+            {
+                <ConfirmButton OnConfirm="SendAsync" Disabled="@(_busy || _audience == 0 || !Mailings.MailConfigured)" Question='@L("Отправить рассылку сейчас?")'>@L("Отправить")</ConfirmButton>
+                <button type="button" class="secondary" @onclick="NewAsync" disabled="@_busy">@L("Новая")</button>
+            }
+        </div>
+    </form>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Тема")</th><th>@L("Статус")</th><th class="num">@L("Получателей")</th><th class="num">@L("Доставлено")</th><th>@L("Отправлена")</th></tr></thead>
+            <tbody>
+                @if (_rows.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">@L("Рассылок пока нет.")</td></tr>
+                }
+                @foreach (var m in _rows)
+                {
+                    <tr>
+                        <td>@if (m.Status == CrmMailingStatus.Draft) { <a href="javascript:void(0)" @onclick="() => OpenAsync(m.Id)">@m.Subject</a> } else { @m.Subject }</td>
+                        <td>@(m.Status == CrmMailingStatus.Draft ? L("черновик") : L("отправлена"))</td>
+                        <td class="num">@m.Recipients</td>
+                        <td class="num">@m.Delivered</td>
+                        <td>@(m.SentAtUtc is { } s ? TimeZones.ToLocal(s, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm") : "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<CrmMailingRowDto>? _rows;
+    private IReadOnlyList<KnitErp.Application.Tagging.TagDto> _tags = [];
+    private CrmMailingDto? _edit;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+    private string? _subject;
+    private string? _text;
+    private string _tag = "";
+    private int _audience;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _rows = await Mailings.ListAsync();
+            _tags = await TagList.ListAsync();
+            _audience = await Mailings.AudienceCountAsync(null);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private Task CountAsync() => RunAsync(async () => _audience = await Mailings.AudienceCountAsync(long.TryParse(_tag, out var t) ? t : null), null);
+
+    private Task OpenAsync(long id) => RunAsync(async () =>
+    {
+        _edit = await Mailings.GetAsync(id);
+        (_subject, _text, _tag, _audience) = (_edit.Subject, _edit.Text, _edit.TagId?.ToString() ?? "", _edit.Audience);
+    }, null);
+
+    private Task NewAsync() => RunAsync(async () =>
+    {
+        (_edit, _subject, _text, _tag) = (null, null, null, "");
+        _audience = await Mailings.AudienceCountAsync(null);
+    }, null);
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var tag = long.TryParse(_tag, out var t) ? t : (long?)null;
+        if (_edit is null)
+        {
+            _edit = await Mailings.GetAsync(await Mailings.CreateAsync(_subject, _text, tag));
+        }
+        else
+        {
+            await Mailings.UpdateAsync(_edit.Id, _subject, _text, tag, _edit.RowVersion);
+            _edit = await Mailings.GetAsync(_edit.Id);
+        }
+    }, L("Черновик сохранён."));
+
+    private Task SendAsync() => RunAsync(async () =>
+    {
+        var delivered = await Mailings.SendAsync(_edit!.Id, _edit.RowVersion);
+        (_edit, _subject, _text) = (null, null, null);
+        _message = L("Рассылка отправлена: доставлено {0}.", delivered);
+    }, null);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        (_message, _isError) = (null, false);
+        try
+        {
+            await action();
+            _message = success ?? _message;
+            _rows = await Mailings.ListAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            (_message, _isError) = (UiErrors.Message(ex), true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

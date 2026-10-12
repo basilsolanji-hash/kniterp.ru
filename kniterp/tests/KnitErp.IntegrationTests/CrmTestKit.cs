@@ -13,6 +13,14 @@ namespace KnitErp.IntegrationTests;
 public sealed class CrmServices(KnitErpDbContext db, CrmSettingsService settings, CrmLeadService leads, CrmDealService deals, CrmContactService contacts,
     SalesService sales) : IAsyncDisposable
 {
+    public required CrmActivityService Activities { get; init; }
+    public required CrmOfferService Offers { get; init; }
+    public required CrmReportService Reports { get; init; }
+    public required CrmIntakeService Intake { get; init; }
+    public required CrmMailingService Mailings { get; init; }
+    public required CrmImportService Import { get; init; }
+    public required CrmMessengerService Messenger { get; init; }
+
     public KnitErpDbContext Db { get; } = db;
     public CrmSettingsService Settings { get; } = settings;
     public CrmLeadService Leads { get; } = leads;
@@ -27,17 +35,33 @@ public sealed class CrmServices(KnitErpDbContext db, CrmSettingsService settings
 public static class CrmTestKit
 {
     private static int _innSeed = 960_000_000;
+
+    /// <summary>MAX без сети: запоминает отправленные сообщения и подписки.</summary>
+    public static FakeMaxClient Max { get; } = new();
     private static int _counterpartySeed = 961_000_000;
 
     public static CrmServices Crm(this SqlTestHost host, long userId, long organizationId,
+        params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors) => host.Crm(userId, organizationId, null, interceptors);
+
+    /// <summary>Сервисы CRM от имени токена API: apiScope ограничивает права (D88).</summary>
+    public static CrmServices Crm(this SqlTestHost host, long userId, long organizationId, IReadOnlyCollection<string>? apiScope,
         params Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor[] interceptors)
     {
         var db = interceptors.Length == 0 ? host.NewDb() : host.NewDb(interceptors);
-        var user = new TestUser { UserId = userId, OrganizationId = organizationId };
+        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ApiScope = apiScope };
         var guard = new AccessGuard(db, user, host.Clock);
         var sales = new SalesService(db, guard, user, host.Clock, new StockDocumentService(db, guard, SqlTestHost.Spreadsheet, user, host.Clock));
-        return new CrmServices(db, new CrmSettingsService(db, guard, user, host.Clock), new CrmLeadService(db, guard, user, host.Clock),
-            new CrmDealService(db, guard, user, host.Clock, sales), new CrmContactService(db, guard, user, host.Clock), sales);
+        return new CrmServices(db, new CrmSettingsService(db, guard, user, host.Clock), new CrmLeadService(db, guard, user, host.Clock, new FakeRequisitesLookup()),
+            new CrmDealService(db, guard, user, host.Clock, sales), new CrmContactService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet), sales)
+        {
+            Activities = new CrmActivityService(db, guard, user, host.Clock, host.Mail),
+            Offers = new CrmOfferService(db, guard, user, host.Clock, host.Mail),
+            Reports = new CrmReportService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet),
+            Intake = new CrmIntakeService(db, guard, user, host.Clock),
+            Mailings = new CrmMailingService(db, guard, user, host.Clock, host.Mail),
+            Import = new CrmImportService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet),
+            Messenger = new CrmMessengerService(db, guard, user, host.Clock, Max, host.Mail),
+        };
     }
 
     public static async Task<CreatedOrganization> CreateCrmOrganizationAsync(this SqlTestHost host)
@@ -78,5 +102,28 @@ public static class CrmTestKit
         }
 
         return body + (sum % 11 % 10);
+    }
+}
+
+public sealed class FakeMaxClient : ICrmMaxClient
+{
+    public bool IsAvailable => true;
+
+    public System.Collections.Concurrent.ConcurrentQueue<(string UserId, string Text)> Sent { get; } = new();
+
+    public System.Collections.Concurrent.ConcurrentQueue<string> Subscriptions { get; } = new();
+
+    public Task<string?> BotNameAsync(string token, CancellationToken ct = default) => Task.FromResult<string?>(token == "bad" ? null : "Фабрика-бот");
+
+    public Task<bool> SubscribeAsync(string token, string url, string secret, CancellationToken ct = default)
+    {
+        Subscriptions.Enqueue(url);
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> SendAsync(string token, string userId, string text, CancellationToken ct = default)
+    {
+        Sent.Enqueue((userId, text));
+        return Task.FromResult(true);
     }
 }

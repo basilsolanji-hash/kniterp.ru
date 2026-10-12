@@ -3,6 +3,8 @@
     высоты касания; на телефоне 390 px колонки канбана идут одна под другой, без горизонтальной прокрутки страницы.
 *@
 <style>
+    /* fieldset по умолчанию не уже содержимого (min-width: min-content) — на 390 px форма вылезала за экран. */
+    fieldset { min-width: 0; }
     .crm-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: start; }
     .crm-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 120px; }
     .crm-col.drop { outline: 2px dashed var(--accent-line); }
@@ -28,7 +30,36 @@
     .crm-tabs { display: flex; gap: 4px; margin: 8px 0; }
     .crm-tabs button { font-weight: 400; background: var(--line); color: var(--text); }
     .crm-tabs button[aria-pressed=true] { background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; }
+    .crm-feed { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .crm-feed-item { display: grid; grid-template-columns: 120px 110px minmax(0, 1fr); gap: 4px 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+    .crm-feed-item.open { border-color: var(--accent-line); }
+    .crm-feed-item.overdue { border-color: var(--bad-line); background: var(--bad-bg-2); }
+    .crm-feed-when { font-size: 12px; color: var(--muted); }
+    .crm-feed-kind { font-size: 12px; color: var(--text-2); }
+    .crm-feed-body { min-width: 0; overflow-wrap: anywhere; }
+    .crm-feed-text { white-space: pre-wrap; font-size: 13px; margin-top: 2px; }
+    .crm-result { max-width: 220px; }
+    .crm-kpi { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin: 8px 0 16px; }
+    .crm-kpi div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--surface-2); }
+    .crm-kpi b { display: block; font-size: 18px; }
+    .crm-kpi span { font-size: 12px; color: var(--muted); }
+    .crm-bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; min-width: 60px; }
+    .crm-bar > i { display: block; height: 100%; background: var(--accent); }
+    .crm-chats { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; align-items: start; }
+    .crm-chat-list { display: flex; flex-direction: column; gap: 4px; max-height: 70vh; overflow-y: auto; }
+    .crm-chat-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: var(--surface-2); color: var(--text); font-weight: 400; border: 1px solid var(--line); }
+    .crm-chat-item.current { border-color: var(--accent); }
+    .crm-chat-last { font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+    .crm-chat-view { border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-width: 0; }
+    .crm-chat-messages { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow-y: auto; }
+    .crm-chat-messages li { max-width: 80%; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; }
+    .crm-chat-messages li.out { align-self: flex-end; background: var(--accent-soft-2); }
+    .crm-chat-text { white-space: pre-wrap; }
+    .crm-chat-reply { display: flex; gap: 8px; align-items: flex-end; }
+    .crm-chat-reply textarea { flex: 1 1 auto; min-width: 0; }
     @@media (max-width: 599px) {
+        .crm-chats { grid-template-columns: minmax(0, 1fr); }
+        .crm-feed-item { grid-template-columns: 1fr; }
         .crm-board { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
         .crm-col { min-height: 0; }
         .crm-summary { grid-template-columns: 1fr 1fr; }
