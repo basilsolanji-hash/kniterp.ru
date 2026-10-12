@@ -146,6 +146,13 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Application.Sales.PriceSource>().Select(KnitErp.Application.Sales.PriceQuoteDto.SourceName));
         keys.UnionWith(["без НДС", "ещё не действует", "Без роли", "Вся организация"]);
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.SelectMany(c => KnitErp.Domain.Catalog.VatRate.DefaultsFor(1, c.Code)).Select(r => r.Name));
+        // Продажи, документы и письма (D1120–D1125): виды изображений, писем и вложений, статусы писем, виды связанных документов.
+        keys.UnionWith(KnitErp.Domain.Sales.SalesDocumentImage.Kinds.Select(KnitErp.Domain.Sales.SalesDocumentImage.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesMailKind>().Select(KnitErp.Domain.Sales.SalesMailMessage.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesMailStatus>().Select(KnitErp.Domain.Sales.SalesMailMessage.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesMailDocument>().Select(KnitErp.Domain.Sales.SalesMailMessage.DocumentName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesLinkKind>().Select(KnitErp.Domain.Sales.SalesDocumentLink.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.CustomerInvoiceStatus>().Select(KnitErp.Domain.Sales.CustomerInvoice.StatusName));
         var labels = File.ReadAllText(Path.Combine(WebDir, "Components", "Shared", "Labels.cs"));
         foreach (Match m in AuditLabel().Matches(labels))
         {

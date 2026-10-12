@@ -23,11 +23,75 @@ public static class PaymentQrImage
         return new SvgQRCode(data).GetGraphic(4);
     }
 
-    public static byte[] Png(string payload)
+    /// <summary>
+    /// PNG для PDF: 8-битный оттенок серого без палитры — такой PNG PDFsharp читает надёжно (палитровый PNG из QRCoder он не принимает).
+    /// </summary>
+    public static byte[] Png(string payload, int pixelsPerModule = 6)
     {
         using var generator = new QRCodeGenerator();
         using var data = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M, forceUtf8: true);
-        return new PngByteQRCode(data).GetGraphic(6);
+        var matrix = data.ModuleMatrix;
+        var size = matrix.Count * pixelsPerModule;
+        using var raw = new MemoryStream();
+        for (var y = 0; y < size; y++)
+        {
+            raw.WriteByte(0); // фильтр строки: нет
+            var row = matrix[y / pixelsPerModule];
+            for (var x = 0; x < size; x++)
+            {
+                raw.WriteByte(row[x / pixelsPerModule] ? (byte)0 : (byte)255);
+            }
+        }
+
+        using var png = new MemoryStream();
+        png.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        var header = new byte[13];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header, size);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(header.AsSpan(4), size);
+        header[8] = 8; // глубина
+        header[9] = 0; // оттенки серого
+        Chunk(png, "IHDR", header);
+        using (var compressed = new MemoryStream())
+        {
+            using (var z = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
+            {
+                raw.Position = 0;
+                raw.CopyTo(z);
+            }
+
+            Chunk(png, "IDAT", compressed.ToArray());
+        }
+
+        Chunk(png, "IEND", []);
+        return png.ToArray();
+    }
+
+    private static void Chunk(Stream png, string type, byte[] data)
+    {
+        Span<byte> buffer = stackalloc byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(buffer, data.Length);
+        png.Write(buffer);
+        var typeBytes = System.Text.Encoding.ASCII.GetBytes(type);
+        png.Write(typeBytes);
+        png.Write(data);
+        var crc = Crc(Crc(0xFFFFFFFFu, typeBytes), data) ^ 0xFFFFFFFFu;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer, crc);
+        png.Write(buffer);
+    }
+
+    /// <summary>CRC-32 (полином 0xEDB88320) блока PNG.</summary>
+    private static uint Crc(uint crc, ReadOnlySpan<byte> data)
+    {
+        foreach (var b in data)
+        {
+            crc ^= b;
+            for (var k = 0; k < 8; k++)
+            {
+                crc = (crc & 1) != 0 ? 0xEDB88320u ^ (crc >> 1) : crc >> 1;
+            }
+        }
+
+        return crc;
     }
 }
 
@@ -244,7 +308,8 @@ public sealed class SalesPdfRenderer : ISalesPdfRenderer
         Signatures(sec, r, deco, r.SoleProprietor
             ? [("Индивидуальный предприниматель или иное уполномоченное лицо", r.DirectorName, deco.DirectorSignature)]
             : [("Руководитель организации или иное уполномоченное лицо", r.DirectorName, deco.DirectorSignature),
-                ("Главный бухгалтер или иное уполномоченное лицо", r.AccountantName ?? r.DirectorName, deco.AccountantSignature ?? deco.DirectorSignature)]);
+                ("Главный бухгалтер или иное уполномоченное лицо", r.AccountantName ?? r.DirectorName, deco.AccountantSignature ?? deco.DirectorSignature)],
+            stamp: false);
 
         var transfer = Grid(sec, 138, 139);
         transfer.Format.Font.Size = 7;
@@ -288,7 +353,9 @@ public sealed class SalesPdfRenderer : ISalesPdfRenderer
         var sec = doc.AddSection();
         sec.PageSetup = doc.DefaultPageSetup.Clone();
         sec.PageSetup.PageFormat = PageFormat.A4;
-        sec.PageSetup.Orientation = landscape ? Orientation.Landscape : Orientation.Portrait;
+        sec.PageSetup.Orientation = Orientation.Portrait;
+        sec.PageSetup.PageWidth = Unit.FromMillimeter(landscape ? 297 : 210);
+        sec.PageSetup.PageHeight = Unit.FromMillimeter(landscape ? 210 : 297);
         var margin = Unit.FromMillimeter(landscape ? 8 : 12);
         sec.PageSetup.LeftMargin = margin;
         sec.PageSetup.RightMargin = margin;
@@ -408,7 +475,7 @@ public sealed class SalesPdfRenderer : ISalesPdfRenderer
 
     /// <summary>Подписи: должность — линия с факсимиле (если загружено и включено) — ФИО; печать — рядом.</summary>
     private static void Signatures(Section sec, PrintRequisites r, SalesPrintDecorations deco,
-        IReadOnlyList<(string Role, string? Name, SalesPrintImage? Signature)> signers)
+        IReadOnlyList<(string Role, string? Name, SalesPrintImage? Signature)> signers, bool stamp = true)
     {
         sec.AddParagraph().Format.SpaceAfter = Unit.FromMillimeter(4);
         var t = Grid(sec, 62, 40, 46, 38);
@@ -428,10 +495,10 @@ public sealed class SalesPdfRenderer : ISalesPdfRenderer
             }
 
             Text(row.Cells[2], name ?? string.Empty);
-            if (i == 0 && deco.Stamp is { } stamp)
+            if (i == 0 && stamp && deco.Stamp is { } image)
             {
                 row.Cells[3].MergeDown = signers.Count - 1;
-                AddImage(row.Cells[3].AddParagraph(), stamp, 34);
+                AddImage(row.Cells[3].AddParagraph(), image, 34);
             }
         }
 
