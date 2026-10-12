@@ -185,6 +185,9 @@ builder.Services.AddDataProtection()
 // Аудит 10.10.2026: cookie антиподделки — только по HTTPS, как и cookie сессии.
 builder.Services.AddAntiforgery(o => o.Cookie.SecurePolicy = CookieSecurePolicy.Always);
 
+// Аудит 12.10.2026: HSTS на год (по умолчанию 30 дней) — браузер дольше помнит, что сайт только по HTTPS.
+builder.Services.AddHsts(o => o.MaxAge = TimeSpan.FromDays(365));
+
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -197,10 +200,6 @@ builder.Services.AddRateLimiter(o =>
         http.Request.Path.StartsWithSegments("/feeds")
             ? RateLimitPartition.GetFixedWindowLimiter("feeds:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
-        // D121 (база, проверка CRM): вебхук MAX без входа — не больше 120 запросов в минуту с адреса.
-        http.Request.Path.StartsWithSegments("/hooks")
-            ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
-                _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
         // D125: открытая анкета сотрудника — не больше 30 открытий страницы в минуту с адреса (отправки — общим лимитом /account ниже).
         HttpMethods.IsGet(http.Request.Method) && http.Request.Path.StartsWithSegments("/account/employee-data")
             ? RateLimitPartition.GetFixedWindowLimiter("employee-data:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
@@ -213,7 +212,8 @@ builder.Services.AddRateLimiter(o =>
                                                       && !http.Request.Path.StartsWithSegments("/account/logout")
                 ? RateLimitPartition.GetFixedWindowLimiter(http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })
-                // D673: вебхуки мессенджеров (без входа) — 120 запросов за 10 секунд на адрес с одного IP: поток мусора не забьёт базу.
+                // D673, D121: вебхуки мессенджеров (без входа) — 120 запросов за 10 секунд с одного IP: поток мусора не забьёт базу, а
+                // серверы Telegram/WhatsApp/MAX, общие для многих ботов организаций, не упрутся в лимит (аудит 12.10.2026: прежняя ветка «120 в минуту» перекрывала эту).
                 : http.Request.Path.StartsWithSegments("/hooks")
                     ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                         _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromSeconds(10), QueueLimit = 0 })

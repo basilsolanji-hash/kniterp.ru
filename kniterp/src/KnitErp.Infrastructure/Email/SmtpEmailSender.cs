@@ -87,8 +87,10 @@ public sealed class SmtpEmailSender(EmailOptions options, ILogger<SmtpEmailSende
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Адрес получателя в лог не пишем: это персональные данные.
-            logger.LogWarning(ex, "Письмо «{Subject}» не отправлено", m.Subject);
+            // Ни адреса, ни темы (в рассылках CRM в ней имя клиента), ни текста исключения: ответ SMTP-сервера часто содержит адрес
+            // получателя («550 <user@…> rejected»). Только тип ошибки и код SMTP — достаточно для разбора (аудит 12.10.2026).
+            var code = ex is MailKit.Net.Smtp.SmtpCommandException smtp ? ((int)smtp.StatusCode).ToString() : "—";
+            logger.LogWarning("Письмо не отправлено: {Error}, код SMTP {Code}", ex.GetType().Name, code);
             return false;
         }
     }
