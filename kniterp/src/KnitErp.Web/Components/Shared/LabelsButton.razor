@@ -1,0 +1,26 @@
+@*
+    D325 (сессия 4): «Этикетки» на любом экране со строками позиций — документы склада, заказы, инвентаризация, переоценка.
+    Открывает печать в новой вкладке: этикеток по количеству в строке (дробное — одна), шаблон и копии выбираются там.
+    Печать проверяет права сама (просмотр справочников; цена — только с правом «Цены и суммы»).
+*@
+@using KnitErp.Domain.Catalog
+@if (_href is not null)
+{
+    <a class="button secondary" href="@_href" target="_blank" rel="noopener" title="@L("Этикетки и ценники для позиций этого экрана: по одной на каждую единицу количества")">@(Text ?? L("Этикетки"))</a>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IEnumerable<(long ItemId, decimal Quantity)> Lines { get; set; } = [];
+
+    [Parameter]
+    public string? Text { get; set; }
+
+    private string? _href;
+
+    protected override void OnParametersSet()
+    {
+        var ids = LabelLink.Build(Lines, KnitErp.Application.Catalog.LabelService.MaxItems);
+        _href = ids.Length == 0 ? null : "catalog/labels/print?ids=" + ids;
+    }
+}

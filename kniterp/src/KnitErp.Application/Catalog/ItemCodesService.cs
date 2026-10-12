@@ -39,11 +39,14 @@ public sealed class ItemCodesService(IKnitErpDbContext db, IAccessGuard guard, I
                 throw new BusinessRuleException("catalog.barcode.too_many", $"У позиции не больше {ItemBarcode.MaxPerItem} штрихкодов.");
             }
 
+            await using var tx = await db.BeginTransactionAsync(ct);
+            await db.LockAsync($"kniterp.catalog.codes.{ctx.OrganizationId}", ct);
             var settings = await SettingsAsync(ctx.OrganizationId, ct);
             var code = await NextFreeBarcodeAsync(db, ctx.OrganizationId, settings, null, ct);
             db.ItemBarcodes.Add(ItemBarcode.Create(ctx.OrganizationId, itemId, BarcodeType.Ean13, code));
             Audit(ctx, itemId.ToString(CultureInfo.InvariantCulture), $"EAN-13 {code}", "Штрихкод создан автоматически");
             await db.SaveOrConflictAsync(ct);
+            await tx.CommitAsync(ct);
             return code;
         }
         catch
@@ -68,6 +71,8 @@ public sealed class ItemCodesService(IKnitErpDbContext db, IAccessGuard guard, I
                 return new BarcodeBatchResult(0, null, null);
             }
 
+            await using var tx = await db.BeginTransactionAsync(ct);
+            await db.LockAsync($"kniterp.catalog.codes.{org}", ct);
             var settings = await SettingsAsync(org, ct);
             var taken = await TakenAsync(db, org, ct);
             var codes = new List<string>(items.Count);
@@ -80,7 +85,6 @@ public sealed class ItemCodesService(IKnitErpDbContext db, IAccessGuard guard, I
             }
 
             Audit(ctx, null, $"{codes.Count} шт., {codes[0]} … {codes[^1]}", "Штрихкоды созданы автоматически для позиций без штрихкода");
-            await using var tx = await db.BeginTransactionAsync(ct);
             await db.SaveOrConflictAsync(ct);
             await tx.CommitAsync(ct);
             return new BarcodeBatchResult(codes.Count, codes[0], codes[^1]);
@@ -90,6 +94,26 @@ public sealed class ItemCodesService(IKnitErpDbContext db, IAccessGuard guard, I
             db.DiscardChanges();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Ревью: строка настроек каталога (счётчики автокодов) — всегда свежая из базы, а внутри транзакции ещё и под блокировкой
+    /// организации: две вкладки не берут один номер, а устаревшая копия в контексте вкладки не даёт ложного конфликта или падения.
+    /// </summary>
+    internal static async Task<CatalogSettings?> FreshSettingsAsync(IKnitErpDbContext db, long org, CancellationToken ct, bool lockCounters = false)
+    {
+        if (lockCounters)
+        {
+            await db.LockAsync($"kniterp.catalog.codes.{org}", ct);
+        }
+
+        var settings = await db.CatalogSettings.SingleOrDefaultAsync(s => s.OrganizationId == org, ct);
+        if (settings is not null)
+        {
+            await db.ReloadAsync(settings, ct);
+        }
+
+        return settings;
     }
 
     /// <summary>Следующий свободный внутренний EAN-13: занятые штрихкодами позиций и упаковок пропускаются.</summary>
@@ -138,7 +162,7 @@ public sealed class ItemCodesService(IKnitErpDbContext db, IAccessGuard guard, I
     /// <summary>Строка настроек (создаётся со значениями по умолчанию, если её нет) — счётчик хранится в ней.</summary>
     private async Task<CatalogSettings> SettingsAsync(long org, CancellationToken ct)
     {
-        var settings = await db.CatalogSettings.SingleOrDefaultAsync(s => s.OrganizationId == org, ct);
+        var settings = await FreshSettingsAsync(db, org, ct);
         if (settings is null)
         {
             settings = CatalogSettings.Default(org);

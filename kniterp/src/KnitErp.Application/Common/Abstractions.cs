@@ -71,6 +71,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<CatalogSettings> CatalogSettings { get; }
     DbSet<CatalogFeed> CatalogFeeds { get; }
     DbSet<LabelTemplate> LabelTemplates { get; }
+    DbSet<ItemGroupDefaults> ItemGroupDefaults { get; }
+    DbSet<CharacteristicValueSet> CharacteristicValueSets { get; }
+    DbSet<PriceRule> PriceRules { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }
@@ -195,6 +198,12 @@ public interface IKnitErpDbContext : IAsyncDisposable
     /// сущность (например, «проведённый» документ, проведение которого отклонено) ушла бы в базу со следующим сохранением.
     /// </summary>
     void DiscardChanges();
+
+    /// <summary>
+    /// Перечитать отслеживаемую сущность из базы (значения и rowversion): у вкладки Blazor контекст живёт долго, и запрос с отслеживанием
+    /// вернул бы копию, загруженную раньше (например, счётчик автокодов, который уже сдвинул другой пользователь).
+    /// </summary>
+    Task ReloadAsync(object entity, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Исключительная блокировка складов до конца текущей транзакции: проверка остатка и запись расхода

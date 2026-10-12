@@ -213,9 +213,16 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)),
             new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.CatalogSettingsService(db, guard, user, Clock),
-            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock, new PlainFeedPhotoLinks()),
             new KnitErp.Application.Catalog.ItemCodesService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.LabelService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.GroupDefaultsService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.BulkEditService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.ItemCopyService(db, guard, user, Clock, new CatalogService(db, guard, user, Clock),
+                new KnitErp.Application.Catalog.NomenclatureService(db, guard, user, Clock)),
+            new KnitErp.Application.Catalog.ValueSetService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.PriceRuleService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.SupplierPriceListService(db, guard, Spreadsheet, user, Clock),
             new AccountSecurityService(db, Hasher, Mail, user, Clock),
             new KnitErp.Application.Finance.BankStatementService(db, guard, user, Clock,
                 new KnitErp.Application.Sales.SalesService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock)),
@@ -332,6 +339,12 @@ public sealed record Services(
     KnitErp.Application.Catalog.CatalogFeedService Feeds,
     KnitErp.Application.Catalog.ItemCodesService Codes,
     KnitErp.Application.Catalog.LabelService Labels,
+    KnitErp.Application.Catalog.GroupDefaultsService GroupDefaults,
+    KnitErp.Application.Catalog.BulkEditService Bulk,
+    KnitErp.Application.Catalog.ItemCopyService Copies,
+    KnitErp.Application.Catalog.ValueSetService ValueSets,
+    KnitErp.Application.Catalog.PriceRuleService PriceRules,
+    KnitErp.Application.Catalog.SupplierPriceListService PriceLists,
     AccountSecurityService Account,
     KnitErp.Application.Finance.BankStatementService BankStatements,
     KnitErp.Application.Sales.SalesAgreementService Agreements,
@@ -350,4 +363,20 @@ public sealed class FakeRequisitesLookup : KnitErp.Application.Common.IRequisite
             ? new KnitErp.Application.Common.CompanyRequisites(false, "ООО «ТЕСТОВАЯ ФАБРИКА»", "ООО «ТФ»", inn, "773601001", "1027700132195",
                 "г. Москва, ул. Тестовая, д. 1", "ГЕНЕРАЛЬНЫЙ ДИРЕКТОР", "Тестов Тест Тестович", true, "ACTIVE")
             : null);
+}
+
+/// <summary>
+/// Ссылки на фото фида для тестов без подписи (D324): «фид.фото» открытым текстом — так тест сам подделывает токен и проверяет,
+/// что сервис всё равно не отдаст фото выключенного фида или чужой организации. Подпись — в Web (Data Protection), проверяется e2e.
+/// </summary>
+public sealed class PlainFeedPhotoLinks : KnitErp.Application.Catalog.IFeedPhotoLinks
+{
+    public string Token(long feedId, long photoId) => $"{feedId}.{photoId}";
+
+    public bool TryRead(string token, out long feedId, out long photoId)
+    {
+        photoId = 0;
+        var parts = token.Split('.');
+        return long.TryParse(parts[0], out feedId) & parts.Length == 2 && long.TryParse(parts[1], out photoId);
+    }
 }

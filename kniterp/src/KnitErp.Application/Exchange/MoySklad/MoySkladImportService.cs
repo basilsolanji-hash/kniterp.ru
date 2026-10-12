@@ -148,9 +148,19 @@ public sealed class MoySkladImportService(
 
         var run = ExternalImportRun.Queue(ctx.OrganizationId, Sys, overwrite, defaultItemType, ctx.UserId, clock.UtcNow);
         db.ExternalImportRuns.Add(run);
-        await db.SaveChangesAsync(ct);
-        Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} поставлена в очередь{(overwrite ? ", с перезаписью" : "")}");
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} поставлена в очередь{(overwrite ? ", с перезаписью" : "")}");
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException)
+        {
+            // Ревью: две одновременные кнопки «Загрузить» — второй запуск упирается в уникальный индекс активной загрузки.
+            db.DiscardChanges();
+            throw new BusinessRuleException("exchange.run.active", "Загрузка уже идёт — дождитесь её окончания.");
+        }
+
         return run.Id;
     }
 
@@ -160,9 +170,19 @@ public sealed class MoySkladImportService(
         var ctx = await DemandAsync(ct);
         var run = await db.ExternalImportRuns.SingleOrDefaultAsync(r => r.Id == runId && r.OrganizationId == ctx.OrganizationId, ct)
                   ?? throw new NotFoundException("Загрузка");
-        run.RequestCancel(clock.UtcNow);
-        Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id}: запрошена остановка");
-        await db.SaveOrConflictAsync(ct);
+        // Ревью: загрузку меняет фоновый обработчик в своём контексте — копия во вкладке перечитывается, а отказ не оставляет её изменённой.
+        await db.ReloadAsync(run, ct);
+        try
+        {
+            run.RequestCancel(clock.UtcNow);
+            Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id}: запрошена остановка");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
     }
 
     /// <summary>Продолжить прерванную загрузку с последней записанной страницы.</summary>
@@ -171,9 +191,19 @@ public sealed class MoySkladImportService(
         var ctx = await DemandAsync(ct);
         var run = await db.ExternalImportRuns.SingleOrDefaultAsync(r => r.Id == runId && r.OrganizationId == ctx.OrganizationId, ct)
                   ?? throw new NotFoundException("Загрузка");
-        run.Resume(clock.UtcNow);
-        Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} продолжена с этапа «{StageName(run.Stage)}»");
-        await db.SaveOrConflictAsync(ct);
+        // Ревью: загрузку меняет фоновый обработчик в своём контексте — копия во вкладке перечитывается, а отказ не оставляет её изменённой.
+        await db.ReloadAsync(run, ct);
+        try
+        {
+            run.Resume(clock.UtcNow);
+            Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} продолжена с этапа «{StageName(run.Stage)}»");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<ImportIssueDto>> IssuesAsync(long runId, int take = 500, CancellationToken ct = default)

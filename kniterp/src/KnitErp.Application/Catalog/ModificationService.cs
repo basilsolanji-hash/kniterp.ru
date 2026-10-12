@@ -133,7 +133,8 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
         foreach (var (id, text) in axes)
         {
             var c = characteristics.GetValueOrDefault(id) ?? throw new NotFoundException("Характеристика");
-            var values = Variants.SplitList(text);
+            // D321: «42-56/2» раскрывается в диапазон, как в наборах значений.
+            var values = string.IsNullOrWhiteSpace(text) ? [] : CharacteristicValueSet.Expand(text);
             if (values.Count > 0 && c.IsArchived)
             {
                 throw new BusinessRuleException("catalog.archived", $"Характеристика «{c.Name}» в архиве.");

@@ -209,6 +209,12 @@ else
                             <LabelView Template="preview" Item="_sample" Organization="@_organization" />
                         </div>
                     </div>
+                    @if (preview.Elements.FirstOrDefault(e => e.Field == LabelField.Barcode) is { } bar && _sample.Barcode is { Length: > 0 and <= 80 } code
+                         && code.All(c => c is >= ' ' and <= '~') && !BarcodeFit.Readable(code, preview.WidthMm - 2 * preview.PaddingMm, bar.BarcodeHeightMm))
+                    {
+                        @* D316: тонкий штрихкод — сканер может не прочитать. *@
+                        <div class="hint warn" role="status">@L("Штрихкод «{0}» на этой этикетке слишком тонкий и может не прочитаться: нужна ширина от {1} мм. Используйте EAN-13 (короче) или этикетку шире.", code, BarcodeFit.RequiredWidthMm(code))</div>
+                    }
                     <p class="muted small">
                         @L("Масштаб 2:1.")@(" ")@(preview.Sheet == LabelSheet.A4 ? L("На листе A4: {0} шт.", preview.Columns * preview.Rows) : L("Рулон: одна этикетка на страницу."))@(" ")
                         @if (_sample.Id > 0)

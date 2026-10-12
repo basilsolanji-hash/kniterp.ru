@@ -314,6 +314,7 @@ else
     }
 
     <div class="actions" style="margin-top: 16px">
+        <LabelsButton Lines="@(_doc.Lines.Select(l => (l.ItemId, l.Quantity)))" />
         @if (_doc.CanPost)
         {
             <button type="button" @onclick="PostAsync" disabled="@(_busy || _doc.Lines.Count == 0)">@L("Провести")</button>

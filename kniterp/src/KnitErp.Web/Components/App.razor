@@ -209,11 +209,11 @@
         .panel { border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 16px; margin: 16px 0; }
         .panel form, .panel .grid { display: flex; flex-direction: column; gap: 12px; }
         .panel label { display: flex; flex-direction: column; gap: 6px; color: var(--text-2); }
-        /* Небольшие справочные таблицы — по ширине содержимого, а не на весь экран. */
-        @@media (min-width: 700px) { table.compact { width: auto; min-width: 480px; } table.compact td, table.compact th { padding-right: 24px; } }
-        /* Компактные формы: колонки по ширине содержимого (не растягиваются на весь экран), короткие поля — узкие. */
+        /* Замечание 12.10.2026 «на всех экранах пустая площадь»: таблицы — на всю ширину, колонки форм делят ширину панели поровну
+           (от 200 px), а не стоят узкой полосой слева. Короткие поля (числа, даты) по-прежнему узкие. */
+        @@media (min-width: 700px) { table.compact td, table.compact th { padding-right: 24px; } }
         @@media (min-width: 700px) {
-            .panel .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 260px)); justify-content: start; column-gap: 16px; }
+            .panel .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); column-gap: 16px; }
             .panel .grid input[inputmode=decimal], .panel .grid input[inputmode=numeric], .panel .grid input[type=date],
             .panel .grid input[type=time], .panel .grid input[type=number] { max-width: 170px; }
             .panel .grid label.inline { align-self: end; }
@@ -277,6 +277,14 @@
         dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 12px 0; max-width: 720px; }
         dl.facts dt { color: var(--muted); }
         dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+        /* Карточка (номенклатура и др.): на широком экране разделы в две колонки, широкие (.wide) — во всю ширину. */
+        @@media (min-width: 1400px) {
+            .card-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; align-items: start; }
+            .card-flow > .wide { grid-column: 1 / -1; }
+            .card-flow > .card-sec > h2:first-child { margin-top: 12px !important; }
+        }
+        .card-sec { min-width: 0; }
+        @@media (min-width: 1400px) { dl.facts { max-width: none; grid-template-columns: repeat(3, max-content minmax(0, 1fr)); } }
 
         /* Компактный вид (замечание пользователя: «всё очень крупно, нет фокуса на данных»): мелкий шрифт и отступы,
            плотные таблицы, видимый фокус клавиатуры. Телефон ниже получает крупные поля и кнопки обратно. */
@@ -293,6 +301,9 @@
         .panel { padding: 10px 12px; margin: 8px 0; border-radius: 6px; }
         .panel form, .panel .grid { gap: 8px; }
         .panel label, .inline-form label { gap: 3px; font-size: 12px; }
+        /* Флажок с подписью в одну строку (label.check — как label.inline): галочка перед текстом, а не над ним. */
+        label.check, .panel label.check, .inline-form label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; color: var(--text-2); }
+        label.check input[type=checkbox] { width: auto; flex: none; margin: 0; }
         .inline-form { gap: 6px 10px; margin: 8px 0; }
         .flash, .error { padding: 6px 10px; margin: 8px 0; border-radius: 4px; }
         .tag { font-size: 11px; padding: 1px 6px; }
@@ -509,6 +520,12 @@
         .photo-strip figcaption { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
         .file-pick { display: inline-flex; flex-direction: column; gap: 4px; }
         .item-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 6px; }
+        /* D320: подсказка (похожие позиции и т. п.) — не ошибка. */
+        .hint.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+        .hint.warn a { color: inherit; margin-left: 6px; }
+        /* D318: выбор позиций в списке и панель массового изменения. */
+        th.select-col, td.select-col { width: 28px; padding-right: 0; }
+        .bulk-bar { margin: 8px 0; } .bulk-bar .grid { grid-template-columns: minmax(140px, auto) minmax(0, 1fr); align-items: center; }
         /* D316: конструктор этикеток — шаблоны, редактор и предпросмотр; на узком экране — друг под другом. */
         .label-designer { display: grid; gap: 16px; grid-template-columns: 1fr; }
         @@media (min-width: 1100px) { .label-designer { grid-template-columns: 260px minmax(0, 1fr) minmax(0, 420px); align-items: start; } }

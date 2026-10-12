@@ -176,6 +176,10 @@ builder.Services.AddRateLimiter(o =>
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http =>
         // D314 (сессия 4): фид каталога без входа — не больше 30 запросов в минуту с адреса (файл к тому же кэшируется на 5 минут).
+        // D324: фото фида площадка скачивает пачкой — свой, более широкий лимит (600 в минуту с адреса).
+        http.Request.Path.StartsWithSegments("/feeds/photos")
+            ? RateLimitPartition.GetFixedWindowLimiter("feed-photos:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
         http.Request.Path.StartsWithSegments("/feeds")
             ? RateLimitPartition.GetFixedWindowLimiter("feeds:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
@@ -216,6 +220,7 @@ builder.Services.AddRateLimiter(o =>
 });
 
 builder.Services.AddSingleton<KnitErp.Web.Exchange.FeedCache>(); // D314: кэш файлов фида каталога (свой, с лимитом объёма)
+builder.Services.AddSingleton<KnitErp.Application.Catalog.IFeedPhotoLinks, KnitErp.Web.Exchange.FeedPhotoLinks>(); // D324: подписанные ссылки на фото фида
 
 // D1102 (продажи): вкладка «Условия продаж» в карточке контрагента — вид цены клиента, менеджер, соглашения.
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.ModuleUi.Text("Условия продаж"),
@@ -594,7 +599,8 @@ app.MapGet("/feeds/{key}.yml", async (string key, KnitErp.Application.Catalog.Ca
     }
 
     var cacheKey = "feed:" + Convert.ToHexString(KnitErp.Domain.Catalog.CatalogFeed.Hash(key));
-    if (!cache.TryGet(cacheKey, out var xml))
+    // Ревью: ответ из кэша — только пока ключ включён (выключенный фид перестаёт отдаваться сразу, а не через 5 минут).
+    if (!cache.TryGet(cacheKey, out var xml) || !await feeds.IsLiveAsync(key, ct))
     {
         var file = await feeds.BuildAsync(key, $"{http.Request.Scheme}://{http.Request.Host}/", ct);
         if (file is null)
@@ -606,9 +612,24 @@ app.MapGet("/feeds/{key}.yml", async (string key, KnitErp.Application.Catalog.Ca
         cache.Set(cacheKey, xml);
     }
 
-    http.Response.Headers.CacheControl = "public, max-age=300";
+    http.Response.Headers.CacheControl = "private, max-age=300";
     http.Response.Headers["X-Robots-Tag"] = "noindex";
     return Results.File(xml!, "application/xml; charset=utf-8");
+}).AllowAnonymous();
+
+// D324 (сессия 4): фото предложений фида по подписанной ссылке (токен на 30 дней, фид должен быть включён). Иначе — 404.
+app.MapGet("/feeds/photos/{token}", async (string token, KnitErp.Application.Catalog.CatalogFeedService feeds, HttpContext http, CancellationToken ct) =>
+{
+    var photo = await feeds.PhotoAsync(token, ct);
+    if (photo is not { } p)
+    {
+        return Results.NotFound();
+    }
+
+    http.Response.Headers.CacheControl = "private, max-age=86400";
+    http.Response.Headers["X-Robots-Tag"] = "noindex";
+    http.Response.Headers.XContentTypeOptions = "nosniff";
+    return Results.File(p.Content, p.ContentType);
 }).AllowAnonymous();
 
 // Встраивать страницы knitERP в чужие сайты запрещено (как и в общей CSP).

@@ -32,6 +32,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<CatalogSettings> CatalogSettings => Set<CatalogSettings>();
     public DbSet<CatalogFeed> CatalogFeeds => Set<CatalogFeed>();
     public DbSet<LabelTemplate> LabelTemplates => Set<LabelTemplate>();
+    public DbSet<ItemGroupDefaults> ItemGroupDefaults => Set<ItemGroupDefaults>();
+    public DbSet<CharacteristicValueSet> CharacteristicValueSets => Set<CharacteristicValueSet>();
+    public DbSet<PriceRule> PriceRules => Set<PriceRule>();
     public DbSet<ExternalLink> ExternalLinks => Set<ExternalLink>();
     public DbSet<ExternalConnection> ExternalConnections => Set<ExternalConnection>();
     public DbSet<ExternalImportRun> ExternalImportRuns => Set<ExternalImportRun>();
@@ -164,6 +167,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
             : Database.BeginTransactionAsync(cancellationToken);
 
     public void DiscardChanges() => ChangeTracker.Clear();
+
+    public Task ReloadAsync(object entity, CancellationToken cancellationToken = default) => Entry(entity).ReloadAsync(cancellationToken);
 
     /// <summary>Участие во внешней транзакции: фиксация и откат — дело внешнего сценария.</summary>
     private sealed class JoinedTransaction(IDbContextTransaction outer) : IDbContextTransaction

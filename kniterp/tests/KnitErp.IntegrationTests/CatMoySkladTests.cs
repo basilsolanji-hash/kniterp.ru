@@ -390,13 +390,14 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         }
 
         // Идущая: «Остановить» нажато из другой вкладки, пока читаются услуги; движок останавливается на контрольной точке.
+        // Ревью: та же вкладка потом нажимает «Продолжить» — её копия загрузки устарела (её закрыл фоновый процесс), но перечитывается.
+        await using var tab = host.As(_user, _org);
         fake.OnList = async entity =>
         {
             if (entity == MoySkladEntities.Service)
             {
                 fake.OnList = null;
-                await using var other = host.As(_user, _org);
-                await Service(other, fake).CancelAsync(runId);
+                await Service(tab, fake).CancelAsync(runId);
             }
         };
         await using (var s = host.As(_user, _org))
@@ -408,10 +409,10 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
             Assert.Equal("product", stopped.Stage);
         }
 
+        await Service(tab, fake).ResumeAsync(runId);
         await using (var s = host.As(_user, _org))
         {
             var ms = Service(s, fake);
-            await ms.ResumeAsync(runId);
             Assert.True(await ms.ProcessNextAsync());
             Assert.Equal(ImportRunStatus.Completed, (await ms.StatusAsync()).Runs.Single().Status);
             Assert.Single((await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ДОСТ"))).Items);
