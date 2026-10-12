@@ -21,7 +21,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
     private sealed record Kit(DevModelService Models, DevTechService Tech, DevShopService Shop, DevSettingsService Settings, Services All,
-        DevHandoffService Handoff, DevYarnService Yarn) : IAsyncDisposable
+        DevHandoffService Handoff, DevYarnService Yarn, DevCostService Costs) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => All.DisposeAsync();
     }
@@ -34,8 +34,9 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         var models = new DevModelService(all.Db, guard, user, host.Clock);
         var tech = new DevTechService(all.Db, guard, user, host.Clock, models);
         return new Kit(models, tech, new DevShopService(all.Db, guard, user, host.Clock, tech), new DevSettingsService(all.Db, guard, user, host.Clock), all,
-            new DevHandoffService(all.Db, guard, user, host.Clock, all.Catalog, all.TechCards),
-            new DevYarnService(all.Db, guard, user, host.Clock, all.Documents));
+            new DevHandoffService(all.Db, guard, user, host.Clock, all.Catalog, all.TechCards,
+                new KnitErp.Application.Catalog.ModificationService(all.Db, guard, user, host.Clock)),
+            new DevYarnService(all.Db, guard, user, host.Clock, all.Documents), new DevCostService(all.Db, guard, user, host.Clock));
     }
 
     private static DevModelHeader Header(string name) =>
@@ -397,6 +398,9 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var extra = await k.Tech.AddColorAsync(model, "доп.1", red, null, null);
             var detail = await k.Tech.AddDetailAsync(model, "Полотно", 2);
             await k.Tech.SetKnittingAsync(detail, null, null, 180, 100m, null, (await k.Tech.DetailAsync(detail)).RowVersion);
+            var sketchFile = await k.Models.AddFileAsync(model, DevFileKind.Sketch, "sharf.png",
+                [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], null);
+            await k.Tech.PinSketchAsync(model, sketchFile, (await k.Models.GetAsync(model)).RowVersion);
             var steam = await k.Shop.AddOperationTypeAsync(new DevOperationValues("Парить", "шт", null, 0.1m, 3));
             await k.Shop.AddOperationAsync(model, steam, null, null, null);
             sample = await k.Shop.CreateSampleAsync(model, null);
@@ -425,7 +429,14 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await k.Models.MoveAsync(model, DevStage.Approved, null, (await k.Models.GetAsync(model)).RowVersion);
             p = await k.Handoff.PreviewAsync(model);
             Assert.True(p.CanHandOff, p.Refusal);
-            var cardId = await k.Handoff.HandOffAsync(model, null, "ШФ-100", null, p.RowVersion);
+            Assert.Null(p.SuggestedSizes); // сетки нет — и размерного ряда в задании нет
+            var handed = await k.Handoff.HandOffAsync(model, null, "ШФ-100", null, p.RowVersion, "S, M", "молочный, красный");
+            var cardId = handed.TechCardId;
+            // D753: модификации «Размер × Цвет» — 2 × 2 = 4 позиции у основной; закреплённый эскиз PNG — фото позиции.
+            Assert.True(p.HasSketchPhoto);
+            Assert.Equal((4, true), (handed.Modifications, handed.PhotoAdded));
+            Assert.Single(await k.All.Modifications.PhotosAsync(handed.ItemId));
+            Assert.Equal(4, (await k.All.Modifications.VariantsAsync(handed.ItemId)).Modifications.Count);
             var card = await k.All.TechCards.GetAsync(cardId);
             Assert.Equal(("ШФ-100", "Шарф в полоску", KnitErp.Domain.Production.TechCardStatus.Draft), (card.ItemCode, card.ItemName, card.Status));
             Assert.Equal(new[] { (cotton, 0.132m), (red, 0.088m) }, card.Lines.OrderBy(l => l.ItemId).Select(l => (l.ItemId, l.Quantity)));
@@ -451,6 +462,84 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await Assert.ThrowsAsync<NotFoundException>(() => k.Handoff.HandOffAsync(model, null, null, null, []));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Yarn.PreviewAsync(sample));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Yarn.WriteOffAsync(sample, warehouse, null));
+        }
+    }
+
+    /// <summary>
+    /// D740–D745: себестоимость по нормам пряжи, фурнитуре и операциям; цены вручную, замена пряжи, версии только на вставку,
+    /// фурнитура уходит в черновик техкарты, права на суммы и чужая организация.
+    /// </summary>
+    [SqlFact]
+    public async Task Costing_versions_scenarios_and_access()
+    {
+        var org = await CreateOrganizationAsync();
+        var other = await CreateOrganizationAsync();
+        long model, cotton, red, tag;
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            var units = await k.All.Catalog.ListUnitsAsync();
+            var kg = units.Single(u => u.Code == "166").Id;
+            var piece = units.Single(u => u.Code == "796").Id;
+            cotton = await k.All.Catalog.CreateItemAsync(new ItemCommand("ПР-20", "Хлопок 20/1", ItemType.RawMaterial, kg, null));
+            red = await k.All.Catalog.CreateItemAsync(new ItemCommand("ПР-21", "Хлопок 24/1", ItemType.RawMaterial, kg, null));
+            tag = await k.All.Catalog.CreateItemAsync(new ItemCommand("ФР-1", "Бирка", ItemType.Accessory, piece, null));
+            await k.Settings.SaveCostSettingsAsync(5m, 10m, 2m, 50m);
+            model = await k.Models.CreateAsync(Header("Шапка бини"));
+            await k.Tech.AddColorAsync(model, "Основной", cotton, null, null);
+            var detail = await k.Tech.AddDetailAsync(model, "Полотно", 2);
+            await k.Tech.SetKnittingAsync(detail, null, null, null, 110m, null, (await k.Tech.DetailAsync(detail)).RowVersion);
+            await k.Costs.AddAccessoryAsync(model, tag, 1m);
+            Assert.Equal("dev.accessory.type", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Costs.AddAccessoryAsync(model, red, 1m))).Code);
+            await k.Shop.AddOperationAsync(model, await k.Shop.AddOperationTypeAsync(new DevOperationValues("Вязание", "шт", 12.5m, null, 1)), null, null, null);
+            await k.Shop.AddOperationAsync(model, await k.Shop.AddOperationTypeAsync(new DevOperationValues("Парить", "шт", null, 3m, 3)), null, null, null);
+
+            // Цен нет — замечание; вручную: 0,22 кг +5 % × 500 + бирка 10 + работа 12,50 + 3 × 2 + накладные 10 % → 158,40, цена +50 %.
+            var bare = await k.Costs.CostingAsync(model);
+            Assert.Contains(bare.Warnings, w => w.Contains("нет цены"));
+            var priced = new DevCostScenario(new Dictionary<long, decimal> { [cotton] = 500m, [tag] = 10m });
+            var c = await k.Costs.CostingAsync(model, priced);
+            Assert.Equal((115.50m, 10m, 18.50m, 14.40m, 158.40m, 237.60m), (c.Yarn, c.Accessories, c.Labor, c.Overhead, c.Cost, c.Price));
+            Assert.Equal("вручную", c.Lines.First(l => l.ItemId == cotton).PriceSource);
+
+            // Сценарий «другая пряжа»: 24/1 по 600 → пряжа 138,60.
+            var replaced = await k.Costs.CostingAsync(model, priced with
+            {
+                Replace = new Dictionary<long, long> { [cotton] = red }, Prices = new Dictionary<long, decimal> { [red] = 600m, [tag] = 10m },
+            });
+            Assert.Equal((red, 138.60m), (replaced.Lines.First(l => l.Kind == DevCostLineKind.Yarn).ItemId!.Value, replaced.Yarn));
+
+            // Версии: номера по порядку, строки сохраняются, изменить версию в базе нельзя (триггер).
+            Assert.Equal(1, await k.Costs.SaveAsync(model, priced with { Note = "базовый" }));
+            Assert.Equal(2, await k.Costs.SaveAsync(model, priced with { Mode = DevPriceMode.TargetPrice, TargetPrice = 200m }));
+            var runs = (await k.Costs.CostingAsync(model)).Runs;
+            Assert.Equal(new[] { 2, 1 }, runs.Select(r => r.Version));
+            Assert.Equal((200m, 41.60m), (runs[0].Price, runs[0].Margin));
+            Assert.Equal(4, (await k.Costs.RunLinesAsync(runs[1].Id)).Count);
+            // D741, D751: в нормы передачи в производство идут пряжа с отходами из настроек и фурнитура модели.
+            var hp = await k.Handoff.PreviewAsync(model);
+            Assert.Equal((0.22m, 5m), (hp.Lines.Single(l => l.ItemId == cotton).Quantity, hp.Lines.Single(l => l.ItemId == cotton).WastePercent));
+            Assert.Equal((1m, 0m), (hp.Lines.Single(l => l.ItemId == tag).Quantity, hp.Lines.Single(l => l.ItemId == tag).WastePercent));
+            await using (var db = host.NewDb())
+            {
+                await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                    "UPDATE kniterp.dev_cost_runs SET Note = N'подмена' WHERE Id = {0}", runs[0].Id));
+                await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM kniterp.dev_cost_lines WHERE RunId = {0}", runs[0].Id));
+            }
+        }
+
+        // Без права «себестоимость» — отказ; чужая организация — «не найдено».
+        var sampler = await InviteActiveAsync(org, SystemRoles.DevSampler);
+        await using (var k = As(sampler, org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Costs.CostingAsync(model));
+        }
+
+        await using (var k = As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Costs.CostingAsync(model));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Costs.SaveAsync(model, new DevCostScenario()));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Costs.AddAccessoryAsync(model, tag, 1m));
         }
     }
 

@@ -182,4 +182,29 @@ public sealed class DevTechRulesTests
         Assert.Equal(133m, DevNorms.ToUnit(132.2m, "163", 0));
         Assert.Null(DevNorms.ToUnit(10m, "006", 2));
     }
+
+    [Fact]
+    public void Cost_and_price_from_lines_overhead_and_markup()
+    {
+        // D740–D743: пряжа 0,22 кг +5 % × 500 = 115,50; бирка 10; работа 12,50 + 3 мин × 2 = 18,50; накладные 10 % = 14,40.
+        var lines = new List<DevCostInputLine>
+        {
+            new(DevCostLineKind.Yarn, 1, "Хлопок", "кг", 0.22m, 500m, 5m),
+            new(DevCostLineKind.Accessory, 2, "Бирка", "шт", 1m, 10m, 0m),
+            new(DevCostLineKind.Labor, null, "Вязание", "шт", 1m, 12.5m, 0m),
+            new(DevCostLineKind.Labor, null, "Парить", "мин", 3m, 2m, 0m),
+        };
+        var r = DevCosting.Compute(lines, 10m, DevPriceMode.Markup, 50m, null, 150m);
+        Assert.Equal((0.231m, 115.50m), (r.Lines[0].Quantity, r.Lines[0].Amount));
+        Assert.Equal((115.50m, 10m, 18.50m, 14.40m, 158.40m), (r.Yarn, r.Accessories, r.Labor, r.Overhead, r.Cost));
+        Assert.Equal((237.60m, 79.20m, 33.33m, 8.40m), (r.Price, r.Margin, r.MarginPercent!.Value, r.VersusTargetCost!.Value));
+
+        var byTarget = DevCosting.Compute(lines, 10m, DevPriceMode.TargetPrice, null, 200m, null);
+        Assert.Equal((200m, 41.60m), (byTarget.Price, byTarget.Margin));
+        Assert.Null(byTarget.VersusTargetCost);
+        Assert.Equal("dev.cost.price", Assert.Throws<BusinessRuleException>(() => DevCosting.Compute(lines, 0, DevPriceMode.TargetPrice, null, null, null)).Code);
+        Assert.Equal("dev.cost.percent", Assert.Throws<BusinessRuleException>(() => DevCosting.Compute(lines, 1001, DevPriceMode.Markup, 0, null, null)).Code);
+        Assert.Throws<BusinessRuleException>(() => DevCosting.Compute([new(DevCostLineKind.Yarn, 1, "x", "кг", 1, -1, 0)], 0, DevPriceMode.Markup, 0, null, null));
+        Assert.Throws<BusinessRuleException>(() => DevModelAccessory.Create(1, 1, 1, 0));
+    }
 }

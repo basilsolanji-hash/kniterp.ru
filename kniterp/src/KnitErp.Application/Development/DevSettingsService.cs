@@ -224,6 +224,41 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
         }
     }
 
+    public async Task<DevCostSettingsDto> CostSettingsAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevCostView, ct);
+        var s = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct) ?? DevSettings.Defaults(ctx.OrganizationId);
+        return new DevCostSettingsDto(s.YarnWastePercent, s.OverheadPercent, s.LaborRatePerMinute, s.MarkupPercent, ctx.Permissions.Has(Permissions.DevSettings));
+    }
+
+    /// <summary>Условия расчёта себестоимости; в журнал — что изменены, без сумм ставки.</summary>
+    public async Task SaveCostSettingsAsync(decimal yarnWastePercent, decimal overheadPercent, decimal? laborRatePerMinute, decimal markupPercent,
+        CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
+        await guard.DemandAsync(Permissions.DevCostView, ct);
+        var org = ctx.OrganizationId;
+        try
+        {
+            var settings = await db.DevSettings.SingleOrDefaultAsync(x => x.OrganizationId == org, ct);
+            var isNew = settings is null;
+            settings ??= DevSettings.Defaults(org);
+            settings.SetCosting(yarnWastePercent, overheadPercent, laborRatePerMinute, markupPercent);
+            if (isNew)
+            {
+                db.DevSettings.Add(settings);
+            }
+
+            Audit(ctx, AuditActions.DevSettingsChanged, null, null, "условия расчёта изменены", "Себестоимость");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
     private static int BitCount(int mask) => System.Numerics.BitOperations.PopCount((uint)mask);
 
     public async Task SaveTemplateAsync(DevCategoryTemplateDto template, CancellationToken ct = default)

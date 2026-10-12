@@ -550,6 +550,11 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
     // ---------- Общие помощники ----------
 
+    /// <summary>Местное время организации (D722): даты документов и этикеток — по её часовому поясу, а не по UTC.</summary>
+    internal static async Task<DateTime> LocalNowAsync(IKnitErpDbContext db, long org, DateTime utc, CancellationToken ct) =>
+        TimeZoneInfo.ConvertTimeBySystemTimeZoneId(utc,
+            await db.Organizations.AsNoTracking().Where(o => o.Id == org).Select(o => o.TimeZoneId).SingleAsync(ct));
+
     internal async Task<DevSettings> SettingsAsync(long org, CancellationToken ct) =>
         await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
 
@@ -723,7 +728,7 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
                 var m = await db.DevModels.AsNoTracking().SingleAsync(x => x.Id == s.ModelId && x.OrganizationId == org, ct);
                 var size = s.SizeId is { } zid ? await db.DevModelSizes.AsNoTracking().Where(z => z.Id == zid).Select(z => z.Name).SingleOrDefaultAsync(ct) : null;
                 return new DevLabelDto(LabelCode(m.Number, "S" + s.No.ToString(CultureInfo.InvariantCulture)), $"{m.Number} · образец № {s.No}", m.Name,
-                    Lines(("Размер", size), ("Статус", DevSample.StatusName(s.Status)), ("Создан", s.CreatedAtUtc.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture))),
+                    Lines(("Размер", size), ("Статус", DevSample.StatusName(s.Status)), ("Создан", (await LocalNowAsync(db, org, s.CreatedAtUtc, ct)).ToString("dd.MM.yyyy", CultureInfo.InvariantCulture))),
                     $"dev/models/{m.Id}");
             }
             default:

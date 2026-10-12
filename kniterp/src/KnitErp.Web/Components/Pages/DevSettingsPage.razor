@@ -99,6 +99,11 @@ else
 
     <DevShopSettingsBlock />
 
+    @if (CurrentAccess.Has(Permissions.DevCostView))
+    {
+        <DevCostSettingsBlock />
+    }
+
     <h2>@L("Технологические операции")</h2>
     <p class="muted">@L("Справочник технолога: операция, единица, норма времени, расценка и этап производства (вязание, сборка, ВТО, контроль качества, упаковка).")</p>
     @if (_ops is not null)

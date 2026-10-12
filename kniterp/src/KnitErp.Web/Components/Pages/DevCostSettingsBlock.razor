@@ -1,0 +1,83 @@
+@using KnitErp.Application.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevSettingsService Settings
+
+@* Условия расчёта себестоимости (D740, D742): отходы пряжи, накладные, ставка за минуту, наценка. Видит `dev.cost.view`, меняет ещё и `dev.settings`. *@
+<h2>@L("Себестоимость")</h2>
+<p class="muted">@L("Отходы пряжи идут и в расчёт, и в норму отхода черновика техкарты; ставка за минуту — для операций без расценки.")</p>
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+@if (_s is not null)
+{
+    <div class="panel">
+        <form @onsubmit="SaveAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !_s.CanEdit)">
+                <div class="grid">
+                    <label>@L("Отходы пряжи, %") <input type="number" min="0" max="100" step="0.1" inputmode="decimal" @bind="_waste" /></label>
+                    <label>@L("Накладные расходы, %") <input type="number" min="0" max="1000" step="0.1" inputmode="decimal" @bind="_overhead" /></label>
+                    <label>@L("Ставка работы за минуту") <input type="number" min="0" step="0.01" inputmode="decimal" @bind="_rate" /></label>
+                    <label>@L("Наценка по умолчанию, %") <input type="number" min="0" max="1000" step="0.1" inputmode="decimal" @bind="_markup" /></label>
+                </div>
+                @if (_s.CanEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </fieldset>
+        </form>
+    </div>
+}
+
+@code {
+    private DevCostSettingsDto? _s;
+    private decimal _waste;
+    private decimal _overhead;
+    private decimal? _rate;
+    private decimal _markup;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _s = await Gate.Run(() => Settings.CostSettingsAsync());
+        (_waste, _overhead, _rate, _markup) = (_s.YarnWastePercent, _s.OverheadPercent, _s.LaborRatePerMinute, _s.MarkupPercent);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(() => Settings.SaveCostSettingsAsync(_waste, _overhead, _rate, _markup));
+            _message = L("Условия расчёта сохранены.");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}
