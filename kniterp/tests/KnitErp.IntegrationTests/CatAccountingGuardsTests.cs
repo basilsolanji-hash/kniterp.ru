@@ -14,7 +14,7 @@ using Microsoft.EntityFrameworkCore;
 namespace KnitErp.IntegrationTests;
 
 /// <summary>
-/// D339 (аудит модуля «Товары»): позиция в учёте не меняет единицу и код (сервис, загрузка Excel и триггер базы), точность единицы
+/// D339 (аудит модуля «Товары»): позиция в учёте не меняет единицу (код — можно, D342) (сервис, загрузка Excel и триггер базы), точность единицы
 /// не уменьшается при записанных количествах, модификация — единица и НДС как у основной, архив — без остатка, модификаций и комплектов,
 /// цены архивной позиции не меняются.
 /// </summary>
@@ -39,8 +39,9 @@ public sealed class CatAccountingGuardsTests(SqlTestHost host) : IClassFixture<S
         var card = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ПР-1"))).Items.Single();
         Assert.Equal("catalog.unit.in_use", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
             s.Catalog.UpdateItemAsync(yarn, new ItemCommand("ПР-1", "Пряжа", ItemType.RawMaterial, piece, null), card.RowVersion))).Code);
-        Assert.Equal("catalog.code.in_use", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
-            s.Catalog.UpdateItemAsync(yarn, new ItemCommand("ПР-9", "Пряжа", ItemType.RawMaterial, kg, null), card.RowVersion))).Code);
+        // D342: код позиции в учёте менять можно (артикулы на фабрике меняются); вернём прежний, чтобы дальше искать по нему.
+        await s.Catalog.UpdateItemAsync(yarn, new ItemCommand("ПР-9", "Пряжа", ItemType.RawMaterial, kg, null), card.RowVersion);
+        card = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ПР-9"))).Items.Single();
         await s.Catalog.UpdateItemAsync(yarn, new ItemCommand("ПР-1", "Пряжа мериносовая", ItemType.RawMaterial, kg, null), card.RowVersion);
 
         // Новая позиция без истории — единицу сменить можно.
@@ -60,16 +61,23 @@ public sealed class CatAccountingGuardsTests(SqlTestHost host) : IClassFixture<S
             s.Catalog.UpdateUnitAsync(kg, new UnitCommand("KGX", "Килограмм тест", "кгт", 0), unit.RowVersion))).Code);
         await s.Catalog.UpdateUnitAsync(kg, new UnitCommand("KGX", "Килограмм тест", "кгт", 4), unit.RowVersion);
 
-        // Архив: с остатком — нет.
+        // D343: архив позиции с остатком — только с подтверждением; без него ничего не меняется.
         card = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ПР-1"))).Items.Single();
-        Assert.Equal("catalog.archive.has_stock", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Catalog.ArchiveItemAsync(yarn, card.RowVersion))).Code);
+        Assert.Contains("остаток 2.5", Assert.Single(await s.Catalog.ArchiveItemAsync(yarn, card.RowVersion)));
+        Assert.False((await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ПР-1"))).Items.Single().IsArchived);
 
         // Компонент действующего комплекта — нет.
         var bundle = await s.Catalog.CreateItemAsync(new ItemCommand("НБ-1", "Набор", ItemType.Bundle, piece, null,
             (await s.VatRates.ActiveAsync()).First().Id));
         await s.Bundles.SetComponentAsync(bundle, fresh, 2);
         freshCard = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ПР-2"))).Items.Single();
-        Assert.Equal("catalog.archive.in_bundle", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Catalog.ArchiveItemAsync(fresh, freshCard.RowVersion))).Code);
+        Assert.Contains("НБ-1", Assert.Single(await s.Catalog.ArchiveItemAsync(fresh, freshCard.RowVersion)));
+        Assert.Empty(await s.Catalog.ArchiveItemAsync(fresh, freshCard.RowVersion, confirmed: true));
+        await using (var db = host.NewDb())
+        {
+            var audit = await db.AuditEntries.Where(a => a.EntityId == fresh.ToString() && a.Action == KnitErp.Domain.Audit.AuditActions.CatalogArchived).SingleAsync();
+            Assert.Contains("подтверждено", audit.Reason);
+        }
 
         // Цены архивной позиции не меняются.
         var plain = await s.Catalog.CreateItemAsync(new ItemCommand("ПР-3", "Пряжа старая", ItemType.RawMaterial, kg, null));
@@ -88,7 +96,7 @@ public sealed class CatAccountingGuardsTests(SqlTestHost host) : IClassFixture<S
     [SqlFact]
     public async Task Item_in_open_order_is_not_archived()
     {
-        // D340: позиция в открытом заказе покупателя — не в архив; после отмены заказа — можно.
+        // D340/D343: позиция в открытом заказе покупателя — предупреждение; после отмены заказа — архив без вопросов.
         var org = await CreateOrgAsync();
         await using var s = host.As(org.OwnerUserId, org.OrganizationId);
         var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
@@ -100,34 +108,33 @@ public sealed class CatAccountingGuardsTests(SqlTestHost host) : IClassFixture<S
         await s.Sales.SetOrderLineAsync(order, sweater, 2, 3000m, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
 
         var card = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "СВ-7"))).Items.Single();
-        Assert.Equal("catalog.archive.in_sales_order", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Catalog.ArchiveItemAsync(sweater, card.RowVersion))).Code);
+        Assert.Contains("открытом заказе покупателя", Assert.Single(await s.Catalog.ArchiveItemAsync(sweater, card.RowVersion)));
 
         await s.Sales.CancelOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion);
-        await s.Catalog.ArchiveItemAsync(sweater, card.RowVersion);
+        Assert.Empty(await s.Catalog.ArchiveItemAsync(sweater, card.RowVersion));
     }
 
     [SqlFact]
-    public async Task Price_changed_by_another_user_is_a_conflict()
+    public async Task Price_saved_last_wins_with_true_history()
     {
-        // D341: цена, изменённая другим пользователем после открытия карточки, не перезаписывается молча.
+        // D344 (ответ заказчика: конфликт цен убрать): сохраняется последнее изменение, но вкладка с устаревшей ценой в памяти
+        // пишет в историю настоящую прежнюю цену из базы.
         var org = await CreateOrgAsync();
         await using var s = host.As(org.OwnerUserId, org.OrganizationId);
         var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
         var sweater = await s.Catalog.CreateItemAsync(new ItemCommand("СВ-8", "Свитер", ItemType.Finished, piece, null, (await s.VatRates.ActiveAsync())[0].Id));
         var price = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.IsDefault).Id;
         await s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1000 });
-
-        var seen = new Dictionary<long, decimal?> { [price] = 1000 };
         await using (var other = host.As(org.OwnerUserId, org.OrganizationId))
         {
-            await other.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1200 }, seen);
+            await other.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1200 });
         }
 
-        await Assert.ThrowsAsync<ConcurrencyConflictException>(() =>
-            s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1100 }, seen));
-        await s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1100 }, new Dictionary<long, decimal?> { [price] = 1200 });
+        await s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1100 });
         await using var db = host.NewDb();
         Assert.Equal(1100m, await db.ItemPrices.Where(p => p.ItemId == sweater).Select(p => p.Price).SingleAsync());
+        var last = await db.ItemPriceHistory.Where(h => h.ItemId == sweater).OrderByDescending(h => h.Id).FirstAsync();
+        Assert.Equal(((decimal?)1200m, (decimal?)1100m), (last.OldPrice, last.NewPrice));
     }
 
     [SqlFact]
@@ -158,6 +165,39 @@ public sealed class CatAccountingGuardsTests(SqlTestHost host) : IClassFixture<S
         await using (var s = host.As(keeper, org.OrganizationId))
         {
             Assert.Equal(3m, (await s.Nomenclature.GetItemAsync(yarn)).Stock);
+        }
+    }
+
+    [SqlFact]
+    public async Task Audit_log_hides_prices_without_price_right()
+    {
+        // D345: аудитор с запретом «Цены и суммы» видит в журнале, что цена менялась, но не её значения.
+        var org = await CreateOrgAsync();
+        long auditor;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+            var sweater = await s.Catalog.CreateItemAsync(new ItemCommand("СВ-9", "Свитер", ItemType.Finished, piece, null, (await s.VatRates.ActiveAsync())[0].Id));
+            var price = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.IsDefault).Id;
+            await s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1234 });
+            auditor = (await s.Access.InviteAsync(new InviteUserCommand($"auditor-{Guid.NewGuid():N}@test.local", "Аудитор",
+                SystemRoles.Auditor, null))).UserId;
+            Assert.Contains(await s.Audit.ListAsync(), r => r.After == "1234.00");
+        }
+
+        await using (var db = host.NewDb())
+        {
+            (await db.Users.SingleAsync(u => u.Id == auditor)).Activate();
+            db.RoleAssignments.Add(RoleAssignment.ForPermission(org.OrganizationId, auditor, Permissions.PriceView,
+                isDeny: true, org.OwnerUserId, host.Clock.UtcNow, "Тест запрета"));
+            await db.SaveChangesAsync();
+        }
+
+        await using (var s = host.As(auditor, org.OrganizationId))
+        {
+            var rows = await s.Audit.ListAsync();
+            Assert.DoesNotContain(rows, r => r.After == "1234.00");
+            Assert.Contains(rows, r => r.After == KnitErp.Application.Audit.AuditQueryService.Hidden && r.Reason!.StartsWith("СВ-9: "));
         }
     }
 

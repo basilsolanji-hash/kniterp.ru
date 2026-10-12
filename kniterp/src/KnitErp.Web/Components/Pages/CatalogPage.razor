@@ -46,6 +46,24 @@ else
         <div class="@(_flashIsError ? "flash error" : "flash")" role="@(_flashIsError ? "alert" : "status")"><span>@_flash@if (_created is { } created && !_flashIsError) { <text> </text><a href="catalog/items/@created.Id">@created.Name</a> }</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _flash = null">×</button></div>
     }
 
+    @if (_archiveAsk is { } ask)
+    {
+        @* D343: позиция в учёте уходит в архив только после подтверждения, с перечнем последствий. *@
+        <div class="notice warning archive-ask" role="alert">
+            <p><strong>@L("Позиция «{0}» уже в учёте:", ask.Item.Name)</strong></p>
+            <ul>
+                @foreach (var w in ask.Warnings)
+                {
+                    <li>@KnitErp.Web.Localization.Text.Message(w)</li>
+                }
+            </ul>
+            <div class="row-actions">
+                <button type="button" class="danger" @onclick="() => ArchiveItemAsync(ask.Item, true)" disabled="@_busy">@L("Всё равно в архив")</button>
+                <button type="button" class="secondary" @onclick="() => _archiveAsk = null" disabled="@_busy">@L("Отмена")</button>
+            </div>
+        </div>
+    }
+
     @if (_mode is Mode.Create or Mode.Edit)
     {
         <div class="panel">
@@ -879,7 +897,28 @@ else
         Close();
     }, L("Позиция сохранена."));
 
-    private Task ArchiveItemAsync(ItemDto i) => RunAsync(() => Catalog.ArchiveItemAsync(i.Id, i.RowVersion), L("Позиция «{0}» в архиве.", i.Name));
+    private (ItemDto Item, IReadOnlyList<string> Warnings)? _archiveAsk;
+
+    /// <summary>D343: сначала без подтверждения — сервис вернёт предупреждения, если позиция в учёте; тогда спрашиваем.</summary>
+    private async Task ArchiveItemAsync(ItemDto i, bool confirmed = false)
+    {
+        _archiveAsk = null;
+        IReadOnlyList<string>? warnings = null;
+        await RunAsync(async () => warnings = await Catalog.ArchiveItemAsync(i.Id, i.RowVersion, confirmed), null);
+        if (warnings is null)
+        {
+            return; // ошибка уже показана
+        }
+
+        if (warnings.Count > 0)
+        {
+            _archiveAsk = (i, warnings);
+        }
+        else
+        {
+            _flash = L("Позиция «{0}» в архиве.", i.Name);
+        }
+    }
 
     private Task RestoreItemAsync(ItemDto i) =>
         RunAsync(() => Catalog.RestoreItemAsync(i.Id, i.RowVersion), L("Позиция «{0}» возвращена из архива.", i.Name));

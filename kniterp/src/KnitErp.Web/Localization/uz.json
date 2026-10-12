@@ -2997,12 +2997,15 @@
   "Вид по умолчанию": "Standart ko‘rinish",
   "Столбцы": "Ustunlar",
   "Единица «{0}» уже в учёте ({1}): уменьшать число знаков после запятой нельзя — записанные количества стали бы недопустимыми.": "«{0}» birligi allaqachon hisobda ({1}): verguldan keyingi belgilar sonini kamaytirib bo‘lmaydi — yozilgan miqdorlar yaroqsiz bo‘lib qoladi.",
-  "Позиция {0} входит в действующий комплект — уберите её из состава или отправьте комплект в архив.": "{0} pozitsiyasi amaldagi to‘plam tarkibida — uni tarkibdan olib tashlang yoki to‘plamni arxivga yuboring.",
   "Позиция {0} уже в учёте ({1}): единицу менять нельзя — записанные количества относятся к прежней. Создайте новую позицию с нужной единицей.": "{0} pozitsiyasi allaqachon hisobda ({1}): birlikni o‘zgartirib bo‘lmaydi — yozilgan miqdorlar avvalgisiga tegishli. Kerakli birlik bilan yangi pozitsiya yarating.",
-  "Позиция {0} уже в учёте ({1}): код не меняется. Наименование и артикул менять можно.": "{0} pozitsiyasi allaqachon hisobda ({1}): kod o‘zgarmaydi. Nomi va artikulini o‘zgartirish mumkin.",
   "У модификации единица и ставка НДС — как у основной позиции: меняйте их в основной позиции.": "Modifikatsiyaning birligi va QQS stavkasi asosiy pozitsiyadagidek: ularni asosiy pozitsiyada o‘zgartiring.",
-  "У позиции {0} есть действующие модификации — сначала отправьте в архив их.": "{0} pozitsiyasida amaldagi modifikatsiyalar bor — avval ularni arxivga yuboring.",
   "Штрихкод {0} только что добавлен к другой позиции.": "{0} shtrix-kodi hozirgina boshqa pozitsiyaga qo‘shildi.",
-  "Позиция {0} есть в открытом заказе покупателя {1}: сначала закройте или отмените заказ.": "{0} pozitsiyasi xaridorning ochiq {1} buyurtmasida bor: avval buyurtmani yoping yoki bekor qiling.",
-  "Позиция {0} есть в открытом заказе поставщику {1}: сначала закройте или отмените заказ.": "{0} pozitsiyasi yetkazib beruvchiga ochiq {1} buyurtmasida bor: avval buyurtmani yoping yoki bekor qiling."
+  "Всё равно в архив": "Baribir arxivga",
+  "Входит в действующий комплект {0}: собрать и продать его без этой позиции не получится.": "Amaldagi {0} to‘plamiga kiradi: uni bu pozitsiyasiz yig‘ish va sotish mumkin bo‘lmaydi.",
+  "Действующих модификаций: {0} — они уйдут в архив вместе с позицией.": "Amaldagi modifikatsiyalar: {0} — ular pozitsiya bilan birga arxivga o‘tadi.",
+  "Есть в открытом заказе покупателя {0}.": "Xaridorning ochiq {0} buyurtmasida bor.",
+  "Есть в открытом заказе поставщику {0}.": "Yetkazib beruvchiga ochiq {0} buyurtmasida bor.",
+  "На складе остаток {0}: списать или переместить его можно будет только после возврата из архива.": "Omborda {0} qoldiq bor: uni faqat arxivdan qaytargandan keyin hisobdan chiqarish yoki ko‘chirish mumkin.",
+  "Позиция «{0}» уже в учёте:": "«{0}» pozitsiyasi allaqachon hisobda:",
+  "скрыто": "yashirilgan"
 }

@@ -385,14 +385,8 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
         }
 
-        // D339: код уникален навсегда — у позиции в учёте он не меняется (иначе старый код достался бы другой позиции, и загрузки
-        // и внешние системы попали бы не на ту вещь).
-        if (!string.Equals(Item.NormalizeCode(cmd.Code), item.Code, StringComparison.Ordinal)
-            && await db.ItemUsageAsync(ctx.OrganizationId, id, null, ct) is { } codeUsage)
-        {
-            throw new BusinessRuleException("catalog.code.in_use",
-                $"Позиция {item.Code} уже в учёте ({ItemUsage.Describe(codeUsage)}): код не меняется. Наименование и артикул менять можно.");
-        }
+        // D342 (ответ заказчика): артикулы на фабрике меняются — код позиции в учёте менять можно (отменяет запрет D339).
+        // Документы ссылаются на позицию по Id, старый код остаётся в журнале аудита («Код: было → стало»).
 
         if (cmd.UnitId != item.UnitId && await db.ItemPacks.AnyAsync(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == id, ct))
         {
@@ -509,54 +503,77 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
     }
 
-    public async Task ArchiveItemAsync(long id, byte[] rowVersion, CancellationToken ct = default)
+    /// <summary>
+    /// D343 (ответ заказчика: жёсткий запрет D339/D340 не подходит): у позиции в учёте архив — с подтверждением. Без confirmed
+    /// при остатке, действующих модификациях, комплекте или открытом заказе ничего не меняется — возвращаются предупреждения,
+    /// экран спрашивает «Всё равно в архив?». С confirmed позиция уходит в архив вместе с действующими модификациями,
+    /// предупреждения пишутся в журнал. Пустой список — позиция в архиве.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ArchiveItemAsync(long id, byte[] rowVersion, bool confirmed = false, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogArchive, ct);
         var item = await FindItemAsync(ctx, id, ct);
         item.EnsureVersion(item.RowVersion, rowVersion);
-        // D339: в архив — только без остатка, без действующих модификаций и не компонентом действующего комплекта: иначе остаток
-        // «зависал» бы в отчётах (списать архивную позицию нельзя), а комплект молча становился недоступным.
-        var stock = await db.StockMovements.Where(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == id).SumAsync(m => (decimal?)m.Quantity, ct) ?? 0;
+        var variants = await db.Items.Where(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == id && !i.IsArchived).ToListAsync(ct);
+        var ids = variants.Select(v => v.Id).Append(id).ToList();
+        var warnings = new List<string>();
+        void Warn(BusinessRuleException w) => warnings.Add(w.Message); // сообщение правила — переводится экраном (Text.Message)
+
+        var stock = await db.StockMovements.Where(m => m.OrganizationId == ctx.OrganizationId && ids.Contains(m.ItemId)).SumAsync(m => (decimal?)m.Quantity, ct) ?? 0;
         if (stock != 0)
         {
-            throw new BusinessRuleException("catalog.archive.has_stock", $"У позиции {item.Code} есть остаток ({stock.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}): сначала спишите или переместите его.");
+            var qty = stock.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+            Warn(new BusinessRuleException("catalog.archive.has_stock", $"На складе остаток {qty}: списать или переместить его можно будет только после возврата из архива."));
         }
 
-        if (await db.Items.AnyAsync(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == id && !i.IsArchived, ct))
+        if (variants.Count > 0)
         {
-            throw new BusinessRuleException("catalog.archive.has_variants", $"У позиции {item.Code} есть действующие модификации — сначала отправьте в архив их.");
+            Warn(new BusinessRuleException("catalog.archive.has_variants", $"Действующих модификаций: {variants.Count} — они уйдут в архив вместе с позицией."));
         }
 
-        if (await db.BundleComponents.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.ComponentItemId == id
-                                                    && db.Items.Any(b => b.Id == c.BundleItemId && !b.IsArchived), ct))
+        var bundle = await db.BundleComponents.Where(c => c.OrganizationId == ctx.OrganizationId && ids.Contains(c.ComponentItemId))
+            .Join(db.Items.Where(b => !b.IsArchived), c => c.BundleItemId, b => b.Id, (c, b) => b.Code).FirstOrDefaultAsync(ct);
+        if (bundle is not null)
         {
-            throw new BusinessRuleException("catalog.archive.in_bundle", $"Позиция {item.Code} входит в действующий комплект — уберите её из состава или отправьте комплект в архив.");
+            Warn(new BusinessRuleException("catalog.archive.in_bundle", $"Входит в действующий комплект {bundle}: собрать и продать его без этой позиции не получится."));
         }
 
-        // D340: открытый заказ (черновик или подтверждён) с позицией — её ещё отгрузят или примут; архив сломал бы заказ и резерв.
         var salesOrder = await db.SalesOrders.AsNoTracking()
             .Where(o => o.OrganizationId == ctx.OrganizationId
                         && (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft || o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed)
-                        && o.Lines.Any(l => l.ItemId == id))
+                        && o.Lines.Any(l => ids.Contains(l.ItemId)))
             .Select(o => o.Number).FirstOrDefaultAsync(ct);
         if (salesOrder is not null)
         {
-            throw new BusinessRuleException("catalog.archive.in_sales_order", $"Позиция {item.Code} есть в открытом заказе покупателя {salesOrder}: сначала закройте или отмените заказ.");
+            Warn(new BusinessRuleException("catalog.archive.in_sales_order", $"Есть в открытом заказе покупателя {salesOrder}."));
         }
 
         var purchaseOrder = await db.PurchaseOrders.AsNoTracking()
             .Where(o => o.OrganizationId == ctx.OrganizationId
                         && (o.Status == KnitErp.Domain.Purchasing.PurchaseOrderStatus.Draft || o.Status == KnitErp.Domain.Purchasing.PurchaseOrderStatus.Confirmed)
-                        && o.Lines.Any(l => l.ItemId == id))
+                        && o.Lines.Any(l => ids.Contains(l.ItemId)))
             .Select(o => o.Number).FirstOrDefaultAsync(ct);
         if (purchaseOrder is not null)
         {
-            throw new BusinessRuleException("catalog.archive.in_purchase_order", $"Позиция {item.Code} есть в открытом заказе поставщику {purchaseOrder}: сначала закройте или отмените заказ.");
+            Warn(new BusinessRuleException("catalog.archive.in_purchase_order", $"Есть в открытом заказе поставщику {purchaseOrder}."));
+        }
+
+        if (warnings.Count > 0 && !confirmed)
+        {
+            return warnings;
+        }
+
+        var note = warnings.Count > 0 ? "подтверждено: " + string.Join(" ", warnings) : null;
+        foreach (var v in variants)
+        {
+            v.Archive(clock.UtcNow);
+            Audit(ctx, AuditActions.CatalogArchived, nameof(Item), v.Id, $"{v.Code} {v.Name}", "в архиве", $"вместе с {item.Code}");
         }
 
         item.Archive(clock.UtcNow);
-        Audit(ctx, AuditActions.CatalogArchived, nameof(Item), id, $"{item.Code} {item.Name}", "в архиве", null);
+        Audit(ctx, AuditActions.CatalogArchived, nameof(Item), id, $"{item.Code} {item.Name}", "в архиве", note);
         await db.SaveOrConflictAsync(ct);
+        return [];
     }
 
     public async Task RestoreItemAsync(long id, byte[] rowVersion, CancellationToken ct = default)

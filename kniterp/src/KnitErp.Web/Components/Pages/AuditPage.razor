@@ -40,7 +40,7 @@ else
                         <td>
                             @if (a.Before is not null || a.After is not null)
                             {
-                                <span class="muted">@(a.Before ?? "—")</span> <span>→ @(a.After ?? "—")</span>
+                                <span class="muted">@Value(a.Before)</span> <span>→ @Value(a.After)</span>
                             }
                         </td>
                         <td>@a.Reason</td>
@@ -70,4 +70,7 @@ else
             _denied = UiErrors.Message(ex);
         }
     }
+
+    /// <summary>D345: «скрыто» (цена без права «Цены и суммы») — на языке интерфейса.</summary>
+    private string Value(string? v) => v is null ? "—" : v == AuditQueryService.Hidden ? L("скрыто") : v;
 }

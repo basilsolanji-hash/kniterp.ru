@@ -1088,7 +1088,7 @@ else
     private Task SavePricesAsync() => RunAsync(async () =>
     {
         var prices = _prices.ToDictionary(p => p.Key, p => Decimals.Parse(p.Value, L("Цена")));
-        await Nomenclature.SetPricesAsync(Id, prices, _item!.Prices.ToDictionary(p => p.PriceTypeId, p => p.Price)); // D341
+        await Nomenclature.SetPricesAsync(Id, prices);
     }, L("Цены сохранены."));
 
     /// <summary>Одна операция за раз, затем свежая карточка: у вкладки один DbContext.</summary>
