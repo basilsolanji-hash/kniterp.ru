@@ -261,7 +261,7 @@ public sealed partial class SalesService
             clock.UtcNow);
         db.SalesCreditApprovals.Add(approval);
         Audit(ctx, AuditActions.SalesCreditOverride, nameof(SalesOrder), order.Id,
-            $"долг {check.Debt:0.00}, лимит {(check.Limit is { } l ? l.ToString("0.00", CultureInfo.InvariantCulture) : "—")}, просрочено {check.Overdue:0.00}, заказ {approval.Amount:0.00}",
+            FormattableString.Invariant($"долг {check.Debt:0.00}, лимит {(check.Limit is { } l ? l.ToString("0.00", CultureInfo.InvariantCulture) : "—")}, просрочено {check.Overdue:0.00}, заказ {approval.Amount:0.00}"),
             approval.Reason, order.Number);
         await db.SaveOrConflictAsync(ct);
     }
