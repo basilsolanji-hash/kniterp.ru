@@ -135,7 +135,7 @@ public sealed class AccountRecoveryTests(SqlTestHost host) : IClassFixture<SqlTe
 
             // Второй фактор ссылка не отменяет; прежние сессии закрыты; ссылка одноразовая.
             Assert.Equal(SignInStatus.TwoFactorRequired, (await s.SignIn.PasswordSignInAsync(email, NewPassword)).Status);
-            Assert.False(await s.SignIn.ValidateSessionAsync(org.OwnerUserId, org.OrganizationId, oldStamp));
+            Assert.False(await s.SignIn.ValidateSessionAsync(org.OwnerUserId, org.OrganizationId, oldStamp, await LastSessionAsync(org.OwnerUserId)));
             Assert.Equal("auth.reset.invalid", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 s.PasswordReset.ResetAsync(token, NewPassword, NewPassword))).Code);
         }
@@ -310,5 +310,12 @@ public sealed class AccountRecoveryTests(SqlTestHost host) : IClassFixture<SqlTe
         await using var s = host.As(null, null);
         return await s.Organizations.CreateWithOwnerAsync(new CreateOrganizationCommand(
             $"Тестовая организация {inn}", $"Тест {inn}", inn, null, false, "Europe/Moscow", $"owner-{inn}@test.local", $"Владелец {inn}"));
+    }
+
+    /// <summary>D122: последняя серверная сессия пользователя (вход при подключении 2FA).</summary>
+    private async Task<Guid> LastSessionAsync(long userId)
+    {
+        await using var db = host.NewDb();
+        return await db.UserSessions.Where(x => x.UserId == userId).OrderByDescending(x => x.Id).Select(x => x.PublicId).FirstAsync();
     }
 }

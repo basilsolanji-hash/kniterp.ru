@@ -32,6 +32,12 @@ public interface ICurrentUser
     /// <summary>IP-адрес клиента обычного HTTP-запроса (страницы входа) — для журнала входов. В Blazor-цепи и тестах — null.</summary>
     string? ClientAddress => null;
 
+    /// <summary>D122: заголовок User-Agent обычного HTTP-запроса (страницы входа) — для названия устройства в списке сессий.</summary>
+    string? UserAgent => null;
+
+    /// <summary>D122: внешний идентификатор сессии из cookie; null — запрос не из браузерной сессии (API, фоновые задачи, тесты).</summary>
+    Guid? SessionId => null;
+
     /// <summary>Запрос по токену API (D88): права ограничены этими кодами (пересечение с правами пользователя). null — обычная сессия.</summary>
     IReadOnlyCollection<string>? ApiScope => null;
 
@@ -54,6 +60,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<UserAccount> Users { get; }
     DbSet<RecoveryCode> RecoveryCodes { get; }
     DbSet<TrustedDevice> TrustedDevices { get; }
+
+    /// <summary>D122: серверные сессии входа.</summary>
+    DbSet<UserSession> UserSessions { get; }
     DbSet<Characteristic> Characteristics { get; }
     DbSet<ItemCharacteristicValue> ItemCharacteristicValues { get; }
     DbSet<ItemPhoto> ItemPhotos { get; }

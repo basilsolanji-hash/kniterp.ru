@@ -77,7 +77,7 @@ builder.Services.AddAuthentication(AuthSchemes.Session)
         o.LoginPath = "/account/login";
         o.AccessDeniedPath = "/account/login";
         // Допущение D27: сессия живёт 12 часов (рабочая смена) и продлевается при активности.
-        o.ExpireTimeSpan = TimeSpan.FromHours(12);
+        o.ExpireTimeSpan = KnitErp.Domain.Access.SignInPolicy.SessionLifetime;
         o.SlidingExpiration = true;
         o.Events.OnValidatePrincipal = SessionValidation.OnValidatePrincipal;
     })
@@ -327,7 +327,7 @@ app.MapPost("/account/logout", async (HttpContext http, IAntiforgery antiforgery
 
     if (SessionClaims.Read(http.User) is { } session)
     {
-        await signIn.RecordSignOutAsync(session.UserId, session.OrganizationId, http.RequestAborted);
+        await signIn.RecordSignOutAsync(session.UserId, session.OrganizationId, session.SessionId, http.RequestAborted);
     }
 
     await http.SignOutAsync(AuthSchemes.Session);

@@ -56,7 +56,8 @@ public static class PendingSignInCookie
 }
 
 /// <summary>
-/// Проверка cookie на HTTP-запросах: не реже раза в минуту сверяем штамп, статус пользователя и участие в организации.
+/// Проверка cookie на HTTP-запросах: не реже раза в минуту сверяем штамп, статус пользователя, участие в организации
+/// и серверную запись сессии (D122: завершённая на другом устройстве сессия закрывается).
 /// Блокировка и смена прав закрывают сессию не позднее чем через 60 секунд.
 /// </summary>
 public static class SessionValidation
@@ -77,7 +78,8 @@ public static class SessionValidation
         var session = context.Principal is null ? null : SessionClaims.Read(context.Principal);
         var signIn = context.HttpContext.RequestServices.GetRequiredService<SignInService>();
         if (session is null
-            || !await signIn.ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, context.HttpContext.RequestAborted))
+            || !await signIn.ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, session.SessionId,
+                context.HttpContext.RequestAborted))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(AuthSchemes.Session);
@@ -104,7 +106,7 @@ public sealed class SessionRevalidatingAuthenticationStateProvider(ILoggerFactor
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var signIn = scope.ServiceProvider.GetRequiredService<SignInService>();
-        return await signIn.ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, cancellationToken);
+        return await signIn.ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, session.SessionId, cancellationToken);
     }
 }
 
@@ -130,28 +132,5 @@ public static class TrustedDeviceCookie
         });
 
     /// <summary>«Chrome, Windows» — по заголовку User-Agent, чтобы пользователь узнал устройство в списке.</summary>
-    public static string Label(HttpContext http)
-    {
-        var ua = http.Request.Headers.UserAgent.ToString();
-        var browser = ua switch
-        {
-            _ when ua.Contains("YaBrowser", StringComparison.Ordinal) => "Яндекс Браузер",
-            _ when ua.Contains("Edg/", StringComparison.Ordinal) => "Edge",
-            _ when ua.Contains("OPR/", StringComparison.Ordinal) => "Opera",
-            _ when ua.Contains("Firefox/", StringComparison.Ordinal) => "Firefox",
-            _ when ua.Contains("Chrome/", StringComparison.Ordinal) => "Chrome",
-            _ when ua.Contains("Safari/", StringComparison.Ordinal) => "Safari",
-            _ => "Браузер",
-        };
-        var system = ua switch
-        {
-            _ when ua.Contains("Android", StringComparison.Ordinal) => "Android",
-            _ when ua.Contains("iPhone", StringComparison.Ordinal) || ua.Contains("iPad", StringComparison.Ordinal) => "iOS",
-            _ when ua.Contains("Windows", StringComparison.Ordinal) => "Windows",
-            _ when ua.Contains("Mac OS X", StringComparison.Ordinal) => "macOS",
-            _ when ua.Contains("Linux", StringComparison.Ordinal) => "Linux",
-            _ => null,
-        };
-        return system is null ? browser : $"{browser}, {system}";
-    }
+    public static string Label(HttpContext http) => KnitErp.Domain.Access.SessionDevice.Label(http.Request.Headers.UserAgent.ToString());
 }

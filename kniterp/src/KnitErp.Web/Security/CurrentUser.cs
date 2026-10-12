@@ -17,6 +17,13 @@ public sealed class ClaimsCurrentUser(AuthenticationStateProvider authentication
 
     public string? ClientAddress => httpContext.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
+    /// <summary>D122: разбирается только начало заголовка; целиком он не сохраняется.</summary>
+    public string? UserAgent => httpContext.HttpContext?.Request.Headers.UserAgent.ToString() is { Length: > 0 } ua
+        ? ua[..Math.Min(ua.Length, KnitErp.Domain.Access.SessionDevice.UserAgentMaxLength)]
+        : null;
+
+    public Guid? SessionId => SessionClaims.SessionId(Principal);
+
     /// <summary>Запрос по токену API (D88): права ограничены правами токена. У сессии в браузере этих утверждений нет.</summary>
     public IReadOnlyCollection<string>? ApiScope =>
         Principal.FindFirstValue(KnitErp.Web.Api.ApiTokenAuthenticationHandler.ScopeClaim) is { } scope
@@ -49,12 +56,13 @@ public sealed class ClaimsCurrentUser(AuthenticationStateProvider authentication
     }
 }
 
-/// <summary>Состав cookie сессии: пользователь, организация, штамп безопасности.</summary>
+/// <summary>Состав cookie сессии: пользователь, организация, штамп безопасности, серверная сессия (D122).</summary>
 public static class SessionClaims
 {
     public const string OrganizationClaim = "kniterp:org";
     public const string StampClaim = "kniterp:stamp";
     public const string TwoFactorClaim = "kniterp:2fa";
+    public const string SessionClaim = "kniterp:sid";
 
     public static ClaimsPrincipal Create(KnitErp.Application.Authentication.SessionIdentity session) =>
         new(new ClaimsIdentity(
@@ -64,11 +72,13 @@ public static class SessionClaims
             new Claim(OrganizationClaim, session.OrganizationId.ToString()),
             new Claim(StampClaim, session.SecurityStamp.ToString("N")),
             new Claim(TwoFactorClaim, session.UsedTwoFactor ? "1" : "0"),
+            .. session.SessionId is { } sid ? [new Claim(SessionClaim, sid.ToString("N"))] : Array.Empty<Claim>(),
         ], AuthSchemes.Session));
 
     public static KnitErp.Application.Authentication.SessionIdentity? Read(ClaimsPrincipal principal) =>
         UserId(principal) is { } userId && OrganizationId(principal) is { } orgId && Stamp(principal) is { } stamp
-            ? new(userId, principal.Identity?.Name ?? string.Empty, stamp, orgId, principal.FindFirstValue(TwoFactorClaim) == "1")
+            ? new(userId, principal.Identity?.Name ?? string.Empty, stamp, orgId, principal.FindFirstValue(TwoFactorClaim) == "1",
+                SessionId: SessionId(principal))
             : null;
 
     public static long? UserId(ClaimsPrincipal principal) =>
@@ -76,6 +86,9 @@ public static class SessionClaims
 
     public static long? OrganizationId(ClaimsPrincipal principal) =>
         principal.Identity?.IsAuthenticated == true && long.TryParse(principal.FindFirstValue(OrganizationClaim), out var id) ? id : null;
+
+    public static Guid? SessionId(ClaimsPrincipal principal) =>
+        principal.Identity?.IsAuthenticated == true && Guid.TryParseExact(principal.FindFirstValue(SessionClaim), "N", out var id) ? id : null;
 
     public static Guid? Stamp(ClaimsPrincipal principal) =>
         Guid.TryParseExact(principal.FindFirstValue(StampClaim), "N", out var stamp) ? stamp : null;
