@@ -157,6 +157,14 @@ public static class AuditActions
 
     /// <summary>Печать документа сотрудника с его данными (D227).</summary>
     public const string AgreementPrinted = "hr.agreement.printed";
+
+    // D125: анкета сотрудника по ссылке — выдача, письмо, отправка, просмотр, принятие и отказ (без значений ПДн).
+    public const string EmployeeDataLinkIssued = "hr.employee_data.link_issued";
+    public const string EmployeeDataLinkEmailed = "hr.employee_data.link_emailed";
+    public const string EmployeeDataSubmitted = "hr.employee_data.submitted";
+    public const string EmployeeDataViewed = "hr.employee_data.viewed";
+    public const string EmployeeDataAccepted = "hr.employee_data.accepted";
+    public const string EmployeeDataRejected = "hr.employee_data.rejected";
     public const string HrOrderCreated = "hr.order.created";
     public const string HrOrderChanged = "hr.order.changed";
     public const string HrOrderPosted = "hr.order.posted";

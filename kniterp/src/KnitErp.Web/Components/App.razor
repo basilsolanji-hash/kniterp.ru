@@ -204,6 +204,16 @@
         /* D124: письмо с приглашением отправлено. */
         .invite-sent { background: var(--ok-bg); color: var(--ok-text); padding: 8px 12px; border-radius: 6px; margin: 8px 0; }
         .invite-panel .actions { flex-wrap: wrap; }
+        /* D125: анкета сотрудника по ссылке (без входа) и проверка в карточке. */
+        .employee-data-form fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+        .employee-data-form legend { font-weight: 600; padding: 0 4px; }
+        .employee-data-form input[type=file] { max-width: 100%; }
+        .employee-data-form details { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+        .employee-data-form summary { cursor: pointer; }
+        .card label.consent-check { flex-direction: row; align-items: flex-start; gap: 8px; color: var(--text); }
+        .consent-check input { margin-top: 3px; flex: none; }
+        .data-compare td { overflow-wrap: anywhere; }
+        .data-compare .differs { font-weight: 600; }
         .tag.warn { background: var(--warn-bg); color: var(--warn-text); margin-left: 0; }
         .tag.bad { background: var(--bad-bg); color: var(--bad-text); margin-left: 0; }
         .panel { border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 16px; margin: 16px 0; }

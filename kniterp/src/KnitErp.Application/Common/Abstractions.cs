@@ -156,6 +156,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns { get; }
     DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
     DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeDataRequest> EmployeeDataRequests { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeDataSubmission> EmployeeDataSubmissions { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeDataSubmissionFile> EmployeeDataSubmissionFiles { get; }
 
     // Модуль «Разработка» (D700–D799).
     DbSet<KnitErp.Domain.Development.DevModel> DevModels { get; }
