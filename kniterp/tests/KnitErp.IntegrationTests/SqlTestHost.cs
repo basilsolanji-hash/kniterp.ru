@@ -77,6 +77,8 @@ public sealed class TestUser : ICurrentUser
     public long? OrganizationId { get; set; }
     public string? CorrelationId => "test";
     public string? ClientAddress { get; set; }
+    public string? UserAgent { get; set; }
+    public Guid? SessionId { get; set; }
     public IReadOnlyCollection<string>? ApiScope { get; set; }
     public long? ApiTokenId { get; set; }
 }
@@ -112,6 +114,9 @@ public sealed class SqlTestHost : IAsyncLifetime
     /// <summary>Адрес клиента для журнала входов (как у HTTP-запроса страницы входа).</summary>
     public string? ClientAddress { get; set; }
 
+    /// <summary>D122: заголовок User-Agent «браузера» тестов — для названия устройства сессии.</summary>
+    public string? UserAgent { get; set; }
+
     /// <summary>Модель ИИ-помощника для тестов: по умолчанию не подключена.</summary>
     public IAssistantModel AssistantModel { get; set; } = new DisabledAssistantModel();
 
@@ -139,10 +144,13 @@ public sealed class SqlTestHost : IAsyncLifetime
             .UseSqlServer(_connectionString, KnitErp.Infrastructure.DependencyInjection.ConfigureSqlServer).AddInterceptors(interceptors).Options);
 
     /// <summary>Набор сервисов от имени пользователя. Каждый вызов — новый DbContext, как отдельный HTTP-запрос.</summary>
-    public Services As(long? userId, long? organizationId, IReadOnlyCollection<string>? apiScope = null)
+    public Services As(long? userId, long? organizationId, IReadOnlyCollection<string>? apiScope = null, Guid? sessionId = null)
     {
         var db = NewDb();
-        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = ClientAddress, ApiScope = apiScope };
+        var user = new TestUser
+        {
+            UserId = userId, OrganizationId = organizationId, ClientAddress = ClientAddress, UserAgent = UserAgent, SessionId = sessionId, ApiScope = apiScope,
+        };
         var guard = new AccessGuard(db, user, Clock);
         var access = new UserAccessService(db, guard, user, Clock);
         return new Services(db,

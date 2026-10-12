@@ -398,6 +398,63 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Access.UserSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AddressPrefix")
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid>("SecurityStamp")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_user_sessions_public_id");
+
+                    b.HasIndex("UserId", "RevokedAtUtc")
+                        .HasDatabaseName("ix_user_sessions_user");
+
+                    b.ToTable("user_sessions", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_user_sessions_revoked", "[RevokedAtUtc] IS NULL OR [RevokedAtUtc] >= [CreatedAtUtc]");
+
+                            t.HasCheckConstraint("ck_user_sessions_seen", "[LastSeenAtUtc] >= [CreatedAtUtc]");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Audit.AuditEntry", b =>
                 {
                     b.Property<long>("Id")
@@ -9701,6 +9758,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Access.TrustedDevice", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Access.UserSession", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
                         .WithMany()

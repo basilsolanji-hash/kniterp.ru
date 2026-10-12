@@ -7,6 +7,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.Application.Authentication;
 
+/// <summary>D122: сессия в списке «Активные сессии». Current — это устройство (сессия текущего запроса).</summary>
+public sealed record UserSessionDto(Guid Id, string Label, string? AddressPrefix, DateTime CreatedAtUtc, DateTime LastSeenAtUtc, bool Current);
+
 /// <summary>
 /// D115: личная безопасность входа — смена пароля и «Выйти на всех устройствах».
 /// Каждое действие подтверждается текущим паролем, а при подключённой 2FA — и кодом из приложения (повторная проверка):
@@ -41,6 +44,7 @@ public sealed class AccountSecurityService(
         SignInPolicy.EnsurePasswordAcceptable(newPassword, user.Email);
         user.ChangePassword(hasher.HashPassword(user, newPassword!));
         await RevokeDevicesAsync(user.Id, ct);
+        await SecurityEvents.RevokeSessionsAsync(db, user.Id, clock.UtcNow, ct);
         await SecurityEvents.AuditAsync(db, currentUser, clock, user, AuditActions.PasswordChanged, "пароль сменён; сессии и доверенные устройства закрыты", ct);
         await db.SaveChangesAsync(ct);
         SecurityEvents.Notify(email, user, "Пароль knitERP изменён",
@@ -54,6 +58,7 @@ public sealed class AccountSecurityService(
         user.RegisterSuccessfulSignIn();
         user.RotateSecurityStamp();
         await RevokeDevicesAsync(user.Id, ct);
+        await SecurityEvents.RevokeSessionsAsync(db, user.Id, clock.UtcNow, ct);
         var tokens = revokeApiTokens ? await SecurityEvents.RevokeApiTokensAsync(db, user.Id, clock.UtcNow, ct) : 0;
         await SecurityEvents.AuditAsync(db, currentUser, clock, user, AuditActions.SessionsRevoked,
             tokens > 0 ? $"все сессии и доверенные устройства закрыты, отозвано токенов API: {tokens}" : "все сессии и доверенные устройства закрыты", ct);
@@ -61,6 +66,62 @@ public sealed class AccountSecurityService(
         SecurityEvents.Notify(email, user, "Выход на всех устройствах knitERP",
             "По вашей команде закрыты все сессии knitERP" + (tokens > 0 ? $" и отозвано токенов API: {tokens}" : string.Empty) + ".");
         return tokens;
+    }
+
+    /// <summary>
+    /// D122: действующие сессии текущего пользователя — по одной на каждый вход (устройство, браузер).
+    /// Сессии, закрытые сменой штампа (блокировка, смена роли, пароля), истёкшие и завершённые, не показываются.
+    /// </summary>
+    public async Task<IReadOnlyList<UserSessionDto>> ListSessionsAsync(CancellationToken ct = default)
+    {
+        var userId = currentUser.UserId ?? throw new NotFoundException("Пользователь");
+        var stamp = await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => u.SecurityStamp).SingleAsync(ct);
+        var now = clock.UtcNow;
+        var since = now - SignInPolicy.SessionIdleLimit;
+        var current = currentUser.SessionId;
+        return (await db.UserSessions.AsNoTracking()
+                .Where(x => x.UserId == userId && x.RevokedAtUtc == null && x.SecurityStamp == stamp && x.LastSeenAtUtc > since)
+                .OrderByDescending(x => x.LastSeenAtUtc).Take(MaxListedSessions).ToListAsync(ct))
+            .Where(x => x.IsActive(stamp, now))
+            .Select(x => new UserSessionDto(x.PublicId, x.Label, x.AddressPrefix, x.CreatedAtUtc, x.LastSeenAtUtc, x.PublicId == current))
+            .OrderByDescending(x => x.Current).ThenByDescending(x => x.LastSeenAtUtc)
+            .ToList();
+    }
+
+    /// <summary>Сколько сессий показывает список: защищает страницу от тысяч входов роботом.</summary>
+    public const int MaxListedSessions = 50;
+
+    /// <summary>
+    /// D122: завершить одну свою сессию на другом устройстве. Подтверждается текущим паролем и кодом 2FA, как «Выйти везде» (D115).
+    /// Чужая или неизвестная сессия — «не найдено» (до проверки пароля: попытка не засчитывается в блокировку и ничего не раскрывает).
+    /// Текущую сессию завершает кнопка «Выйти». Устройство теряет доступ при следующей проверке cookie — не позднее чем через минуту.
+    /// </summary>
+    public async Task RevokeSessionAsync(Guid sessionId, string? currentPassword, string? code, CancellationToken ct = default)
+    {
+        var userId = currentUser.UserId ?? throw new NotFoundException("Пользователь");
+        var session = await db.UserSessions.AsNoTracking().SingleOrDefaultAsync(x => x.PublicId == sessionId && x.UserId == userId && x.RevokedAtUtc == null, ct)
+                      ?? throw new NotFoundException("Сессия");
+        if (session.PublicId == currentUser.SessionId)
+        {
+            throw new BusinessRuleException("auth.session.current", "Текущую сессию завершает кнопка «Выйти».");
+        }
+
+        var user = await ConfirmIdentityAsync(currentPassword, code, ct);
+        user.RegisterSuccessfulSignIn();
+        var now = clock.UtcNow;
+        await using var tx = await db.BeginTransactionAsync(ct);
+        // Условный UPDATE не спорит по rowversion с отметкой активности той же сессии; 0 строк — её уже завершили.
+        var revoked = await db.UserSessions.Where(x => x.Id == session.Id && x.UserId == userId && x.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(x => x.SetProperty(v => v.RevokedAtUtc, now), ct);
+        if (revoked == 0)
+        {
+            throw new NotFoundException("Сессия");
+        }
+
+        await SecurityEvents.AuditAsync(db, currentUser, clock, user, AuditActions.SessionRevoked,
+            $"завершена сессия: {session.Label}, сеть {session.AddressPrefix ?? "неизвестна"}, вход {session.CreatedAtUtc:yyyy-MM-dd HH:mm} UTC", ct);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     private async Task<UserAccount> ConfirmIdentityAsync(string? password, string? code, CancellationToken ct)
@@ -117,6 +178,11 @@ internal static class SecurityEvents
                 reason: withAddress, correlationId: currentUser.CorrelationId));
         }
     }
+
+    /// <summary>D122: все серверные сессии пользователя завершаются (выход везде, смена и сброс пароля).</summary>
+    public static Task<int> RevokeSessionsAsync(IKnitErpDbContext db, long userId, DateTime nowUtc, CancellationToken ct) =>
+        db.UserSessions.Where(x => x.UserId == userId && x.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(x => x.SetProperty(v => v.RevokedAtUtc, nowUtc), ct);
 
     /// <summary>Токены API, выпущенные пользователем, отзываются: после сброса пароля и по его просьбе (D115).</summary>
     public static async Task<int> RevokeApiTokensAsync(IKnitErpDbContext db, long userId, DateTime nowUtc, CancellationToken ct)

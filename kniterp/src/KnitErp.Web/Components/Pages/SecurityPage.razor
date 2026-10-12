@@ -123,6 +123,62 @@ else
     }
 
     <h2 style="margin-top: 20px">@L("Пароль и сессии")</h2>
+    @if (_sessions is not null)
+    {
+        @* D122: свои сессии по устройствам; завершить можно любую, кроме текущей, с подтверждением паролем (и кодом). *@
+        <h3>@L("Активные сессии")</h3>
+        <p class="muted">@L("Каждый вход с браузера — отдельная сессия. Адрес показан только до сети, без последних цифр. Незнакомое устройство — завершите его сессию и смените пароль.")</p>
+        @if (_sessionError is not null)
+        {
+            <div class="error" role="alert">@_sessionError</div>
+        }
+        @if (_sessionDone is not null)
+        {
+            <div class="flash" role="status"><span>@_sessionDone</span></div>
+        }
+        <div class="scroll">
+            <table class="compact" aria-label="@L("Активные сессии")">
+                <thead><tr><th>@L("Устройство")</th><th class="opt">@L("Сеть")</th><th>@L("Вход")</th><th class="opt">@L("Активность")</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var x in _sessions)
+                    {
+                        <tr>
+                            <td>@x.Label</td>
+                            <td class="opt">@(x.AddressPrefix ?? "—")</td>
+                            <td>@Local(x.CreatedAtUtc)</td>
+                            <td class="opt">@Local(x.LastSeenAtUtc)</td>
+                            <td>
+                                @if (x.Current)
+                                {
+                                    <b>@L("это устройство")</b>
+                                }
+                                else
+                                {
+                                    <button type="button" class="secondary" @onclick="() => BeginRevokeSession(x)" disabled="@_busy">@L("Завершить")</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_revoking is { } target)
+        {
+            <form class="panel" @onsubmit="RevokeSessionAsync" aria-label="@L("Завершить сессию")">
+                <h3>@L("Завершить сессию")</h3>
+                <p class="muted small">@L("Сессия «{0}» закроется в течение минуты. Остальные сессии, включая эту, продолжат работать.", target.Label)</p>
+                <label>@L("Текущий пароль") <input type="password" autocomplete="current-password" @bind="_sessionPassword" required maxlength="128" /></label>
+                @if (_status.TwoFactorEnabled)
+                {
+                    <label>@L("Код из приложения") <input inputmode="numeric" autocomplete="one-time-code" maxlength="6" @bind="_sessionCode" required /></label>
+                }
+                <div class="actions">
+                    <button type="submit" class="danger" disabled="@_busy">@L("Завершить сессию")</button>
+                    <button type="button" class="secondary" @onclick="CancelRevokeSession" disabled="@_busy">@L("Отмена")</button>
+                </div>
+            </form>
+        }
+    }
     <p class="muted">@L("Действия подтверждаются текущим паролем") @(_status.TwoFactorEnabled ? L("и кодом из приложения") : null).
         @L("После них все сессии, включая эту, закрываются, а доверенные устройства забываются. На почту придёт уведомление.")</p>
     @if (_error is not null && _formsError)
@@ -170,6 +226,12 @@ else
 
     private RecoveryCodeStatus? _status;
     private IReadOnlyList<TrustedDeviceDto>? _devices;
+    private IReadOnlyList<UserSessionDto>? _sessions;
+    private UserSessionDto? _revoking;
+    private string? _sessionPassword;
+    private string? _sessionCode;
+    private string? _sessionError;
+    private string? _sessionDone;
     private IReadOnlyList<string>? _codes;
     private bool _busy;
     private string? _error;
@@ -187,6 +249,7 @@ else
     {
         _status = await Recovery.GetStatusAsync();
         _devices = await Devices.ListAsync();
+        _sessions = await Account.ListSessionsAsync();
     }
 
     private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
@@ -204,6 +267,44 @@ else
         await Devices.RevokeAsync(id);
         _devices = await Devices.ListAsync();
     });
+
+    private void BeginRevokeSession(UserSessionDto session)
+    {
+        (_revoking, _sessionPassword, _sessionCode, _sessionError, _sessionDone) = (session, null, null, null, null);
+    }
+
+    private void CancelRevokeSession()
+    {
+        (_revoking, _sessionPassword, _sessionCode, _sessionError) = (null, null, null, null);
+    }
+
+    /// <summary>D122: одна операция за раз (у вкладки один DbContext); ошибка показывается у списка сессий.</summary>
+    private async Task RevokeSessionAsync()
+    {
+        if (_busy || _revoking is not { } target)
+        {
+            return;
+        }
+
+        _busy = true;
+        _sessionError = null;
+        try
+        {
+            await Account.RevokeSessionAsync(target.Id, _sessionPassword, _sessionCode);
+            _revoking = null;
+            _sessionDone = L("Сессия «{0}» завершена.", target.Label);
+            _sessions = await Account.ListSessionsAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _sessionError = UiErrors.Message(ex);
+        }
+        finally
+        {
+            (_sessionPassword, _sessionCode) = (null, null);
+            _busy = false;
+        }
+    }
 
     private Task ChangePasswordAsync() => RunForms(async () =>
     {

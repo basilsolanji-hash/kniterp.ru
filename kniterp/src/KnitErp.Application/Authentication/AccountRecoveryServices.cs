@@ -90,6 +90,8 @@ public sealed class PasswordResetService(
             device.Revoke(clock.UtcNow);
         }
 
+        await SecurityEvents.RevokeSessionsAsync(db, user.Id, clock.UtcNow, ct);
+
         // D115: сброс пароля — признак, что пароль мог попасть к чужому. Токены API, выпущенные этим пользователем, отзываются:
         // иначе выпущенный злоумышленником токен пережил бы смену пароля. Интеграции перевыпускают токен в «Интеграциях».
         var tokens = await SecurityEvents.RevokeApiTokensAsync(db, user.Id, clock.UtcNow, ct);

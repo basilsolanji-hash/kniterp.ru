@@ -21,6 +21,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<UserAccount> Users => Set<UserAccount>();
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<TrustedDevice> TrustedDevices => Set<TrustedDevice>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<Characteristic> Characteristics => Set<Characteristic>();
     public DbSet<ItemCharacteristicValue> ItemCharacteristicValues => Set<ItemCharacteristicValue>();
     public DbSet<ItemPhoto> ItemPhotos => Set<ItemPhoto>();

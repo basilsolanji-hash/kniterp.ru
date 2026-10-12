@@ -49,7 +49,7 @@ public sealed class AccountSecurityTests(SqlTestHost host) : IClassFixture<SqlTe
         await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
         {
             await s.Account.ChangePasswordAsync(Password, NewPassword, NewPassword, NextCode(key));
-            Assert.False(await s.SignIn.ValidateSessionAsync(org.OwnerUserId, org.OrganizationId, oldStamp));
+            Assert.False(await s.SignIn.ValidateSessionAsync(org.OwnerUserId, org.OrganizationId, oldStamp, await LastSessionAsync(org.OwnerUserId)));
         }
 
         await using (var db = host.NewDb())
@@ -268,5 +268,12 @@ public sealed class AccountSecurityTests(SqlTestHost host) : IClassFixture<SqlTe
         }
 
         return (org, email, key);
+    }
+
+    /// <summary>D122: последняя серверная сессия пользователя (вход при подключении 2FA).</summary>
+    private async Task<Guid> LastSessionAsync(long userId)
+    {
+        await using var db = host.NewDb();
+        return await db.UserSessions.Where(x => x.UserId == userId).OrderByDescending(x => x.Id).Select(x => x.PublicId).FirstAsync();
     }
 }
