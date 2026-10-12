@@ -203,11 +203,11 @@
         .panel { border: 1px solid var(--line); background: var(--surface-2); border-radius: 10px; padding: 16px; margin: 16px 0; }
         .panel form, .panel .grid { display: flex; flex-direction: column; gap: 12px; }
         .panel label { display: flex; flex-direction: column; gap: 6px; color: var(--text-2); }
-        /* Небольшие справочные таблицы — по ширине содержимого, а не на весь экран. */
-        @@media (min-width: 700px) { table.compact { width: auto; min-width: 480px; } table.compact td, table.compact th { padding-right: 24px; } }
-        /* Компактные формы: колонки по ширине содержимого (не растягиваются на весь экран), короткие поля — узкие. */
+        /* Замечание 12.10.2026 «на всех экранах пустая площадь»: таблицы — на всю ширину, колонки форм делят ширину панели поровну
+           (от 200 px), а не стоят узкой полосой слева. Короткие поля (числа, даты) по-прежнему узкие. */
+        @@media (min-width: 700px) { table.compact td, table.compact th { padding-right: 24px; } }
         @@media (min-width: 700px) {
-            .panel .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 260px)); justify-content: start; column-gap: 16px; }
+            .panel .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); column-gap: 16px; }
             .panel .grid input[inputmode=decimal], .panel .grid input[inputmode=numeric], .panel .grid input[type=date],
             .panel .grid input[type=time], .panel .grid input[type=number] { max-width: 170px; }
             .panel .grid label.inline { align-self: end; }
@@ -268,6 +268,14 @@
         dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 12px 0; max-width: 720px; }
         dl.facts dt { color: var(--muted); }
         dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+        /* Карточка (номенклатура и др.): на широком экране разделы в две колонки, широкие (.wide) — во всю ширину. */
+        @@media (min-width: 1400px) {
+            .card-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; align-items: start; }
+            .card-flow > .wide { grid-column: 1 / -1; }
+            .card-flow > .card-sec > h2:first-child { margin-top: 12px !important; }
+        }
+        .card-sec { min-width: 0; }
+        @@media (min-width: 1400px) { dl.facts { max-width: none; grid-template-columns: repeat(3, max-content minmax(0, 1fr)); } }
 
         /* Компактный вид (замечание пользователя: «всё очень крупно, нет фокуса на данных»): мелкий шрифт и отступы,
            плотные таблицы, видимый фокус клавиатуры. Телефон ниже получает крупные поля и кнопки обратно. */

@@ -57,7 +57,7 @@
     <a href="catalog/labels">Конструктор этикеток</a>
     @if (_data is { } info)
     {
-        <span>Этикеток: @(info.Items.Count * CopiesValue)</span>
+        <span>Этикеток: @Total(info)</span>
         @if (_templates.Count == 0)
         {
             <span class="warn">Шаблонов нет — печатается образец «@info.Template.Name». Свой шаблон — в конструкторе.</span>
@@ -94,7 +94,7 @@ else
         }
         @foreach (var item in _data.Items)
         {
-            for (var c = 0; c < CopiesValue; c++, n++)
+            for (var c = 0; c < CountOf(item.Id) * CopiesValue; c++, n++)
             {
                 if (t.Sheet == LabelSheet.A4 && n > 0 && n % perSheet == 0)
                 {
@@ -126,6 +126,12 @@ else
 
     private int CopiesValue => Math.Clamp(Copies ?? 1, 1, 100);
 
+    private Dictionary<long, int> _counts = [];
+
+    private int CountOf(long itemId) => _counts.TryGetValue(itemId, out var n) ? n : 1;
+
+    private long Total(LabelPrintDto d) => d.Items.Sum(i => (long)CountOf(i.Id)) * CopiesValue;
+
     private int SkipValue => Math.Clamp(Skip ?? 0, 0, 239);
 
     private static string Mm(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "mm";
@@ -148,8 +154,9 @@ else
     {
         try
         {
-            var ids = (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(x => long.TryParse(x, out var v) ? v : 0).Where(v => v > 0).ToList();
+            // D325: «12x5» — позиция и число этикеток (из строк документа); просто «12» — одна.
+            _counts = LabelLink.Parse(Ids).ToDictionary(x => x.ItemId, x => x.Count);
+            var ids = _counts.Keys.ToList();
             if (ids.Count == 0)
             {
                 _error = "Не выбраны позиции: откройте печать из карточки позиции или из списка номенклатуры.";
@@ -158,7 +165,7 @@ else
 
             _templates = await Labels.TemplatesAsync();
             _data = await Labels.PrintAsync(ids, TemplateId);
-            if (_data.Items.Count * CopiesValue > LabelService.MaxLabels)
+            if (Total(_data) > LabelService.MaxLabels)
             {
                 _error = $"За раз — не больше {LabelService.MaxLabels} этикеток: уменьшите число копий или позиций.";
                 _data = null;

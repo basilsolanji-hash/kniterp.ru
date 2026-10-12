@@ -2939,5 +2939,10 @@
   "с окончанием на 99 (1 999)": "99 bilan tugaydigan (1 999)",
   "через запятую или 42-56/2": "vergul orqali yoki 42-56/2",
   "Штрихкод «{0}» на этой этикетке слишком тонкий и может не прочитаться: нужна ширина от {1} мм. Используйте EAN-13 (короче) или этикетку шире.": "Ushbu yorliqdagi «{0}» shtrix-kodi juda ingichka va o‘qilmasligi mumkin: kengligi kamida {1} mm bo‘lishi kerak. EAN-13 (qisqaroq) yoki kengroq yorliqdan foydalaning.",
-  "Этикетки — для первых {0} позиций отбора.": "Yorliqlar — tanlovning dastlabki {0} ta pozitsiyasi uchun."
+  "Этикетки — для первых {0} позиций отбора.": "Yorliqlar — tanlovning dastlabki {0} ta pozitsiyasi uchun.",
+  "Напечатать новые ценники": "Yangi narx yorliqlarini chop etish",
+  "Ценники": "Narx yorliqlari",
+  "Этикетки": "Yorliqlar",
+  "Этикетки и ценники для позиций этого экрана: по одной на каждую единицу количества": "Ushbu ekrandagi pozitsiyalar uchun yorliqlar va narx yorliqlari: miqdorning har bir birligiga bittadan",
+  "Этикетки по остатку": "Qoldiq bo‘yicha yorliqlar"
 }

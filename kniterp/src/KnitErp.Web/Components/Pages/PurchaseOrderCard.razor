@@ -216,6 +216,7 @@ else
     }
 
     <div class="actions" style="margin-top: 12px">
+        <LabelsButton Lines="@(_order.Lines.Select(l => (l.ItemId, l.Quantity)))" />
         @if (editable)
         {
             <button type="button" @onclick="ConfirmAsync" disabled="@(_busy || _order.Lines.Count == 0)">@L("Подтвердить заказ")</button>

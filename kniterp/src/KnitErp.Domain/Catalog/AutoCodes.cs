@@ -147,3 +147,49 @@ public static class BarcodeFit
     public static decimal RequiredWidthMm(string code) =>
         decimal.Round(Modules(code) * (Ean13Pattern.CanEncode(code) ? MinModuleEan13Mm : MinModuleCode128Mm), 1, MidpointRounding.ToPositiveInfinity);
 }
+
+/// <summary>
+/// D325: ссылка печати этикеток со строками документа — «12x5,13x3»: позиция и сколько этикеток. Штучное количество — столько этикеток,
+/// дробное (кг, м) или нулевое — одна; повторы позиции складываются. Без «x» — одна этикетка (старые ссылки «ids=1,2»).
+/// </summary>
+public static class LabelLink
+{
+    public const int MaxPerItem = 1000;
+
+    public static string Build(IEnumerable<(long ItemId, decimal Quantity)> lines, int maxItems)
+    {
+        var counts = new Dictionary<long, int>();
+        foreach (var (id, qty) in lines)
+        {
+            var n = qty > 0 && qty == decimal.Truncate(qty) && qty <= MaxPerItem ? (int)qty : qty > MaxPerItem ? MaxPerItem : 1;
+            counts[id] = Math.Min(MaxPerItem, (counts.TryGetValue(id, out var was) ? was : 0) + n);
+        }
+
+        return string.Join(",", counts.Take(maxItems).Select(c => c.Value == 1
+            ? c.Key.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{c.Key}x{c.Value}")));
+    }
+
+    public static IReadOnlyList<(long ItemId, int Count)> Parse(string? ids)
+    {
+        var counts = new Dictionary<long, int>();
+        foreach (var part in (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var pieces = part.Split('x', 'X', '*');
+            if (pieces.Length is < 1 or > 2 || !long.TryParse(pieces[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id) || id <= 0)
+            {
+                continue;
+            }
+
+            var n = 1;
+            if (pieces.Length == 2 && (!int.TryParse(pieces[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out n) || n <= 0))
+            {
+                continue;
+            }
+
+            counts[id] = Math.Min(MaxPerItem, (counts.TryGetValue(id, out var was) ? was : 0) + n);
+        }
+
+        return counts.Select(c => (c.Key, c.Value)).ToList();
+    }
+}
