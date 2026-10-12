@@ -415,7 +415,8 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         await using var s = host.As(_user, _org);
         var ms = Service(s, fake);
         var probe = await ms.ProbeAsync("Bearer " + FakeMoySkladClient.Token);
-        Assert.Equal(10, probe.Count);
+        Assert.Equal(11, probe.Count);
+        Assert.Equal("Версия knitERP", probe[0].Section); // D337: версия сборки — первой строкой
         Assert.All(probe.Where(p => p.Section != "Комплекты"), p => Assert.True(p.Ok, p.Section + ": " + p.Detail));
         var bundles = probe.Single(p => p.Section == "Комплекты");
         Assert.False(bundles.Ok);

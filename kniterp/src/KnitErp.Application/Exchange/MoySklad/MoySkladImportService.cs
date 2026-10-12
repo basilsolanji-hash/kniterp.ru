@@ -80,6 +80,9 @@ public sealed class MoySkladImportService(
     {
         var ctx = await DemandAsync(ct);
         var t = string.IsNullOrWhiteSpace(token) ? await TokenAsync(ctx.OrganizationId, ct) : ExternalConnection.NormalizeToken(token);
+        // D337: первой строкой — какая версия knitERP запущена и какой Accept она шлёт: видно, обновилось ли приложение на сервере.
+        var commit = Environment.GetEnvironmentVariable("KNITERP_COMMIT") is { Length: >= 7 } c ? c[..Math.Min(12, c.Length)] : "сборка без метки";
+        var version = new MoySkladProbeDto("Версия knitERP", true, $"{commit} · {client.HeadersInfo}".TrimEnd(' ', '·'));
         var result = new List<MoySkladProbeDto>();
         var sections = new (string Title, Func<CancellationToken, Task<string>> Call)[]
         {
@@ -127,6 +130,7 @@ public sealed class MoySkladImportService(
             }
         }
 
+        result.Insert(0, version);
         return result;
 
         async Task<string> Size(string entity, string? expand, CancellationToken c)

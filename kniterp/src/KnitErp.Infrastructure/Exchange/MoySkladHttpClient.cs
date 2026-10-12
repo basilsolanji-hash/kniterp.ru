@@ -28,6 +28,8 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
     private static readonly Queue<DateTime> Recent = new();
     private static readonly object Gate = new();
 
+    public string HeadersInfo => $"Accept: {AcceptHeader}";
+
     public static void Configure(HttpClient client)
     {
         client.BaseAddress = new Uri(MoySkladEntities.BaseUrl);

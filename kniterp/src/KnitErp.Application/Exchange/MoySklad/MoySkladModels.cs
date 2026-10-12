@@ -133,6 +133,9 @@ public interface IMoySkladClient
 
     Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default);
 
+    /// <summary>D337: что клиент отправляет в заголовках (для проверки связи) — без токена.</summary>
+    string HeadersInfo => string.Empty;
+
     /// <summary>D327: массовое изменение цен (POST entity/… массивом, до 1000 объектов). Возвращает изменённые объекты (id, updated).</summary>
     /// <summary>D333: страница отчёта об остатках по всем складам (все позиции, и с нулевым остатком).</summary>
     Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default);

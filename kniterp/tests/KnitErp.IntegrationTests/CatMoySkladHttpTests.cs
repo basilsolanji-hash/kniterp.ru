@@ -82,6 +82,42 @@ public sealed class CatMoySkladHttpTests
     }
 
     [Fact]
+    public async Task Accept_header_on_the_wire_is_exactly_what_moysklad_requires()
+    {
+        // D334: проверка байтов в сети (локальный HTTP-сервер) — внутренние представления заголовков .NET могут отличаться.
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var serve = Task.Run(async () =>
+        {
+            using var tcp = await listener.AcceptTcpClientAsync();
+            var stream = tcp.GetStream();
+            var buffer = new byte[8192];
+            var text = new StringBuilder();
+            while (!text.ToString().Contains("\r\n\r\n"))
+            {
+                var n = await stream.ReadAsync(buffer);
+                text.Append(Encoding.ASCII.GetString(buffer, 0, n));
+            }
+
+            var body = Encoding.UTF8.GetBytes("""{"meta":{"size":1},"rows":[{"id":"o-1","name":"ООО"}]}""");
+            var head = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(head);
+            await stream.WriteAsync(body);
+            return text.ToString();
+        });
+
+        var http = new HttpClient(MoySkladHttpClient.Handler());
+        MoySkladHttpClient.Configure(http);
+        http.BaseAddress = new Uri($"http://127.0.0.1:{port}/api/remap/1.2/");
+        Assert.Equal("ООО", await new MoySkladHttpClient(http).CheckAsync(Token));
+        var raw = await serve;
+        listener.Stop();
+        var accept = raw.Split("\r\n").Where(l => l.StartsWith("Accept:", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Equal(["Accept: application/json;charset=utf-8"], accept);
+    }
+
+    [Fact]
     public async Task Fixed_address_token_in_header_and_retry_after_on_429()
     {
         var (client, handler) = Create((_, n) =>
