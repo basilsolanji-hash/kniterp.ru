@@ -97,13 +97,13 @@ public sealed record DevSampleMeasureDto(long MeasureId, string Name, decimal? P
 public sealed record DevSampleDto(
     long Id, int No, long? SizeId, string? Size, DevSampleStatus Status, string? Comment, DateTime CreatedAtUtc, string CreatedBy,
     IReadOnlyList<(string Detail, DevFactDto? Fact, int? PlanKnitSeconds, decimal? PlanWeightGrams)> Details,
-    IReadOnlyList<DevSampleMeasureDto> Measures, byte[] RowVersion)
+    IReadOnlyList<DevSampleMeasureDto> Measures, byte[] RowVersion, string? Reason = null)
 {
     public string StatusName => DevSample.StatusName(Status);
 }
 
 public sealed record DevSamplesDto(IReadOnlyList<DevSampleDto> Samples, IReadOnlyList<DevSizeDto> Sizes, bool CanEdit, bool CanRecord,
-    int FactTolerancePercent = DevSettings.DefaultTolerance);
+    int FactTolerancePercent = DevSettings.DefaultTolerance, IReadOnlyList<DevOptionDto>? Reasons = null);
 
 public sealed record DevOperationTypeDto(long Id, string Name, string Unit, decimal? Price, decimal? NormMinutes, byte? ProductionStage, bool IsArchived,
     byte[] RowVersion);

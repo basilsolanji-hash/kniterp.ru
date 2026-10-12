@@ -231,6 +231,9 @@ internal sealed class DevSampleConfiguration : IEntityTypeConfiguration<DevSampl
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_samples_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.No }).IsUnique().HasDatabaseName("ux_dev_samples_no");
+        // D768: причина доработки или отказа — запись справочника разработки своей организации.
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ReasonId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_reason");
         // D721: черновик списания пряжи на образец — документ склада своей организации.
         b.HasOne<KnitErp.Domain.Warehousing.StockDocument>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.YarnWriteOffDocumentId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_yarn_writeoff");

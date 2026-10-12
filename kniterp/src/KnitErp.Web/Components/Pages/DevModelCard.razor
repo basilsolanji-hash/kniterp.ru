@@ -28,6 +28,15 @@ else
     <p><a href="dev/models">@L("← Модели в разработке")</a></p>
     <div class="page-head">
         <h1>@m.Number · @m.Name <span class="tag @(m.Stage == DevStage.Cancelled ? "bad" : m.Stage == DevStage.Handed ? "ok" : "warn")">@L(m.StageName)</span></h1>
+        @if (m.VersionNo > 1 || m.NextVersionId is not null)
+        {
+            @* D769: версии модели — откуда эта и есть ли следующая. *@
+            <p class="small dev-versions">
+                @L("Версия {0}", m.VersionNo)
+                @if (m.PreviousVersionId is { } prev) { <span> · @L("на основе") <a href="dev/models/@prev">@m.PreviousNumber</a></span> }
+                @if (m.NextVersionId is { } nextVersion) { <span> · @L("следующая версия") <a href="dev/models/@nextVersion">@m.NextNumber</a></span> }
+            </p>
+        }
     </div>
     <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.DevModel" EntityId="Id" />
 
@@ -134,6 +143,11 @@ else
             }
             @if (_canEdit)
             {
+                @if (m.Stage == DevStage.Handed && m.NextVersionId is null)
+                {
+                    <button type="button" @onclick="NewVersionAsync" disabled="@_busy">@L("Новая версия")</button>
+                }
+
                 <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Создать похожую")</button>
             }
             @if (m.Stage == DevStage.Cancelled && _canEdit)
@@ -488,6 +502,16 @@ else
     {
         _editingBrief = false;
         _brief = BriefForm.From(_model!.Brief);
+    }
+
+    private async Task NewVersionAsync()
+    {
+        long? id = null;
+        await RunAsync(async () => id = await Tech.NewVersionAsync(Id), L("Создана новая версия модели."));
+        if (id is { } created && !_isError)
+        {
+            Navigation.NavigateTo($"dev/models/{created}");
+        }
     }
 
     private async Task CopyAsync()

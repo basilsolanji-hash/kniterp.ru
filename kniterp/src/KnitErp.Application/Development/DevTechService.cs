@@ -535,6 +535,100 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
         return new DevCompletenessDto(c.Sections.Select(s => new DevSectionDto(s.Section, s.Done)).ToList(), c.Done, c.Total, c.Percent);
     }
 
+    /// <summary>
+    /// Новая версия переданной в производство модели (D769): новая модель с тем же названием, ссылкой на прежнюю и номером версии,
+    /// задание и исполнители — как у прежней; копируются палитра, детали с заправкой и размерами, размерная сетка и упаковка, табель мер,
+    /// операции и фурнитура. Файлы, программы, образцы и расчёты остаются у прежней версии. У версии не больше одной следующей.
+    /// </summary>
+    public async Task<long> NewVersionAsync(long modelId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        var org = ctx.OrganizationId;
+        try
+        {
+            await using var tx = await db.BeginTransactionAsync(ct);
+            var src = await db.DevModels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == modelId && x.OrganizationId == org, ct) ?? throw new NotFoundException("Модель");
+            if (src.Stage != DevStage.Handed)
+            {
+                throw new BusinessRuleException("dev.version.stage", "Новая версия делается от модели, переданной в производство; для остальных — «Создать похожую».");
+            }
+
+            if (await db.DevModels.AnyAsync(x => x.OrganizationId == org && x.PreviousVersionId == modelId, ct))
+            {
+                throw new BusinessRuleException("dev.version.exists", "У этой версии уже есть следующая — изменения вносите в неё.");
+            }
+
+            var header = new DevModelHeader(src.Name, src.CollectionId, src.Category, src.Audience, src.ChildSafety, src.HasPattern, src.CustomerId, src.DealId, null,
+                src.Priority, DevModel.Roles.ToDictionary(r => r, src.AssigneeOf));
+            var brief = new DevBrief(src.Description, src.SizeRange, src.ColorRange, src.TargetCost, src.TargetPrice, src.RunQuantity, null, src.Composition,
+                src.Labeling, src.Care);
+            var version = src.VersionNo + 1;
+            var newId = await models.CreateCoreAsync(ctx, header, brief, $"версия {version} модели {src.Number}", ct);
+            var m = await db.DevModels.SingleAsync(x => x.Id == newId && x.OrganizationId == org, ct);
+            m.MarkVersionOf(modelId, version);
+            if (src.PackBox is not null)
+            {
+                m.SetPackBox(src.PackBox);
+            }
+
+            // Первый проход: записи без зависимостей — палитра, сетка, детали, точки табеля, операции, фурнитура.
+            var colors = await db.DevModelColors.AsNoTracking().Where(x => x.OrganizationId == org && x.ModelId == modelId).ToListAsync(ct);
+            var colorMap = colors.ToDictionary(c => c.Id, c => DevModelColor.Create(org, newId, c.Label, c.ItemId, c.Swatch, c.Note, c.SortOrder));
+            var sizes = await db.DevModelSizes.AsNoTracking().Where(x => x.OrganizationId == org && x.ModelId == modelId).ToListAsync(ct);
+            var sizeMap = sizes.ToDictionary(z => z.Id, z => DevModelSize.Create(org, newId, z.Name, z.SortOrder, z.IsBase, z.PerBox));
+            var details = await db.DevDetails.AsNoTracking().Where(x => x.OrganizationId == org && x.ModelId == modelId).ToListAsync(ct);
+            var detailMap = details.ToDictionary(d => d.Id, d =>
+            {
+                var nd = DevDetail.Create(org, newId, d.Name, d.Quantity, d.SortOrder);
+                nd.SetKnitting(d.MachineId, d.WeaveId, d.PlanKnitSeconds, d.PlanWeightGrams, d.Notes);
+                return nd;
+            });
+            var measures = await db.DevMeasures.AsNoTracking().Where(x => x.OrganizationId == org && x.ModelId == modelId).ToListAsync(ct);
+            var measureMap = measures.ToDictionary(x => x.Id, x => DevMeasure.Create(org, newId, x.Name, x.Tolerance, x.Step, x.SortOrder));
+            db.DevModelColors.AddRange(colorMap.Values);
+            db.DevModelSizes.AddRange(sizeMap.Values);
+            db.DevDetails.AddRange(detailMap.Values);
+            db.DevMeasures.AddRange(measureMap.Values);
+            db.DevModelOperations.AddRange((await db.DevModelOperations.AsNoTracking().Where(x => x.OrganizationId == org && x.ModelId == modelId).ToListAsync(ct))
+                .Select(o => DevModelOperation.Create(org, newId, o.Seq, o.OperationTypeId, o.Note, o.NormMinutes, o.Price)));
+            db.DevModelAccessories.AddRange((await db.DevModelAccessories.AsNoTracking().Where(x => x.OrganizationId == org && x.ModelId == modelId).ToListAsync(ct))
+                .Select(a => DevModelAccessory.Create(org, newId, a.ItemId, a.Quantity)));
+            await db.SaveChangesAsync(ct);
+
+            // Второй проход: заправка, размеры деталей и значения табеля — с новыми номерами цветов, деталей, размеров и точек.
+            var detailIds = details.Select(d => d.Id).ToList();
+            foreach (var t in await db.DevThreading.AsNoTracking().Where(x => x.OrganizationId == org && detailIds.Contains(x.DetailId)).ToListAsync(ct))
+            {
+                db.DevThreading.Add(DevThreading.Create(org, detailMap[t.DetailId].Id, new DevThreadingRow(t.Feeder, t.Side,
+                    t.ColorId is { } cid ? colorMap[cid].Id : null, t.Label, t.Ends, t.Paraffin, t.Mode, t.Elastic), DevMachine.MaxFeeders));
+            }
+
+            foreach (var v in await db.DevDetailSizes.AsNoTracking().Where(x => x.OrganizationId == org && detailIds.Contains(x.DetailId)).ToListAsync(ct))
+            {
+                var row = DevDetailSize.Create(org, detailMap[v.DetailId].Id, sizeMap[v.SizeId].Id);
+                row.Set(v.LengthOffMachineCm, v.LengthAfterSteamCm, v.WidthCm);
+                db.DevDetailSizes.Add(row);
+            }
+
+            var measureIds = measures.Select(x => x.Id).ToList();
+            foreach (var v in await db.DevMeasureValues.AsNoTracking().Where(x => x.OrganizationId == org && measureIds.Contains(x.MeasureId)).ToListAsync(ct))
+            {
+                db.DevMeasureValues.Add(DevMeasureValue.Create(org, measureMap[v.MeasureId].Id, sizeMap[v.SizeId].Id, v.Value));
+            }
+
+            db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.DevModelCreated, nameof(DevModel), newId.ToString(), null,
+                $"{m.Number}: версия {version} модели {src.Number}", $"деталей {details.Count}, цветов {colors.Count}, размеров {sizes.Count}", currentUser.CorrelationId));
+            await db.SaveOrConflictAsync(ct);
+            await tx.CommitAsync(ct);
+            return newId;
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
     // ---------- Общие помощники ----------
 
     /// <summary>Местное время организации (D722): даты документов и этикеток — по её часовому поясу, а не по UTC.</summary>

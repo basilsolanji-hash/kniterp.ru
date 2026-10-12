@@ -15,6 +15,7 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
         b.ToTable("dev_models", t =>
         {
             t.HasCheckConstraint("ck_dev_models_stage", "[Stage] BETWEEN 1 AND 11 OR [Stage] = 99");
+            t.HasCheckConstraint("ck_dev_models_version", "[VersionNo] >= 1 AND ([PreviousVersionId] IS NULL OR [VersionNo] >= 2)");
             t.HasCheckConstraint("ck_dev_models_category", "[Category] BETWEEN 1 AND 10 OR [Category] = 99");
             t.HasCheckConstraint("ck_dev_models_audience", "[Audience] BETWEEN 1 AND 4");
             t.HasCheckConstraint("ck_dev_models_priority", "[Priority] BETWEEN 1 AND 4");
@@ -43,6 +44,12 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_collection");
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustomerId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_customer");
+        // D769: предыдущая версия — модель своей организации; у версии не больше одной следующей.
+        b.Property(x => x.VersionNo).HasDefaultValue(1).HasSentinel(1);
+        b.HasOne<DevModel>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PreviousVersionId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_previous_version");
+        b.HasIndex(x => new { x.OrganizationId, x.PreviousVersionId }).IsUnique().HasFilter("[PreviousVersionId] IS NOT NULL")
+            .HasDatabaseName("ux_dev_models_previous_version");
         // D750: позиция и черновик техкарты, в которые передана модель, — только своей организации.
         b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionItemId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_production_item");

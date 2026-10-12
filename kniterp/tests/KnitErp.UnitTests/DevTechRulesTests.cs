@@ -222,4 +222,23 @@ public sealed class DevTechRulesTests
         DevApprovalRules.Ensure(true, null, true, -5m, null);
         Assert.Throws<BusinessRuleException>(() => DevSettings.Defaults(1).SetCosting(0, 0, null, 0, true, 150m));
     }
+
+    [Fact]
+    public void Sample_decision_reason_and_model_version()
+    {
+        // D768: доработка — с причиной из справочника или текстом; у принятого образца причины нет.
+        var s = DevSample.Create(1, 2, 1, null, Now, 3);
+        Assert.Equal("dev.sample.reason", Assert.Throws<BusinessRuleException>(() => s.Decide(DevSampleStatus.Rework, " ")).Code);
+        s.Decide(DevSampleStatus.Rework, null, 7);
+        Assert.Equal((DevSampleStatus.Rework, 7L), (s.Status, s.ReasonId!.Value));
+        s.Decide(DevSampleStatus.Accepted, null, 7);
+        Assert.Null(s.ReasonId);
+
+        // D769: номер версии — от 2, не от самой себя.
+        var (m, _) = DevModel.Create(1, "М-00002", new DevModelHeader("Шарф", null, DevCategory.Accessory, DevAudience.Unisex, false, false, null, null, null,
+            DevPriority.Normal, new Dictionary<DevRole, long?>()), Now, 3);
+        Assert.Throws<BusinessRuleException>(() => m.MarkVersionOf(5, 1));
+        m.MarkVersionOf(5, 2);
+        Assert.Equal((5L, 2), (m.PreviousVersionId!.Value, m.VersionNo));
+    }
 }

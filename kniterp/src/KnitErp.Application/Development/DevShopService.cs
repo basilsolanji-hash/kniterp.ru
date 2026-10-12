@@ -399,6 +399,9 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var plan = await db.DevMeasureValues.AsNoTracking().Where(v => v.OrganizationId == org && mids.Contains(v.MeasureId)).ToListAsync(ct);
         var sampleIds = samples.Select(s => s.s.Id).ToList();
         var actual = await db.DevSampleMeasures.AsNoTracking().Where(v => v.OrganizationId == org && sampleIds.Contains(v.SampleId)).ToListAsync(ct);
+        var reasons = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.ReworkReason)
+            .OrderBy(l => l.SortOrder).ThenBy(l => l.Name).Select(l => new { l.Id, l.Name, l.IsArchived }).ToListAsync(ct);
+        var reasonNames = reasons.ToDictionary(r => r.Id, r => r.Name);
         return new DevSamplesDto(samples.Select(x =>
             {
                 var s = x.s;
@@ -418,10 +421,11 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
                         return new DevSampleMeasureDto(m.Id, m.Name, p, m.Tolerance, fact, null, false);
                     }).ToList(),
-                    s.RowVersion);
+                    s.RowVersion, s.ReasonId is { } rid ? reasonNames.GetValueOrDefault(rid) : null);
             }).ToList(),
             sizes, ctx.Permissions.Has(Permissions.DevEdit) && !DevStages.IsFinal(model.Stage),
-            ctx.Permissions.Has(Permissions.DevSample) && !DevStages.IsFinal(model.Stage), (await tech.SettingsAsync(org, ct)).FactTolerancePercent);
+            ctx.Permissions.Has(Permissions.DevSample) && !DevStages.IsFinal(model.Stage), (await tech.SettingsAsync(org, ct)).FactTolerancePercent,
+            reasons.Where(r => !r.IsArchived).Select(r => new DevOptionDto(r.Id, r.Name)).ToList());
     }
 
     /// <summary>Новый образец (№ следующий в модели) в размере сетки.</summary>
@@ -456,7 +460,8 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         return id;
     }
 
-    public async Task DecideSampleAsync(long sampleId, DevSampleStatus status, string? comment, byte[] rowVersion, CancellationToken ct = default)
+    public async Task DecideSampleAsync(long sampleId, DevSampleStatus status, string? comment, byte[] rowVersion, long? reasonId = null,
+        CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
         await RunAsync(async () =>
@@ -465,8 +470,18 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             s.EnsureVersion(s.RowVersion, rowVersion);
             var model = await tech.FindEditableModelAsync(ctx, s.ModelId, ct);
             var before = DevSample.StatusName(s.Status);
-            s.Decide(status, comment);
-            Audit(ctx, nameof(DevModel), s.ModelId, before, DevSample.StatusName(s.Status), $"{model.Number}: образец № {s.No}{(s.Comment is null ? "" : ": " + s.Comment)}");
+            string? reason = null;
+            if (reasonId is { } rid)
+            {
+                // D768: причина — из справочника своей организации, вид «причина доработки», не в архиве.
+                reason = await db.DevLookups.AsNoTracking()
+                             .Where(l => l.Id == rid && l.OrganizationId == ctx.OrganizationId && l.Kind == DevLookupKind.ReworkReason && !l.IsArchived)
+                             .Select(l => l.Name).SingleOrDefaultAsync(ct)
+                         ?? throw new NotFoundException("Причина доработки");
+            }
+
+            s.Decide(status, comment, reasonId);
+            Audit(ctx, nameof(DevModel), s.ModelId, before, DevSample.StatusName(s.Status), $"{model.Number}: образец № {s.No}{(reason is null || s.ReasonId is null ? "" : ", причина: " + reason)}{(s.Comment is null ? "" : ": " + s.Comment)}");
             await db.SaveOrConflictAsync(ct);
         });
     }

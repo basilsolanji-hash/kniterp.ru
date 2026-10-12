@@ -4838,6 +4838,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<DateOnly?>("PlannedLaunch")
                         .HasColumnType("date");
 
+                    b.Property<long?>("PreviousVersionId")
+                        .HasColumnType("bigint");
+
                     b.Property<byte>("Priority")
                         .HasColumnType("tinyint");
 
@@ -4883,6 +4886,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long?>("TechnologistUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<int>("VersionNo")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
+
                     b.HasKey("Id");
 
                     b.HasAlternateKey("OrganizationId", "Id")
@@ -4910,6 +4918,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_dev_models_number");
 
+                    b.HasIndex("OrganizationId", "PreviousVersionId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_models_previous_version")
+                        .HasFilter("[PreviousVersionId] IS NOT NULL");
+
                     b.HasIndex("OrganizationId", "ProductionItemId");
 
                     b.HasIndex("OrganizationId", "ProductionTechCardId");
@@ -4936,6 +4949,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_dev_models_run", "[RunQuantity] IS NULL OR [RunQuantity] > 0");
 
                             t.HasCheckConstraint("ck_dev_models_stage", "[Stage] BETWEEN 1 AND 11 OR [Stage] = 99");
+
+                            t.HasCheckConstraint("ck_dev_models_version", "[VersionNo] >= 1 AND ([PreviousVersionId] IS NULL OR [VersionNo] >= 2)");
                         });
                 });
 
@@ -5258,6 +5273,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("ReasonId")
+                        .HasColumnType("bigint");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
@@ -5279,6 +5297,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasName("ak_dev_samples_org_id");
 
                     b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "ReasonId");
 
                     b.HasIndex("OrganizationId", "SizeId");
 
@@ -13125,6 +13145,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_dev_models_sketch");
 
+                    b.HasOne("KnitErp.Domain.Development.DevModel", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PreviousVersionId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_models_previous_version");
+
                     b.HasOne("KnitErp.Domain.Catalog.Item", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId", "ProductionItemId")
@@ -13286,6 +13313,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_dev_samples_model");
+
+                    b.HasOne("KnitErp.Domain.Development.DevLookup", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ReasonId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_samples_reason");
 
                     b.HasOne("KnitErp.Domain.Development.DevModelSize", null)
                         .WithMany()

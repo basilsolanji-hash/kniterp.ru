@@ -5087,7 +5087,6 @@
   "На второй день парить 2 секунды": "Ikkinchi kuni 2 soniya bugʻlash",
   "На доработку": "Takomillashtirishga",
   "Название детали": "Detal nomi",
-  "Напишите, что не так: причина доработки или отказа.": "Nima notoʻgʻri ekanini yozing: takomillashtirish yoki rad etish sababi.",
   "Не работает": "Ishlamaydi",
   "Нитеводителей — от 1 до {0}.": "Ip yoʻnaltirgichlar — 1 dan {0} gacha.",
   "Нитеводитель {0}": "{0}-ip yoʻnaltirgich",
@@ -5652,5 +5651,14 @@
   "У модели нет деталей.": "Modelda detallar yo‘q.",
   "Участник": "Ishtirokchi",
   "Целевая": "Maqsadli",
-  "Целевая из задания против последней версии расчёта у моделей, переданных за период. Фактическая себестоимость производственных заказов появится, когда её начнёт считать производство.": "Davrda topshirilgan modellar uchun topshiriqdagi maqsadli qiymat va oxirgi hisob versiyasi. Ishlab chiqarish buyurtmalarining haqiqiy tannarxi ishlab chiqarish uni hisoblay boshlaganda paydo bo‘ladi."
+  "Целевая из задания против последней версии расчёта у моделей, переданных за период. Фактическая себестоимость производственных заказов появится, когда её начнёт считать производство.": "Davrda topshirilgan modellar uchun topshiriqdagi maqsadli qiymat va oxirgi hisob versiyasi. Ishlab chiqarish buyurtmalarining haqiqiy tannarxi ishlab chiqarish uni hisoblay boshlaganda paydo bo‘ladi.",
+  "Версия {0}": "{0}-versiya",
+  "Выберите причину доработки или отказа либо напишите, что не так.": "Qayta ishlash yoki rad etish sababini tanlang yoki nima noto‘g‘ri ekanini yozing.",
+  "Новая версия делается от модели, переданной в производство; для остальных — «Создать похожую».": "Yangi versiya ishlab chiqarishga topshirilgan modeldan qilinadi; qolganlari uchun — «O‘xshashini yaratish».",
+  "Новая версия — от другой модели, номер версии от 2.": "Yangi versiya — boshqa modeldan, versiya raqami 2 dan.",
+  "Причина доработки": "Qayta ishlash sababi",
+  "Создана новая версия модели.": "Modelning yangi versiyasi yaratildi.",
+  "У этой версии уже есть следующая — изменения вносите в неё.": "Bu versiyaning keyingisi allaqachon bor — o‘zgarishlarni unga kiriting.",
+  "на основе": "asosida",
+  "следующая версия": "keyingi versiya"
 }

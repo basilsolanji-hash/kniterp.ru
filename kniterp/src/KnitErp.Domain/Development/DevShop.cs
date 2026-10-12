@@ -63,19 +63,25 @@ public sealed class DevSample
         CreatedByUserId = userId,
     };
 
-    public void Decide(DevSampleStatus status, string? comment)
+    /// <summary>Причина доработки или отказа из справочника (D768); для принятого образца — пусто.</summary>
+    public long? ReasonId { get; private set; }
+
+    /// <summary>Решение по образцу: на доработку или отказ — с причиной из справочника (D768) или с текстом «что не так».</summary>
+    public void Decide(DevSampleStatus status, string? comment, long? reasonId = null)
     {
         if (!Enum.IsDefined(status))
         {
             throw new BusinessRuleException("dev.sample.status", "Выберите результат образца.");
         }
 
-        if (status is DevSampleStatus.Rework or DevSampleStatus.Rejected && string.IsNullOrWhiteSpace(comment))
+        var negative = status is DevSampleStatus.Rework or DevSampleStatus.Rejected;
+        if (negative && reasonId is null && string.IsNullOrWhiteSpace(comment))
         {
-            throw new BusinessRuleException("dev.sample.reason", "Напишите, что не так: причина доработки или отказа.");
+            throw new BusinessRuleException("dev.sample.reason", "Выберите причину доработки или отказа либо напишите, что не так.");
         }
 
         Status = status;
+        ReasonId = negative ? reasonId : null;
         Comment = DomainText.Optional(comment, CommentMaxLength, "Комментарий");
     }
 

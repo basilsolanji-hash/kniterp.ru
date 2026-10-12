@@ -56,9 +56,9 @@ else
                     }
                 </span>
             </div>
-            @if (smp.Comment is not null)
+            @if (smp.Reason is not null || smp.Comment is not null)
             {
-                <p class="small">@smp.Comment</p>
+                <p class="small">@if (smp.Reason is not null) { <span class="tag bad">@smp.Reason</span> } @smp.Comment</p>
             }
             @if (_yarnFor == smp.Id)
             {
@@ -130,6 +130,19 @@ else
                             }
                         </select>
                     </label>
+                    @if (data.Reasons is { Count: > 0 } reasons && _decision != ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture))
+                    {
+                        <label>
+                            @L("Причина")
+                            <select @bind="_reason">
+                                <option value="">—</option>
+                                @foreach (var r in reasons)
+                                {
+                                    <option value="@r.Id">@r.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
                     <label>@L("Что не так / комментарий") <input @bind="_decisionComment" maxlength="@DevSample.CommentMaxLength" /></label>
                     <button type="submit" disabled="@_busy">@L("Записать решение")</button>
                 </form>
@@ -152,6 +165,7 @@ else
     private string _size = string.Empty;
     private string _decision = ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture);
     private string? _decisionComment;
+    private string _reason = string.Empty;
     private bool _busy;
     private string? _message;
     private bool _isError;
@@ -212,8 +226,10 @@ else
 
     private Task DecideAsync(DevSampleDto s) => RunAsync(async () =>
     {
-        await Shop.DecideSampleAsync(s.Id, (DevSampleStatus)byte.Parse(_decision, CultureInfo.InvariantCulture), _decisionComment, s.RowVersion);
+        await Shop.DecideSampleAsync(s.Id, (DevSampleStatus)byte.Parse(_decision, CultureInfo.InvariantCulture), _decisionComment, s.RowVersion,
+            long.TryParse(_reason, out var reason) ? reason : null);
         _decisionComment = null;
+        _reason = string.Empty;
     }, L("Решение записано."));
 
     private async Task RunAsync(Func<Task> action, string success)

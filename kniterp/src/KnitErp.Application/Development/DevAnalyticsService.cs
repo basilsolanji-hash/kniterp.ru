@@ -89,9 +89,14 @@ public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard
 
         // Образцы, созданные за период: решения и причины доработок (комментарий решения).
         var samples = await db.DevSamples.AsNoTracking().Where(s => s.OrganizationId == org && s.CreatedAtUtc >= fromUtc && s.CreatedAtUtc < toUtc)
-            .Select(s => new { s.ModelId, s.Status, s.Comment }).ToListAsync(ct);
+            .Select(s => new { s.ModelId, s.Status, s.Comment, s.ReasonId }).ToListAsync(ct);
+        var reasonIds = samples.Where(s => s.ReasonId is not null).Select(s => s.ReasonId!.Value).Distinct().ToList();
+        var reasonNames = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && reasonIds.Contains(l.Id))
+            .ToDictionaryAsync(l => l.Id, l => l.Name, ct);
         var reasons = samples.Where(s => s.Status is DevSampleStatus.Rework or DevSampleStatus.Rejected)
-            .GroupBy(s => string.IsNullOrWhiteSpace(s.Comment) ? "без комментария" : s.Comment.Trim().ToLowerInvariant())
+            // D768: причина из справочника, иначе — текст решения (как написали).
+            .GroupBy(s => s.ReasonId is { } rid && reasonNames.TryGetValue(rid, out var name) ? name
+                : string.IsNullOrWhiteSpace(s.Comment) ? "без комментария" : s.Comment.Trim().ToLowerInvariant())
             .Select(g => new DevReasonDto(g.Key, g.Count())).OrderByDescending(r => r.Count).ThenBy(r => r.Reason).Take(15).ToList();
 
         // Загрузка: открытые модели по исполнителю и роли.

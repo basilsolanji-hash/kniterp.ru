@@ -401,7 +401,10 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var main = await k.Tech.AddColorAsync(model, "Основной", cotton, null, null);
             var extra = await k.Tech.AddColorAsync(model, "доп.1", red, null, null);
             var detail = await k.Tech.AddDetailAsync(model, "Полотно", 2);
-            await k.Tech.SetKnittingAsync(detail, null, null, 180, 100m, null, (await k.Tech.DetailAsync(detail)).RowVersion);
+            var machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №9", DevMachineBrand.Stoll, null, 7, 8, null, null, null));
+            await k.Tech.SetKnittingAsync(detail, machine, null, 180, 100m, null, (await k.Tech.DetailAsync(detail)).RowVersion);
+            await k.Tech.SetThreadingAsync(detail, [new DevThreadingRow(1, DevFeederSide.Left, main, null, 2, true, null, false),
+                new DevThreadingRow(2, DevFeederSide.Right, extra, null, 1, false, "N", false)], (await k.Tech.DetailAsync(detail)).RowVersion);
             var sketchFile = await k.Models.AddFileAsync(model, DevFileKind.Sketch, "sharf.png",
                 [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], null);
             await k.Tech.PinSketchAsync(model, sketchFile, (await k.Models.GetAsync(model)).RowVersion);
@@ -469,9 +472,25 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             Assert.True((await k.Analytics.ExportAsync(today.AddDays(-30), today)).Length > 1000);
             Assert.Equal("dev.analytics.period", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Analytics.ReportAsync(today, today.AddDays(-1)))).Code);
+            // D769: новая версия переданной модели — с техданными, ссылкой на прежнюю; вторую от той же версии сделать нельзя.
+            var v2 = await k.Tech.NewVersionAsync(model);
+            var m2 = await k.Models.GetAsync(v2);
+            Assert.Equal((DevStage.Idea, 2, model, "Шарф в полоску"), (m2.Stage, m2.VersionNo, m2.PreviousVersionId!.Value, m2.Name));
+            Assert.Equal(v2, (await k.Models.GetAsync(model)).NextVersionId);
+            Assert.Equal(2, (await k.Tech.ColorsAsync(v2)).Count);
+            var d2 = Assert.Single(await k.Tech.DetailsAsync(v2));
+            Assert.Equal(2, d2.ThreadingRows);
+            var threading2 = (await k.Tech.DetailAsync(d2.Id)).Threading;
+            var colors2 = (await k.Tech.ColorsAsync(v2)).ToDictionary(c => c.Id);
+            Assert.All(threading2, t => Assert.True(colors2.ContainsKey(t.ColorId!.Value))); // цвета — новой палитры
+            Assert.Single((await k.Shop.OperationsAsync(v2)).Rows);
+            Assert.Null((await k.Tech.DetailAsync(d2.Id)).ProgramFileId); // программы остаются у прежней версии
+            Assert.Equal("dev.version.exists", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Tech.NewVersionAsync(model))).Code);
+            Assert.Equal("dev.version.stage", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Tech.NewVersionAsync(v2))).Code);
+
             var dash = await k.Analytics.GetAsync(k.All.Db, await new AccessGuard(k.All.Db,
                 new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress }, host.Clock).CurrentAsync(), today, default);
-            Assert.Equal((0, 1), (dash!.InWork, dash.SamplesWaiting));
+            Assert.Equal((1, 1), (dash!.InWork, dash.SamplesWaiting)); // в работе — новая версия
         }
 
         // Без права «утверждение» — отказ; чужая организация — «не найдено».
@@ -490,6 +509,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await Assert.ThrowsAsync<NotFoundException>(() => k.Handoff.HandOffAsync(model, null, null, null, []));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Yarn.PreviewAsync(sample));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Yarn.WriteOffAsync(sample, warehouse, null));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Tech.NewVersionAsync(model));
         }
     }
 
@@ -554,6 +574,24 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
                 await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync(
                     "DELETE FROM kniterp.dev_cost_lines WHERE RunId = {0}", runs[0].Id));
             }
+        }
+
+        // D768: решение по образцу — причина из справочника; чужой вид справочника не подходит; аналитика группирует по причине.
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            var loops = await k.Settings.AddLookupAsync(DevLookupKind.ReworkReason, "Петли", null);
+            var weave = await k.Settings.AddLookupAsync(DevLookupKind.Weave, "Гладь", null);
+            var smp = await k.Shop.CreateSampleAsync(model, null);
+            var rv = (await k.Shop.SamplesAsync(model)).Samples.Single().RowVersion;
+            Assert.Equal("dev.sample.reason", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.DecideSampleAsync(smp, DevSampleStatus.Rework, null, rv))).Code);
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.DecideSampleAsync(smp, DevSampleStatus.Rework, null, rv, weave));
+            await k.Shop.DecideSampleAsync(smp, DevSampleStatus.Rework, null, rv, loops);
+            var data = await k.Shop.SamplesAsync(model);
+            Assert.Equal("Петли", data.Samples.Single().Reason);
+            Assert.Contains(data.Reasons!, r => r.Id == loops);
+            var today = DateOnly.FromDateTime(host.Clock.UtcNow);
+            Assert.Equal(("Петли", 1), (await k.Analytics.ReportAsync(today.AddDays(-1), today.AddDays(1))).ReworkReasons.Select(r => (r.Reason, r.Count)).Single());
         }
 
         // Без права «себестоимость» — отказ; чужая организация — «не найдено».

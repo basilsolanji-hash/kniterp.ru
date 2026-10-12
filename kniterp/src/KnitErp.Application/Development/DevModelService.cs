@@ -124,6 +124,12 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             hasPatternFile: files.Any(f => f.Kind == DevFileKind.Pattern),
             hasProgram: files.Any(f => f.Kind == DevFileKind.MachineProgram),
             hasResponsible: DevStages.ResponsibleRole(m.Stage) is not { } role || m.AssigneeOf(role) is not null);
+        // D769: соседние версии модели — ссылки «на основе» и «следующая версия».
+        var previous = m.PreviousVersionId is { } pid
+            ? await db.DevModels.AsNoTracking().Where(x => x.Id == pid && x.OrganizationId == ctx.OrganizationId).Select(x => new { x.Id, x.Number }).SingleOrDefaultAsync(ct)
+            : null;
+        var next2 = await db.DevModels.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.PreviousVersionId == m.Id)
+            .Select(x => new { x.Id, x.Number }).SingleOrDefaultAsync(ct);
         return new DevModelDto(m.Id, m.Number, m.Name, m.CollectionId, collection, m.Category, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, customer,
             m.DealId, m.PlannedLaunch, m.Priority, m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), m.CancelReason,
             DevModel.Roles.Select(r => new DevAssigneeDto(r, m.AssigneeOf(r), m.AssigneeOf(r) is { } u ? users.GetValueOrDefault(u) : null)).ToList(),
@@ -137,7 +143,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
                 users.GetValueOrDefault(f.UploadedByUserId) ?? "—")).ToList(),
             targets, next, canEdit && !DevStages.IsFinal(m.Stage), canApprove,
             DevModel.IsLate(m.Stage, m.PlannedLaunch, today), DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), clock.UtcNow),
-            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false }, m.MainSketchFileId);
+            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false }, m.MainSketchFileId,
+            m.VersionNo, m.PreviousVersionId, previous?.Number, next2?.Id, next2?.Number);
     }
 
     /// <summary>
