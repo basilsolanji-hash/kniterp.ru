@@ -22,7 +22,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
     private sealed record Kit(DevModelService Models, DevTechService Tech, DevShopService Shop, DevSettingsService Settings, Services All,
-        DevHandoffService Handoff, DevYarnService Yarn, DevCostService Costs, DevAnalyticsService Analytics) : IAsyncDisposable
+        DevHandoffService Handoff, DevYarnService Yarn, DevCostService Costs, DevAnalyticsService Analytics, DevPassportService Passport) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => All.DisposeAsync();
     }
@@ -34,11 +34,12 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         var guard = new AccessGuard(all.Db, user, host.Clock);
         var models = new DevModelService(all.Db, guard, user, host.Clock);
         var tech = new DevTechService(all.Db, guard, user, host.Clock, models);
-        return new Kit(models, tech, new DevShopService(all.Db, guard, user, host.Clock, tech), new DevSettingsService(all.Db, guard, user, host.Clock), all,
+        var shop = new DevShopService(all.Db, guard, user, host.Clock, tech);
+        return new Kit(models, tech, shop, new DevSettingsService(all.Db, guard, user, host.Clock), all,
             new DevHandoffService(all.Db, guard, user, host.Clock, all.Catalog, all.TechCards,
                 new KnitErp.Application.Catalog.ModificationService(all.Db, guard, user, host.Clock)),
             new DevYarnService(all.Db, guard, user, host.Clock, all.Documents), new DevCostService(all.Db, guard, user, host.Clock),
-            new DevAnalyticsService(all.Db, guard, host.Clock, SqlTestHost.Spreadsheet));
+            new DevAnalyticsService(all.Db, guard, host.Clock, SqlTestHost.Spreadsheet), new DevPassportService(all.Db, guard, host.Clock, models, tech, shop));
     }
 
     private static DevModelHeader Header(string name) =>
@@ -206,6 +207,39 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             Assert.Equal("dev.detail.used", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Tech.RemoveDetailAsync(front, detailRv))).Code);
             Assert.NotEmpty(await k.Tech.TechCardsAsync("Подвяз"));
             Assert.Equal(op, (await k.Shop.OperationTypesAsync()).Single(o => o.Name == "Вязание").Id);
+
+            // D725: технический паспорт — эскиз, палитра, детали с заправкой, табель мер, операции без расценок, упаковка; PDF строится.
+            var png = KnitErp.Infrastructure.Documents.PaymentQrImage.Png("эскиз", 4);
+            var sketch = await k.Models.AddFileAsync(modelId, DevFileKind.Sketch, "eskiz.png", png, null);
+            await k.Tech.PinSketchAsync(modelId, sketch, (await k.Models.GetAsync(modelId)).RowVersion);
+            var passport = await k.Passport.BuildAsync(modelId);
+            Assert.Equal(png, passport.Sketch);
+            Assert.Equal(new[] { "Основной", "доп.1" }, passport.Palette.Select(c => c.Label));
+            Assert.Equal(new[] { 4, 4 }, passport.Details.Select(d => d.Feeders.Count)); // 5 позиций на нитеводителях 8, 5 (обе стороны), 4, 1
+            Assert.Equal(("Ластик 2×2", "podvyaz.sin, версия 1"), (passport.Details[0].Weave!, passport.Details[0].Program!));
+            Assert.Equal(new[] { 14m, 16m, 18m, 20m }, passport.Sizes.Select(z => passport.Measures.Single().Values[z.Id]));
+            Assert.Equal(new[] { "Вязание", "Убрать боковые нитки", "Упаковка в короба" }, passport.Operations.Select(o => o.Name));
+            Assert.Equal("40 × 30 × 30 см", passport.PackBox);
+            var (fileName, pdf) = await k.Passport.PdfAsync(modelId, new KnitErp.Infrastructure.Documents.DevPassportPdfRenderer());
+            Assert.StartsWith("pasport-", fileName);
+            Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));
+            if (Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") is { Length: > 0 } dir)
+            {
+                Directory.CreateDirectory(dir);
+                await File.WriteAllBytesAsync(Path.Combine(dir, fileName), pdf); // посмотреть паспорт глазами
+            }
+        }
+
+        // Паспорт без денег — открывает и образцовщица (просмотр); чужая организация — «не найдено».
+        await using (var k = As(sampler, org.OrganizationId))
+        {
+            Assert.NotEmpty((await k.Passport.BuildAsync(modelId)).Details);
+        }
+
+        var stranger = await CreateOrganizationAsync();
+        await using (var k = As(stranger.OwnerUserId, stranger.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Passport.BuildAsync(modelId));
         }
 
         await using var db = host.NewDb();

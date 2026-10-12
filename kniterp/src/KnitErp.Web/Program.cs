@@ -567,6 +567,27 @@ app.MapGet("/dev/files/{id:long}", async (long id, string? inline, KnitErp.Appli
     }
 });
 
+// Технический паспорт изделия (D725): PDF; право и своя организация — в сервисе. ?inline=1 — открыть в браузере для печати.
+app.MapGet("/dev/models/{id:long}/passport.pdf", async (long id, string? inline, KnitErp.Application.Development.DevPassportService passports,
+    KnitErp.Application.Development.IDevPassportRenderer renderer, HttpContext http, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, content) = await passports.PdfAsync(id, renderer, ct);
+        http.Response.Headers.CacheControl = "private, no-store";
+        http.Response.Headers.XContentTypeOptions = "nosniff";
+        return inline is "1" or "true" ? Results.File(content, "application/pdf") : Results.File(content, "application/pdf", fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 // Excel моделей разработки (D794): выгрузка списка в работе и шаблон загрузки; права — в сервисе.
 app.MapGet("/dev/models.xlsx", (KnitErp.Application.Development.DevExchangeService exchange, CancellationToken ct) =>
     FileOrForbid(() => exchange.ExportAsync(new KnitErp.Application.Development.DevModelFilter(IncludeFinal: true), ct), $"modeli-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));

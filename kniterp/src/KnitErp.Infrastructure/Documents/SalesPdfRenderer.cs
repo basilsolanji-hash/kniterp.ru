@@ -553,7 +553,7 @@ public sealed class SalesPdfRenderer : ISalesPdfRenderer
         string.Join(", ", new[] { p.Name, p.Inn is null ? null : $"ИНН {p.Inn}", p.Kpp is null ? null : $"КПП {p.Kpp}", p.Address }.Where(x => x is not null));
 
     /// <summary>Шрифт подключается один раз на процесс: PDFsharp не даёт сменить FontResolver после первого использования.</summary>
-    private static void EnsureFonts()
+    internal static void EnsureFonts()
     {
         if (_fontsReady)
         {

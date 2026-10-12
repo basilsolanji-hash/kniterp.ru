@@ -69,6 +69,7 @@ public static class DependencyInjection
         services.AddScoped<Development.DevExchangeService>();
         services.AddScoped<Development.DevTechService>();
         services.AddScoped<Development.DevShopService>();
+        services.AddScoped<Development.DevPassportService>();
         services.AddScoped<Development.DevHandoffService>();
         services.AddScoped<Development.DevYarnService>();
         services.AddScoped<Development.DevCostService>();

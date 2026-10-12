@@ -237,6 +237,13 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Вернули на фабрику", Exact = true })).ToBeVisibleAsync();
         await AssertNoHorizontalScrollAsync(page, "образец у заказчика");
 
+        // D725: технический паспорт открывается из карточки модели как PDF.
+        var passportHref = await page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" }).GetAttributeAsync("href") ?? throw new InvalidOperationException("нет ссылки");
+        var passport = await page.APIRequest.GetAsync(new Uri(new Uri(page.Url), "/" + passportHref).ToString());
+        Assert.Equal(200, passport.Status);
+        Assert.Equal("application/pdf", passport.Headers["content-type"]);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString((await passport.BodyAsync())[..4]));
+
         // D750: утверждённая модель — панель передачи в производство с нормами и причиной, почему пока нельзя.
         // D746: без сохранённого расчёта себестоимости утвердить нельзя — сначала версия расчёта.
         await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });

@@ -155,6 +155,8 @@ else
                 <button type="button" @onclick="RestoreAsync" disabled="@_busy">@L("Вернуть в работу")</button>
             }
             <DevLabelLink Kind="model" Id="m.Id" />
+            <a class="button secondary" href="dev/models/@(m.Id)/passport.pdf?inline=1" target="_blank" rel="noopener" data-enhance-nav="false"
+               title="@L("Технический паспорт изделия (PDF)")">@L("Техпаспорт")</a>
         </div>
         @if (_cancelling)
         {
