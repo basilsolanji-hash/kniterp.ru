@@ -1,0 +1,283 @@
+@page "/dev/models"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevModelService Models
+@inject DevExchangeService Exchange
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Модели в разработке") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Модели в разработке")</h1>
+        @if (_options.CanEdit && !_creating)
+        {
+            <button type="button" @onclick="() => _creating = true" disabled="@_busy">@L("Новая модель")</button>
+        }
+    </div>
+    <p class="muted">@L("Путь модели: идея → задание → рисунок → пряжа и вязка → программа → образец → доработка → согласование → себестоимость → утверждено → передано в производство.")</p>
+
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+
+    @if (_creating)
+    {
+        <div class="panel">
+            <h2>@L("Новая модель")</h2>
+            <DevModelForm Options="_options" Busy="_busy" SubmitText="@L("Создать модель")" OnSubmit="CreateAsync" OnCancel="() => _creating = false" />
+        </div>
+    }
+
+    <ImportPanel ExportHref="dev/models.xlsx" TemplateHref="dev/models-template.xlsx" CanImport="@_options.CanEdit" ShownColumns="[0, 1, 3]"
+                 Hint="@L("Коллекция на сезон одним файлом: пустое название и дата запуска рассчитываются сами, задание дополняется из шаблона категории.")"
+                 Preview="s => Exchange.PreviewAsync(s)" Apply="rows => Exchange.ApplyAsync(rows)" Applied="ReloadAsync" />
+
+    <div class="dev-switch" role="tablist">
+        <button type="button" role="tab" class="@(_table ? "secondary" : "")" aria-selected="@(!_table ? "true" : "false")" @onclick="() => SwitchAsync(false)" disabled="@_busy">@L("Доска")</button>
+        <button type="button" role="tab" class="@(_table ? "" : "secondary")" aria-selected="@(_table ? "true" : "false")" @onclick="() => SwitchAsync(true)" disabled="@_busy">@L("Таблица")</button>
+    </div>
+
+    <form class="inline-form" @onsubmit="ReloadAsync">
+        <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер или название")" /></label>
+        <label>
+            @L("Коллекция")
+            <select @bind="_collection">
+                <option value="">@L("Все")</option>
+                @foreach (var c in _options.Collections)
+                {
+                    <option value="@c.Id">@c.Name</option>
+                }
+            </select>
+        </label>
+        @if (_table)
+        {
+            <label>
+                @L("Стадия")
+                <select @bind="_stage">
+                    <option value="">@L("В работе")</option>
+                    @foreach (var s in DevStages.All)
+                    {
+                        <option value="@((byte)s)">@L(DevStages.Name(s))</option>
+                    }
+                </select>
+            </label>
+        }
+        <label>
+            @L("Исполнитель")
+            <select @bind="_assignee">
+                <option value="">@L("Все")</option>
+                @foreach (var u in _options.Users)
+                {
+                    <option value="@u.Id">@u.Name</option>
+                }
+            </select>
+        </label>
+        <label>
+            @L("Заказчик")
+            <select @bind="_customer">
+                <option value="">@L("Все")</option>
+                @foreach (var c in _options.Customers)
+                {
+                    <option value="@c.Id">@c.Name</option>
+                }
+            </select>
+        </label>
+        <label class="inline"><span><input type="checkbox" @bind="_overdue" /> @L("Только просроченные")</span></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+    </form>
+
+    @if (!_table && _board is not null)
+    {
+        <div class="dev-board">
+            @foreach (var col in _board)
+            {
+                <section class="dev-col" aria-label="@L(col.StageName)">
+                    <h2><span>@L(col.StageName)</span><span class="muted">@col.Models.Count@(col.Models.Count >= DevModelService.BoardColumnLimit ? "+" : "")</span></h2>
+                    @if (col.Models.Count == 0)
+                    {
+                        <p class="muted small">—</p>
+                    }
+                    <ul>
+                        @foreach (var m in col.Models)
+                        {
+                            <li class="dev-cardlet @(m.IsOverdue ? "late" : null)">
+                                <a href="dev/models/@m.Id">@m.Number</a> @m.Name
+                                <div class="meta">
+                                    <span>@L(m.CategoryName)</span>
+                                    @if (m.CustomerName is not null) { <span>@m.CustomerName</span> }
+                                    @if (m.ResponsibleName is not null) { <span>@m.ResponsibleName</span> }
+                                    @if (m.PlannedLaunch is { } d) { <span class="@(m.IsLate ? "late-text" : null)">@L("запуск {0}", d.ToString("dd.MM.yyyy"))</span> }
+                                    @if (m.IsStageOverdue) { <span class="late-text">@L("стадия дольше нормы")</span> }
+                                    @if (m.Priority >= DevPriority.High) { <span class="tag warn">@L(m.PriorityName)</span> }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+        </div>
+    }
+    else if (_page is not null)
+    {
+        <div class="scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>@L("Номер")</th><th>@L("Название")</th><th>@L("Стадия")</th><th class="opt">@L("Категория")</th><th class="opt">@L("Коллекция")</th>
+                        <th class="opt">@L("Заказчик")</th><th class="opt">@L("Ответственный")</th><th>@L("Запуск")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_page.Rows.Count == 0)
+                    {
+                        <tr><td colspan="8" class="muted">@L("Моделей не найдено.")</td></tr>
+                    }
+                    @foreach (var m in _page.Rows)
+                    {
+                        <tr>
+                            <td><a href="dev/models/@m.Id">@m.Number</a></td>
+                            <td>@m.Name</td>
+                            <td><span class="tag @(m.IsOverdue ? "bad" : m.Stage == DevStage.Handed ? "ok" : "")">@L(m.StageName)</span></td>
+                            <td>@L(m.CategoryName)</td>
+                            <td>@(m.CollectionName ?? "—")</td>
+                            <td>@(m.CustomerName ?? "—")</td>
+                            <td>@(m.ResponsibleName ?? "—")</td>
+                            <td class="@(m.IsLate ? "late-text" : null)">@(m.PlannedLaunch?.ToString("dd.MM.yyyy") ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_page.Total > _page.PageSize)
+        {
+            var pages = (_page.Total + _page.PageSize - 1) / _page.PageSize;
+            <div class="actions">
+                <button type="button" class="secondary" disabled="@(_busy || _page.Page <= 1)" @onclick="() => GoAsync(_page.Page - 1)">@L("← Назад")</button>
+                <span class="muted">@L("Страница {0} из {1}", _page.Page, pages)</span>
+                <button type="button" class="secondary" disabled="@(_busy || _page.Page >= pages)" @onclick="() => GoAsync(_page.Page + 1)">@L("Вперёд →")</button>
+            </div>
+        }
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? View { get; set; }
+
+    [SupplyParameterFromQuery(Name = "overdue")]
+    public bool? OverdueQuery { get; set; }
+
+    private DevModelOptionsDto? _options;
+    private IReadOnlyList<DevBoardColumnDto>? _board;
+    private DevModelPageDto? _page;
+    private bool _table;
+    private bool _creating;
+    private bool _busy;
+    private string? _denied;
+    private string? _error;
+    private string _search = string.Empty;
+    private string _collection = string.Empty;
+    private string _stage = string.Empty;
+    private string _assignee = string.Empty;
+    private string _customer = string.Empty;
+    private bool _overdue;
+    private int _pageNo = 1;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _table = View == "table";
+        _overdue = OverdueQuery == true;
+        try
+        {
+            _options = await Models.OptionsAsync();
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private DevModelFilter Filter() => new(
+        long.TryParse(_collection, out var c) ? c : null,
+        _table && byte.TryParse(_stage, out var s) ? (DevStage)s : null,
+        long.TryParse(_assignee, out var u) ? u : null,
+        long.TryParse(_customer, out var k) ? k : null,
+        _overdue, _search);
+
+    /// <summary>Доска или таблица — один вызов сервиса за раз (один DbContext у вкладки).</summary>
+    private async Task LoadAsync()
+    {
+        if (_table)
+        {
+            _page = await Models.ListAsync(Filter(), _pageNo);
+        }
+        else
+        {
+            _board = await Models.BoardAsync(Filter());
+        }
+    }
+
+    private Task ReloadAsync() => RunAsync(() =>
+    {
+        _pageNo = 1;
+        return LoadAsync();
+    });
+
+    private Task GoAsync(int page) => RunAsync(() =>
+    {
+        _pageNo = page;
+        return LoadAsync();
+    });
+
+    private Task SwitchAsync(bool table) => RunAsync(() =>
+    {
+        _table = table;
+        _pageNo = 1;
+        return LoadAsync();
+    });
+
+    private Task CreateAsync(DevModelHeader header) => RunAsync(async () =>
+    {
+        var id = await Models.CreateAsync(header);
+        Navigation.NavigateTo($"dev/models/{id}");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

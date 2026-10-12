@@ -1,0 +1,22 @@
+@* Постраничный список CRM (ТЗ §8): «показано 100 из 2 345», «Назад» и «Дальше». *@
+@if (Total > PageSize || Page > 0)
+{
+    <nav class="crm-pager" aria-label="@L("Страницы списка")">
+        <span class="muted">@L("Показано {0}–{1} из {2}", Page * PageSize + (Shown > 0 ? 1 : 0), Page * PageSize + Shown, Total)</span>
+        <button type="button" class="secondary" disabled="@(Busy || Page == 0)" @onclick="() => PageChanged.InvokeAsync(Page - 1)">@L("Назад")</button>
+        <button type="button" class="secondary" disabled="@(Busy || (Page + 1) * PageSize >= Total)" @onclick="() => PageChanged.InvokeAsync(Page + 1)">@L("Дальше")</button>
+    </nav>
+}
+else if (Total > 0)
+{
+    <p class="muted small">@L("Всего: {0}", Total)</p>
+}
+
+@code {
+    [Parameter] public int Total { get; set; }
+    [Parameter] public int Page { get; set; }
+    [Parameter] public int PageSize { get; set; }
+    [Parameter] public int Shown { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
+}

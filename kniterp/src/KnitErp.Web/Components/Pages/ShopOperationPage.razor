@@ -58,16 +58,37 @@ else
                 @if (_qc == QcMode.Defect)
                 {
                     <label>@L("Причина брака")
-                        <input @bind="_comment" maxlength="300" aria-label="@L("Причина брака")" /></label>
+                        <input @bind="_comment" maxlength="300" aria-label="@L("Причина брака")" list="@(op.DefectReasons is { Count: > 0 } ? "shop-defect-reasons" : null)" /></label>
+                    @if (op.DefectReasons is { Count: > 0 } defectHints)
+                    {
+                        <div class="shop-quick" aria-label="@L("Частые причины")">
+                            @foreach (var h in defectHints.Take(4))
+                            {
+                                <button type="button" class="secondary" @onclick="() => _comment = h">@h</button>
+                            }
+                        </div>
+                        <datalist id="shop-defect-reasons">
+                            @foreach (var h in defectHints)
+                            {
+                                <option value="@h"></option>
+                            }
+                        </datalist>
+                    }
                     @if (op.Culprits is { Count: > 0 } people)
                     {
                         <label>@L("Виновник брака")
                             <select @bind="_culprit" aria-label="@L("Виновник брака")">
                                 <option value="">@L("— не указан —")</option>
-                                @foreach (var e in people)
+                                @* D413: сначала те, кто работал по этому заказу. Табельный номер — только чтобы различить однофамильцев:
+                                   на общем телефоне цеха лишних данных не показываем. *@
+                                @foreach (var group in people.GroupBy(x => x.WorkedOnOrder).OrderByDescending(g => g.Key))
                                 {
-                                    @* Табельный номер — только чтобы различить однофамильцев: на общем телефоне цеха лишних данных не показываем. *@
-                                    <option value="@e.Id">@(people.Count(x => x.Name == e.Name) > 1 ? $"{e.Name} ({e.PersonnelNumber})" : e.Name)</option>
+                                    <optgroup label="@(group.Key ? L("Работали по заказу") : L("Остальные сотрудники"))">
+                                        @foreach (var e in group)
+                                        {
+                                            <option value="@e.Id">@(people.Count(x => x.Name == e.Name) > 1 ? $"{e.Name} ({e.PersonnelNumber})" : e.Name)</option>
+                                        }
+                                    </optgroup>
                                 }
                             </select>
                         </label>
@@ -84,7 +105,16 @@ else
                         </select>
                     </label>
                     <label>@L("Комментарий")
-                        <input @bind="_comment" maxlength="300" aria-label="@L("Комментарий")" /></label>
+                        <input @bind="_comment" maxlength="300" aria-label="@L("Комментарий")" list="@(op.ReworkReasons is { Count: > 0 } ? "shop-rework-reasons" : null)" /></label>
+                    @if (op.ReworkReasons is { Count: > 0 } reworkHints)
+                    {
+                        <datalist id="shop-rework-reasons">
+                            @foreach (var h in reworkHints)
+                            {
+                                <option value="@h"></option>
+                            }
+                        </datalist>
+                    }
                 }
                 <button type="submit" class="shop-submit" disabled="@_busy">@(_qc == QcMode.Defect ? L("Отметить брак") : L("Отправить на переделку"))</button>
                 </fieldset>
@@ -99,6 +129,10 @@ else
                     <input @bind="_quantityText" @bind:event="oninput" inputmode="decimal" autocomplete="off" aria-label="@L("Сделано")" />
                 </label>
                 <div class="shop-quick">
+                    @if (op.MyTaskRemaining is { } byTask && byTask != op.Available)
+                    {
+                        <button type="button" class="secondary" @onclick="() => _quantityText = Quantities.Format(byTask)">@L("По заданию: {0}", Quantities.Format(byTask))</button>
+                    }
                     <button type="button" class="secondary" @onclick="() => _quantityText = Quantities.Format(op.Available)">@L("Всё: {0}", Quantities.Format(op.Available))</button>
                 </div>
                 @if (IsPartial)

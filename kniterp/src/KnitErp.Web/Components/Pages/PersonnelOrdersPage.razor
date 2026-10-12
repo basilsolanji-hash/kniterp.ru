@@ -150,7 +150,7 @@ else
         try
         {
             _options = await Orders.OptionsAsync();
-            _form = new PersonnelOrderFormModel { OrderDate = _options.Today, EffectiveFrom = _options.Today };
+            _form = new PersonnelOrderFormModel { OrderDate = _options.Today, EffectiveFrom = _options.Today, PersonnelNumber = _options.NextPersonnelNumber };
             _error = null;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))

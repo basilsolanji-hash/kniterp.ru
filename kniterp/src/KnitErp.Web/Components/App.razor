@@ -60,6 +60,7 @@
             --sec-crm: #9085E9;
             --sec-warehouse: #199E70;
             --sec-production: #C98500;
+            --sec-dev: #D9739A; /* D700: «Разработка» */
             --sec-reports: #D55181;
             --sec-catalogs: #3FA34D;
             --sec-settings: #8A8A92;
@@ -112,6 +113,7 @@
             --sec-crm: #6250D6;
             --sec-warehouse: #1BAF7A;
             --sec-production: #B07A00;
+            --sec-dev: #B8456F;
             --sec-reports: #C9457A;
             --sec-catalogs: #008300;
             --sec-settings: #66707B;
@@ -165,6 +167,7 @@
             --sec-crm: #6250D6;
             --sec-warehouse: #1BAF7A;
             --sec-production: #B07A00;
+            --sec-dev: #B8456F;
             --sec-reports: #C9457A;
             --sec-catalogs: #008300;
             --sec-settings: #66707B;
@@ -503,6 +506,20 @@
         .photo-strip figcaption { display: flex; gap: 4px; align-items: center; margin-top: 4px; }
         .file-pick { display: inline-flex; flex-direction: column; gap: 4px; }
         .item-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 6px; }
+        /* D316: конструктор этикеток — шаблоны, редактор и предпросмотр; на узком экране — друг под другом. */
+        .label-designer { display: grid; gap: 16px; grid-template-columns: 1fr; }
+        @@media (min-width: 1100px) { .label-designer { grid-template-columns: 260px minmax(0, 1fr) minmax(0, 420px); align-items: start; } }
+        .label-designer fieldset { min-width: 0; } .label-designer .row-actions { flex-wrap: nowrap; }
+        .label-designer > * { min-width: 0; } .label-designer select, .label-designer input { max-width: 100%; }
+        .label-designer .plain-list { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 6px; }
+        .label-zoom { max-width: 100%; overflow: hidden; margin: 8px 0; }
+        /* D316: этикетка по шаблону — одинаково на экране конструктора и при печати. */
+        .item-label { box-sizing: border-box; background: #fff; color: #000; font-family: Arial, sans-serif; line-height: 1.15; overflow: hidden; display: flex; flex-direction: column; gap: 0.4mm; outline: 1px dashed #bbb; }
+        .item-label .lb-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .item-label .lb-line.wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+        .item-label .lb-bars { margin-top: auto; }
+        .item-label .lb-missing { color: #a00; font-style: italic; text-align: center; }
+        @@media print { .item-label { outline: none; } }
         .variant-of { color: var(--muted); }
         .dash-box table.compact { width: 100%; min-width: 0; }
         .dash-box table.compact td, .dash-box table.compact th { padding-right: 8px; }

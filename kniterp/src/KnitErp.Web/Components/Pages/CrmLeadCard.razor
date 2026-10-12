@@ -1,0 +1,382 @@
+@page "/crm/leads/{Id:long}"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@using KnitErp.Domain.Tagging
+@inject CrmLeadService Leads
+@inject NavigationManager Navigation
+
+<PageTitle>@(_lead?.Number ?? L("Лид")) — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound is not null)
+{
+    <div class="error" role="alert">@_notFound</div>
+    <p><a href="crm/leads">@L("К списку лидов")</a></p>
+}
+else if (_lead is null || _options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var v = _lead.Values;
+    var canEdit = _lead.CanEdit && !_lead.IsClosed;
+    <p class="muted small"><a href="crm/leads">@L("Лиды")</a></p>
+    <div class="page-head">
+        <h1>@_lead.Number @v.Title</h1>
+        <span class="tag @CrmLeadsPage.StatusClass(_lead.Status)">@L(_lead.StatusName)</span>
+    </div>
+    <TagPicker Entity="TaggedEntity.CrmLead" EntityId="Id" ReadOnly="@(!_lead.CanEdit)" />
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_lead.Status == CrmLeadStatus.Qualified)
+    {
+        <div class="flash" role="status">
+            <span>
+                @L("Квалифицирован:") <a href="crm/deals/@_lead.DealId">@L("сделка {0}", _lead.DealNumber ?? "")</a>,
+                @L("контакт") <a href="crm/contacts/@_lead.ContactId">@_lead.Contact</a>,
+                @L("контрагент") <a href="counterparties/@_lead.CounterpartyId">@_lead.Counterparty</a>
+            </span>
+        </div>
+    }
+    else if (_lead.Status == CrmLeadStatus.Rejected)
+    {
+        <div class="flash warn" role="status">
+            <span>
+                @L("Отказ: {0}", _lead.RejectReason ?? "—")@(_lead.RejectComment is null ? "" : $" — {_lead.RejectComment}")
+                @if (_lead.MergedIntoLeadId is { } main)
+                {
+                    <span> · <a href="crm/leads/@main">@L("основной лид {0}", _lead.MergedIntoNumber ?? "")</a></span>
+                }
+            </span>
+            @if (_lead.CanEdit && _lead.MergedIntoLeadId is null)
+            {
+                <button type="button" class="secondary" @onclick="ReopenAsync" disabled="@_busy">@L("Вернуть в работу")</button>
+            }
+        </div>
+    }
+
+    <div class="crm-summary">
+        <div><span>@L("Ответственный")</span><span>@_lead.Responsible</span></div>
+        <div><span>@L("Источник")</span><span>@(_lead.Source ?? "—")</span></div>
+        <div><span>@L("Канал продаж")</span><span>@(_lead.Channel ?? "—")</span></div>
+        <div><span>@L("Создан")</span><span>@TimeZones.ToLocal(_lead.CreatedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm"), @_lead.CreatedBy</span></div>
+        @if (_lead.CanSeeAmounts)
+        {
+            <div><span>@L("Ожидаемая сумма")</span><span>@(v.ExpectedAmount is { } a ? $"{Amounts.Format(a)} {v.CurrencyCode}" : "—")</span></div>
+        }
+    </div>
+
+    @if (canEdit)
+    {
+        <div class="actions">
+            @if (_lead.Status == CrmLeadStatus.New)
+            {
+                <button type="button" @onclick="StartWorkAsync" disabled="@_busy">@L("Взять в работу")</button>
+            }
+            <button type="button" @onclick="() => _panel = Panel.Qualify" disabled="@_busy">@L("Квалифицировать")</button>
+            <button type="button" class="secondary" @onclick="() => _panel = Panel.Reject" disabled="@_busy">@L("Отказ")</button>
+            @if (_lead.CanAll)
+            {
+                <button type="button" class="secondary" @onclick="() => _panel = Panel.Merge" disabled="@_busy">@L("Объединить с другим лидом")</button>
+            }
+        </div>
+    }
+
+    @if (_panel == Panel.Qualify)
+    {
+        <div class="panel">
+            <h2>@L("Квалификация")</h2>
+            <p class="muted small">@L("Создадутся контакт (или найдётся существующий с тем же телефоном или почтой), контрагент-покупатель (найдётся по ИНН или точному названию) и сделка на первом этапе воронки.")</p>
+            <form @onsubmit="QualifyAsync">
+                <div class="grid">
+                    <label>
+                        @L("Воронка")
+                        <select @bind="_pipeline">
+                            @foreach (var p in _options.Pipelines)
+                            {
+                                <option value="@p.Id">@p.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Название сделки") <input @bind="_dealTitle" maxlength="@CrmDeal.TitleMaxLength" /></label>
+                    @if (_lead.CanSeeAmounts)
+                    {
+                        <label>@L("Сумма сделки") <input inputmode="decimal" @bind="_dealAmount" /></label>
+                    }
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Создать сделку")</button>
+                    <button type="button" class="secondary" @onclick="() => _panel = Panel.None">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
+    }
+    else if (_panel == Panel.Reject)
+    {
+        <div class="panel">
+            <h2>@L("Отказ")</h2>
+            <form @onsubmit="RejectAsync">
+                <div class="grid">
+                    <label>
+                        @L("Причина")
+                        <select @bind="_reason" required>
+                            <option value="">—</option>
+                            @foreach (var r in _options.LossReasons)
+                            {
+                                <option value="@r.Id">@r.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="wide">@L("Комментарий") <input @bind="_rejectComment" maxlength="@CrmLead.CommentMaxLength" /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Закрыть отказом")</button>
+                    <button type="button" class="secondary" @onclick="() => _panel = Panel.None">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
+    }
+    else if (_panel == Panel.Merge)
+    {
+        <div class="panel">
+            <h2>@L("Объединить с другим лидом")</h2>
+            <p class="muted small">@L("Этот лид закроется отказом «Дубликат», его данные дополнят пустые поля основного. Укажите номер основного лида.")</p>
+            <form @onsubmit="MergeAsync">
+                <div class="grid">
+                    <label>@L("Номер основного лида") <input @bind="_mergeNumber" placeholder="Л-000001" required /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Объединить")</button>
+                    <button type="button" class="secondary" @onclick="() => _panel = Panel.None">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
+    }
+
+    <div class="panel">
+        <h2>@L("Данные лида")</h2>
+        <form @onsubmit="SaveAsync">
+            <fieldset disabled="@(!canEdit)">
+                <div class="grid">
+                    <label class="wide">@L("Что нужно клиенту") <input @bind="_f.Title" maxlength="@CrmLead.TitleMaxLength" required /></label>
+                    <label>@L("Контактное лицо") <input @bind="_f.ContactName" maxlength="@CrmLead.NameMaxLength" /></label>
+                    <label>@L("Телефон") <input type="tel" @bind="_f.Phone" @bind:after="CheckDuplicatesAsync" maxlength="@CrmText.PhoneMaxLength" placeholder="+7 900 000-00-01" /></label>
+                    <label>@L("Почта") <input type="email" @bind="_f.Email" @bind:after="CheckDuplicatesAsync" maxlength="@CrmText.EmailMaxLength" /></label>
+                    <label>@L("Мессенджер") <input @bind="_f.Messenger" maxlength="@CrmText.MessengerMaxLength" placeholder="@L("@имя в Telegram или ссылка")" /></label>
+                    <label>@L("Компания") <input @bind="_f.Company" maxlength="@CrmLead.NameMaxLength" /></label>
+                    <label>@L("ИНН") <input inputmode="numeric" @bind="_f.Inn" @bind:after="CheckDuplicatesAsync" maxlength="12" /></label>
+                    <label>
+                        @L("Источник")
+                        <select @bind="_f.Source">
+                            <option value="">—</option>
+                            @foreach (var s in _options.Sources)
+                            {
+                                <option value="@s.Id">@s.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Канал продаж")
+                        <select @bind="_f.Channel">
+                            <option value="">—</option>
+                            @foreach (var c in _options.Channels)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_lead.CanAll)
+                    {
+                        <label>
+                            @L("Ответственный")
+                            <select @bind="_f.Responsible">
+                                @foreach (var u in _options.Users)
+                                {
+                                    <option value="@u.Id">@u.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (_lead.CanSeeAmounts)
+                    {
+                        <label>@L("Ожидаемая сумма") <input inputmode="decimal" @bind="_f.Amount" /></label>
+                        <label>
+                            @L("Валюта")
+                            <select @bind="_f.Currency">
+                                @foreach (var c in _options.Currencies)
+                                {
+                                    <option value="@c">@c</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <label class="wide">@L("Потребность") <textarea rows="3" @bind="_f.Need" maxlength="@CrmLead.NeedMaxLength"></textarea></label>
+                </div>
+                @if (canEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </fieldset>
+        </form>
+        <CrmDuplicates Items="_duplicates" />
+    </div>
+
+    <Discussion Target="TaggedEntity.CrmLead" TargetId="Id" />
+}
+
+@code {
+    private enum Panel
+    {
+        None,
+        Qualify,
+        Reject,
+        Merge,
+    }
+
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private CrmLeadDto? _lead;
+    private CrmOptionsDto? _options;
+    private IReadOnlyList<CrmDuplicateDto> _duplicates = [];
+    private LeadForm _f = new();
+    private Panel _panel;
+    private bool _busy;
+    private string? _denied;
+    private string? _notFound;
+    private string? _message;
+    private bool _isError;
+    private string _pipeline = string.Empty;
+    private string? _dealTitle;
+    private string? _dealAmount;
+    private string _reason = string.Empty;
+    private string? _rejectComment;
+    private string? _mergeNumber;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _options ??= await Leads.OptionsAsync();
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException ex)
+        {
+            _notFound = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _lead = await Leads.GetAsync(Id);
+        var v = _lead.Values;
+        _f = new LeadForm
+        {
+            Title = v.Title, ContactName = v.ContactName, Phone = v.Phone, Email = v.Email, Messenger = v.Messenger, Company = v.CompanyName, Inn = v.Inn,
+            Source = v.SourceId?.ToString() ?? "", Channel = v.ChannelId?.ToString() ?? "", Responsible = _lead.ResponsibleUserId.ToString(),
+            Amount = v.ExpectedAmount is { } a ? Amounts.Input(a) : null, Currency = v.CurrencyCode ?? "RUB", Need = v.Need,
+        };
+        _pipeline = _options!.Pipelines.FirstOrDefault()?.Id.ToString() ?? "";
+        _dealTitle = v.Title;
+        _dealAmount = _f.Amount;
+    }
+
+    private Task CheckDuplicatesAsync() => RunAsync(async () => _duplicates = await Leads.DuplicatesAsync(_f.Phone, _f.Email, _f.Inn, Id), null, reload: false);
+
+    private Task SaveAsync() => RunAsync(() => Leads.UpdateAsync(Id, new CrmLeadValues(_f.Title, Long(_f.Source), Long(_f.Channel),
+        _lead!.CanAll ? Long(_f.Responsible) : null, _f.ContactName, _f.Phone, _f.Email, _f.Messenger, _f.Company, _f.Inn, _f.Need,
+        KnitErp.Domain.Catalog.Decimals.Parse(_f.Amount, L("Ожидаемая сумма")), _f.Currency), _lead.RowVersion), L("Лид сохранён."));
+
+    private Task StartWorkAsync() => RunAsync(() => Leads.StartWorkAsync(Id, _lead!.RowVersion), L("Лид в работе."));
+
+    private Task ReopenAsync() => RunAsync(() => Leads.ReopenAsync(Id, _lead!.RowVersion), L("Лид снова в работе."));
+
+    private Task RejectAsync() => RunAsync(async () =>
+    {
+        var reason = Long(_reason) ?? throw new BusinessRuleException("crm.reason", L("Выберите причину отказа."));
+        await Leads.RejectAsync(Id, reason, _rejectComment, _lead!.RowVersion);
+        _panel = Panel.None;
+    }, L("Лид закрыт отказом."));
+
+    private Task QualifyAsync() => RunAsync(async () =>
+    {
+        var result = await Leads.QualifyAsync(Id, new CrmQualifyCommand(Long(_pipeline), null, _dealTitle,
+            KnitErp.Domain.Catalog.Decimals.Parse(_dealAmount, L("Сумма сделки"))));
+        Navigation.NavigateTo($"crm/deals/{result.DealId}");
+    }, null, reload: false);
+
+    private Task MergeAsync() => RunAsync(async () =>
+    {
+        var number = _mergeNumber?.Trim() ?? "";
+        var target = (await Leads.ListAsync(new CrmLeadFilter(Search: number))).Rows.FirstOrDefault(r => string.Equals(r.Number, number, StringComparison.OrdinalIgnoreCase))
+                     ?? throw new NotFoundException("Лид");
+        await Leads.MergeAsync(Id, target.Id);
+        _panel = Panel.None;
+    }, L("Лиды объединены."));
+
+    private static long? Long(string? value) => long.TryParse(value, out var v) ? v : null;
+
+    /// <summary>Одна операция за раз, затем свежие данные: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? success, bool reload = true)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+            if (reload)
+            {
+                await LoadAsync();
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private sealed class LeadForm
+    {
+        public string? Title { get; set; }
+        public string? ContactName { get; set; }
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public string? Messenger { get; set; }
+        public string? Company { get; set; }
+        public string? Inn { get; set; }
+        public string Source { get; set; } = "";
+        public string Channel { get; set; } = "";
+        public string Responsible { get; set; } = "";
+        public string? Amount { get; set; }
+        public string Currency { get; set; } = "RUB";
+        public string? Need { get; set; }
+    }
+}

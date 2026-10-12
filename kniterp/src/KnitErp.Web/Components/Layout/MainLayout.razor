@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @implements IAsyncDisposable
+@inject KnitErp.Application.Hr.EmployeeAgreementService Agreements
 @inject UserAccessService Access
 @inject PersonalToolsService Personal
 @inject NotificationService Notifications
@@ -92,7 +93,15 @@
                 @* Страница начинает работу после меню: у вкладки один DbContext, параллельных запросов к нему быть не должно.
                    Инструменты панели работают со своим DbContext на каждую операцию и страницу не трогают. *@
                 <CascadingValue Value="_access" IsFixed="true">
-                    @Body
+                    @if (_agreements is { Count: > 0 })
+                    {
+                        @* D227 (сессия «Сотрудники»): сначала документы перед доступом — потом страницы системы. *@
+                        <AgreementsGate Documents="_agreements" Signed="LoadAgreementsAsync" />
+                    }
+                    else
+                    {
+                        @Body
+                    }
                 </CascadingValue>
             }
         </main>
@@ -164,6 +173,7 @@
             new("money", "Касса и счета", a => a.Has(Permissions.PriceView)),
             new("customer-payments", "Оплаты покупателей", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("supplier-payments", "Оплаты поставщикам", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
+            new("money/bank-statement", "Загрузка выписки банка", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesEdit) || a.Has(Permissions.PurchaseEdit))),
             new("reports/customer-balances", "Расчёты с покупателями", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/supplier-balances", "Расчёты с поставщиками", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
             new("settlement-statement", "Акт сверки", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesView) || a.Has(Permissions.PurchaseView))),
@@ -175,12 +185,17 @@
         ]),
         new("crm", "CRM",
         [
+            // D600 (CRM): лиды, сделки, контакты и настройки воронок.
+            new("crm/deals", "Сделки", a => a.Has(Permissions.CrmView)),
+            new("crm/leads", "Лиды", a => a.Has(Permissions.CrmView)),
+            new("crm/contacts", "Контакты", a => a.Has(Permissions.CrmView)),
             new("counterparties", "Контрагенты", a => a.Has(Permissions.CatalogView)),
             new("counterparties?role=customer", "Покупатели", a => a.Has(Permissions.CatalogView)),
             new("counterparties?role=supplier", "Поставщики", a => a.Has(Permissions.CatalogView)),
             Soon("contracts", "Договоры"),
             Soon("calls", "Звонки"),
             Soon("discounts", "Скидки"),
+            new("crm/settings", "Настройки CRM", a => a.Has(Permissions.CrmView)),
             new("learn/crm", "Обучение", a => true),
         ]),
         new("warehouse", "Склад",
@@ -210,6 +225,13 @@
             new("shop", "Терминал цеха", a => a.Has(Permissions.ProductionStageMark)),
             new("reports/production", "Отчёт по производству", a => a.Has(Permissions.ProductionOrderView)),
         ]),
+        // Модуль «Разработка» (D700–D799).
+        new("dev", "Разработка",
+        [
+            new("dev/models", "Модели", a => a.Has(Permissions.DevView)),
+            new("dev/my", "Мои задачи разработки", a => a.Has(Permissions.DevView)),
+            new("dev/settings", "Настройки разработки", a => a.Has(Permissions.DevView)),
+        ]),
         // Модуль «Сотрудники» (D200–D299).
         new("hr", "Кадры",
         [
@@ -237,6 +259,7 @@
             new("catalog/settings?tab=Characteristics", "Характеристики", a => a.Has(Permissions.CatalogView)),
             new("catalog/settings?tab=Fields", "Доп. поля номенклатуры", a => a.Has(Permissions.CatalogView)),
             new("catalog/settings?tab=Catalogs", "Свои справочники", a => a.Has(Permissions.CatalogView)),
+            new("catalog/labels", "Этикетки и ценники", a => a.Has(Permissions.CatalogView)),
             new("catalog/settings?tab=General", "Настройки каталога", a => a.Has(Permissions.CatalogView)),
             new("sales-settings?section=projects", "Проекты", a => a.Has(Permissions.SalesView)),
             new("sales-settings?section=channels", "Каналы продаж", a => a.Has(Permissions.SalesView)),
@@ -359,10 +382,26 @@
         },
     });
 
+    private IReadOnlyList<KnitErp.Application.Hr.AgreementDocumentDto>? _agreements;
+
+    /// <summary>D227: неподписанные документы перед доступом текущего сотрудника (пусто — работать можно).</summary>
+    private async Task LoadAgreementsAsync()
+    {
+        try
+        {
+            _agreements = await Agreements.PendingAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _agreements = null;
+        }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
         _access = await Access.GetCurrentAccessAsync();
+        await LoadAgreementsAsync();
         try
         {
             _assistant = new AssistantChoice(await Personal.GetAssistantPersonaAsync(), SetPersonaAsync);

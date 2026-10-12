@@ -1,0 +1,327 @@
+@page "/dev/settings"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevSettingsService Settings
+
+<PageTitle>@L("Настройки разработки") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_stages is null || _lookups is null || _auto is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Настройки разработки")</h1>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <h2>@L("Автоматизация")</h2>
+    <p class="muted">@L("Меньше ручного ввода: новая модель получает исполнителей по умолчанию, дату запуска по нормативам и задание из шаблона категории; загрузка программы машины или рисунка сама переводит модель дальше.")</p>
+    <div class="panel">
+        <form @onsubmit="SaveAutomationAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !_auto.CanEdit)">
+                <div class="grid">
+                    @foreach (var d in _auto.Defaults)
+                    {
+                        var role = d.Role;
+                        <label>
+                            @L("{0} по умолчанию", L(d.RoleName))
+                            <select value="@(_defaults.GetValueOrDefault(role)?.ToString() ?? "")" @onchange="e => _defaults[role] = long.TryParse(e.Value as string, out var u) ? u : null">
+                                <option value="">—</option>
+                                @foreach (var u in _auto.Users)
+                                {
+                                    <option value="@u.Id">@u.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <label class="inline"><span><input type="checkbox" @bind="_autoLaunch" /> @L("Плановый запуск по нормативам стадий, если не указан")</span></label>
+                    <label class="inline"><span><input type="checkbox" @bind="_autoAdvance" /> @L("Автопереход стадии при загрузке программы машины или рисунка")</span></label>
+                </div>
+                @if (_auto.CanEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить автоматизацию")</button></div>
+                }
+            </fieldset>
+        </form>
+    </div>
+
+    <h2>@L("Шаблоны задания по категориям")</h2>
+    <p class="muted">@L("Подставляются в задание новой модели этой категории; заполненные вручную поля не меняются.")</p>
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Категория")</th><th class="opt">@L("Размерный ряд")</th><th class="opt">@L("Состав")</th><th class="opt">@L("Уход")</th>@if (_auto.CanEdit) { <th></th> }</tr></thead>
+            <tbody>
+                @foreach (var t in _auto.Templates)
+                {
+                    var row = t;
+                    <tr>
+                        <td>@L(row.CategoryName)</td>
+                        <td>@(row.SizeRange ?? "—")</td>
+                        <td>@(row.Composition ?? "—")</td>
+                        <td>@(row.Care ?? "—")</td>
+                        @if (_auto.CanEdit)
+                        {
+                            <td><button type="button" class="secondary" @onclick="() => _template = new TemplateForm(row)" disabled="@_busy">@L("Изменить")</button></td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_template is not null)
+    {
+        <div class="panel">
+            <h3>@L("Шаблон: {0}", L(DevModel.CategoryName(_template.Category)))</h3>
+            <form @onsubmit="SaveTemplateAsync">
+                <div class="grid">
+                    <label>@L("Размерный ряд") <input @bind="_template.SizeRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label>@L("Цветовая гамма") <input @bind="_template.ColorRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label class="wide">@L("Состав") <input @bind="_template.Composition" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label class="wide">@L("Маркировка") <input @bind="_template.Labeling" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label class="wide">@L("Уход") <input @bind="_template.Care" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Сохранить шаблон")</button>
+                    <button type="button" class="secondary" @onclick="() => _template = null">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
+    }
+
+    <h2>@L("Стадии")</h2>
+    <p class="muted">@L("Норматив — сколько дней модель может быть на стадии; дольше — «просрочено». Необязательные стадии можно отключить: их пропускает кнопка «Дальше».")</p>
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Стадия")</th><th class="num">@L("Норматив, дней")</th><th>@L("Включена")</th>@if (_canEdit) { <th></th> }</tr></thead>
+            <tbody>
+                @foreach (var s in _stages)
+                {
+                    var row = s;
+                    <tr>
+                        <td>@L(row.StageName)</td>
+                        <td class="num">
+                            @if (_canEdit)
+                            {
+                                <input type="number" min="0" max="@DevStageSetting.MaxPlanDays" step="1" inputmode="numeric" style="max-width: 90px"
+                                       value="@_days[row.Stage]" @onchange="e => _days[row.Stage] = int.TryParse(e.Value as string, out var d) ? d : 0"
+                                       aria-label="@L("Норматив, дней")" />
+                            }
+                            else
+                            {
+                                @row.PlanDays
+                            }
+                        </td>
+                        <td>
+                            @if (row.CanDisable && _canEdit)
+                            {
+                                <input type="checkbox" checked="@_enabled[row.Stage]" @onchange="e => _enabled[row.Stage] = e.Value is true" aria-label="@L("Включена")" />
+                            }
+                            else
+                            {
+                                @(row.IsEnabled ? L("да") : L("нет"))
+                            }
+                        </td>
+                        @if (_canEdit)
+                        {
+                            <td><button type="button" class="secondary" @onclick="() => SaveStageAsync(row)" disabled="@_busy">@L("Сохранить")</button></td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h2>@L("Справочники")</h2>
+    <div class="tabs dev-tabs" role="tablist">
+        @foreach (var k in Enum.GetValues<DevLookupKind>())
+        {
+            var kind = k;
+            <button type="button" role="tab" class="@(_kind == kind ? "tab active" : "tab secondary")" aria-selected="@(_kind == kind ? "true" : "false")"
+                    @onclick="() => OpenKindAsync(kind)" disabled="@_busy">@L(DevLookup.KindName(kind))</button>
+        }
+    </div>
+    @if (_canEdit)
+    {
+        <form class="inline-form" @onsubmit="AddAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                <label>@L("Название") <input @bind="_newName" maxlength="@DevLookup.NameMaxLength" required /></label>
+                @if (_kind == DevLookupKind.MachineClass)
+                {
+                    <label>@L("Нитеводителей") <input type="number" min="0" max="@DevLookup.MaxNumber" step="1" inputmode="numeric" @bind="_newNumber" /></label>
+                }
+                <button type="submit" disabled="@_busy">@L("Добавить")</button>
+            </fieldset>
+        </form>
+    }
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Название")</th>@if (_kind == DevLookupKind.MachineClass) { <th class="num">@L("Нитеводителей")</th> }<th>@L("Состояние")</th>@if (_canEdit) { <th></th> }</tr></thead>
+            <tbody>
+                @if (_lookups.Count == 0)
+                {
+                    <tr><td colspan="4" class="muted">@L("Записей пока нет.")</td></tr>
+                }
+                @foreach (var l in _lookups)
+                {
+                    var row = l;
+                    <tr>
+                        <td>@row.Name</td>
+                        @if (_kind == DevLookupKind.MachineClass) { <td class="num">@(row.Number?.ToString() ?? "—")</td> }
+                        <td>@(row.IsArchived ? L("в архиве") : L("действует"))</td>
+                        @if (_canEdit)
+                        {
+                            <td>
+                                <button type="button" class="secondary" @onclick="() => ArchiveAsync(row)" disabled="@_busy">@(row.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<DevStageSettingDto>? _stages;
+    private IReadOnlyList<DevLookupDto>? _lookups;
+    private readonly Dictionary<DevStage, int> _days = [];
+    private readonly Dictionary<DevStage, bool> _enabled = [];
+    private DevLookupKind _kind = DevLookupKind.Collection;
+    private bool _canEdit;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private string? _newName;
+    private int? _newNumber;
+    private DevAutomationDto? _auto;
+    private readonly Dictionary<DevRole, long?> _defaults = [];
+    private bool _autoLaunch;
+    private bool _autoAdvance;
+    private TemplateForm? _template;
+
+    private sealed class TemplateForm(DevCategoryTemplateDto t)
+    {
+        public DevCategory Category { get; } = t.Category;
+        public string? SizeRange { get; set; } = t.SizeRange;
+        public string? ColorRange { get; set; } = t.ColorRange;
+        public string? Composition { get; set; } = t.Composition;
+        public string? Labeling { get; set; } = t.Labeling;
+        public string? Care { get; set; } = t.Care;
+
+        public DevCategoryTemplateDto ToDto() => new(Category, SizeRange, ColorRange, Composition, Labeling, Care);
+    }
+
+    private async Task LoadAutomationAsync()
+    {
+        _auto = await Settings.AutomationAsync();
+        foreach (var d in _auto.Defaults)
+        {
+            _defaults[d.Role] = d.UserId;
+        }
+
+        _autoLaunch = _auto.AutoLaunchDate;
+        _autoAdvance = _auto.AutoAdvance;
+    }
+
+    private Task SaveAutomationAsync() => RunAsync(async () =>
+    {
+        await Settings.SaveAutomationAsync(new Dictionary<DevRole, long?>(_defaults), _autoLaunch, _autoAdvance);
+        await LoadAutomationAsync();
+    }, L("Сохранено."));
+
+    private Task SaveTemplateAsync() => RunAsync(async () =>
+    {
+        await Settings.SaveTemplateAsync(_template!.ToDto());
+        _template = null;
+        await LoadAutomationAsync();
+    }, L("Шаблон сохранён."));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _canEdit = CurrentAccess.Has(Permissions.DevSettings);
+        try
+        {
+            await LoadStagesAsync();
+            await LoadAutomationAsync();
+            _lookups = await Settings.LookupsAsync(_kind, includeArchived: true);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadStagesAsync()
+    {
+        _stages = await Settings.StagesAsync();
+        foreach (var s in _stages)
+        {
+            _days[s.Stage] = s.PlanDays;
+            _enabled[s.Stage] = s.IsEnabled;
+        }
+    }
+
+    private Task SaveStageAsync(DevStageSettingDto row) => RunAsync(async () =>
+    {
+        await Settings.SetStageAsync(row.Stage, _days[row.Stage], _enabled[row.Stage]);
+        await LoadStagesAsync();
+    }, L("Сохранено."));
+
+    private Task OpenKindAsync(DevLookupKind kind) => RunAsync(async () =>
+    {
+        _kind = kind;
+        _lookups = await Settings.LookupsAsync(kind, includeArchived: true);
+    }, null);
+
+    private Task AddAsync() => RunAsync(async () =>
+    {
+        await Settings.AddLookupAsync(_kind, _newName, _kind == DevLookupKind.MachineClass ? _newNumber : null);
+        _newName = null;
+        _newNumber = null;
+        _lookups = await Settings.LookupsAsync(_kind, includeArchived: true);
+    }, L("Добавлено."));
+
+    private Task ArchiveAsync(DevLookupDto row) => RunAsync(async () =>
+    {
+        await Settings.SetLookupArchivedAsync(row.Id, !row.IsArchived, row.RowVersion);
+        _lookups = await Settings.LookupsAsync(_kind, includeArchived: true);
+    }, L("Сохранено."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

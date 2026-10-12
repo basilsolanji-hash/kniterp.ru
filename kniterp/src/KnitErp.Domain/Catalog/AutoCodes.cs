@@ -1,0 +1,119 @@
+using System.Globalization;
+using KnitErp.Domain.Common;
+
+namespace KnitErp.Domain.Catalog;
+
+/// <summary>
+/// Внутренние штрихкоды EAN-13 (D315): префикс 20–29 — диапазон GS1 для внутреннего использования (магазин, склад, свои этикетки);
+/// такие коды не пересекаются с кодами производителей. Для маркированных товаров и площадок, требующих GTIN из Национального каталога,
+/// нужен настоящий GTIN — его не генерируют, а получают в Честном ЗНАКе (GS1).
+/// </summary>
+public static class InternalEan13
+{
+    public const byte MinPrefix = 20;
+    public const byte MaxPrefix = 29;
+    public const long MaxNumber = 9_999_999_999;
+
+    /// <summary>Префикс (2 цифры) + номер (10 цифр) + контрольная цифра.</summary>
+    public static string Build(byte prefix, long number)
+    {
+        if (prefix is < MinPrefix or > MaxPrefix || number is < 1 or > MaxNumber)
+        {
+            throw new BusinessRuleException("catalog.barcode.range", "Номера внутренних штрихкодов закончились: смените префикс в настройках каталога.");
+        }
+
+        var body = prefix.ToString(CultureInfo.InvariantCulture) + number.ToString("D10", CultureInfo.InvariantCulture);
+        return body + CheckDigit(body);
+    }
+
+    /// <summary>Контрольная цифра GTIN по первым цифрам: веса 3 и 1 справа налево.</summary>
+    public static char CheckDigit(string body)
+    {
+        var sum = 0;
+        for (int i = body.Length - 1, w = 3; i >= 0; i--, w = 4 - w)
+        {
+            sum += (body[i] - '0') * w;
+        }
+
+        return (char)('0' + (10 - sum % 10) % 10);
+    }
+
+    /// <summary>Код из внутреннего диапазона 20–29 (такой не годится как GTIN для маркировки).</summary>
+    public static bool IsInternal(string code) => code.Length == 13 && code[0] == '2';
+}
+
+/// <summary>
+/// Шаблон артикула (D315): {N} — номер по счётчику, {CODE} — код позиции; остальное — как написано, например «KN-{N}» → «KN-00042».
+/// </summary>
+public static class ArticleTemplate
+{
+    public const int MaxLength = 30;
+    public const string Number = "{N}";
+    public const string Code = "{CODE}";
+
+    public static string Validate(string? template)
+    {
+        var t = (template ?? string.Empty).Trim();
+        if (t.Length is 0 or > MaxLength || (!t.Contains(Number, StringComparison.Ordinal) && !t.Contains(Code, StringComparison.Ordinal))
+                                         || t.Any(char.IsControl))
+        {
+            throw new BusinessRuleException("catalog.settings.article_template",
+                "Шаблон артикула — до 30 знаков и содержит {N} (номер) или {CODE} (код позиции), например «KN-{N}».");
+        }
+
+        return t;
+    }
+
+    public static bool UsesNumber(string template) => template.Contains(Number, StringComparison.Ordinal);
+
+    public static string Apply(string template, string itemCode, int number, byte digits)
+    {
+        var article = template.Replace(Code, itemCode, StringComparison.Ordinal)
+            .Replace(Number, number.ToString(CultureInfo.InvariantCulture).PadLeft(digits, '0'), StringComparison.Ordinal);
+        if (article.Length > ItemDetailRules.ArticleMaxLength)
+        {
+            throw new BusinessRuleException("catalog.article.too_long", "Артикул по шаблону длиннее 64 знаков — сократите шаблон в настройках каталога.");
+        }
+
+        return article;
+    }
+}
+
+/// <summary>
+/// Рисунок штрихкода EAN-13 (D315): 95 модулей — краевые 101, шесть цифр левой половины в наборах L/G по первой цифре, разделитель 01010,
+/// шесть цифр правой половины в наборе R, краевые 101. Строка из «1» (штрих) и «0» (пробел).
+/// </summary>
+public static class Ean13Pattern
+{
+    private static readonly string[] L = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"];
+    private static readonly string[] Parity = ["LLLLLL", "LLGLGG", "LLGGLG", "LLGGGL", "LGLLGG", "LGGLLG", "LGGGLL", "LGLGLG", "LGLGGL", "LGGLGL"];
+
+    public static bool CanEncode(string? code) =>
+        code is { Length: 13 } c && c.All(char.IsAsciiDigit) && InternalEan13.CheckDigit(c[..12]) == c[12];
+
+    public static string Modules(string code)
+    {
+        if (!CanEncode(code))
+        {
+            throw new ArgumentException("Нужен EAN-13: 13 цифр с верной контрольной цифрой.", nameof(code));
+        }
+
+        var parity = Parity[code[0] - '0'];
+        var sb = new System.Text.StringBuilder(95).Append("101");
+        for (var i = 1; i <= 6; i++)
+        {
+            var l = L[code[i] - '0'];
+            sb.Append(parity[i - 1] == 'L' ? l : new string(Complement(l).Reverse().ToArray()));
+        }
+
+        sb.Append("01010");
+        for (var i = 7; i <= 12; i++)
+        {
+            sb.Append(Complement(L[code[i] - '0']));
+        }
+
+        return sb.Append("101").ToString();
+    }
+
+    private static string Complement(string bits) => new(bits.Select(b => b == '1' ? '0' : '1').ToArray());
+}

@@ -70,6 +70,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<ExternalImportIssue> ExternalImportIssues { get; }
     DbSet<CatalogSettings> CatalogSettings { get; }
     DbSet<CatalogFeed> CatalogFeeds { get; }
+    DbSet<LabelTemplate> LabelTemplates { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }
@@ -104,6 +105,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Purchasing.SupplierPayment> SupplierPayments { get; }
     DbSet<KnitErp.Domain.Sales.SalesOrder> SalesOrders { get; }
     DbSet<KnitErp.Domain.Sales.CustomerPayment> CustomerPayments { get; }
+    DbSet<KnitErp.Domain.Finance.BankStatementLine> BankStatementLines { get; }
     DbSet<KnitErp.Domain.Sales.CustomerInvoice> CustomerInvoices { get; }
     DbSet<KnitErp.Domain.Sales.SalesOrderStage> SalesOrderStages { get; }
     DbSet<KnitErp.Domain.Sales.SalesStageRule> SalesStageRules { get; }
@@ -146,12 +148,32 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory { get; }
     DbSet<KnitErp.Domain.Hr.WorkSchedule> WorkSchedules { get; }
     DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules { get; }
+    DbSet<KnitErp.Domain.Hr.DepartmentSchedule> DepartmentSchedules { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeAgreement> EmployeeAgreements { get; }
     DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets { get; }
     DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays { get; }
     DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates { get; }
     DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns { get; }
     DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
     DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings { get; }
+
+    // Модуль «Разработка» (D700–D799).
+    DbSet<KnitErp.Domain.Development.DevModel> DevModels { get; }
+    DbSet<KnitErp.Domain.Development.DevModelStageEntry> DevModelStages { get; }
+    DbSet<KnitErp.Domain.Development.DevStageSetting> DevStageSettings { get; }
+    DbSet<KnitErp.Domain.Development.DevFile> DevFiles { get; }
+    DbSet<KnitErp.Domain.Development.DevLookup> DevLookups { get; }
+    DbSet<KnitErp.Domain.Development.DevSettings> DevSettings { get; }
+    DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates { get; }
+    // CRM (D600–D699).
+    DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines { get; }
+    DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages { get; }
+    DbSet<KnitErp.Domain.Crm.CrmReference> CrmReferences { get; }
+    DbSet<KnitErp.Domain.Crm.CrmLead> CrmLeads { get; }
+    DbSet<KnitErp.Domain.Crm.CrmContact> CrmContacts { get; }
+    DbSet<KnitErp.Domain.Crm.CrmDeal> CrmDeals { get; }
+    DbSet<KnitErp.Domain.Crm.CrmDealStageHistory> CrmDealStageHistory { get; }
+    DbSet<KnitErp.Domain.Crm.CrmDealOrder> CrmDealOrders { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

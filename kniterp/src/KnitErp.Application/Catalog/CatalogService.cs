@@ -240,9 +240,22 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         await EnsureCodeFreeAsync(ctx, item.Code, null, ct);
+        // D315: артикул по шаблону настроек каталога (если включён).
+        if (settings is { AutoArticle: true } && await ItemCodesService.NextArticleAsync(db, ctx.OrganizationId, settings, item.Code, ct) is { } article)
+        {
+            item.SetDetails(item.Details with { Article = article });
+        }
+
         db.Items.Add(item);
         await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
+        // D315: внутренний EAN-13 новой позиции (кроме услуги), если включён.
+        if (settings is { AutoBarcode: true } && item.Type != ItemType.Service)
+        {
+            var barcode = await ItemCodesService.NextFreeBarcodeAsync(db, ctx.OrganizationId, settings, null, ct);
+            db.ItemBarcodes.Add(ItemBarcode.Create(ctx.OrganizationId, item.Id, BarcodeType.Ean13, barcode));
+        }
+
         Audit(ctx, AuditActions.CatalogCreated, nameof(Item), item.Id, null, $"{item.Code} {item.Name}", ItemTypes.Name(item.Type));
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);

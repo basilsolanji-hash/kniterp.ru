@@ -1,0 +1,544 @@
+@page "/dev/models/{Id:long}"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevModelService Models
+@inject NavigationManager Navigation
+
+<PageTitle>@(_model is null ? L("Модель") : $"{_model.Number} {_model.Name}") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <h1>@L("Модель не найдена")</h1>
+    <p><a href="dev/models">@L("К списку моделей")</a></p>
+}
+else if (_model is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var m = _model;
+    <p><a href="dev/models">@L("← Модели в разработке")</a></p>
+    <div class="page-head">
+        <h1>@m.Number · @m.Name <span class="tag @(m.Stage == DevStage.Cancelled ? "bad" : m.Stage == DevStage.Handed ? "ok" : "warn")">@L(m.StageName)</span></h1>
+    </div>
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.DevModel" EntityId="Id" />
+
+    <ol class="dev-stage-path" aria-label="@L("Стадии")">
+        @foreach (var s in DevStages.Path)
+        {
+            <li class="@StageClass(s)">@L(DevStages.Name(s))</li>
+        }
+    </ol>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (m.Hints is { Count: > 0 } hints && m.CanEdit)
+    {
+        <div class="panel dev-hints" aria-label="@L("Что дальше")">
+            <b>@L("Что дальше")</b>
+            <ul>
+                @foreach (var h in hints)
+                {
+                    <li>@L(h)</li>
+                }
+            </ul>
+        </div>
+    }
+
+    @if (_options is not null)
+    {
+        <div class="panel">
+            <h2>@L("Изменить модель")</h2>
+            <DevModelForm Options="_options" Initial="m.ToHeader()" Busy="_busy" SubmitText="@L("Сохранить")" OnSubmit="SaveAsync" OnCancel="() => _options = null" />
+        </div>
+    }
+    else
+    {
+        <dl class="facts">
+            <dt>@L("Стадия")</dt>
+            <dd>
+                @L(m.StageName), @L("с {0}", Local(m.StageSinceUtc))
+                @if (m.StagePlanDays > 0 && !DevStages.IsFinal(m.Stage))
+                {
+                    <span class="@(m.IsStageOverdue ? "late-text" : "muted")"> · @L("норматив {0} дн.", m.StagePlanDays)@(m.IsStageOverdue ? " — " + L("стадия дольше нормы") : "")</span>
+                }
+            </dd>
+            @if (m.CancelReason is not null)
+            {
+                <dt>@L("Причина отмены")</dt><dd>@m.CancelReason</dd>
+            }
+            <dt>@L("Категория")</dt><dd>@L(m.CategoryName), @L(m.AudienceName)@(m.ChildSafety ? " · " + L("ТР ТС 007/2011") : "")</dd>
+            <dt>@L("Рисунок")</dt><dd>@(m.HasPattern ? L("есть") : L("нет (гладь, ластик) — стадия «Рисунок» пропускается"))</dd>
+            <dt>@L("Коллекция")</dt><dd>@(m.CollectionName ?? "—")</dd>
+            <dt>@L("Заказчик")</dt><dd>@(m.CustomerName ?? "—")@(m.DealId is { } deal ? " · " + L("сделка № {0}", deal) : "")</dd>
+            <dt>@L("Плановый запуск")</dt><dd class="@(m.IsLate ? "late-text" : null)">@(m.PlannedLaunch?.ToString("dd.MM.yyyy") ?? "—")@(m.IsLate ? " — " + L("просрочено") : "")</dd>
+            <dt>@L("Приоритет")</dt><dd>@L(m.PriorityName)</dd>
+            @foreach (var a in m.Assignees)
+            {
+                <dt>@L(a.RoleName)</dt><dd>@(a.Name ?? "—")</dd>
+            }
+            <dt>@L("Автор")</dt><dd>@m.CreatedBy, @Local(m.CreatedAtUtc)</dd>
+        </dl>
+
+        <div class="actions">
+            @if (m.NextStage is { } next)
+            {
+                <button type="button" @onclick="() => MoveAsync(next)" disabled="@_busy">@L("Дальше: {0}", L(DevStages.Name(next)))</button>
+            }
+            @if (m.MoveTargets.Count > 0)
+            {
+                <label class="inline-form" style="margin:0">
+                    <select @bind="_target" aria-label="@L("Перевести на стадию")">
+                        <option value="">@L("Перевести на стадию…")</option>
+                        @foreach (var s in m.MoveTargets)
+                        {
+                            <option value="@((byte)s)">@L(DevStages.Name(s))</option>
+                        }
+                    </select>
+                    <button type="button" class="secondary" @onclick="MoveToSelectedAsync" disabled="@(_busy || _target.Length == 0)">@L("Перевести")</button>
+                </label>
+            }
+            @if (m.CanEdit)
+            {
+                <button type="button" class="secondary" @onclick="EditAsync" disabled="@_busy">@L("Изменить")</button>
+                @if (!_cancelling)
+                {
+                    <button type="button" class="secondary" @onclick="() => _cancelling = true" disabled="@_busy">@L("Отменить модель")</button>
+                }
+            }
+            @if (_canEdit)
+            {
+                <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Создать похожую")</button>
+            }
+            @if (m.Stage == DevStage.Cancelled && _canEdit)
+            {
+                <button type="button" @onclick="RestoreAsync" disabled="@_busy">@L("Вернуть в работу")</button>
+            }
+        </div>
+        @if (_cancelling)
+        {
+            <form class="inline-form" @onsubmit="CancelAsync">
+                <label>@L("Причина отмены") <input @bind="_reason" maxlength="@DevModel.ReasonMaxLength" required /></label>
+                <button type="submit" disabled="@_busy">@L("Отменить модель")</button>
+                <button type="button" class="secondary" @onclick="() => _cancelling = false">@L("Не отменять")</button>
+            </form>
+        }
+    }
+
+    <div class="tabs dev-tabs" role="tablist">
+        @foreach (var t in Enum.GetValues<Tab>())
+        {
+            var tab = t;
+            <button type="button" role="tab" class="@(_tab == tab ? "tab active" : "tab secondary")" aria-selected="@(_tab == tab ? "true" : "false")"
+                    @onclick="() => _tab = tab">@TabName(tab)@(tab == Tab.Files && m.Files.Count > 0 ? $" {m.Files.Count}" : "")</button>
+        }
+    </div>
+
+    @switch (_tab)
+    {
+        case Tab.Brief:
+            @BriefTab
+            break;
+        case Tab.Files:
+            @FilesTab
+            break;
+        case Tab.Discussion:
+            <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.DevModel" TargetId="Id" />
+            break;
+        default:
+            <p class="dev-placeholder">@Placeholder(_tab)</p>
+            break;
+    }
+
+    <details class="panel">
+        <summary>@L("История стадий") <span class="muted">@m.History.Count</span></summary>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Когда")</th><th>@L("Стадия")</th><th class="opt">@L("Было")</th><th class="opt num">@L("Дней на прежней")</th><th>@L("Кто")</th><th class="opt">@L("Комментарий")</th></tr></thead>
+                <tbody>
+                    @foreach (var h in m.History.Reverse())
+                    {
+                        <tr>
+                            <td>@Local(h.AtUtc)</td>
+                            <td>@L(h.ToName)</td>
+                            <td>@(h.FromName is null ? "—" : L(h.FromName))</td>
+                            <td class="num">@(h.DaysInPrevious?.ToString() ?? "—")</td>
+                            <td>@h.User</td>
+                            <td>@(h.Comment ?? "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </details>
+}
+
+@code {
+    private enum Tab
+    {
+        Brief,
+        Pattern,
+        Yarn,
+        Samples,
+        Sizes,
+        Cost,
+        Files,
+        Discussion,
+    }
+
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private DevModelDto? _model;
+    private DevModelOptionsDto? _options;
+    private Tab _tab = Tab.Brief;
+    private bool _busy;
+    private bool _notFound;
+    private bool _cancelling;
+    private bool _canEdit;
+    private bool _editingBrief;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private string? _reason;
+    private string _target = string.Empty;
+    private BriefForm _brief = new();
+    private DevFileKind _fileKind = DevFileKind.Sketch;
+    private string? _fileComment;
+
+    private static string TabName(Tab tab) => tab switch
+    {
+        Tab.Brief => L("Задание"),
+        Tab.Pattern => L("Рисунок"),
+        Tab.Yarn => L("Пряжа и вязка"),
+        Tab.Samples => L("Образцы"),
+        Tab.Sizes => L("Размеры и замеры"),
+        Tab.Cost => L("Себестоимость"),
+        Tab.Files => L("Файлы"),
+        _ => L("Обсуждение"),
+    };
+
+    // Допущение D706: вкладки следующих этапов показаны сразу, чтобы карточка не менялась от этапа к этапу; пока — с пояснением.
+    private static string Placeholder(Tab tab) => tab switch
+    {
+        Tab.Pattern => L("Рисунок, раппорт, раскладка цветов и версии — следующий этап модуля. Пока приложите файл рисунка на вкладке «Файлы» (вид «Рисунок»)."),
+        Tab.Yarn => L("Пряжа, переплетение, класс машины, плотность и усадка — этап «Пряжа, вязка, образцы»."),
+        Tab.Samples => L("Образцы, доработки и передача заказчику — этап «Пряжа, вязка, образцы». Фото образцов пока — на вкладке «Файлы»."),
+        Tab.Sizes => L("Табель мер, градация и замеры образцов — этап «Размеры и замеры». Лекала пока — на вкладке «Файлы»."),
+        _ => L("Расчёт себестоимости по цветам рисунка и цена — этап «Себестоимость и цена». Целевые суммы — на вкладке «Задание»."),
+    };
+
+    private long _loadedId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId != Id)
+        {
+            // Переход на другую модель тем же компонентом («Создать похожую»): начинаем с вкладки «Задание», без открытых форм.
+            _loadedId = Id;
+            _tab = Tab.Brief;
+            _options = null;
+            _editingBrief = false;
+            _cancelling = false;
+            _target = string.Empty;
+        }
+
+        _model = null;
+        _notFound = false;
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _model = await Models.GetAsync(Id);
+        _canEdit = CurrentAccess.Has(Permissions.DevEdit);
+        if (!_editingBrief)
+        {
+            _brief = BriefForm.From(_model.Brief);
+        }
+    }
+
+    private string StageClass(DevStage s)
+    {
+        var m = _model!;
+        if (s == m.Stage)
+        {
+            return "current";
+        }
+
+        if (s == DevStage.Pattern && !m.HasPattern)
+        {
+            return "off";
+        }
+
+        return m.Stage != DevStage.Cancelled && DevStages.IndexOf(s) < DevStages.IndexOf(m.Stage) ? "done" : "";
+    }
+
+    private RenderFragment BriefTab => __builder =>
+    {
+        var m = _model!;
+        if (_editingBrief)
+        {
+            <div class="panel">
+                <form @onsubmit="SaveBriefAsync">
+                    <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                        <label>@L("Описание, эскиз словами") <textarea rows="4" @bind="_brief.Description" maxlength="@DevModel.TextMaxLength"></textarea></label>
+                        <div class="grid">
+                            <label>@L("Размерный ряд") <input @bind="_brief.SizeRange" maxlength="@DevModel.ShortTextMaxLength" placeholder="42–52" /></label>
+                            <label>@L("Цветовая гамма") <input @bind="_brief.ColorRange" maxlength="@DevModel.ShortTextMaxLength" placeholder="@L("молочный, графит")" /></label>
+                            @if (m.CanSeeCost)
+                            {
+                                <label>@L("Целевая себестоимость, ₽") <input type="number" min="0" step="0.01" inputmode="decimal" @bind="_brief.TargetCost" /></label>
+                                <label>@L("Целевая цена, ₽") <input type="number" min="0" step="0.01" inputmode="decimal" @bind="_brief.TargetPrice" /></label>
+                            }
+                            <label>@L("Тираж, шт") <input type="number" min="1" step="1" inputmode="numeric" @bind="_brief.RunQuantity" /></label>
+                            <label>@L("Срок задания") <input type="date" @bind="_brief.DueDate" /></label>
+                            <label class="wide">@L("Состав") <input @bind="_brief.Composition" maxlength="@DevModel.ShortTextMaxLength" placeholder="@L("50% шерсть, 50% акрил")" /></label>
+                            <label class="wide">@L("Маркировка") <input @bind="_brief.Labeling" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                            <label class="wide">@L("Уход") <input @bind="_brief.Care" maxlength="@DevModel.ShortTextMaxLength" placeholder="@L("ручная стирка 30 °C")" /></label>
+                        </div>
+                        <div class="actions">
+                            <button type="submit" disabled="@_busy">@L("Сохранить задание")</button>
+                            <button type="button" class="secondary" @onclick="CancelBrief" disabled="@_busy">@L("Отмена")</button>
+                        </div>
+                    </fieldset>
+                </form>
+            </div>
+        }
+        else
+        {
+            var b = m.Brief;
+            <dl class="facts">
+                <dt>@L("Описание")</dt><dd style="white-space: pre-line">@(b.Description ?? "—")</dd>
+                <dt>@L("Размерный ряд")</dt><dd>@(b.SizeRange ?? "—")</dd>
+                <dt>@L("Цветовая гамма")</dt><dd>@(b.ColorRange ?? "—")</dd>
+                @if (m.CanSeeCost)
+                {
+                    <dt>@L("Целевая себестоимость")</dt><dd>@(b.TargetCost is { } cost ? Amounts.Format(cost) : "—")</dd>
+                    <dt>@L("Целевая цена")</dt><dd>@(b.TargetPrice is { } price ? Amounts.Format(price) : "—")</dd>
+                }
+                <dt>@L("Тираж")</dt><dd>@(b.RunQuantity is { } run ? L("{0} шт", run) : "—")</dd>
+                <dt>@L("Срок задания")</dt><dd>@(b.DueDate?.ToString("dd.MM.yyyy") ?? "—")</dd>
+                <dt>@L("Состав")</dt><dd>@(b.Composition ?? "—")</dd>
+                <dt>@L("Маркировка")</dt><dd>@(b.Labeling ?? "—")</dd>
+                <dt>@L("Уход")</dt><dd>@(b.Care ?? "—")</dd>
+            </dl>
+            <p class="muted small">@L("Эскиз и образцы для вдохновения прикладываются на вкладке «Файлы».")</p>
+            @if (m.CanEdit)
+            {
+                <div class="actions">
+                    <button type="button" class="secondary" @onclick="() => _editingBrief = true" disabled="@_busy">@L("Изменить задание")</button>
+                    @if (m.HasTemplate)
+                    {
+                        <button type="button" class="secondary" @onclick="FillTemplateAsync" disabled="@_busy">@L("Заполнить из шаблона категории")</button>
+                    }
+                </div>
+            }
+        }
+    };
+
+    private RenderFragment FilesTab => __builder =>
+    {
+        var m = _model!;
+        if (m.CanEdit)
+        {
+            <div class="panel">
+                <div class="inline-form">
+                    <label>
+                        @L("Вид файла")
+                        <select @bind="_fileKind">
+                            @foreach (var k in DevFile.Kinds)
+                            {
+                                <option value="@k">@L(DevFile.KindName(k))</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Комментарий") <input @bind="_fileComment" maxlength="@DevFile.CommentMaxLength" /></label>
+                    <label class="file-pick" title="@L("До 50 МБ")">@L("Загрузить ({0})", DevFile.Accept(_fileKind)) <InputFile OnChange="UploadAsync" accept="@DevFile.Accept(_fileKind)" disabled="@_busy" capture="@(_fileKind == DevFileKind.Photo ? "environment" : null)" /></label>
+                </div>
+                <p class="muted small">@L("Файл с тем же именем и видом становится новой версией — прежние версии сохраняются.")</p>
+            </div>
+        }
+
+        if (m.Files.Count == 0)
+        {
+            <p class="muted">@L("Файлов пока нет.")</p>
+        }
+        else
+        {
+            <ul class="dev-files">
+                @foreach (var f in m.Files)
+                {
+                    <li>
+                        @if (f.IsImage)
+                        {
+                            <a href="dev/files/@f.Id" download data-enhance-nav="false"><img class="dev-thumb" src="dev/files/@f.Id" alt="@f.FileName" loading="lazy" /></a>
+                        }
+                        <span class="tag">@L(f.KindName)</span>
+                        <a href="dev/files/@f.Id" download data-enhance-nav="false">@f.FileName</a>
+                        <span class="muted small">@L("версия {0}", f.Version) · @(f.SizeBytes / 1024 + 1) @L("КБ") · @f.UploadedBy, @Local(f.UploadedAtUtc)</span>
+                        @if (f.Comment is not null)
+                        {
+                            <span class="small">@f.Comment</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    };
+
+    private Task EditAsync() => RunAsync(async () => _options = await Models.OptionsAsync(), null);
+
+    private Task SaveAsync(DevModelHeader header) => RunAsync(async () =>
+    {
+        await Models.UpdateAsync(Id, header, _model!.RowVersion);
+        _options = null;
+    }, L("Сохранено."));
+
+    private Task SaveBriefAsync() => RunAsync(async () =>
+    {
+        await Models.UpdateBriefAsync(Id, _brief.ToBrief(), _model!.RowVersion);
+        _editingBrief = false;
+    }, L("Задание сохранено."));
+
+    private void CancelBrief()
+    {
+        _editingBrief = false;
+        _brief = BriefForm.From(_model!.Brief);
+    }
+
+    private async Task CopyAsync()
+    {
+        long? id = null;
+        await RunAsync(async () => id = await Models.CopyAsync(Id), L("Создана похожая модель."));
+        if (id is { } copy && !_isError)
+        {
+            Navigation.NavigateTo($"dev/models/{copy}");
+        }
+    }
+
+    private Task FillTemplateAsync() => RunAsync(() => Models.FillBriefFromTemplateAsync(Id, _model!.RowVersion), L("Задание дополнено из шаблона категории."));
+
+    private Task MoveAsync(DevStage to) => RunAsync(() => Models.MoveAsync(Id, to, null, _model!.RowVersion), L("Стадия изменена."));
+
+    private Task MoveToSelectedAsync() => byte.TryParse(_target, out var s)
+        ? RunAsync(async () =>
+        {
+            await Models.MoveAsync(Id, (DevStage)s, null, _model!.RowVersion);
+            _target = string.Empty;
+        }, L("Стадия изменена."))
+        : Task.CompletedTask;
+
+    private Task CancelAsync() => RunAsync(async () =>
+    {
+        await Models.CancelAsync(Id, _reason, _model!.RowVersion);
+        _cancelling = false;
+        _reason = null;
+    }, L("Модель отменена."));
+
+    private Task RestoreAsync() => RunAsync(() => Models.RestoreAsync(Id, _model!.RowVersion), L("Модель возвращена в работу."));
+
+    private Task UploadAsync(InputFileChangeEventArgs args) => RunAsync(async () =>
+    {
+        var file = args.File;
+        if (file.Size > DevFile.MaxBytes)
+        {
+            throw new BusinessRuleException("dev.file.size", "Файл модели — до 50 МБ.");
+        }
+
+        using var buffer = new MemoryStream();
+        await using (var stream = file.OpenReadStream(DevFile.MaxBytes))
+        {
+            await stream.CopyToAsync(buffer);
+        }
+
+        await Models.AddFileAsync(Id, _fileKind, file.Name, buffer.ToArray(), _fileComment);
+        _fileComment = null;
+    }, L("Файл загружен."));
+
+    /// <summary>Одна операция за раз, затем свежая карточка: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+            {
+                _message = UiErrors.Message(ex);
+                _isError = true;
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+
+    private sealed class BriefForm
+    {
+        public string? Description { get; set; }
+        public string? SizeRange { get; set; }
+        public string? ColorRange { get; set; }
+        public decimal? TargetCost { get; set; }
+        public decimal? TargetPrice { get; set; }
+        public int? RunQuantity { get; set; }
+        public DateOnly? DueDate { get; set; }
+        public string? Composition { get; set; }
+        public string? Labeling { get; set; }
+        public string? Care { get; set; }
+
+        public static BriefForm From(DevBrief b) => new()
+        {
+            Description = b.Description, SizeRange = b.SizeRange, ColorRange = b.ColorRange, TargetCost = b.TargetCost, TargetPrice = b.TargetPrice,
+            RunQuantity = b.RunQuantity, DueDate = b.DueDate, Composition = b.Composition, Labeling = b.Labeling, Care = b.Care,
+        };
+
+        public DevBrief ToBrief() => new(Description, SizeRange, ColorRange, TargetCost, TargetPrice, RunQuantity, DueDate, Composition, Labeling, Care);
+    }
+}

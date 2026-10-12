@@ -19,7 +19,7 @@ namespace KnitErp.IntegrationTests;
 /// </summary>
 public sealed class ModuleExtensionTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
-    private const TaggedEntity FakeDeal = (TaggedEntity)31;
+    private const TaggedEntity FakeDeal = (TaggedEntity)59;
     private static int _innSeed = 850_000_000;
 
     [SqlFact]

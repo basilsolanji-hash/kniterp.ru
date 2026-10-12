@@ -123,6 +123,7 @@ public static class AuditActions
     public const string PasswordResetRequested = "auth.password_reset.requested";
     public const string PasswordReset = "auth.password.reset";
     public const string PasswordChanged = "auth.password.changed";
+    public const string BankStatementImported = "money.bank_statement.imported";
     public const string SessionsRevoked = "auth.sessions.revoked";
     public const string PasswordResetIssued = "access.password_reset.issued";
     public const string EmergencyAccess = "access.emergency";
@@ -143,6 +144,18 @@ public static class AuditActions
     public const string ConsentChanged = "hr.consent.changed";
     public const string ConsentScanAdded = "hr.consent.scan_added";
     public const string ConsentScanViewed = "hr.consent.scan_viewed";
+
+    /// <summary>Загружен документ сотрудника: скан паспорта, регистрации или фотография (D226).</summary>
+    public const string EmployeeDocumentAdded = "hr.document.added";
+
+    /// <summary>Просмотр документа сотрудника (D226).</summary>
+    public const string EmployeeDocumentViewed = "hr.document.viewed";
+
+    /// <summary>Подписаны документы перед доступом: согласие, правила, обязательство (D227) — или неудачная попытка.</summary>
+    public const string AgreementsSigned = "hr.agreement.signed";
+
+    /// <summary>Печать документа сотрудника с его данными (D227).</summary>
+    public const string AgreementPrinted = "hr.agreement.printed";
     public const string HrOrderCreated = "hr.order.created";
     public const string HrOrderChanged = "hr.order.changed";
     public const string HrOrderPosted = "hr.order.posted";
@@ -215,4 +228,29 @@ public static class AuditActions
     public const string IntegrityChecked = "security.integrity.checked";
     public const string OrganizationCreated = "organization.created";
     public const string OrganizationRequisitesChanged = "organization.requisites.changed";
+
+    // Модуль «Разработка» (D700–D799).
+    public const string DevModelCreated = "dev.model.created";
+    public const string DevModelChanged = "dev.model.changed";
+    public const string DevBriefChanged = "dev.brief.changed";
+    public const string DevStageChanged = "dev.stage.changed";
+    public const string DevModelCancelled = "dev.model.cancelled";
+    public const string DevModelRestored = "dev.model.restored";
+    public const string DevFileAdded = "dev.file.added";
+    public const string DevFileViewed = "dev.file.viewed";
+    public const string DevSettingsChanged = "dev.settings.changed";
+    // CRM (D600–D699). Телефоны и почты — только маской (D612).
+    public const string CrmLeadCreated = "crm.lead.created";
+    public const string CrmLeadChanged = "crm.lead.changed";
+    public const string CrmLeadQualified = "crm.lead.qualified";
+    public const string CrmLeadRejected = "crm.lead.rejected";
+    public const string CrmLeadMerged = "crm.lead.merged";
+    public const string CrmDealCreated = "crm.deal.created";
+    public const string CrmDealChanged = "crm.deal.changed";
+    public const string CrmDealStageChanged = "crm.deal.stage_changed";
+    public const string CrmDealReassigned = "crm.deal.reassigned";
+    public const string CrmDealOrderCreated = "crm.deal.order_created";
+    public const string CrmContactCreated = "crm.contact.created";
+    public const string CrmContactChanged = "crm.contact.changed";
+    public const string CrmSettingsChanged = "crm.settings.changed";
 }

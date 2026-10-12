@@ -253,6 +253,12 @@ public sealed class NotificationService(IKnitErpDbContextFactory factory, Person
                 }
             }
 
+            // D796 (разработка): модели на моей стадии, мои просрочки, ждущие утверждения.
+            foreach (var a in await KnitErp.Application.Development.DevNotifications.ComputeAsync(db, ctx, today, clock.UtcNow, ct))
+            {
+                result.Add(new(a.Text, a.Href, null, a.Warning ? NotificationLevel.Warning : NotificationLevel.Action, a.Key));
+            }
+
             // D107: упоминания в обсуждениях и новые ответы там, где пользователь писал.
             foreach (var a in await KnitErp.Application.Collaboration.DiscussionService.AlertsAsync(db, ctx, clock.UtcNow, ct))
             {
@@ -343,6 +349,16 @@ public sealed class QuickSearchService(IKnitErpDbContextFactory factory, ICurren
                     .OrderByDescending(d => d.Id).Take(MaxPerKind).Select(d => new { d.Id, d.Number, d.Status, d.CountDate }).ToListAsync(ct);
                 hits.AddRange(counts.Select(d => new SearchHitDto(SearchHitKind.Document, $"{ui.Translate("Инвентаризация")} {d.Number}",
                     $"{d.CountDate:dd.MM.yyyy} · {ui.Translate(InventoryCount.StatusName(d.Status))}", $"inventory/{d.Id}", null)));
+            }
+
+            // D796 (разработка): модель по номеру «М-00012» или названию.
+            if (ctx.Permissions.Has(Permissions.DevView))
+            {
+                var devModels = await db.DevModels.AsNoTracking()
+                    .Where(m => m.OrganizationId == org && (m.Number.Contains(text) || m.Name.Contains(text)))
+                    .OrderByDescending(m => m.Id).Take(MaxPerKind).Select(m => new { m.Id, m.Number, m.Name, m.Stage }).ToListAsync(ct);
+                hits.AddRange(devModels.Select(m => new SearchHitDto(SearchHitKind.Document, $"{m.Number} — {m.Name}",
+                    ui.Translate("Модель") + " · " + ui.Translate(KnitErp.Domain.Development.DevStages.Name(m.Stage)), $"dev/models/{m.Id}", null)));
             }
 
             string[] openingPermissions = [Permissions.OpeningBalanceCreate, Permissions.OpeningBalanceApprove, Permissions.WarehouseReportView];

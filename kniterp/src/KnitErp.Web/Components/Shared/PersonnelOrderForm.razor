@@ -41,7 +41,7 @@
     {
         <label>
             @L("Подразделение")
-            <InputSelect @bind-Value="Model.DepartmentId" required>
+            <InputSelect @bind-Value="Model.DepartmentId" @bind-Value:after="SuggestSalary" required>
                 <option value="0">@L("— выберите —")</option>
                 @foreach (var d in Options.Departments)
                 {
@@ -51,7 +51,7 @@
         </label>
         <label>
             @L("Должность")
-            <InputSelect @bind-Value="Model.PositionId" required>
+            <InputSelect @bind-Value="Model.PositionId" @bind-Value:after="SuggestSalary" required>
                 <option value="0">@L("— выберите —")</option>
                 @foreach (var p in Options.Positions)
                 {
@@ -61,6 +61,10 @@
         </label>
         <label>@L("Ставка") <InputNumber @bind-Value="Model.Rate" step="0.01" min="0.01" max="1.5" /></label>
         <label>@L("Оклад (тарифная ставка), руб.") <InputNumber @bind-Value="Model.Salary" step="0.01" min="0" /></label>
+        @if (_fromStaffing && Model.Salary == _suggested)
+        {
+            <p class="muted small">@L("Оклад подставлен из штатного расписания — при необходимости измените.")</p>
+        }
     }
 
     @if (Model.Kind == PersonnelOrderKind.Hire)
@@ -108,4 +112,24 @@
 
     [Parameter]
     public bool KindLocked { get; set; }
+
+    private decimal? _suggested;
+    private bool _fromStaffing;
+
+    /// <summary>
+    /// D225: оклад из действующей строки штата для выбранных подразделения и должности. Введённый вручную оклад не перезаписывается:
+    /// подстановка меняет только пустое поле или прежнюю подстановку.
+    /// </summary>
+    private void SuggestSalary()
+    {
+        if (Model.Salary is not null && Model.Salary != _suggested)
+        {
+            return;
+        }
+
+        var salary = Options.SalaryFor(Model.DepartmentId, Model.PositionId);
+        Model.Salary = salary; // нет строки штата — прежняя подстановка снимается
+        _suggested = salary;
+        _fromStaffing = salary is not null;
+    }
 }

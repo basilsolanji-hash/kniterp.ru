@@ -43,7 +43,7 @@
                         <td>@l.UnitSymbol</td>
                         @if (_data.CanMove)
                         {
-                            <td class="num"><input @bind="_quantities[l.ItemId]" inputmode="decimal" size="8" aria-label="@L("Количество: {0}", l.Code)" /></td>
+                            <td class="num"><input @bind="_quantities[l.ItemId]" @bind:event="oninput" disabled="@(!RendererInfo.IsInteractive)" inputmode="decimal" size="8" aria-label="@L("Количество: {0}", l.Code)" /></td>
                         }
                     </tr>
                 }
@@ -55,6 +55,7 @@
     @if (_data.CanMove)
     {
         <form class="inline-form" @onsubmit="MoveAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
             <label>
                 @L("Операция")
                 <select @bind="_purpose" @bind:after="PurposeChanged" aria-label="@L("Операция")">
@@ -95,6 +96,7 @@
             <label>@L("Комментарий") <input @bind="_comment" size="24" aria-label="@L("Комментарий к документу")" /></label>
             <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата документа")" /></label>
             <button type="submit" disabled="@_busy">@L("Провести")</button>
+            </fieldset>
         </form>
         <p class="muted">@L("Выдача — перемещение на склад цеха «{0}», возврат — обратное перемещение, отходы — списание из цеха. Документ проводится сразу.", _data.WipWarehouseName)</p>
     }

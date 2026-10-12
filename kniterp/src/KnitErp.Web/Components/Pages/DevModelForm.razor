@@ -1,0 +1,164 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+
+@* Форма карточки модели (D701): создание и изменение. Проверки — в сервисе и домене. *@
+<form @onsubmit="SubmitAsync">
+    <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+        <div class="grid">
+            <label class="wide">@L("Название") <input @bind="_name" maxlength="@DevModel.NameMaxLength" required="@(Initial is not null)"
+                                                       placeholder="@(Initial is null ? L("Пусто — по категории, коллекции и заказчику") : L("Свитер с оленями"))" /></label>
+            <label>
+                @L("Категория")
+                <select @bind="_category">
+                    @foreach (var c in Enum.GetValues<DevCategory>())
+                    {
+                        <option value="@c">@L(DevModel.CategoryName(c))</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Аудитория")
+                <select @bind="_audience">
+                    @foreach (var a in Enum.GetValues<DevAudience>())
+                    {
+                        <option value="@a">@L(DevModel.AudienceName(a))</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Коллекция или сезон")
+                <select @bind="_collection">
+                    <option value="">—</option>
+                    @foreach (var c in Options.Collections)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Приоритет")
+                <select @bind="_priority">
+                    @foreach (var p in Enum.GetValues<DevPriority>())
+                    {
+                        <option value="@p">@L(DevModel.PriorityName(p))</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Плановый запуск") <input type="date" @bind="_launch" title="@(Initial is null && Options.AutoLaunchDate ? L("Пусто — рассчитается по нормативам стадий") : null)" />
+                @if (Initial is null && Options.AutoLaunchDate)
+                {
+                    <span class="muted small">@L("пусто — по нормативам стадий")</span>
+                }
+            </label>
+            <label>
+                @L("Заказчик")
+                <select @bind="_customer">
+                    <option value="">—</option>
+                    @foreach (var c in Options.Customers)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Сделка CRM, №") <input type="number" min="1" step="1" inputmode="numeric" @bind="_deal" /></label>
+            @foreach (var role in DevModel.Roles)
+            {
+                var r = role;
+                <label>
+                    @L(DevModel.RoleName(r))
+                    <select value="@(_assignees.GetValueOrDefault(r)?.ToString() ?? "")" @onchange="e => SetAssignee(r, e.Value as string)">
+                        <option value="">—</option>
+                        @foreach (var u in Options.Users)
+                        {
+                            <option value="@u.Id">@u.Name</option>
+                        }
+                    </select>
+                </label>
+            }
+            <label class="inline"><span><input type="checkbox" @bind="_hasPattern" /> @L("Есть рисунок (жаккард, интарсия, структура)")</span></label>
+            @if (_audience == DevAudience.Kids)
+            {
+                <label class="inline"><span><input type="checkbox" @bind="_childSafety" /> @L("Требования ТР ТС 007/2011 (детская одежда)")</span></label>
+            }
+        </div>
+        <div class="actions">
+            <button type="submit" disabled="@Busy">@SubmitText</button>
+            <button type="button" class="secondary" @onclick="OnCancel" disabled="@Busy">@L("Отмена")</button>
+        </div>
+    </fieldset>
+</form>
+
+@code {
+    [Parameter, EditorRequired]
+    public DevModelOptionsDto Options { get; set; } = default!;
+
+    [Parameter]
+    public DevModelHeader? Initial { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public string SubmitText { get; set; } = string.Empty;
+
+    [Parameter]
+    public EventCallback<DevModelHeader> OnSubmit { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private string _name = string.Empty;
+    private DevCategory _category = DevCategory.Sweater;
+    private DevAudience _audience = DevAudience.Women;
+    private DevPriority _priority = DevPriority.Normal;
+    private string _collection = string.Empty;
+    private string _customer = string.Empty;
+    private long? _deal;
+    private DateOnly? _launch;
+    private bool _hasPattern = true;
+    private bool _childSafety;
+    private readonly Dictionary<DevRole, long?> _assignees = [];
+    private bool _initialized;
+
+    protected override void OnParametersSet()
+    {
+        if (_initialized)
+        {
+            return;
+        }
+
+        if (Initial is not { } h)
+        {
+            // D791: новая модель сразу с исполнителями по умолчанию из настроек разработки.
+            _initialized = true;
+            foreach (var (role, user) in Options.DefaultAssignees ?? new Dictionary<DevRole, long?>())
+            {
+                _assignees[role] = user;
+            }
+
+            return;
+        }
+
+        _initialized = true;
+        _name = h.Name;
+        _category = h.Category;
+        _audience = h.Audience;
+        _priority = h.Priority;
+        _collection = h.CollectionId?.ToString() ?? string.Empty;
+        _customer = h.CustomerId?.ToString() ?? string.Empty;
+        _deal = h.DealId;
+        _launch = h.PlannedLaunch;
+        _hasPattern = h.HasPattern;
+        _childSafety = h.ChildSafety;
+        foreach (var (role, user) in h.Assignees)
+        {
+            _assignees[role] = user;
+        }
+    }
+
+    private void SetAssignee(DevRole role, string? value) => _assignees[role] = long.TryParse(value, out var id) ? id : null;
+
+    private Task SubmitAsync() => OnSubmit.InvokeAsync(new DevModelHeader(
+        _name, long.TryParse(_collection, out var c) ? c : null, _category, _audience, _childSafety, _hasPattern,
+        long.TryParse(_customer, out var k) ? k : null, _deal, _launch, _priority, DevModel.Roles.ToDictionary(r => r, r => _assignees.GetValueOrDefault(r))));
+}

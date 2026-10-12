@@ -6,6 +6,7 @@
 @inject NomenclatureService Nomenclature
 @inject ModificationService Modifications
 @inject CatalogSettingsService Settings
+@inject ItemCodesService Codes
 
 <PageTitle>@L("Настройки номенклатуры") — knitERP</PageTitle>
 
@@ -431,6 +432,62 @@ else
                         <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить настройки")</button></div>
                     }
                 </form>
+
+                @* D315: автоматические штрихкоды и артикулы — своя форма и своё сохранение. *@
+                <h2 style="margin-top: 20px">@L("Штрихкоды и артикулы автоматически")</h2>
+                <form class="panel" @onsubmit="SaveCodesAsync">
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Штрихкод EAN-13")</legend>
+                        <label class="check"><input type="checkbox" @bind="_autoBarcode" /> @L("Выдавать штрихкод новой позиции сразу (кроме услуг)")</label>
+                        <div class="grid">
+                            <label>
+                                @L("Префикс")
+                                <select @bind="_barcodePrefix">
+                                    @for (var p = InternalEan13.MinPrefix; p <= InternalEan13.MaxPrefix; p++)
+                                    {
+                                        <option value="@p">@p</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Следующий номер") <input type="number" min="1" @bind="_nextBarcode" /></label>
+                        </div>
+                        <p class="muted small">@L("Внутренний штрихкод из диапазона 20–29 — для своего склада, касс и этикеток. Для маркировки (Честный ЗНАК) и площадок, требующих GTIN, нужен настоящий GTIN из Национального каталога — его вводят в блоке «Торговля и маркировка».")</p>
+                        @if (_settings.Codes?.NextBarcode is { } nb)
+                        {
+                            <p class="small">@L("Следующий штрихкод: {0}", nb)</p>
+                        }
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Артикул")</legend>
+                        <label class="check"><input type="checkbox" @bind="_autoArticle" /> @L("Заполнять пустой артикул новой позиции по шаблону")</label>
+                        <div class="grid">
+                            <label>@L("Шаблон") <input @bind="_articleTemplate" maxlength="@ArticleTemplate.MaxLength" placeholder="KN-{N}" /></label>
+                            <label>
+                                @L("Цифр в номере")
+                                <select @bind="_articleDigits">
+                                    @for (var d = CatalogSettings.MinDigits; d <= CatalogSettings.MaxDigits; d++)
+                                    {
+                                        <option value="@d">@d</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Следующий номер") <input type="number" min="1" @bind="_nextArticle" /></label>
+                        </div>
+                        <p class="muted small">@L("{N} — номер по счётчику, {CODE} — код позиции. Например: «KN-{N}» → KN-00042, «{CODE}-A» → ТВ-0001-A.")</p>
+                        @if (_settings.Codes?.ArticleExample is { } ae)
+                        {
+                            <p class="small">@L("Следующий артикул: {0}", ae)</p>
+                        }
+                    </fieldset>
+                    @if (_settings.CanEdit)
+                    {
+                        <div class="actions">
+                            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                            <ConfirmButton Class="secondary" Disabled="_busy" Question="@L("Выдать внутренний EAN-13 всем действующим позициям без штрихкода (кроме услуг)?")"
+                                           OnConfirm="GenerateMissingAsync">@L("Создать штрихкоды для позиций без штрихкода")</ConfirmButton>
+                        </div>
+                    }
+                </form>
             }
             break;
 
@@ -548,6 +605,25 @@ else
 
     private void ToggleBlock(CardBlocks block, ChangeEventArgs e) => _hidden = e.Value is true ? _hidden & ~block : _hidden | block;
 
+    // D315: автоматические штрихкоды и артикулы.
+    private bool _autoBarcode;
+    private byte _barcodePrefix = InternalEan13.MinPrefix;
+    private long _nextBarcode = 1;
+    private bool _autoArticle;
+    private string? _articleTemplate;
+    private byte _articleDigits = 5;
+    private int _nextArticle = 1;
+
+    private Task SaveCodesAsync() => Run(() => Settings.SaveCodesAsync(
+        new CatalogCodesCommand(_autoBarcode, _barcodePrefix, _nextBarcode, _autoArticle, _articleTemplate, _articleDigits, _nextArticle),
+        _settings!.RowVersion), L("Настройки штрихкодов и артикулов сохранены."));
+
+    private Task GenerateMissingAsync() => Run(async () =>
+    {
+        var r = await Codes.GenerateMissingBarcodesAsync();
+        _message = r.Created == 0 ? L("У всех позиций уже есть штрихкоды.") : L("Создано штрихкодов: {0} ({1} … {2}).", r.Created, r.First!, r.Last!);
+    }, null);
+
     private Task SaveSettingsAsync() => Run(() => Settings.SaveAsync(
         new CatalogSettingsCommand(_servicesOn, _bundlesOn, _prefix, _digits, _nextNumber, _defaultType, _requireGroup, _requireVat, _hidden), _settings!.RowVersion), L("Настройки каталога сохранены."));
 
@@ -592,6 +668,11 @@ else
         (_servicesOn, _bundlesOn, _prefix, _digits, _nextNumber, _defaultType) =
             (_settings.ServicesEnabled, _settings.BundlesEnabled, _settings.AutoCodePrefix, _settings.AutoCodeDigits, _settings.NextNumber, _settings.DefaultItemType);
         (_requireGroup, _requireVat, _hidden) = (_settings.RequireGroup, _settings.RequireVat, _settings.HiddenBlocks);
+        if (_settings.Codes is { } c)
+        {
+            (_autoBarcode, _barcodePrefix, _nextBarcode, _autoArticle, _articleTemplate, _articleDigits, _nextArticle) =
+                (c.AutoBarcode, c.BarcodePrefix, c.NextBarcodeNumber, c.AutoArticle, c.ArticleTemplate, c.ArticleDigits, c.NextArticleNumber);
+        }
     }
 
     private string TypeName(CustomFieldType type) => type switch
@@ -679,7 +760,7 @@ else
         try
         {
             await action();
-            _message = success;
+            _message = success ?? _message;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

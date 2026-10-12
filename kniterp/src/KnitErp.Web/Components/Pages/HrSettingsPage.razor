@@ -71,6 +71,7 @@ else
             <label class="inline"><input type="checkbox" @bind="_r.HrOfficerClosesTimesheet" /> @L("Кадровик может закрывать табель (иначе закрывает руководитель подразделения)")</label>
             <label class="inline"><input type="checkbox" @bind="_r.LeaveOnlyByOrder" /> @L("Отпуск только по приказу Т-6 (без кнопки «В отпуск» на карточке)")</label>
             <label class="inline"><input type="checkbox" @bind="_r.BlockPersonalDataWithoutConsent" /> @L("Не вводить персональные данные без действующего согласия сотрудника")</label>
+            <label class="inline"><input type="checkbox" @bind="_r.RequireAgreements" /> @L("Перед доступом сотрудник подписывает согласие на обработку ПДн, правила работы и обязательство о конфиденциальности")</label>
         </fieldset>
         @if (_data.CanEditRules)
         {
@@ -146,7 +147,7 @@ else
 
         _p = PayrollForm.From(_data.Payroll);
         _r = new RulesForm { HrOfficerClosesTimesheet = _data.Rules.HrOfficerClosesTimesheet, LeaveOnlyByOrder = _data.Rules.LeaveOnlyByOrder,
-            BlockPersonalDataWithoutConsent = _data.Rules.BlockPersonalDataWithoutConsent };
+            BlockPersonalDataWithoutConsent = _data.Rules.BlockPersonalDataWithoutConsent, RequireAgreements = _data.Rules.RequireAgreements };
     }
 
     private Task SavePayrollAsync() => RunAsync(async () =>
@@ -157,7 +158,7 @@ else
 
     private Task SaveRulesAsync() => RunAsync(async () =>
     {
-        await Settings.SaveRulesAsync(new HrRulesValues(_r.HrOfficerClosesTimesheet, _r.LeaveOnlyByOrder, _r.BlockPersonalDataWithoutConsent), _data!.RowVersion);
+        await Settings.SaveRulesAsync(new HrRulesValues(_r.HrOfficerClosesTimesheet, _r.LeaveOnlyByOrder, _r.BlockPersonalDataWithoutConsent, _r.RequireAgreements), _data!.RowVersion);
         _message = L("Кадровые правила сохранены.");
     });
 
@@ -192,6 +193,7 @@ else
         public bool HrOfficerClosesTimesheet { get; set; }
         public bool LeaveOnlyByOrder { get; set; }
         public bool BlockPersonalDataWithoutConsent { get; set; }
+        public bool RequireAgreements { get; set; } = true;
     }
 
     private sealed class PayrollForm

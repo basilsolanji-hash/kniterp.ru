@@ -1924,3 +1924,37 @@ internal sealed class ApiIdempotencyRecordConfiguration : IEntityTypeConfigurati
         b.HasIndex(x => x.CreatedAtUtc).HasDatabaseName("ix_api_idempotency_created");
     }
 }
+
+/// <summary>D119 (А1): строки загруженных выписок — только вставка (триггер в миграции), отпечаток уникален в организации.</summary>
+internal sealed class BankStatementLineConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Finance.BankStatementLine>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Finance.BankStatementLine> b)
+    {
+        b.ToTable("bank_statement_lines", t =>
+        {
+            t.HasCheckConstraint("ck_bank_statement_lines_amount", "[Amount] > 0");
+            t.HasCheckConstraint("ck_bank_statement_lines_payment",
+                "([Direction] = 1 AND [CustomerPaymentId] IS NOT NULL AND [SupplierPaymentId] IS NULL) OR ([Direction] = 2 AND [SupplierPaymentId] IS NOT NULL AND [CustomerPaymentId] IS NULL)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Fingerprint).HasMaxLength(32).IsFixedLength().IsRequired();
+        b.Property(x => x.Direction).HasConversion<byte>();
+        b.Property(x => x.DocumentNumber).HasMaxLength(30).IsRequired();
+        b.Property(x => x.Amount).HasColumnType("decimal(19,4)");
+        b.Property(x => x.Purpose).HasMaxLength(KnitErp.Domain.Finance.BankStatementLine.PurposeMaxLength).IsRequired();
+        b.HasIndex(x => new { x.OrganizationId, x.Fingerprint }).IsUnique().HasDatabaseName("ux_bank_statement_lines_fingerprint");
+        b.HasIndex(x => new { x.OrganizationId, x.DocumentDate }).HasDatabaseName("ix_bank_statement_lines_date");
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<LegalEntityAccount>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.MoneyAccountId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_bank_statement_lines_account");
+        b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CounterpartyId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_bank_statement_lines_counterparty");
+        b.HasOne<CustomerPayment>().WithMany().HasForeignKey(x => x.CustomerPaymentId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_bank_statement_lines_customer_payment");
+        b.HasOne<SupplierPayment>().WithMany().HasForeignKey(x => x.SupplierPaymentId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_bank_statement_lines_supplier_payment");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ImportedByUserId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_bank_statement_lines_user");
+    }
+}

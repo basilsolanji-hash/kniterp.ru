@@ -48,6 +48,8 @@ description: Модуль «Производство» knitERP — произв�
   Запуск: `dotnet build` всего решения, затем `dotnet test tests/KnitErp.E2ETests --no-build` (нужен `KNITERP_TEST_SQL`).
 
 ## Частые ошибки
+- Меньше ручного ввода (D413, `docs/production-automation.md`): подставлять вычислимое, но не затирать набранное и ничего не отправлять
+  само; виновника и причины — только подсказывать. Поток многих заказов — `ShopFloorService.FlowsAsync`, не цикл по заказам.
 - Права модуля: выгрузка «Баллы и показатели» — `hr.employee.view` в пределах подразделений, причины — `hr.personal_data.view`,
   запись `production.scores.exported` обязательна (D411, D223); виновник брака — `production.defect.culprit` (D412).
 - Сквозной тест производства — через `ScenarioBrowser.RunAsync(app.Browser, async browser => …)` и `browser.NewContextAsync(...)`:

@@ -385,6 +385,9 @@ app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, Kn
 });
 
 // Расчёт заработка месяца в Excel для сверки (D216): право и журнал — в сервисе.
+// Шаблон сдельных расценок, заполненный операциями производства без расценки (D225): право — в сервисе.
+app.MapGet("/hr/piece-rates-template.xlsx", (KnitErp.Application.Hr.PayrollService payroll, CancellationToken ct) =>
+    FileOrForbid(() => payroll.RatesTemplateAsync(ct), "shablon-rascenok.xlsx"));
 app.MapGet("/hr/payroll.xlsx", async (int year, int month, KnitErp.Application.Hr.PayrollService payroll, CancellationToken ct) =>
 {
     try
@@ -461,6 +464,32 @@ app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.A
         return Results.NotFound();
     }
 });
+
+// Файл модели разработки (D705): право, своя организация и журнал скачивания — в сервисе; всегда вложением и без угадывания типа.
+app.MapGet("/dev/files/{id:long}", async (long id, KnitErp.Application.Development.DevModelService models, HttpContext http, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, contentType, content) = await models.GetFileAsync(id, ct);
+        http.Response.Headers.CacheControl = "private, no-store";
+        http.Response.Headers.XContentTypeOptions = "nosniff";
+        return Results.File(content, contentType, fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
+// Excel моделей разработки (D794): выгрузка списка в работе и шаблон загрузки; права — в сервисе.
+app.MapGet("/dev/models.xlsx", (KnitErp.Application.Development.DevExchangeService exchange, CancellationToken ct) =>
+    FileOrForbid(() => exchange.ExportAsync(new KnitErp.Application.Development.DevModelFilter(IncludeFinal: true), ct), $"modeli-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
+app.MapGet("/dev/models-template.xlsx", (KnitErp.Application.Development.DevExchangeService exchange, CancellationToken ct) =>
+    FileOrForbid(() => exchange.TemplateAsync(ct), "shablon-modelei.xlsx"));
 
 app.MapGet("/opening-balances/template.xlsx", (OpeningBalanceService balances, CancellationToken ct) =>
     FileOrForbid(() => balances.LinesTemplateAsync(ct), "shablon-nachalnyh-ostatkov.xlsx"));

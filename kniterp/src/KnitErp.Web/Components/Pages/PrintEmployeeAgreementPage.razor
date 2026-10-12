@@ -1,0 +1,81 @@
+@page "/print/employee-agreement/{Id:long}/{Kind:int}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@inject EmployeeAgreementService Agreements
+
+@*
+    D227: документ перед доступом с данными сотрудника — согласие на обработку ПДн, правила работы в системе, обязательство о конфиденциальности.
+    Российский документ — печатается по-русски (D68). Подписан электронно — отметка с датой и хэшем текста; иначе — строки для подписи от руки.
+    Печать пишется в журнал аудита.
+*@
+<PageTitle>@(_doc?.Title ?? "Документ сотрудника") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 15mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="employees/@Id">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_doc is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    <div class="sheet portrait">
+        <h2 style="text-align: center">@_doc.Title.ToUpperInvariant()</h2>
+        @foreach (var p in _doc.Text.Paragraphs)
+        {
+            <p style="text-align: justify">@p</p>
+        }
+
+        @if (_doc.Signature is { } s)
+        {
+            <div style="border: 1px solid #000; padding: 8px; margin-top: 16px">
+                Подписано @s.MethodName @TimeZones.ToLocal(s.SignedAtUtc, CurrentAccess?.TimeZoneId ?? "Europe/Moscow").ToString("dd.MM.yyyy HH:mm").
+                Редакция @s.Version. Контрольная сумма текста (SHA-256): <span style="font-family: monospace; font-size: 10px">@s.TextHash</span>.
+                @if (!s.TextMatches)
+                {
+                    <br /><b>Внимание: данные в документе изменились после подписания — подписан текст с прежними данными.</b>
+                }
+            </div>
+        }
+        else
+        {
+            <table class="plain" style="margin-top: 32px; width: 100%">
+                <tr><td>Подпись ____________________</td><td style="text-align: right">Расшифровка ____________________________</td></tr>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [Parameter]
+    public int Kind { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto? CurrentAccess { get; set; }
+
+    private AgreementDocumentDto? _doc;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await Agreements.PrintAsync(Id, (AgreementKind)Kind);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

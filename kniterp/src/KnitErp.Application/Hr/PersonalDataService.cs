@@ -27,7 +27,16 @@ public sealed record PersonalDataDto(
     public bool ConsentWarning => Consent != ConsentState.Valid;
 }
 
-public sealed record ConsentScanDto(long Id, string FileName, int SizeBytes, DateTime UploadedAtUtc);
+public sealed record ConsentScanDto(long Id, string FileName, int SizeBytes, DateTime UploadedAtUtc, EmployeeDocumentKind Kind = EmployeeDocumentKind.Consent)
+{
+    public string KindName => EmployeeDocumentKinds.Name(Kind);
+}
+
+/// <summary>Заполненность карточек списка (D226): по сотруднику и сводка «чего не хватает» по всем видимым.</summary>
+public sealed record CompletenessListDto(IReadOnlyDictionary<long, EmployeeCompleteness> Employees)
+{
+    public int Count(string item) => Employees.Values.Count(c => c.Missing.Contains(item));
+}
 
 /// <summary>Состояние согласия без самих персональных данных — для карточки сотрудника, чтения ПДн не требует.</summary>
 public sealed record ConsentSummaryDto(ConsentState State, DateOnly? ValidUntil, bool CanViewPersonalData, bool CanEditPersonalData)
@@ -86,7 +95,7 @@ public sealed class PersonalDataService(IKnitErpDbContext db, IAccessGuard guard
         var scans = await db.ConsentScans.AsNoTracking()
             .Where(s => s.OrganizationId == ctx.OrganizationId && s.EmployeeId == employeeId)
             .OrderByDescending(s => s.Id)
-            .Select(s => new ConsentScanDto(s.Id, s.FileName, s.SizeBytes, s.UploadedAtUtc)).ToListAsync(ct);
+            .Select(s => new ConsentScanDto(s.Id, s.FileName, s.SizeBytes, s.UploadedAtUtc, s.Kind)).ToListAsync(ct);
         var today = await TodayAsync(ctx, ct);
         Audit(ctx, AuditActions.PersonalDataViewed, employeeId, null, employee.FullName, null);
         await db.SaveChangesAsync(ct);
@@ -147,18 +156,93 @@ public sealed class PersonalDataService(IKnitErpDbContext db, IAccessGuard guard
         return pd.RowVersion;
     }
 
-    public async Task<long> AddConsentScanAsync(long employeeId, string fileName, string contentType, byte[] content, CancellationToken ct = default)
+    public Task<long> AddConsentScanAsync(long employeeId, string fileName, string contentType, byte[] content, CancellationToken ct = default) =>
+        AddDocumentAsync(employeeId, EmployeeDocumentKind.Consent, fileName, contentType, content, ct);
+
+    /// <summary>Документ сотрудника (D226): скан согласия, паспорта, регистрации или фотография. Право — изменение ПДн; загрузка — в журнал.</summary>
+    public async Task<long> AddDocumentAsync(long employeeId, EmployeeDocumentKind kind, string fileName, string contentType, byte[] content,
+        CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.PersonalDataEdit, ct);
         var employee = await LoadEmployeeAsync(ctx, employeeId, forView: false, ct);
-        var scan = ConsentScan.Create(ctx.OrganizationId, employeeId, fileName, contentType, content, clock.UtcNow, ctx.UserId);
+        var scan = ConsentScan.Create(ctx.OrganizationId, employeeId, fileName, contentType, content, clock.UtcNow, ctx.UserId, kind);
         db.ConsentScans.Add(scan);
         await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
-        Audit(ctx, AuditActions.ConsentScanAdded, employeeId, null, $"{scan.FileName}, {scan.SizeBytes / 1024 + 1} КБ", employee.FullName);
+        Audit(ctx, kind == EmployeeDocumentKind.Consent ? AuditActions.ConsentScanAdded : AuditActions.EmployeeDocumentAdded, employeeId, null,
+            $"{EmployeeDocumentKinds.Name(kind)}: {scan.FileName}, {scan.SizeBytes / 1024 + 1} КБ", employee.FullName);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return scan.Id;
+    }
+
+    /// <summary>
+    /// Заполненность карточки сотрудника (D226). Видна тем, кто читает его ПДн или ведёт сотрудников: это только факт наличия, без значений.
+    /// </summary>
+    public async Task<EmployeeCompleteness> CompletenessAsync(long employeeId, CancellationToken ct = default)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        var employee = await LoadEmployeeAsync(ctx, employeeId, forView: true, ct);
+        if (!CanRead(ctx, employee) && !ctx.Permissions.Has(Permissions.EmployeeEdit))
+        {
+            await guard.DenyAsync(ctx, Permissions.PersonalDataView, ct);
+        }
+
+        return (await CompletenessOfAsync(ctx.OrganizationId, [employee.Id], ct))[employee.Id];
+    }
+
+    /// <summary>D226: заполненность карточек видимых сотрудников — для списка и сводки «чего не хватает». Право — ПДн или ведение сотрудников.</summary>
+    public async Task<CompletenessListDto?> CompletenessListAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        var permission = ctx.Permissions.Has(Permissions.PersonalDataView) ? Permissions.PersonalDataView
+            : ctx.Permissions.Has(Permissions.EmployeeEdit) ? Permissions.EmployeeEdit : null;
+        if (permission is null)
+        {
+            return null; // показатель не для этой роли — блок просто не показывается
+        }
+
+        var visible = await Structure.StructureScope.VisibleDepartmentsAsync(db, ctx, permission, ct);
+        var ids = (await db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && e.Status != EmploymentStatus.Dismissed)
+                .Select(e => new { e.Id, e.DepartmentId }).ToListAsync(ct))
+            .Where(e => visible is null || visible.Contains(e.DepartmentId)).Select(e => e.Id).ToList();
+        return new CompletenessListDto(await CompletenessOfAsync(ctx.OrganizationId, ids, ct));
+    }
+
+    private async Task<Dictionary<long, EmployeeCompleteness>> CompletenessOfAsync(long org, IReadOnlyCollection<long> ids, CancellationToken ct)
+    {
+        var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == org).Select(o => o.TimeZoneId).SingleAsync(ct);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, tz));
+        var births = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == org && ids.Contains(e.Id))
+            .Select(e => new { e.Id, e.BirthDate }).ToDictionaryAsync(e => e.Id, e => e.BirthDate != null, ct);
+        var pd = await db.EmployeePersonalData.AsNoTracking().Where(p => p.OrganizationId == org && ids.Contains(p.EmployeeId))
+            .Select(p => new
+            {
+                p.EmployeeId,
+                Passport = p.PassportNumber != null && p.PassportIssuer != null && p.PassportIssuedOn != null,
+                Snils = p.Snils != null, Inn = p.Inn != null, Address = p.RegistrationAddress != null, Phone = p.Phone != null,
+                p.ConsentGivenOn, p.ConsentValidUntil, p.ConsentRevokedOn,
+            }).ToDictionaryAsync(p => p.EmployeeId, ct);
+        var documents = (await db.ConsentScans.AsNoTracking().Where(s => s.OrganizationId == org && ids.Contains(s.EmployeeId))
+                .Select(s => new { s.EmployeeId, s.Kind }).Distinct().ToListAsync(ct))
+            .ToLookup(s => s.EmployeeId, s => s.Kind);
+        var scheduled = (await db.EmployeeSchedules.AsNoTracking().Where(s => s.OrganizationId == org && ids.Contains(s.EmployeeId))
+            .Select(s => s.EmployeeId).Distinct().ToListAsync(ct)).ToHashSet();
+        var hired = (await db.EmploymentHistory.AsNoTracking()
+            .Where(h => h.OrganizationId == org && ids.Contains(h.EmployeeId) && h.Kind == PersonnelOrderKind.Hire && h.OrderId != null)
+            .Select(h => h.EmployeeId).Distinct().ToListAsync(ct)).ToHashSet();
+        var agreed = await EmployeeAgreementService.FullySignedAsync(db, org, ids, ct); // D227
+        return ids.ToDictionary(id => id, id =>
+        {
+            var p = pd.GetValueOrDefault(id);
+            var docs = documents[id].ToHashSet();
+            return EmployeeCompleteness.Of(births.GetValueOrDefault(id), p?.Passport ?? false, p?.Snils ?? false, p?.Inn ?? false,
+                p?.Address ?? false, p?.Phone ?? false,
+                p is not null && EmployeePersonalData.StateOf(p.ConsentGivenOn, p.ConsentValidUntil, p.ConsentRevokedOn, today) == ConsentState.Valid,
+                docs.Contains(EmployeeDocumentKind.Consent), docs.Contains(EmployeeDocumentKind.Passport), docs.Contains(EmployeeDocumentKind.Registration),
+                docs.Contains(EmployeeDocumentKind.Photo), scheduled.Contains(id), hired.Contains(id), docs.Contains(EmployeeDocumentKind.Contract),
+                agreed.Contains(id));
+        });
     }
 
     /// <summary>Скан согласия для просмотра. Просмотр — в журнал.</summary>
@@ -173,7 +257,8 @@ public sealed class PersonalDataService(IKnitErpDbContext db, IAccessGuard guard
             await guard.DenyAsync(ctx, Permissions.PersonalDataView, ct);
         }
 
-        Audit(ctx, AuditActions.ConsentScanViewed, scan.EmployeeId, null, scan.FileName, employee.FullName);
+        Audit(ctx, scan.Kind == EmployeeDocumentKind.Consent ? AuditActions.ConsentScanViewed : AuditActions.EmployeeDocumentViewed, scan.EmployeeId, null,
+            $"{EmployeeDocumentKinds.Name(scan.Kind)}: {scan.FileName}", employee.FullName);
         await db.SaveChangesAsync(ct);
         return (scan.FileName, scan.ContentType, scan.Content);
     }
