@@ -485,13 +485,6 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
         var feeders = Enumerable.Range(1, feederCount).Reverse().Select(n => new DevFeederRowDto(n, Slot(n, DevFeederSide.Left), Slot(n, DevFeederSide.Right))).ToList();
         var canSeeCost = ctx.Permissions.Has(Permissions.DevCostView);
-        var operations = await (from o in db.DevModelOperations.AsNoTracking()
-                                join t in db.DevOperationTypes.AsNoTracking() on o.OperationTypeId equals t.Id
-                                where o.OrganizationId == org && o.ModelId == d.ModelId
-                                orderby o.Seq
-                                select new { o.Seq, t.Name, o.Note, Norm = o.NormMinutes ?? t.NormMinutes, t.Unit, Price = o.Price ?? t.Price }).ToListAsync(ct);
-        var sizes = await db.DevModelSizes.AsNoTracking().Where(s => s.OrganizationId == org && s.ModelId == d.ModelId).OrderBy(s => s.SortOrder).ToListAsync(ct);
-        var detailSizes = await db.DevDetailSizes.AsNoTracking().Where(s => s.OrganizationId == org && s.DetailId == detailId).ToListAsync(ct);
         var program = d.ProgramFileId is { } pid
             ? await db.DevFiles.AsNoTracking().Where(f => f.Id == pid).Select(f => new { f.FileName, f.Version, f.MachineParams }).SingleOrDefaultAsync(ct)
             : null;
@@ -505,13 +498,7 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var canEdit = !DevStages.IsFinal(m.Stage);
         return new DevTechCardDto(m.Id, m.Number, m.Name, d.Id, d.Name, d.Quantity, machine?.Id, machine?.Name, machine?.Parameters, feederCount, machine?.Status,
             lastNote, d.WeaveId, weave, d.PlanKnitSeconds, d.PlanWeightGrams, m.Composition, d.Notes, feeders, palette,
-            operations.Select(o => new DevTechOperationDto(o.Seq, o.Name, o.Note, o.Norm, o.Unit, canSeeCost ? o.Price : null)).ToList(),
-            sizes.Select(s =>
-            {
-                var v = detailSizes.FirstOrDefault(x => x.SizeId == s.Id);
-                return new DevTechSizeDto(s.Id, s.Name, s.IsBase, v?.LengthOffMachineCm, v?.LengthAfterSteamCm, v?.WidthCm, s.PerBox);
-            }).ToList(),
-            m.PackBox, d.ProgramFileId, program?.FileName, program?.Version, program?.MachineParams, m.MainSketchFileId,
+            d.ProgramFileId, program?.FileName, program?.Version, program?.MachineParams, m.MainSketchFileId,
             canEdit && (ctx.Permissions.Has(Permissions.DevPattern) || ctx.Permissions.Has(Permissions.DevEdit)),
             canEdit && ctx.Permissions.Has(Permissions.DevSample), canSeeCost, samples, facts, d.RowVersion, (await SettingsAsync(org, ct)).FactTolerancePercent);
     }

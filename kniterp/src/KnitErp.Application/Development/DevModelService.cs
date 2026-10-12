@@ -290,7 +290,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         {
             var plan = await DevStagePlan.LoadAsync(db, ctx.OrganizationId, ct);
             var before = m.Stage;
-            if (to == DevStage.Approved)
+            // Сначала право утверждать (его проверяет MoveTo), затем расчёт: без права — понятный отказ «утверждает главный технолог».
+            if (to == DevStage.Approved && ctx.Permissions.Has(Permissions.DevApprove))
             {
                 await EnsureApprovableAsync(ctx, m, comment, ct);
             }
@@ -582,10 +583,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         var last = await db.DevCostRuns.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId && r.ModelId == m.Id)
             .OrderByDescending(r => r.Version).Select(r => new { r.Price, r.Margin }).FirstOrDefaultAsync(ct);
         var marginPercent = last is null || last.Price == 0 ? (decimal?)null : last.Margin * 100m / last.Price;
-        if (DevApprovalRules.Check(settings.RequireCostForApproval, settings.MinMarginPercent, last is not null, marginPercent, comment) is { } refusal)
-        {
-            throw new BusinessRuleException("dev.approve.cost", refusal);
-        }
+        DevApprovalRules.Ensure(settings.RequireCostForApproval, settings.MinMarginPercent, last is not null, marginPercent, comment);
     }
 
     private async Task EditAsync(long id, byte[] rowVersion, string permission, Func<AccessContext, DevModel, Task> change, CancellationToken ct)

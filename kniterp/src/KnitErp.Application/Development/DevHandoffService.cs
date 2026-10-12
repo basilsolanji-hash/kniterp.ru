@@ -21,7 +21,7 @@ public sealed record DevHandoffLineDto(long ItemId, string ItemCode, string Item
 /// </summary>
 public sealed record DevHandoffPreviewDto(
     bool CanHandOff, string? Refusal, string SuggestedCode, string SuggestedName, IReadOnlyList<DevOptionDto> Products,
-    IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<string> Route, IReadOnlyList<string> Warnings, long? ItemId, long? TechCardId,
+    IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<string> Route, IReadOnlyList<DevNote> Warnings, long? ItemId, long? TechCardId,
     byte[] RowVersion, string? SuggestedSizes = null, string? SuggestedColors = null, bool HasSketchPhoto = false);
 
 /// <summary>Итог передачи: черновик техкарты, позиция, сколько модификаций создано и добавлено ли фото эскиза (D753).</summary>
@@ -184,7 +184,7 @@ public sealed class DevHandoffService(
         return await db.DevFiles.AsNoTracking().Where(f => f.Id == id).Select(f => f.Content).SingleAsync(ct);
     }
 
-    private sealed record Plan(IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<ProductionStage> Route, IReadOnlyList<string> Warnings);
+    private sealed record Plan(IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<ProductionStage> Route, IReadOnlyList<DevNote> Warnings);
 
     /// <summary>
     /// Нормы и маршрут (D751, D752): вес детали — из факта принятого образца, иначе последнего образца, иначе план; доли цветов — из того же
@@ -203,7 +203,7 @@ public sealed class DevHandoffService(
             }
             else
             {
-                warnings.Add($"«{n.Name}»: единица «{n.Symbol}» — не кг и не г, норму введёт производство.");
+                warnings.Add(DevNote.Of(DevNotes.UnitForProduction, n.Name, n.Symbol));
             }
         }
 

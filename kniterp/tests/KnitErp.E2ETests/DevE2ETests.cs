@@ -227,6 +227,13 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.Locator(".dev-yarn")).ToContainTextAsync("Нечего списывать");
 
         // D750: утверждённая модель — панель передачи в производство с нормами и причиной, почему пока нельзя.
+        // D746: без сохранённого расчёта себестоимости утвердить нельзя — сначала версия расчёта.
+        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("сохраните расчёт себестоимости");
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить версию расчёта", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Сохранена версия расчёта" })).ToBeVisibleAsync();
         await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
         await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждено");
@@ -241,6 +248,15 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GotoAsync("dev/settings");
         await Ready(page);
         await Assertions.Expect(page.GetByLabel("Ставка работы за минуту")).ToBeVisibleAsync();
+
+        // D760: аналитика разработки — плитки, стадии, выгрузка в Excel; на телефоне без горизонтальной прокрутки.
+        await page.GotoAsync("dev/analytics");
+        await Ready(page);
+        await Assertions.Expect(page.Locator(".dev-cost-tiles").First).ToContainTextAsync("В работе");
+        await AssertNoHorizontalScrollAsync(page, "аналитика");
+        var xlsx = await page.APIRequest.GetAsync(await page.GetByRole(AriaRole.Link, new() { Name = "Выгрузить в Excel" }).GetAttributeAsync("href") is { } href
+            ? new Uri(new Uri(page.Url), "/" + href).ToString() : throw new InvalidOperationException("нет ссылки")); // <base href="/">
+        Assert.Equal(200, xlsx.Status);
         await page.GotoAsync("dev/machines");
         await Ready(page);
         await AssertNoHorizontalScrollAsync(page, "станки");

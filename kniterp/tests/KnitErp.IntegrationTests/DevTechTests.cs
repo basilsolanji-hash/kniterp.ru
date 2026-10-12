@@ -21,7 +21,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
     private sealed record Kit(DevModelService Models, DevTechService Tech, DevShopService Shop, DevSettingsService Settings, Services All,
-        DevHandoffService Handoff, DevYarnService Yarn, DevCostService Costs) : IAsyncDisposable
+        DevHandoffService Handoff, DevYarnService Yarn, DevCostService Costs, DevAnalyticsService Analytics) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => All.DisposeAsync();
     }
@@ -36,7 +36,8 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         return new Kit(models, tech, new DevShopService(all.Db, guard, user, host.Clock, tech), new DevSettingsService(all.Db, guard, user, host.Clock), all,
             new DevHandoffService(all.Db, guard, user, host.Clock, all.Catalog, all.TechCards,
                 new KnitErp.Application.Catalog.ModificationService(all.Db, guard, user, host.Clock)),
-            new DevYarnService(all.Db, guard, user, host.Clock, all.Documents), new DevCostService(all.Db, guard, user, host.Clock));
+            new DevYarnService(all.Db, guard, user, host.Clock, all.Documents), new DevCostService(all.Db, guard, user, host.Clock),
+            new DevAnalyticsService(all.Db, guard, host.Clock, SqlTestHost.Spreadsheet));
     }
 
     private static DevModelHeader Header(string name) =>
@@ -160,11 +161,15 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var f8 = card.Feeders[0].Left!;
             Assert.Equal(("доп.1", "Хлопок 20/1 красный", 4, true), (f8.Yarn, f8.ItemName!, f8.Ends, f8.Paraffin));
             Assert.True(card.Feeders.Single(f => f.Feeder == 4).Right!.Elastic);
-            Assert.Equal(("Ластик 2×2", 180, "40 × 30 × 30 см", DevMachineStatus.Limited), (card.Weave!, card.PlanKnitSeconds!.Value, card.PackBox!, card.MachineStatus!.Value));
-            Assert.Equal(new[] { 70, 60, 50, 50 }, card.Sizes.Select(z => z.PerBox!.Value));
-            Assert.Equal(22.5m, card.Sizes[3].OffMachineCm);
-            Assert.Equal(3, card.Operations.Count);
-            Assert.All(card.Operations, o => Assert.Null(o.Price)); // расценки — только с правом себестоимости
+            Assert.Equal(("Ластик 2×2", 180, DevMachineStatus.Limited), (card.Weave!, card.PlanKnitSeconds!.Value, card.MachineStatus!.Value));
+            // Размеры и упаковка — во вкладке «Размеры», операции — во вкладке «Операции» (в техкарту вязания не входят, D719).
+            var sz = await k.Shop.SizesAsync(modelId);
+            Assert.Equal("40 × 30 × 30 см", sz.PackBox);
+            Assert.Equal(new[] { 70, 60, 50, 50 }, sz.Sizes.Select(z => z.PerBox!.Value));
+            Assert.Equal(22.5m, sz.Details.Single(d => d.DetailId == front).Values[sz.Sizes[3].Id].OffMachine);
+            var ops = await k.Shop.OperationsAsync(modelId);
+            Assert.Equal(3, ops.Rows.Count);
+            Assert.All(ops.Rows, o => Assert.Null(o.Price ?? o.TypePrice)); // расценки — только с правом себестоимости
             Assert.Equal("podvyaz.sin", card.ProgramName);
             Assert.Contains("E7", card.ProgramParams);
 
@@ -191,14 +196,13 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var c = await k.Tech.CompletenessAsync(modelId);
             Assert.Equal(new[] { "Задание", "Эскиз", "Программы", "Размеры деталей" }, c.Sections.Where(s => !s.Done).Select(s => s.Name));
             Assert.Equal((6, 10, 60), (c.Done, c.Total, c.Percent));
-            var card = await k.Tech.TechCardAsync(front);
-            Assert.Equal(12.5m, card.Operations.Single(o => o.Name == "Вязание").Price);
+            Assert.Equal(12.5m, (await k.Shop.OperationsAsync(modelId)).Rows.Single(o => o.Name == "Вязание").TypePrice);
             Assert.Single(await k.Tech.ProgramsAsync(machineId));
             Assert.Equal(DevMachineStatus.Limited, (await k.Tech.MachinesAsync()).Single(m => m.Id == machineId).Status);
             Assert.Equal("перенёс, плохо работает", (await k.Tech.MachineNotesAsync(machineId)).First().Text);
             Assert.Equal("dev.color.used", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Tech.RemoveColorAsync(main))).Code);
-            Assert.Equal("dev.detail.used", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
-                k.Tech.RemoveDetailAsync(front, card.RowVersion))).Code);
+            var detailRv = (await k.Tech.TechCardAsync(front)).RowVersion;
+            Assert.Equal("dev.detail.used", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Tech.RemoveDetailAsync(front, detailRv))).Code);
             Assert.NotEmpty(await k.Tech.TechCardsAsync("Подвяз"));
             Assert.Equal(op, (await k.Shop.OperationTypesAsync()).Single(o => o.Name == "Вязание").Id);
         }
@@ -430,8 +434,8 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await k.Settings.SaveCostSettingsAsync(0, 0, null, 0, true, 20m);
             await k.Costs.SaveAsync(model, new DevCostScenario());
             var rv = (await k.Models.GetAsync(model)).RowVersion;
-            Assert.Contains("ниже порога", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
-                k.Models.MoveAsync(model, DevStage.Approved, null, rv))).Message);
+            Assert.Equal("dev.approve.margin", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Models.MoveAsync(model, DevStage.Approved, null, rv))).Code);
             await k.Models.MoveAsync(model, DevStage.Approved, "образец для выставки, маржа не важна", (await k.Models.GetAsync(model)).RowVersion);
             p = await k.Handoff.PreviewAsync(model);
             Assert.True(p.CanHandOff, p.Refusal);
@@ -453,6 +457,21 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var after = await k.Handoff.PreviewAsync(model);
             Assert.Equal((card.ItemId, cardId, false), (after.ItemId!.Value, after.TechCardId!.Value, after.CanHandOff));
             await Assert.ThrowsAsync<BusinessRuleException>(() => k.Handoff.HandOffAsync(model, null, null, null, after.RowVersion));
+
+            // D760–D766: аналитика за период — передана 1 модель, образец связан и ждёт решения, план-факт с расчётом; выгрузка в Excel.
+            var today = DateOnly.FromDateTime(host.Clock.UtcNow);
+            var report = await k.Analytics.ReportAsync(today.AddDays(-30), today.AddDays(1));
+            Assert.Equal((0, 1, 1), (report.InWork, report.Handed, report.SamplesWaiting));
+            Assert.Equal(1m, report.SamplesPerModel);
+            var pf = Assert.Single(report.PlanFact!);
+            Assert.Equal((model, 0m), (pf.ModelId, pf.CalculatedCost!.Value));
+            Assert.NotNull(report.AvgDevelopmentDays);
+            Assert.True((await k.Analytics.ExportAsync(today.AddDays(-30), today)).Length > 1000);
+            Assert.Equal("dev.analytics.period", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Analytics.ReportAsync(today, today.AddDays(-1)))).Code);
+            var dash = await k.Analytics.GetAsync(k.All.Db, await new AccessGuard(k.All.Db,
+                new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress }, host.Clock).CurrentAsync(), today, default);
+            Assert.Equal((0, 1), (dash!.InWork, dash.SamplesWaiting));
         }
 
         // Без права «утверждение» — отказ; чужая организация — «не найдено».
@@ -460,6 +479,9 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         await using (var k = As(sampler, org.OrganizationId))
         {
             await Assert.ThrowsAsync<AccessDeniedException>(() => k.Handoff.HandOffAsync(model, null, null, null, []));
+            // Образцовщица видит аналитику без сумм плана-факта.
+            var today = DateOnly.FromDateTime(host.Clock.UtcNow);
+            Assert.Null((await k.Analytics.ReportAsync(today.AddDays(-30), today.AddDays(1))).PlanFact);
         }
 
         await using (var k = As(other.OwnerUserId, other.OrganizationId))
@@ -501,7 +523,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 
             // Цен нет — замечание; вручную: 0,22 кг +5 % × 500 + бирка 10 + работа 12,50 + 3 × 2 + накладные 10 % → 158,40, цена +50 %.
             var bare = await k.Costs.CostingAsync(model);
-            Assert.Contains(bare.Warnings, w => w.Contains("нет цены"));
+            Assert.Contains(bare.Warnings, w => w.Template == DevNotes.NoPrice);
             var priced = new DevCostScenario(new Dictionary<long, decimal> { [cotton] = 500m, [tag] = 10m });
             var c = await k.Costs.CostingAsync(model, priced);
             Assert.Equal((115.50m, 10m, 18.50m, 14.40m, 158.40m, 237.60m), (c.Yarn, c.Accessories, c.Labor, c.Overhead, c.Cost, c.Price));

@@ -33,10 +33,6 @@ public sealed record DevThreadSlotDto(long? ColorId, string Yarn, string? ItemNa
 
 public sealed record DevFeederRowDto(int Feeder, DevThreadSlotDto? Left, DevThreadSlotDto? Right);
 
-public sealed record DevTechOperationDto(int Seq, string Name, string? Note, decimal? NormMinutes, string Unit, decimal? Price);
-
-public sealed record DevTechSizeDto(long SizeId, string Size, bool IsBase, decimal? OffMachineCm, decimal? AfterSteamCm, decimal? WidthCm, int? PerBox);
-
 public sealed record DevSampleOptionDto(long Id, int No, string? Size, DevSampleStatus Status)
 {
     public string StatusName => DevSample.StatusName(Status);
@@ -49,13 +45,13 @@ public sealed record DevFactDto(
 
 /// <summary>
 /// Техкарта вязания детали (D711, D717) — то, что вязальщица открывает на телефоне или планшете у машины: общая информация,
-/// заправка по нитеводителям, важные комментарии, технологические операции, размеры и упаковка. Цены — только с правом себестоимости.
+/// заправка по нитеводителям, важные комментарии (блоки 1–3, D719). Операции и размеры — во вкладках модели, сюда не грузятся.
 /// </summary>
 public sealed record DevTechCardDto(
     long ModelId, string ModelNumber, string ModelName, long DetailId, string DetailName, int Quantity, long? MachineId, string? MachineName,
     string? MachineParams, int FeederCount, DevMachineStatus? MachineStatus, string? MachineLastNote, long? WeaveId, string? Weave,
     int? PlanKnitSeconds, decimal? PlanWeightGrams, string? Composition, string? Notes, IReadOnlyList<DevFeederRowDto> Feeders,
-    IReadOnlyList<DevColorDto> Palette, IReadOnlyList<DevTechOperationDto> Operations, IReadOnlyList<DevTechSizeDto> Sizes, string? PackBox,
+    IReadOnlyList<DevColorDto> Palette,
     long? ProgramFileId, string? ProgramName, int? ProgramVersion, string? ProgramParams, long? SketchFileId, bool CanEditThreading,
     bool CanRecordFact, bool CanSeeCost, IReadOnlyList<DevSampleOptionDto> Samples, IReadOnlyList<DevFactDto> Facts, byte[] RowVersion,
     int FactTolerancePercent = DevSettings.DefaultTolerance)

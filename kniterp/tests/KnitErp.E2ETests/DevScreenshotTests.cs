@@ -266,6 +266,9 @@ public sealed class DevScreenshotTests(HrAppFixture app) : IClassFixture<HrAppFi
             await page.GetByLabel("Комментарий к версии").FillAsync("хлопок 20/1, наценка по умолчанию");
             await Save(page, "Сохранить версию расчёта", "Сохранена версия расчёта");
             await Shot(page, dir, "17-sebestoimost");
+            await Go(page, "dev/analytics");
+            await page.Locator(".dev-cost-tiles").First.WaitForAsync();
+            await Shot(page, dir, "18-analitika");
 
             await Go(page, $"dev/tech/{detailUrl[(detailUrl.LastIndexOf('/') + 1)..]}");
             await Shot(page, dir, "10-tehkarta-vyazaniya");
