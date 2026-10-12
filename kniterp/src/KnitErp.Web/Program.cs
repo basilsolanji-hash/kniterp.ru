@@ -446,11 +446,16 @@ app.MapGet("/feeds/{key}.yml", async (string key, KnitErp.Application.Catalog.Ca
         return Results.NotFound();
     }
 
-    var cacheKey = "feed:" + Convert.ToHexString(KnitErp.Domain.Catalog.CatalogFeed.Hash(key));
+    // D331: адреса фото в фиде — от публичного адреса (App:PublicUrl), а не от заголовка Host запроса: иначе запрос с чужим Host
+    // (при AllowedHosts=*) положил бы в общий кэш файл со ссылками на чужой сайт. Без настройки — Host запроса, и он входит в ключ кэша.
+    var baseUrl = Uri.TryCreate(app.Configuration["App:PublicUrl"], UriKind.Absolute, out var configured) && configured.Scheme is "https" or "http"
+        ? configured.GetLeftPart(UriPartial.Authority) + "/"
+        : $"{http.Request.Scheme}://{http.Request.Host}/";
+    var cacheKey = "feed:" + Convert.ToHexString(KnitErp.Domain.Catalog.CatalogFeed.Hash(key)) + "|" + baseUrl;
     // Ревью: ответ из кэша — только пока ключ включён (выключенный фид перестаёт отдаваться сразу, а не через 5 минут).
     if (!cache.TryGet(cacheKey, out var xml) || !await feeds.IsLiveAsync(key, ct))
     {
-        var file = await feeds.BuildAsync(key, $"{http.Request.Scheme}://{http.Request.Host}/", ct);
+        var file = await feeds.BuildAsync(key, baseUrl, ct);
         if (file is null)
         {
             return Results.NotFound();

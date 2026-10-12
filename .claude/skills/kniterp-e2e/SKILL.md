@@ -44,3 +44,11 @@ node .claude/skills/kniterp-e2e/scenarios/<сценарий>.mjs       # с те
 4. Декодер — в отдельном venv: `python3 -m venv <scratch>/bcvenv && <scratch>/bcvenv/bin/pip install zxing-cpp pillow numpy`,
    затем `<scratch>/bcvenv/bin/python -I .claude/skills/kniterp-e2e/barcodes/decode.py` — итог по шаблону, dpi и типу кода (серый и 1 бит).
 Результат 12.10.2026: EAN-13 — 100 %; длинный Code 128 на 30×20 и 43×25 при 203 dpi не читается — экран предупреждает (`BarcodeFit`).
+
+## Регрессия всех сценариев
+`KNITERP_SA_PASSWORD=… E2E_DIR=<scratchpad>/e2e bash .claude/skills/kniterp-e2e/run-all.sh` — на уже запущенном приложении все `scenarios/cat-*.mjs` по очереди
+(вход с 2FA ждёт новое окно кода, поэтому ~1 мин на сценарий), итог «сценарий — ок/ОШИБКА — время», логи в `$E2E_DIR/regress/`.
+Сценариям со складом нужны данные: `cat-step9` создаёт склад и поступление; `cat-step10` — `E2E_STOCK_WAREHOUSE` (склад с остатком).
+`cat-step13-feed-host` с `E2E_PUBLIC_URL` проверяет режим с `App__PublicUrl` (приложение запускать с той же переменной).
+Перезапуск приложения (`start-app.sh`) — отдельной командой, без путей с `KnitErp.Web` в той же строке (pkill завершит саму команду).
+

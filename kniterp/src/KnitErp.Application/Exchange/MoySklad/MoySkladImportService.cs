@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using KnitErp.Application.Access;
 using KnitErp.Application.Common;
 using KnitErp.Domain.Access;
@@ -995,6 +996,7 @@ public sealed class MoySkladImportService(
 
                 await db.SaveChangesAsync(ct);
                 await CommonAsync(row, item, ct);
+                await AttributesAsync(row, item, ct); // D332
                 if (stage == "bundle")
                 {
                     await ComponentsAsync(row, item, ct);
@@ -1031,6 +1033,183 @@ public sealed class MoySkladImportService(
 
         /// <summary>Отмена изменений кэшей движка, сделанных текущей строкой (на случай её отката).</summary>
         private readonly List<Action> _undo = [];
+
+        // ---------- Доп. поля МойСклад → доп. поля номенклатуры (D332) ----------
+
+        private Dictionary<string, CustomFieldDefinition>? _fields;
+        private readonly HashSet<string> _attributeWarnings = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Доп. поля товара МойСклад: поле knitERP с тем же названием (нет — создаётся с подходящим типом), значение — по типу.
+        /// Неподдерживаемый тип (файл, сотрудник, склад…), другой тип у одноимённого поля, неверное значение — предупреждение, строка грузится.
+        /// </summary>
+        private async Task AttributesAsync(MsRow row, Item item, CancellationToken ct)
+        {
+            if (row.Attributes is not { Count: > 0 } attributes)
+            {
+                return;
+            }
+
+            _fields ??= (await db.CustomFieldDefinitions.Where(f => f.OrganizationId == org && f.Target == CustomFieldTarget.Item && !f.IsArchived).ToListAsync(ct))
+                .GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var current = await db.CustomFieldValues.Where(v => v.OrganizationId == org && v.TargetId == item.Id).ToListAsync(ct);
+            foreach (var a in attributes)
+            {
+                var name = (a.Name ?? "").Trim();
+                var type = a.Type switch
+                {
+                    "string" => CustomFieldType.Text,
+                    "text" => CustomFieldType.LongText,
+                    "long" or "double" => CustomFieldType.Number,
+                    "boolean" => CustomFieldType.Flag,
+                    "time" => CustomFieldType.Date,
+                    "link" => CustomFieldType.Link,
+                    "customentity" => CustomFieldType.Catalog,
+                    "counterparty" => CustomFieldType.Counterparty,
+                    _ => (CustomFieldType?)null,
+                };
+                if (name.Length == 0)
+                {
+                    continue;
+                }
+
+                if (type is null)
+                {
+                    await WarnOnceAsync(row, name, $"Доп. поле «{name}» (тип МойСклад «{a.Type}») не переносится: такого типа в knitERP нет.", ct);
+                    continue;
+                }
+
+                try
+                {
+                    var field = await FieldAsync(name, type.Value, ct);
+                    if (field is null)
+                    {
+                        await WarnOnceAsync(row, name, $"Доп. поле «{name}» в knitERP другого типа или полей уже {CustomFieldDefinition.MaxFields} — значение не перенесено.", ct);
+                        continue;
+                    }
+
+                    var value = field.Normalize(await RawValueAsync(field, a.Value, ct));
+                    var existing = current.FirstOrDefault(v => v.FieldId == field.Id);
+                    if (value is null)
+                    {
+                        if (existing is not null)
+                        {
+                            db.CustomFieldValues.Remove(existing);
+                        }
+                    }
+                    else if (existing is null)
+                    {
+                        db.CustomFieldValues.Add(CustomFieldValue.Create(org, field.Id, item.Id, value));
+                    }
+                    else
+                    {
+                        existing.Set(value);
+                    }
+                }
+                catch (BusinessRuleException ex)
+                {
+                    await IssueAsync("Доп. поля", row, false, ex.Message, ct);
+                }
+            }
+
+            await db.SaveChangesAsync(ct);
+        }
+
+        private async Task WarnOnceAsync(MsRow row, string name, string text, CancellationToken ct)
+        {
+            if (_attributeWarnings.Add(name))
+            {
+                await IssueAsync("Доп. поля", row, false, text, ct);
+            }
+        }
+
+        /// <summary>Поле по названию; нет — создаётся (справочник — свой с тем же названием). Другой тип или предел полей — null.</summary>
+        private async Task<CustomFieldDefinition?> FieldAsync(string name, CustomFieldType type, CancellationToken ct)
+        {
+            var key = name.Length > CustomFieldDefinition.NameMaxLength ? name[..CustomFieldDefinition.NameMaxLength] : name;
+            if (_fields!.TryGetValue(key, out var field))
+            {
+                // Текст из МойСклад ложится и в многострочное поле knitERP.
+                return field.Type == type || (type == CustomFieldType.Text && field.Type == CustomFieldType.LongText) ? field : null;
+            }
+
+            if (_fields.Count >= CustomFieldDefinition.MaxFields)
+            {
+                return null;
+            }
+
+            long? catalogId = type == CustomFieldType.Catalog ? await UserCatalogAsync(key, ct) : null;
+            var sort = await db.CustomFieldDefinitions.Where(f => f.OrganizationId == org && f.Target == CustomFieldTarget.Item).Select(f => (int?)f.SortOrder).MaxAsync(ct) ?? 0;
+            field = CustomFieldDefinition.Create(org, CustomFieldTarget.Item, key, type, sort + 10, catalogId);
+            db.CustomFieldDefinitions.Add(field);
+            await db.SaveChangesAsync(ct);
+            _fields[key] = field;
+            _undo.Add(() => _fields.Remove(key));
+            return field;
+        }
+
+        private async Task<long> UserCatalogAsync(string name, CancellationToken ct)
+        {
+            var key = name.Length > UserCatalog.NameMaxLength ? name[..UserCatalog.NameMaxLength] : name;
+            var existing = await db.UserCatalogs.Where(c => c.OrganizationId == org && !c.IsArchived && c.Name == key).Select(c => (long?)c.Id).FirstOrDefaultAsync(ct);
+            if (existing is { } id)
+            {
+                return id;
+            }
+
+            var catalog = UserCatalog.Create(org, key);
+            db.UserCatalogs.Add(catalog);
+            await db.SaveChangesAsync(ct);
+            return catalog.Id;
+        }
+
+        /// <summary>Значение доп. поля МойСклад в виде для knitERP: справочник — номер записи (создаётся по названию), контрагент — по названию.</summary>
+        private async Task<string?> RawValueAsync(CustomFieldDefinition field, JsonElement value, CancellationToken ct)
+        {
+            switch (value.ValueKind)
+            {
+                case JsonValueKind.Null or JsonValueKind.Undefined:
+                    return null;
+                case JsonValueKind.True:
+                    return "true";
+                case JsonValueKind.False:
+                    return null;
+                case JsonValueKind.Number:
+                    return value.GetRawText();
+                case JsonValueKind.String when field.Type == CustomFieldType.Date:
+                    var date = value.GetString() ?? "";
+                    return date.Length >= 10 ? date[..10] : date; // «2026-10-01 00:00:00.000»
+                case JsonValueKind.String:
+                    return value.GetString();
+                case JsonValueKind.Object when value.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String:
+                    var name = n.GetString()!.Trim();
+                    if (field.Type == CustomFieldType.Catalog)
+                    {
+                        var entry = await db.UserCatalogEntries.Where(e => e.OrganizationId == org && e.CatalogId == field.CatalogId && !e.IsArchived && e.Name == name)
+                            .Select(e => (long?)e.Id).FirstOrDefaultAsync(ct);
+                        if (entry is null)
+                        {
+                            var created = UserCatalogEntry.Create(org, field.CatalogId!.Value, name, null);
+                            db.UserCatalogEntries.Add(created);
+                            await db.SaveChangesAsync(ct);
+                            entry = created.Id;
+                        }
+
+                        return entry.Value.ToString(CultureInfo.InvariantCulture);
+                    }
+
+                    if (field.Type == CustomFieldType.Counterparty)
+                    {
+                        var counterparty = await db.Counterparties.Where(c => c.OrganizationId == org && !c.IsArchived && c.Name == name).Select(c => (long?)c.Id).FirstOrDefaultAsync(ct);
+                        return counterparty?.ToString(CultureInfo.InvariantCulture)
+                               ?? throw new BusinessRuleException("exchange.moysklad.counterparty", $"«{field.Name}»: контрагента «{name}» нет в knitERP — значение не перенесено.");
+                    }
+
+                    return name;
+                default:
+                    return null;
+            }
+        }
 
         private readonly Dictionary<long, IReadOnlyList<string>> _catalogNames = [];
 

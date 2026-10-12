@@ -432,6 +432,61 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
     }
 
     [SqlFact]
+    public async Task Import_maps_moysklad_attributes_to_typed_custom_fields()
+    {
+        // D332: доп. поля МойСклад → доп. поля номенклатуры: тип по МойСклад, справочник создаётся, неподдерживаемое и опасное — предупреждение.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        static MsAttribute A(string name, string type, string json) => new(null, name, type, JsonDocument.Parse(json).RootElement.Clone());
+        var products = fake.Entities[MoySkladEntities.Product];
+        var hatIndex = products.FindIndex(r => r.Id == "p-hat");
+        products[hatIndex] = products[hatIndex] with
+        {
+            Attributes =
+            [
+                A("Состав", "string", "\"шерсть 50%\""),
+                A("Уход", "text", "\"Стирка 30°\\nНе отбеливать\""),
+                A("Плотность", "double", "220.5"),
+                A("Новинка", "boolean", "true"),
+                A("Дата поступления", "time", "\"2026-10-01 00:00:00.000\""),
+                A("Страница", "link", "\"https://shop.example/hat\""),
+                A("Сезон", "customentity", "{\"meta\":{},\"name\":\"Зима\"}"),
+                A("Фото", "file", "{\"meta\":{},\"filename\":\"a.jpg\"}"),
+                A("Плохая ссылка", "link", "\"javascript:alert(1)\""),
+            ],
+        };
+
+        long runId;
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+            runId = await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+            var run = (await ms.StatusAsync()).Runs.Single();
+            Assert.Equal((ImportRunStatus.Completed, 0), (run.Status, run.Errors)); // предупреждения — не ошибки строки
+            var issues = await ms.IssuesAsync(runId);
+            Assert.Contains(issues, i => !i.IsError && i.Entity == "Доп. поля" && i.Text.Contains("«Фото»"));
+            Assert.Contains(issues, i => !i.IsError && i.Entity == "Доп. поля" && i.Text.Contains("https://"));
+        }
+
+        await using var c = host.As(_user, _org);
+        var hat = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1"))).Items.Single(i => i.ParentItemId is null).Id;
+        var fields = (await c.Nomenclature.GetItemAsync(hat)).CustomFields.ToDictionary(f => f.Name);
+        Assert.Equal((CustomFieldType.Text, "шерсть 50%"), (fields["Состав"].Type, fields["Состав"].Value));
+        Assert.Equal((CustomFieldType.LongText, "Стирка 30°\nНе отбеливать"), (fields["Уход"].Type, fields["Уход"].Value));
+        Assert.Equal((CustomFieldType.Number, "220.5"), (fields["Плотность"].Type, fields["Плотность"].Value));
+        Assert.Equal((CustomFieldType.Flag, "true"), (fields["Новинка"].Type, fields["Новинка"].Value));
+        Assert.Equal((CustomFieldType.Date, "2026-10-01"), (fields["Дата поступления"].Type, fields["Дата поступления"].Value));
+        Assert.Equal((CustomFieldType.Link, "https://shop.example/hat"), (fields["Страница"].Type, fields["Страница"].Value));
+        Assert.Equal((CustomFieldType.Catalog, "Зима"), (fields["Сезон"].Type, fields["Сезон"].Display));
+        Assert.False(fields.ContainsKey("Фото"));
+        Assert.Null(fields["Плохая ссылка"].Value);
+        Assert.Contains(await c.Nomenclature.CatalogsAsync(), x => x.Name == "Сезон");
+    }
+
+    [SqlFact]
     public async Task Reimport_is_idempotent_protects_manual_changes_and_resumes()
     {
         var org = await CreateOrgAsync();

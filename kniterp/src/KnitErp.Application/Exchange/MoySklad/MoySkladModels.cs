@@ -59,9 +59,15 @@ public sealed record MsRow
     public IReadOnlyList<MsPack>? Packs { get; init; }
     public IReadOnlyList<MsCharacteristic>? Characteristics { get; init; }
     public MsComponents? Components { get; init; }
+
+    /// <summary>D332: доп. поля объекта МойСклад (type: string, text, long, double, boolean, time, link, customentity, counterparty…).</summary>
+    public IReadOnlyList<MsAttribute>? Attributes { get; init; }
 }
 
 public sealed record MsPriceType(string Id, string? Name, string? ExternalCode);
+
+/// <summary>Доп. поле в строке объекта: значение — строка, число, логическое или объект ({ "name": … } у справочника и контрагента).</summary>
+public sealed record MsAttribute(string? Id, string? Name, string? Type, JsonElement Value);
 
 /// <summary>
 /// D327: новые цены одного объекта МойСклад — все цены продажи (текущие из МойСклад с заменой связанных видов: так неважно, обнуляет ли
