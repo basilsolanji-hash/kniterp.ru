@@ -89,6 +89,7 @@ public static class DependencyInjection
         services.AddScoped<Catalog.LabelService>(); // D316 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
+        services.AddScoped<Finance.BankStatementService>();
         services.AddScoped<Finance.SettlementStatementService>();
         services.AddScoped<Finance.CashFlowItemService>();
         services.AddScoped<Finance.AccountableService>();

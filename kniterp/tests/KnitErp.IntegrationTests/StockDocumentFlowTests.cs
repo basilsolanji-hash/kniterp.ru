@@ -190,6 +190,16 @@ public sealed class StockDocumentFlowTests(SqlTestHost host) : IClassFixture<Sql
             await Assert.ThrowsAsync<NotFoundException>(() => s.Documents.CancelAsync(transfer, card.RowVersion));
             Assert.DoesNotContain(await s.Documents.ListAsync(new StockDocumentListFilter()), d => d.Kind == StockOperationKind.Receipt);
             Assert.Equal([f.Shop], (await s.Documents.ListVisibleWarehousesAsync()).Select(w => w.Id));
+
+            // D118 (AUTHZ-03): карточка позиции показывает остаток только по своим складам — 5 на складе пряжи кладовщику магазина не видны.
+            var item = await s.Nomenclature.GetItemAsync(f.Wool);
+            Assert.Equal((0m, false), (item.Stock, item.StockAllWarehouses));
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            var item = await s.Nomenclature.GetItemAsync(f.Wool);
+            Assert.Equal((5m, true), (item.Stock, item.StockAllWarehouses));
         }
     }
 

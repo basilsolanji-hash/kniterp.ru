@@ -1,0 +1,171 @@
+@page "/money/bank-statement"
+@using KnitErp.Application.Finance
+@using KnitErp.Domain.Finance
+@inject BankStatementService Statements
+
+<PageTitle>@L("Загрузка выписки банка") — knitERP</PageTitle>
+
+@* D119 (А1): выписка 1С «Клиент-банк» → оплаты покупателей и поставщикам с разноской; повторная загрузка без дублей. *@
+<div class="page-head">
+    <h1>@L("Загрузка выписки банка")</h1>
+</div>
+<p class="muted">
+    @L("В интернет-банке выгрузите выписку «в 1С» (файл kl_to_1c.txt) за нужные дни и выберите её здесь. Программа найдёт покупателей и поставщиков по ИНН, заказ — по номеру в назначении платежа, и покажет, что сделает. Оплаты создаются только после вашего подтверждения; загруженные раньше строки пропускаются.")
+</p>
+
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+
+<div class="panel">
+    <label>@L("Файл выписки (до 5 МБ)") <InputFile OnChange="PreviewAsync" accept=".txt" disabled="@_busy" /></label>
+</div>
+
+@if (_preview is not null)
+{
+    <div class="totals" role="status">
+        <span>@_preview.AccountLabel</span>
+        @if (_preview.From is { } from && _preview.To is { } to)
+        {
+            <span class="muted">@L("за {0} — {1}", from.ToString("dd.MM.yyyy"), to.ToString("dd.MM.yyyy"))</span>
+        }
+        <span>@L("К загрузке: {0} из {1}", _preview.ReadyCount, _preview.Lines.Count)</span>
+    </div>
+    <div class="scroll">
+        <table class="compact">
+            <thead>
+                <tr><th></th><th>@L("Дата")</th><th>@L("№")</th><th>@L("Контрагент")</th><th class="num">@L("Поступление")</th><th class="num">@L("Списание")</th>
+                    <th class="opt">@L("Назначение платежа")</th><th>@L("Что сделаем")</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var l in _preview.Lines)
+                {
+                    <tr @key="l.Index" class="@(l.Status == BankLineStatus.Ready ? null : "archived")">
+                        <td>
+                            @if (l.Status == BankLineStatus.Ready)
+                            {
+                                <input type="checkbox" checked="@(!_excluded.Contains(l.Index))" aria-label="@L("Загрузить строку")"
+                                       @onchange="e => Toggle(l.Index, e.Value is true)" disabled="@_busy" />
+                            }
+                        </td>
+                        <td>@l.Date.ToString("dd.MM.yyyy")</td>
+                        <td>@l.Number</td>
+                        <td>@l.CounterpartyName @if (l.Inn is not null) { <span class="muted small">@L("ИНН {0}", l.Inn)</span> }</td>
+                        <td class="num">@(l.Direction == BankLineDirection.Incoming ? Amounts.Format(l.Amount) : null)</td>
+                        <td class="num">@(l.Direction == BankLineDirection.Outgoing ? Amounts.Format(l.Amount) : null)</td>
+                        <td class="opt small">@l.Purpose</td>
+                        <td><span class="tag @StatusTone(l.Status)">@StatusText(l.Status)</span> <span class="muted small">@NoteText(l)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="actions">
+        <button type="button" @onclick="ImportAsync" disabled="@(_busy || SelectedCount == 0)">@L("Создать оплаты: {0}", SelectedCount)</button>
+        <button type="button" class="secondary" @onclick="() => { _preview = null; _content = null; }" disabled="@_busy">@L("Отмена")</button>
+    </div>
+}
+
+@code {
+    private BankStatementPreviewDto? _preview;
+    private byte[]? _content;
+    private readonly HashSet<int> _excluded = [];
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    private int SelectedCount => _preview?.Lines.Count(l => l.Status == BankLineStatus.Ready && !_excluded.Contains(l.Index)) ?? 0;
+
+    private void Toggle(int index, bool on)
+    {
+        if (on)
+        {
+            _excluded.Remove(index);
+        }
+        else
+        {
+            _excluded.Add(index);
+        }
+    }
+
+    private async Task PreviewAsync(InputFileChangeEventArgs e) => await RunAsync(async () =>
+    {
+        if (e.File.Size > ClientBankStatement.MaxBytes)
+        {
+            throw new BusinessRuleException("bank.statement.size", L("Файл выписки пустой или больше 5 МБ."));
+        }
+
+        await using var upload = e.File.OpenReadStream(maxAllowedSize: ClientBankStatement.MaxBytes);
+        using var buffer = new MemoryStream();
+        await upload.CopyToAsync(buffer);
+        _content = buffer.ToArray();
+        _excluded.Clear();
+        _preview = await Statements.PreviewAsync(_content);
+        _message = null;
+    });
+
+    private Task ImportAsync() => RunAsync(async () =>
+    {
+        var selected = _preview!.Lines.Where(l => l.Status == BankLineStatus.Ready && !_excluded.Contains(l.Index)).Select(l => l.Index).ToList();
+        var result = await Statements.ImportAsync(_content!, selected);
+        _message = L("Создано оплат: {0} (поступления {1}, списания {2}). Пропущено строк: {3}.", result.Created, Amounts.Format(result.Incoming),
+            Amounts.Format(result.Outgoing), result.Skipped);
+        _preview = await Statements.PreviewAsync(_content!);
+        _excluded.Clear();
+    });
+
+    private string StatusText(BankLineStatus s) => s switch
+    {
+        BankLineStatus.Ready => L("будет оплата"),
+        BankLineStatus.Duplicate => L("уже загружено"),
+        BankLineStatus.UnknownCounterparty => L("нет контрагента"),
+        BankLineStatus.WrongRole => L("не та роль"),
+        BankLineStatus.NoRight => L("нет права"),
+        _ => L("пропуск"),
+    };
+
+    private static string StatusTone(BankLineStatus s) => s switch
+    {
+        BankLineStatus.Ready => "ok",
+        BankLineStatus.Duplicate or BankLineStatus.Skipped => "",
+        _ => "bad",
+    };
+
+    private string NoteText(BankLineDto l) => l.Status switch
+    {
+        BankLineStatus.Ready when l.OrderNumber is { } n => L("на заказ {0}", n),
+        BankLineStatus.Ready => L("разнесётся по самым старым долгам"),
+        BankLineStatus.UnknownCounterparty when l.Inn is null => L("в выписке нет ИНН — налоги, комиссии банка и прочее оформите в «Деньгах»"),
+        BankLineStatus.UnknownCounterparty => L("контрагента с этим ИНН нет — создайте его (реквизиты заполнятся по ИНН) и загрузите выписку снова"),
+        BankLineStatus.WrongRole => l.Direction == BankLineDirection.Incoming ? L("контрагент не отмечен как покупатель") : L("контрагент не отмечен как поставщик"),
+        BankLineStatus.NoRight => l.Direction == BankLineDirection.Incoming ? L("нет права на оплаты покупателей") : L("нет права на оплаты поставщикам"),
+        BankLineStatus.Skipped => L("перевод между своими счетами или не этот счёт — оформите в «Деньгах»"),
+        _ => string.Empty,
+    };
+
+    /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await action();
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

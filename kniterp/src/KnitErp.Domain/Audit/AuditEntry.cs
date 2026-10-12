@@ -123,6 +123,7 @@ public static class AuditActions
     public const string PasswordResetRequested = "auth.password_reset.requested";
     public const string PasswordReset = "auth.password.reset";
     public const string PasswordChanged = "auth.password.changed";
+    public const string BankStatementImported = "money.bank_statement.imported";
     public const string SessionsRevoked = "auth.sessions.revoked";
     public const string PasswordResetIssued = "access.password_reset.issued";
     public const string EmergencyAccess = "access.emergency";

@@ -57,10 +57,11 @@ else
         <dt>@L("Код")</dt><dd>@_item.Code</dd>
         <dt>@L("Группа")</dt><dd>@(_item.GroupPath ?? L("без группы"))</dd>
         <dt>@L("Единица")</dt><dd>@_item.UnitSymbol</dd>
-        @if (_item.IsStocked)
+        @if (_item.IsStocked && _item.Stock is { } stock)
         {
-            <dt>@L("Остаток на всех складах")</dt><dd>@Quantities.Format(_item.Stock) @_item.UnitSymbol
-                @if (_item.Details.MinStock is { } min && _item.Stock < min) { <span class="tag bad">@L("ниже неснижаемого {0}", Quantities.Format(min))</span> }</dd>
+            @* D118: остаток — только по складам области пользователя; без складских прав строки нет. *@
+            <dt>@(_item.StockAllWarehouses ? L("Остаток на всех складах") : L("Остаток на ваших складах"))</dt><dd>@Quantities.Format(stock) @_item.UnitSymbol
+                @if (_item.StockAllWarehouses && _item.Details.MinStock is { } min && stock < min) { <span class="tag bad">@L("ниже неснижаемого {0}", Quantities.Format(min))</span> }</dd>
         }
         else if (_item.Type == ItemType.Bundle)
         {
@@ -606,7 +607,7 @@ else
                                 <td><a href="catalog/items/@m.Id">@m.Code</a></td>
                                 <td>@m.Name @if (m.IsArchived) { <span class="tag">@L("архив")</span> }</td>
                                 <td>@string.Join(", ", m.Values.Select(v => $"{v.Characteristic}: {v.Value}"))</td>
-                                <td class="num">@Quantities.Format(m.Stock) @_item.UnitSymbol</td>
+                                <td class="num">@(m.Stock is { } ms ? $"{Quantities.Format(ms)} {_item.UnitSymbol}" : "—")</td>
                             </tr>
                         }
                     </tbody>

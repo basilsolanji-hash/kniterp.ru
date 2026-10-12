@@ -356,6 +356,28 @@ internal static class WarehouseScope
         return result;
     }
 
+    /// <summary>Права, дающие видеть остатки (D118): создание и проведение складских документов, складские отчёты.</summary>
+    public static readonly string[] StockViews = [Permissions.WarehouseDocumentCreate, Permissions.WarehouseDocumentPost, Permissions.WarehouseReportView];
+
+    /// <summary>
+    /// D118 (аудит AUTHZ-03): движения склада, которые пользователь вправе видеть, — только склады его области; без складских прав — null
+    /// (остаток не показывается). Так карточки справочников не раскрывают остатки чужих складов.
+    /// </summary>
+    public static IQueryable<KnitErp.Domain.Warehousing.StockMovement>? VisibleMovements(IKnitErpDbContext db, AccessContext ctx)
+    {
+        if (!StockViews.Any(ctx.Permissions.Has))
+        {
+            return null;
+        }
+
+        var visible = Visible(ctx, StockViews);
+        var q = db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == ctx.OrganizationId);
+        return visible is null ? q : q.Where(m => visible.Contains(m.WarehouseId));
+    }
+
+    /// <summary>Видит ли пользователь все склады (для подписи «на всех складах» / «на ваших складах»).</summary>
+    public static bool SeesAllWarehouses(AccessContext ctx) => StockViews.Any(ctx.Permissions.Has) && Visible(ctx, StockViews) is null;
+
     public static bool Covers(AccessContext ctx, string permissionCode, long warehouseId) =>
         ctx.Permissions.Has(permissionCode) && ctx.Permissions.ScopeOf(permissionCode).CoversWarehouse(warehouseId);
 }

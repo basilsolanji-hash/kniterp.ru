@@ -3416,6 +3416,87 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Finance.BankStatementLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<long>("CounterpartyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("CustomerPaymentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Direction")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateOnly>("DocumentDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("DocumentNumber")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<byte[]>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("binary(32)")
+                        .IsFixedLength();
+
+                    b.Property<DateTime>("ImportedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("ImportedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("MoneyAccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("SupplierPaymentId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerPaymentId");
+
+                    b.HasIndex("ImportedByUserId");
+
+                    b.HasIndex("SupplierPaymentId");
+
+                    b.HasIndex("OrganizationId", "CounterpartyId");
+
+                    b.HasIndex("OrganizationId", "DocumentDate")
+                        .HasDatabaseName("ix_bank_statement_lines_date");
+
+                    b.HasIndex("OrganizationId", "Fingerprint")
+                        .IsUnique()
+                        .HasDatabaseName("ux_bank_statement_lines_fingerprint");
+
+                    b.HasIndex("OrganizationId", "MoneyAccountId");
+
+                    b.ToTable("bank_statement_lines", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_bank_statement_lines_amount", "[Amount] > 0");
+
+                            t.HasCheckConstraint("ck_bank_statement_lines_payment", "([Direction] = 1 AND [CustomerPaymentId] IS NOT NULL AND [SupplierPaymentId] IS NULL) OR ([Direction] = 2 AND [SupplierPaymentId] IS NOT NULL AND [CustomerPaymentId] IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Finance.CashFlowItem", b =>
                 {
                     b.Property<long>("Id")
@@ -9152,6 +9233,50 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Finance.BankStatementLine", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Sales.CustomerPayment", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_bank_statement_lines_customer_payment");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ImportedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_bank_statement_lines_user");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Purchasing.SupplierPayment", null)
+                        .WithMany()
+                        .HasForeignKey("SupplierPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_bank_statement_lines_supplier_payment");
+
+                    b.HasOne("KnitErp.Domain.Catalog.Counterparty", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "CounterpartyId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_bank_statement_lines_counterparty");
+
+                    b.HasOne("KnitErp.Domain.Organizations.LegalEntityAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MoneyAccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_bank_statement_lines_account");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Finance.CashFlowItem", b =>

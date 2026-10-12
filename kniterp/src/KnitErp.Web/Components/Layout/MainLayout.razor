@@ -164,6 +164,7 @@
             new("money", "Касса и счета", a => a.Has(Permissions.PriceView)),
             new("customer-payments", "Оплаты покупателей", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("supplier-payments", "Оплаты поставщикам", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
+            new("money/bank-statement", "Загрузка выписки банка", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesEdit) || a.Has(Permissions.PurchaseEdit))),
             new("reports/customer-balances", "Расчёты с покупателями", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/supplier-balances", "Расчёты с поставщиками", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
             new("settlement-statement", "Акт сверки", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesView) || a.Has(Permissions.PurchaseView))),
