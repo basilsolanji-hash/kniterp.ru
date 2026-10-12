@@ -4912,6 +4912,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrganizationId", "CustomerId");
 
+                    b.HasIndex("OrganizationId", "DealId");
+
                     b.HasIndex("OrganizationId", "MainSketchFileId");
 
                     b.HasIndex("OrganizationId", "Number")
@@ -5173,6 +5175,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("UserId");
 
+                    b.HasIndex("OrganizationId", "AtUtc")
+                        .HasDatabaseName("ix_dev_model_stages_at");
+
                     b.HasIndex("OrganizationId", "ModelId", "Id")
                         .HasDatabaseName("ix_dev_model_stages_model");
 
@@ -5297,6 +5302,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasName("ak_dev_samples_org_id");
 
                     b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "CreatedAtUtc")
+                        .HasDatabaseName("ix_dev_samples_created");
 
                     b.HasIndex("OrganizationId", "ReasonId");
 
@@ -13137,6 +13145,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_dev_models_customer");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmDeal", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DealId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_models_deal");
 
                     b.HasOne("KnitErp.Domain.Development.DevFile", null)
                         .WithMany()

@@ -231,6 +231,7 @@ internal sealed class DevSampleConfiguration : IEntityTypeConfiguration<DevSampl
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_samples_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.No }).IsUnique().HasDatabaseName("ux_dev_samples_no");
+        b.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc }).HasDatabaseName("ix_dev_samples_created");
         // D768: причина доработки или отказа — запись справочника разработки своей организации.
         b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ReasonId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_reason");

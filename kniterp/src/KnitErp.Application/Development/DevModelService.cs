@@ -352,11 +352,24 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             throw new BusinessRuleException("dev.model.handed", "Модель передана в производство — изменения вносятся новой версией модели.");
         }
 
+        if (model.Stage == DevStage.Cancelled)
+        {
+            throw new BusinessRuleException("dev.model.cancelled", "Модель отменена — сначала верните её в работу.");
+        }
+
         var name = DevFile.CleanName(fileName);
         await using var tx = await db.BeginTransactionAsync(ct);
         try
         {
             await db.LockAsync($"kniterp.dev.files.{ctx.OrganizationId}.{modelId}", ct);
+            var used = await db.DevFiles.AsNoTracking().Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId)
+                .GroupBy(_ => 1).Select(g => new { Count = g.Count(), Bytes = g.Sum(f => (long)f.SizeBytes) }).SingleOrDefaultAsync(ct);
+            if (used is not null && (used.Count >= DevFile.MaxFilesPerModel || used.Bytes + content.Length > DevFile.MaxBytesPerModel))
+            {
+                throw new BusinessRuleException("dev.file.quota",
+                    $"У модели исчерпан предел файлов: не больше {DevFile.MaxFilesPerModel} файлов и {DevFile.MaxBytesPerModel / 1024 / 1024 / 1024} ГБ вместе с версиями.");
+            }
+
             var last = await db.DevFiles.AsNoTracking()
                 .Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId && f.Kind == kind && f.FileName == name)
                 .MaxAsync(f => (int?)f.Version, ct) ?? 0;
@@ -566,6 +579,13 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             && !await db.Counterparties.AnyAsync(c => c.Id == kid && c.OrganizationId == org && !c.IsArchived, ct))
         {
             throw new BusinessRuleException("dev.model.customer", "Заказчик не найден или в архиве.");
+        }
+
+        // Аудит 2026-10-12: сделка — только своей организации (раньше номер принимался без проверки; в БД теперь составной FK).
+        if (h.DealId is { } did and > 0 && did != current?.DealId
+            && !await db.CrmDeals.AnyAsync(d => d.Id == did && d.OrganizationId == org, ct))
+        {
+            throw new BusinessRuleException("dev.model.deal", "Сделка не найдена.");
         }
 
         var users = h.Assignees.Values.OfType<long>().Distinct().ToList();

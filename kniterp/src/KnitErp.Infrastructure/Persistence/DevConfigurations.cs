@@ -1,5 +1,6 @@
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Catalog;
+using KnitErp.Domain.Crm;
 using KnitErp.Domain.Development;
 using KnitErp.Domain.Organizations;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +45,8 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_collection");
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustomerId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_customer");
+        b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DealId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_deal");
         // D769: предыдущая версия — модель своей организации; у версии не больше одной следующей.
         b.Property(x => x.VersionNo).HasDefaultValue(1).HasSentinel(1);
         b.HasOne<DevModel>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PreviousVersionId })
@@ -89,6 +92,8 @@ internal sealed class DevModelStageEntryConfiguration : IEntityTypeConfiguration
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_model_stages_model");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.Id }).HasDatabaseName("ix_dev_model_stages_model");
+        // Аудит 2026-10-12: аналитика берёт переходы за период — без индекса просматривалась вся история организации.
+        b.HasIndex(x => new { x.OrganizationId, x.AtUtc }).HasDatabaseName("ix_dev_model_stages_at");
     }
 }
 

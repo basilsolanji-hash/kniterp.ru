@@ -22,6 +22,11 @@ public enum DevFileKind : byte
 public sealed class DevFile
 {
     public const int MaxBytes = 50 * 1024 * 1024;
+
+    /// <summary>Аудит 2026-10-12: предел хранилища одной модели — версии файлов не удаляются, без предела база растёт бесконечно.</summary>
+    public const long MaxBytesPerModel = 2L * 1024 * 1024 * 1024;
+
+    public const int MaxFilesPerModel = 1000;
     public const int FileNameMaxLength = 200;
     public const int CommentMaxLength = 300;
 

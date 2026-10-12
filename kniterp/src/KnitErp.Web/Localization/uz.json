@@ -5660,5 +5660,7 @@
   "Создана новая версия модели.": "Modelning yangi versiyasi yaratildi.",
   "У этой версии уже есть следующая — изменения вносите в неё.": "Bu versiyaning keyingisi allaqachon bor — o‘zgarishlarni unga kiriting.",
   "на основе": "asosida",
-  "следующая версия": "keyingi versiya"
+  "следующая версия": "keyingi versiya",
+  "Сделка не найдена.": "Bitim topilmadi.",
+  "У модели исчерпан предел файлов: не больше {0} файлов и {1} ГБ вместе с версиями.": "Model fayllar chegarasi tugadi: versiyalari bilan birga {0} ta fayl va {1} GB dan oshmasligi kerak."
 }
