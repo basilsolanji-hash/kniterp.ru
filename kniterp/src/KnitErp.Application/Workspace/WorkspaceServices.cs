@@ -379,7 +379,11 @@ public sealed class QuickSearchService(IKnitErpDbContextFactory factory, ICurren
     }
 }
 
-public sealed record AssistantReply(string Text, bool FromModel, IReadOnlyList<HelpArticle> Articles);
+/// <summary>
+/// Ответ помощника. Answer — готовый ответ базы знаний (D900), на который опирается текст: его экраны дают кнопку «Открыть»,
+/// источники и дата проверки показываются под ответом.
+/// </summary>
+public sealed record AssistantReply(string Text, bool FromModel, IReadOnlyList<HelpArticle> Articles, Knowledge.KnowledgeDoc? Answer = null);
 
 /// <summary>
 /// ИИ-помощник по работе в системе. Модели передаются вопрос, раздел, роли и права пользователя и справка —
@@ -427,34 +431,45 @@ public sealed class AssistantService(IAssistantModel model, IKnitErpDbContextFac
             roles = string.Join(", ", (await db.Roles.AsNoTracking().Where(r => roleIds.Contains(r.Id)).Select(r => r.Name).ToListAsync(ct)).Select(ui.Translate));
         }
 
+        // D910: готовые ответы базы знаний с учётом экрана; уверенный лучший — ответ без модели и опора для модели.
         var current = HelpCenter.ForRoute(route);
-        var related = HelpCenter.Search(text, 3, ui).Where(a => a != current).ToList();
-        var articles = (current is null ? related : [current, .. related]).Take(4).ToList();
+        var hits = Knowledge.KnowledgeSearch.Search(text, 4, route);
+        var best = Knowledge.KnowledgeSearch.Confident(hits);
+        var related = HelpCenter.Search(text, 4, ui, route).Where(a => a != current && a.Id != best?.Id).ToList();
+        var articles = (current is null || best is not null ? related : [current, .. related]).Take(best is null ? 4 : 3).ToList();
 
         if (!model.IsConfigured || !TryTakeQuota(ctx.UserId))
         {
-            return Fallback(articles, model.IsConfigured ? ui.Translate("Лимит вопросов помощнику на этот час исчерпан. Вот что есть в справке:") : null);
+            return Fallback(articles, best, model.IsConfigured ? ui.Translate("Лимит вопросов помощнику на этот час исчерпан. Вот что есть в справке:") : null);
         }
 
-        var system = BuildSystemPrompt(roles, ctx, route, current, articles, AssistantPersonas.Name(AssistantPersonas.Clean(persona)));
+        var sources = best is null ? articles : [best.Article, .. articles];
+        var system = BuildSystemPrompt(roles, ctx, route, current, sources, AssistantPersonas.Name(AssistantPersonas.Clean(persona)));
         var conversation = history.TakeLast(MaxHistoryTurns).Append(new AssistantTurn(true, text)).ToList();
         try
         {
             // Служебные ответы модели (отказ, пустой ответ) — ключи перевода; обычный ответ уже на языке пользователя.
-            return new AssistantReply(ui.Translate(await model.AskAsync(system, conversation, ct)), true, articles);
+            return new AssistantReply(ui.Translate(await model.AskAsync(system, conversation, ct)), true, articles, best);
         }
         catch (ExternalServiceUnavailableException ex)
         {
-            return Fallback(articles, ui.Translate(ex.Message) + " " + ui.Translate("Пока — ответ из справки:"));
+            return Fallback(articles, best, ui.Translate(ex.Message) + " " + ui.Translate("Пока — ответ из справки:"));
         }
     }
 
-    private AssistantReply Fallback(IReadOnlyList<HelpArticle> articles, string? lead)
+    private AssistantReply Fallback(IReadOnlyList<HelpArticle> articles, Knowledge.KnowledgeDoc? best, string? lead)
     {
         var sb = new StringBuilder();
         if (lead is not null)
         {
             sb.AppendLine(lead);
+        }
+
+        if (best is not null)
+        {
+            // D900: без модели помощник показывает готовый проверенный ответ целиком.
+            sb.AppendJoin("\n\n", best.Article.Body.Select(ui.Translate));
+            return new AssistantReply(sb.ToString().Trim(), false, articles, best);
         }
 
         if (articles.Count == 0)
@@ -481,6 +496,7 @@ public sealed class AssistantService(IAssistantModel model, IKnitErpDbContextFac
         var who = personaName is null ? "помощник" : $"{personaName}, {(personaName == "Ника" ? "помощница" : "помощник")}";
         sb.AppendLine($"Ты — {who} по работе в knitERP, системе учёта трикотажной фабрики. Отвечай {AnswerLanguage(ui.LanguageCode)}, коротко и по шагам; тон спокойный, деловой и уважительный.");
         sb.AppendLine("Отвечай о работе в системе и о производстве одежды и трикотажа — по справке и отраслевой базе знаний ниже. Не выдумывай функции, данные, нормы и номера стандартов: если ответа нет, так и скажи и предложи создать обращение в «Поддержке».");
+        sb.AppendLine("Первый материал ниже, если он есть, — проверенный ответ базы знаний на этот вопрос: опирайся на него и в конце ответа назови его заголовок как источник («Источник: …»).");
         sb.AppendLine("Учитывай права пользователя: если для действия нужно право, которого у него нет, объясни, к кому обратиться (Владелец или Администратор), а не как обойти запрет.");
         if (ui.LanguageCode != UiLanguages.Default)
         {

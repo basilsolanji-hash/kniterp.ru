@@ -23,10 +23,31 @@
             {
                 <div class="chat-who muted small">@who</div>
             }
-            <div class="chat-text">@m.Text</div>
+            @if (!m.FromUser && m.Answer is { } kb)
+            {
+                @* D900: готовый ответ базы знаний — по абзацам, с кнопками «Открыть» и источниками. *@
+                @if (m.FromModel)
+                {
+                    <div class="chat-text">@m.Text</div>
+                }
+                else if (m.Lead is not null)
+                {
+                    <div class="chat-text">@m.Lead</div>
+                }
+                <KnowledgeAnswerView Doc="kb" Context="Context" ShowText="@(!m.FromModel)" />
+                <div class="muted small">@L("Ответ из базы знаний:") <button type="button" class="link" @onclick="() => Context.OpenTool(ToolCatalog.Help, kb.Id)">@L(kb.Article.Title)</button></div>
+            }
+            else
+            {
+                <div class="chat-text">@m.Text</div>
+            }
             @if (m.Articles.Count > 0)
             {
                 <div class="chat-links">
+                    @if (m.Answer is not null)
+                    {
+                        <span class="muted small">@L("Ещё по теме:")</span>
+                    }
                     @foreach (var a in m.Articles)
                     {
                         <button type="button" class="link" @onclick="() => Context.OpenTool(ToolCatalog.Help, a.Id)">📖 @L(a.Title)</button>
@@ -69,12 +90,19 @@
 
     private string? PersonaName => Choice is null ? null : KnitErp.Application.Workspace.AssistantPersonas.Name(Choice.Persona) is { } n ? L(n) : null;
 
-    private sealed record Message(bool FromUser, string Text, IReadOnlyList<HelpArticle> Articles);
+    private sealed record Message(bool FromUser, string Text, IReadOnlyList<HelpArticle> Articles,
+        KnitErp.Application.Workspace.Knowledge.KnowledgeDoc? Answer = null, bool FromModel = false, string? Lead = null);
 
     private readonly List<Message> _messages = [];
     private string _question = string.Empty;
     private string? _error;
     private bool _busy;
+
+    private static string? LeadOf(string text, KnitErp.Application.Workspace.Knowledge.KnowledgeDoc answer)
+    {
+        var first = answer.Article.Body.Count > 0 ? text.IndexOf(answer.Article.Body[0], StringComparison.Ordinal) : -1;
+        return first > 0 ? text[..first].Trim() : null;
+    }
 
     private async Task AskAsync()
     {
@@ -92,7 +120,9 @@
         try
         {
             var reply = await Assistant.AskAsync(question, Context.Route, history, Choice?.Persona);
-            _messages.Add(new Message(false, reply.Text, reply.Articles));
+            // Без модели текст ответа — абзацы готового ответа; строка перед ними (лимит, недоступность модели) — пояснение.
+            var lead = reply.Answer is not null && !reply.FromModel ? LeadOf(reply.Text, reply.Answer) : null;
+            _messages.Add(new Message(false, reply.Text, reply.Articles, reply.Answer, reply.FromModel, lead));
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

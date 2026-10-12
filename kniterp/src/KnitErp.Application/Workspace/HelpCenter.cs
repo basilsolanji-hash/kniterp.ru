@@ -203,8 +203,10 @@ public static class HelpCenter
 
     public static IReadOnlyList<string> Categories => Articles.Select(a => a.Category).Distinct().ToList();
 
-    /// <summary>Справка по программе и отраслевая база знаний (D116) — для поиска, помощника и панели «Справка».</summary>
-    public static IReadOnlyList<HelpArticle> All => [.. Articles, .. IndustryKnowledge.Articles];
+    /// <summary>
+    /// Справка по программе, отраслевая база знаний (D116) и готовые ответы (D900) — для поиска, помощника и панели «Справка».
+    /// </summary>
+    public static IReadOnlyList<HelpArticle> All => Knowledge.KnowledgeSearch.Docs.Select(d => d.Article).ToList();
 
     /// <summary>Подсказка по текущему экрану: статья, чей адрес раздела совпадает с началом пути.</summary>
     public static HelpArticle? ForRoute(string? route)
@@ -219,10 +221,22 @@ public static class HelpCenter
     }
 
     /// <summary>
-    /// Поиск по словам: совпадение в заголовке весит больше, чем в тексте. С переводом (D60) ищет и в тексте на
-    /// языке пользователя — вопрос можно задать на любом языке интерфейса.
+    /// Поиск по вопросу своими словами (D910): морфология, синонимы, опечатки, вопрос и варианты весят больше текста,
+    /// экран route поднимает свои ответы. С переводом (D60) ищет и в тексте статей справки на языке пользователя.
     /// </summary>
-    public static IReadOnlyList<HelpArticle> Search(string? query, int take = 5, IUiText? language = null)
+    public static IReadOnlyList<HelpArticle> Search(string? query, int take = 5, IUiText? language = null, string? route = null)
+    {
+        var found = Knowledge.KnowledgeSearch.Search(query, take, route).Select(h => h.Doc.Article).ToList();
+        if (language is null || language.LanguageCode == UiLanguages.Default)
+        {
+            return found;
+        }
+
+        return TranslatedSearch(query, take, language).Concat(found).DistinctBy(a => a.Id).Take(take).ToList();
+    }
+
+    /// <summary>Поиск по переводу статей справки: совпадение в заголовке весит больше, чем в тексте.</summary>
+    private static IReadOnlyList<HelpArticle> TranslatedSearch(string? query, int take, IUiText language)
     {
         var words = (query ?? string.Empty).ToLowerInvariant()
             .Split([' ', ',', '.', '?', '!', ':', ';', '«', '»', '"', '(', ')'], StringSplitOptions.RemoveEmptyEntries)
@@ -232,10 +246,8 @@ public static class HelpCenter
             return [];
         }
 
-        var translated = language is not null && language.LanguageCode != UiLanguages.Default;
-        return All
-            .Select(a => (Article: a, Title: translated ? a.Title + "\n" + language!.Translate(a.Title) : a.Title,
-                Text: translated ? a.Text + "\n" + string.Join("\n", a.Body.Select(language!.Translate)) : a.Text))
+        return Articles
+            .Select(a => (Article: a, Title: language.Translate(a.Title), Text: string.Join("\n", a.Body.Select(language.Translate))))
             .Select(x => (x.Article, Score: words.Sum(w =>
                 (x.Title.Contains(w, StringComparison.OrdinalIgnoreCase) ? 3 : 0) + (x.Text.Contains(w, StringComparison.OrdinalIgnoreCase) ? 1 : 0))))
             .Where(x => x.Score > 0)
