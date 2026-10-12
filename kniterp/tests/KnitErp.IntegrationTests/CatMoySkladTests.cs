@@ -377,6 +377,61 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
     }
 
     [SqlFact]
+    public async Task Probe_shows_which_section_fails_without_saving_token()
+    {
+        // D330: проверка связи по разделам — с введённым токеном, ещё до подключения; ничего не сохраняет.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        fake.FailOnEntity = MoySkladEntities.Bundle;
+        await using var s = host.As(_user, _org);
+        var ms = Service(s, fake);
+        var probe = await ms.ProbeAsync("Bearer " + FakeMoySkladClient.Token);
+        Assert.Equal(9, probe.Count);
+        Assert.All(probe.Where(p => p.Section != "Комплекты"), p => Assert.True(p.Ok, p.Section + ": " + p.Detail));
+        var bundles = probe.Single(p => p.Section == "Комплекты");
+        Assert.False(bundles.Ok);
+        Assert.Contains("503", bundles.Detail);
+        Assert.Equal("записей: 2", probe.Single(p => p.Section == "Товары").Detail);
+        Assert.False((await ms.StatusAsync()).Connected); // токен не сохранён
+
+        // Без введённого токена и без подключения — понятный отказ.
+        Assert.Equal("exchange.not_connected", (await Assert.ThrowsAsync<BusinessRuleException>(() => ms.ProbeAsync())).Code);
+    }
+
+    [SqlFact]
+    public async Task Import_respects_characteristic_types()
+    {
+        // D328: у «Цвета» тип «Справочник» — значение из МойСклад должно быть записью справочника (как в справочнике), иначе ошибка строки.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        long colors;
+        await using (var s = host.As(_user, _org))
+        {
+            colors = await s.Nomenclature.CreateCatalogAsync("Цвета");
+            await s.Nomenclature.AddEntryAsync(colors, "Синий", null);
+            await s.Modifications.CreateCharacteristicAsync("Цвет", CharacteristicType.Catalog, colors);
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+            var run = (await ms.StatusAsync()).Runs.First();
+            Assert.Contains(await ms.IssuesAsync(run.Id), i => i.IsError && i.Entity == "Модификации" && i.Text.Contains("нет в справочнике"));
+            Assert.Empty((await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1-К"))).Items);
+
+            await s.Nomenclature.AddEntryAsync(colors, "КРАСНЫЙ", null);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+        }
+
+        await using var c = host.As(_user, _org);
+        var variant = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1-К"))).Items.Single();
+        var values = (await c.Modifications.VariantsAsync(variant.ParentItemId!.Value)).Modifications.Single().Values;
+        Assert.Equal("КРАСНЫЙ", values.Single().Value); // как в справочнике, а не «Красный» из МойСклад
+    }
+
+    [SqlFact]
     public async Task Reimport_is_idempotent_protects_manual_changes_and_resumes()
     {
         var org = await CreateOrgAsync();

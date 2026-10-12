@@ -23,6 +23,9 @@ public sealed record PreviewLineDto(string Entity, int Total, int ToCreate, int 
 /// <summary>D327: выгрузка цен — проверено связанных объектов, сколько отличаются, сколько отправлено, примеры кодов.</summary>
 public sealed record PriceExportDto(int Checked, int ToChange, int Sent, IReadOnlyList<string> Samples);
 
+/// <summary>D330: проверка связи по разделу — ответил ли МойСклад и сколько записей (или текст ошибки).</summary>
+public sealed record MoySkladProbeDto(string Section, bool Ok, string Detail);
+
 public sealed record MoySkladPreviewDto(IReadOnlyList<PreviewLineDto> Lines, IReadOnlyList<string> Conflicts, bool Truncated);
 
 public sealed record ImportIssueDto(string Entity, string? Code, string? Name, bool IsError, string Text);
@@ -38,6 +41,10 @@ public sealed class MoySkladImportService(
 {
     public const int PageSize = 500;
     public const int BundlePageSize = 100;
+
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
+
+    private const string NoAnswer = "нет ответа";
     public const int PreviewLimit = 10_000;
     public const int MaxConflicts = 200;
     private const ExternalSystem Sys = ExternalSystem.MoySklad;
@@ -55,6 +62,71 @@ public sealed class MoySkladImportService(
         "bundle" => "Комплекты",
         _ => "—",
     };
+
+    // ---------- Проверка связи по разделам (D330) ----------
+
+    /// <summary>
+    /// По одному запросу на каждый раздел, который читает загрузка (как в загрузке, по одной записи): какой раздел МойСклад не отдаёт и почему.
+    /// Токен — введённый (ещё не сохранённый, если подключиться не удалось) или сохранённый. Ничего не записывает.
+    /// </summary>
+    public async Task<IReadOnlyList<MoySkladProbeDto>> ProbeAsync(string? token = null, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        var t = string.IsNullOrWhiteSpace(token) ? await TokenAsync(ctx.OrganizationId, ct) : ExternalConnection.NormalizeToken(token);
+        var result = new List<MoySkladProbeDto>();
+        var sections = new (string Title, Func<CancellationToken, Task<string>> Call)[]
+        {
+            ("Доступ к аккаунту", async c => $"юрлицо: {await client.CheckAsync(t, c) ?? "—"}"),
+            ("Виды цен", async c => $"видов: {(await client.PriceTypesAsync(t, c)).Count}"),
+            ("Единицы измерения", c => Size(MoySkladEntities.Uom, null, c)),
+            ("Страны", c => Size(MoySkladEntities.Country, null, c)),
+            ("Группы", c => Size(MoySkladEntities.Folder, null, c)),
+            ("Товары", c => Size(MoySkladEntities.Product, null, c)),
+            ("Услуги", c => Size(MoySkladEntities.Service, null, c)),
+            ("Модификации", c => Size(MoySkladEntities.Variant, null, c)),
+            ("Комплекты", c => Size(MoySkladEntities.Bundle, "components.assortment", c)),
+        };
+        foreach (var (title, call) in sections)
+        {
+            // Нет связи уже с первым разделом (не ответ МойСклад, а сеть) — остальные не ждём.
+            if (result.Count == 1 && !result[0].Ok && result[0].Detail.StartsWith(NoAnswer, StringComparison.Ordinal))
+            {
+                result.Add(new MoySkladProbeDto(title, false, "не проверялся: нет связи с МойСклад"));
+                continue;
+            }
+
+            if (result.Count > 1 && result[1].Detail.StartsWith("не проверялся", StringComparison.Ordinal))
+            {
+                result.Add(new MoySkladProbeDto(title, false, "не проверялся: нет связи с МойСклад"));
+                continue;
+            }
+
+            // Не дольше 15 секунд на раздел: при недоступной сети проверка не висит минутами из-за повторов клиента.
+            using var section = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            section.CancelAfter(ProbeTimeout);
+            try
+            {
+                result.Add(new MoySkladProbeDto(title, true, await call(section.Token)));
+            }
+            catch (MoySkladException ex)
+            {
+                // Без кода ответа — сеть (нет связи, тайм-аут), а не отказ МойСклад.
+                result.Add(new MoySkladProbeDto(title, false, ex.Status is null ? $"{NoAnswer}: {ex.Message}" : ex.Message));
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                result.Add(new MoySkladProbeDto(title, false, $"{NoAnswer} за {ProbeTimeout.TotalSeconds:0} с"));
+            }
+        }
+
+        return result;
+
+        async Task<string> Size(string entity, string? expand, CancellationToken c)
+        {
+            var page = await client.ListAsync(t, entity, 0, 1, expand, c);
+            return $"записей: {page.Meta?.Size ?? page.Rows?.Count ?? 0}";
+        }
+    }
 
     // ---------- Выгрузка цен в МойСклад (D327) ----------
 
@@ -960,6 +1032,25 @@ public sealed class MoySkladImportService(
         /// <summary>Отмена изменений кэшей движка, сделанных текущей строкой (на случай её отката).</summary>
         private readonly List<Action> _undo = [];
 
+        private readonly Dictionary<long, IReadOnlyList<string>> _catalogNames = [];
+
+        private async Task<IReadOnlyList<string>?> CatalogNamesAsync(Characteristic c, CancellationToken ct)
+        {
+            if (c.CatalogId is not { } catalogId)
+            {
+                return null;
+            }
+
+            if (!_catalogNames.TryGetValue(catalogId, out var names))
+            {
+                names = await db.UserCatalogEntries.AsNoTracking().Where(e => e.OrganizationId == org && e.CatalogId == catalogId && !e.IsArchived)
+                    .Select(e => e.Name).ToListAsync(ct);
+                _catalogNames[catalogId] = names;
+            }
+
+            return names;
+        }
+
         private void MarkLinked(Item item) => _codes[item.Code] = (item.Id, true);
 
         /// <summary>Товар, услуга или комплект: создать или обновить карточку (без цен, штрихкодов и упаковок — они в CommonAsync).</summary>
@@ -1033,7 +1124,8 @@ public sealed class MoySkladImportService(
                     characteristics.Add(local);
                 }
 
-                values[local.Id] = Variants.CleanValue(ch.Value);
+                // D328: значение по типу характеристики knitERP (число, да/нет, запись справочника); не подходит — ошибка строки (откат).
+                values[local.Id] = local.Type == CharacteristicType.Text ? Variants.CleanValue(ch.Value) : local.Normalize(ch.Value, await CatalogNamesAsync(local, ct));
             }
 
             var key = Variants.Key(values);

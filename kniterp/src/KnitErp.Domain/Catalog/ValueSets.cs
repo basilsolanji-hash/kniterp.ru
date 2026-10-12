@@ -107,16 +107,24 @@ public sealed class CharacteristicValueSet
             throw new BusinessRuleException("catalog.value_set.step", "Шаг диапазона — положительное число, например «42-56/2».");
         }
 
+        // Ревью безопасности: шаг не мельче 0,01 (значения выводятся с двумя знаками) — иначе «10-10/1e-28» давал бесконечный цикл
+        // (v + шаг == v) и съедал память сервера. Число значений считается заранее, цикл — по счётчику, не по сумме.
+        if (step < 0.01m)
+        {
+            throw new BusinessRuleException("catalog.value_set.step", "Шаг диапазона — не меньше 0.01, например «42-56/2».");
+        }
+
         if (to < from || (to - from) / step >= MaxValues)
         {
             throw new BusinessRuleException("catalog.value_set.range", "Диапазон — «от-до/шаг», от меньшего к большему, не больше 100 значений.");
         }
 
-        var list = new List<string>();
-        for (var v = from; v <= to; v += step)
+        var count = (int)decimal.Floor((to - from) / step) + 1;
+        var list = new List<string>(count);
+        for (var i = 0; i < count; i++)
         {
             // Точка, не запятая: запятая — разделитель значений, «1,5» распалась бы на два.
-            list.Add(v.ToString("0.##", CultureInfo.InvariantCulture));
+            list.Add((from + i * step).ToString("0.##", CultureInfo.InvariantCulture));
         }
 
         values = list;
