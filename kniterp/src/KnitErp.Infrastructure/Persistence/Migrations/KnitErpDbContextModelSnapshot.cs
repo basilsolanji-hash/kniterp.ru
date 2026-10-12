@@ -6932,6 +6932,64 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesCreditApproval", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<DateTime>("ApprovedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("ApprovedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Debt")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<decimal?>("Limit")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<long>("OrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Overdue")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByUserId");
+
+                    b.HasIndex("OrganizationId", "OrderId", "ApprovedAtUtc")
+                        .HasDatabaseName("ix_sales_credit_approvals_order");
+
+                    b.ToTable("sales_credit_approvals", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_sales_credit_approvals_amount", "[Amount] > 0");
+
+                            t.HasCheckConstraint("ck_sales_credit_approvals_limit", "[Limit] IS NULL OR [Limit] >= 0");
+
+                            t.HasCheckConstraint("ck_sales_credit_approvals_reason", "LEN([Reason]) > 0");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Sales.SalesOrder", b =>
                 {
                     b.Property<long>("Id")
@@ -10883,6 +10941,30 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_sales_agreements_warehouse");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesCreditApproval", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sales_credit_approvals_user");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Sales.SalesOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "OrderId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_sales_credit_approvals_order");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Sales.SalesOrder", b =>

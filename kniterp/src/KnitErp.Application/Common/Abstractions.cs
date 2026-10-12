@@ -177,6 +177,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements { get; }
     DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles { get; }
     DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings { get; }
+    DbSet<KnitErp.Domain.Sales.SalesCreditApproval> SalesCreditApprovals { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

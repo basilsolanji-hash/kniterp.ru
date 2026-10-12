@@ -220,6 +220,7 @@ public static class AuditActions
     public const string SalesCustomerProfileChanged = "sales.customer_profile.changed";
     public const string SalesRoleSettingsChanged = "sales.role_settings.changed";
     public const string SalesPriceOverride = "sales.price.override";
+    public const string SalesCreditOverride = "sales.credit.override";
     public const string CustomerPaymentCreated = "sales.payment.created";
     public const string CustomerPaymentCancelled = "sales.payment.cancelled";
     public const string CustomerInvoiceIssued = "sales.invoice.issued";

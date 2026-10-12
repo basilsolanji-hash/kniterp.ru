@@ -143,6 +143,7 @@ public static class AuditLabels
         [AuditActions.SalesCustomerProfileChanged] = "Условия продаж покупателя изменены",
         [AuditActions.SalesRoleSettingsChanged] = "Ограничения цен роли изменены",
         [AuditActions.SalesPriceOverride] = "Цена ниже допустимой разрешена",
+        [AuditActions.SalesCreditOverride] = "Отгрузка сверх кредитного лимита разрешена",
         [AuditActions.CustomerPaymentCreated] = "Оплата от покупателя",
         [AuditActions.CustomerPaymentCancelled] = "Оплата от покупателя отменена",
         [AuditActions.CustomerInvoiceIssued] = "Выставлен счёт покупателю",
