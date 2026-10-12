@@ -10,11 +10,11 @@ namespace KnitErp.Application.Sales;
 
 /// <summary>
 /// Условия кредитного контроля заказа (D1111): лимит и отсрочка — из соглашения заказа, а чего в нём нет — из договора соглашения.
-/// Без соглашения у заказа нет ни лимита, ни отсрочки. LimitSource — «соглашение СГ-1» или «договор № 5».
+/// Без соглашения у заказа нет ни лимита, ни отсрочки. LimitDocument — номер соглашения или договора, откуда взят лимит.
 /// </summary>
-public sealed record SalesCreditTerms(decimal? Limit, string? LimitSource, int? PaymentDays)
+public sealed record SalesCreditTerms(decimal? Limit, string? LimitDocument, bool LimitFromContract, int? PaymentDays)
 {
-    public static readonly SalesCreditTerms None = new(null, null, null);
+    public static readonly SalesCreditTerms None = new(null, null, false, null);
 }
 
 /// <summary>
@@ -34,8 +34,12 @@ public sealed record OpenShipmentDto(long DocumentId, string Number, string Orde
 /// проверяется, D1112); OverdueDays — самая давняя просрочка.
 /// </summary>
 public sealed record SalesCreditCheckDto(
-    decimal? Limit, string? LimitSource, int? PaymentDays, decimal Debt, decimal Amount, decimal? Excess, decimal Overdue, int OverdueDays)
+    decimal? Limit, string? LimitDocument, bool LimitFromContract, int? PaymentDays, decimal Debt, decimal Amount, decimal? Excess, decimal Overdue,
+    int OverdueDays)
 {
+    /// <summary>Откуда лимит — для журнала и тестов («соглашение СГ-1», «договор № 5»); в интерфейсе — через перевод.</summary>
+    public string? LimitSource => LimitDocument is null ? null : LimitFromContract ? $"договор № {LimitDocument}" : $"соглашение {LimitDocument}";
+
     public bool OverLimit => Excess > 0;
     public bool Blocked => OverLimit || Overdue > 0;
 }
@@ -198,7 +202,8 @@ public static class SalesCredit
             .ToListAsync(ct);
         return agreements.ToDictionary(a => a.Id, a => new SalesCreditTerms(
             a.CreditLimit ?? a.ContractLimit,
-            a.CreditLimit is not null ? $"соглашение {a.Number}" : a.ContractLimit is not null ? $"договор № {a.ContractNumber}" : null,
+            a.CreditLimit is not null ? a.Number : a.ContractLimit is not null ? a.ContractNumber : null,
+            a.CreditLimit is null && a.ContractLimit is not null,
             a.PaymentDays ?? a.ContractDays));
     }
 
@@ -210,7 +215,7 @@ public static class SalesCredit
         var ledger = (await LedgersAsync(db, org, [customerId], today, ct)).GetValueOrDefault(customerId) ?? new CustomerLedger(customerId);
         var debt = ledger.Debt;
         var (overdue, days) = ledger.Overdue(today, onlyWithTerms: true);
-        return new SalesCreditCheckDto(terms.Limit, terms.LimitSource, terms.PaymentDays, debt, Money.Round(amount),
+        return new SalesCreditCheckDto(terms.Limit, terms.LimitDocument, terms.LimitFromContract, terms.PaymentDays, debt, Money.Round(amount),
             terms.Limit is { } limit ? Math.Max(0, debt + Money.Round(amount) - limit) : null, overdue, days);
     }
 

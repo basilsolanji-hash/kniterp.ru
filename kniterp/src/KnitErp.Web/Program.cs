@@ -214,6 +214,8 @@ builder.Services.AddSingleton<KnitErp.Web.Exchange.FeedCache>(); // D314: кэш
 // D1102 (продажи): вкладка «Условия продаж» в карточке контрагента — вид цены клиента, менеджер, соглашения.
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.ModuleUi.Text("Условия продаж"),
     typeof(KnitErp.Web.Components.Pages.SalesCustomerTermsTab), KnitErp.Domain.Access.Permissions.SalesView);
+// D1114 (продажи): блок главного экрана «Просроченная дебиторка».
+KnitErp.Web.Modules.ModuleUi.AddDashboardBlock("sales-overdue", typeof(KnitErp.Web.Components.Pages.SalesOverdueBlock), order: 20);
 
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);
@@ -517,6 +519,11 @@ app.MapGet("/reports/sales-by-item.xlsx", (DateOnly from, DateOnly to, string? c
         CancellationToken ct) =>
     FileOrForbid(() => export.SalesByItemAsync(new KnitErp.Application.Sales.SalesAnalyticsFilter(from, to, customer, search), ct),
         $"realizacii-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.xlsx"));
+// D1112 (продажи): дебиторская задолженность по срокам и менеджерам.
+app.MapGet("/reports/receivables.xlsx", (DateOnly? asOf, long? manager, KnitErp.Application.Sales.SalesService sales, ISpreadsheetFormat spreadsheet,
+        CancellationToken ct) =>
+    FileOrForbid(() => sales.ExportReceivablesAsync(new KnitErp.Application.Sales.ReceivablesFilter(asOf, manager), spreadsheet, ct),
+        $"debitorka-{asOf ?? DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}.xlsx"));
 app.MapGet("/reports/profitability.xlsx", (DateOnly from, DateOnly to, byte? group, string? customer, KnitErp.Web.Exports.ReportExports export,
         CancellationToken ct) =>
     FileOrForbid(() => export.ProfitabilityAsync(new KnitErp.Application.Sales.SalesAnalyticsFilter(from, to, customer),

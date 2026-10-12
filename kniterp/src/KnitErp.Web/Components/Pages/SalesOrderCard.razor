@@ -425,6 +425,7 @@ else
         </div>
     }
 
+    <SalesCreditPanel OrderId="Id" Credit="_credit" RowVersion="_order.RowVersion" OnChanged="LoadAsync" /> @* D1105, D1111 *@
     @if (editable && _order.PriceIssues is { Count: > 0 } issues)
     {
         <div class="sx-issues" role="alert">
@@ -684,6 +685,7 @@ else
         () => Sales.SetOrderStageAsync(Id, long.TryParse(e.Value?.ToString(), out var s) ? s : null, _order!.RowVersion), L("Этап заказа изменён."));
 
     private KnitErp.Application.Warehousing.SalesOrderBatchesDto? _lots;
+    private SalesCreditDto? _credit; // D1105, D1111: кредитный контроль заказа
 
     private async Task LoadAsync()
     {
@@ -698,6 +700,7 @@ else
         _lots = _order.Documents.Count > 0 ? await BatchService.ForSalesOrderAsync(Id) : null;
         _invoiceId = _order.CanSeePrices ? await Invoices.FindForOrderAsync(Id) : null;
         _advances = _order.CanEdit && _order.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Closed ? await Sales.AvailableAdvancesAsync(Id) : 0;
+        _credit = _order.CanSeePrices && _order.Status is SalesOrderStatus.Draft or SalesOrderStatus.Confirmed ? await Sales.GetCreditAsync(Id) : null; // D1105
     }
 
     /// <summary>Счёт по заказу и сразу его карточка: там печать.</summary>
