@@ -1199,7 +1199,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Entity")
                         .IsRequired()
-                        .HasColumnType("varchar(40)");
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<string>("ExternalId")
                         .HasColumnType("varchar(64)");

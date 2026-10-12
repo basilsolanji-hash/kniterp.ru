@@ -171,20 +171,28 @@ public static class Variants
     /// <summary>Все сочетания значений: Цвет [красный, синий] × Размер [46, 48] → 4 набора.</summary>
     public static IReadOnlyList<IReadOnlyDictionary<long, string>> Matrix(IReadOnlyDictionary<long, IReadOnlyList<string>> axes)
     {
+        var cleanAxes = axes.Where(a => a.Value.Count > 0).OrderBy(a => a.Key)
+            .Select(a => (a.Key, Values: a.Value.Select(CleanValue).Distinct(StringComparer.OrdinalIgnoreCase).ToList())).ToList();
+
+        // Ревью безопасности: число сочетаний — до перебора (100 значений × 4 характеристики = 10⁸ наборов съели бы память сервера).
+        var total = 1L;
+        foreach (var (_, values) in cleanAxes)
+        {
+            total = Math.Min(total * values.Count, long.MaxValue / 1000);
+        }
+
+        if (cleanAxes.Count > 0 && total > MaxPerBatch)
+        {
+            throw new BusinessRuleException("catalog.variant.too_many", $"За один раз — не больше {MaxPerBatch} модификаций, получилось {total}.");
+        }
+
         IEnumerable<Dictionary<long, string>> result = [new Dictionary<long, string>()];
-        foreach (var (characteristic, values) in axes.Where(a => a.Value.Count > 0).OrderBy(a => a.Key))
+        foreach (var (characteristic, values) in cleanAxes)
         {
-            var clean = values.Select(CleanValue).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            result = result.SelectMany(r => clean.Select(v => new Dictionary<long, string>(r) { [characteristic] = v }));
+            result = result.SelectMany(r => values.Select(v => new Dictionary<long, string>(r) { [characteristic] = v }));
         }
 
-        var list = result.Where(r => r.Count > 0).Cast<IReadOnlyDictionary<long, string>>().ToList();
-        if (list.Count > MaxPerBatch)
-        {
-            throw new BusinessRuleException("catalog.variant.too_many", $"За один раз — не больше {MaxPerBatch} модификаций, получилось {list.Count}.");
-        }
-
-        return list;
+        return result.Where(r => r.Count > 0).Cast<IReadOnlyDictionary<long, string>>().ToList();
     }
 
     /// <summary>Значения через запятую или точку с запятой: «46, 48, 50».</summary>

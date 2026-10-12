@@ -48,6 +48,7 @@ else
                 </form>
             </details>
             <div class="actions">
+                <button type="button" class="secondary" @onclick="() => ProbeAsync(null)" disabled="@_busy">@L("Проверить связь по разделам")</button>
                 <ConfirmButton Class="secondary" Disabled="@(_busy || Active is not null)" Question="@L("Отключить МойСклад? Токен будет удалён из knitERP; загруженные позиции и их связи останутся.")"
                                OnConfirm="DisconnectAsync">@L("Отключить")</ConfirmButton>
             </div>
@@ -57,9 +58,32 @@ else
     {
         <form class="panel" @onsubmit="ConnectAsync">
             <p class="muted small">@L("В МойСклад: Настройки → Токены → Создать токен. Нужен доступ на чтение товаров и справочников. Токен хранится зашифрованным, на экране — только последние 4 символа.")</p>
-            <label>@L("Токен МойСклад") <input type="password" autocomplete="off" @bind="_token" maxlength="@ExternalConnection.TokenMaxLength" required style="width: 100%" /></label>
-            <div class="actions"><button type="submit" disabled="@_busy">@L("Проверить и подключить")</button></div>
+            <label>@L("Токен МойСклад") <input type="password" autocomplete="off" @bind="_token" @bind:event="oninput" maxlength="@ExternalConnection.TokenMaxLength" required style="width: 100%" /></label>
+            <div class="actions">
+                <button type="submit" disabled="@_busy">@L("Проверить и подключить")</button>
+                <button type="button" class="secondary" @onclick="() => ProbeAsync(_token)" disabled="@(_busy || string.IsNullOrWhiteSpace(_token))">@L("Проверить связь по разделам")</button>
+            </div>
         </form>
+    }
+
+    @if (_probe is { } probe)
+    {
+        @* D330: какой раздел МойСклад не отдаёт и почему — текст ошибки МойСклад как есть. *@
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Раздел")</th><th>@L("Результат")</th></tr></thead>
+                <tbody>
+                    @foreach (var p in probe)
+                    {
+                        <tr><td>@Title(p.Section)</td><td class="@(p.Ok ? null : "neg")">@(p.Ok ? "✓ " : "✗ ")@p.Detail</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (probe.Any(p => !p.Ok))
+        {
+            <p class="muted small">@L("Пришлите строки с ✗ в поддержку или разработчику: в них нет токена, только раздел и ответ МойСклад.")</p>
+        }
     }
 
     @if (_status.Connected)
@@ -145,6 +169,44 @@ else
                 <p role="status">@(x.Sent > 0 ? L("Отправлено в МойСклад: {0} из {1} проверенных.", x.Sent, x.Checked)
                                     : x.ToChange == 0 ? L("Цены совпадают с МойСклад (проверено: {0}).", x.Checked)
                                     : L("Отличаются цены {0} из {1} связанных позиций: {2}{3}", x.ToChange, x.Checked, string.Join(", ", x.Samples), x.ToChange > x.Samples.Count ? " …" : ""))</p>
+            }
+        </div>
+    }
+
+    @if (_status.Connected && CurrentAccess.Has(Permissions.WarehouseReportView))
+    {
+        @* D333 (сессия 4): сверка остатков — только чтение, в МойСклад ничего не пишется. *@
+        <h2>@L("Сверка остатков с МойСклад")</h2>
+        <div class="panel">
+            <p class="muted small">@L("Остатки связанных позиций: сумма по действующим складам knitERP и отчёт «Остатки» МойСклад по всем складам. Только чтение — ничего не меняется ни там, ни здесь.")</p>
+            <div class="actions"><button type="button" class="secondary" @onclick="StockCompareAsync" disabled="@(_busy || Active is not null)">@L("Сверить остатки")</button></div>
+            @if (_stock is { } st)
+            {
+                <p role="status">@(st.Different == 0 ? L("Остатки совпадают (позиций: {0}).", st.Compared) : L("Расходятся остатки {0} из {1} позиций.", st.Different, st.Compared))</p>
+                @if (st.Differences.Count > 0)
+                {
+                    <div class="scroll">
+                        <table class="compact">
+                            <thead><tr><th>@L("Код")</th><th>@L("Наименование")</th><th class="num">knitERP</th><th class="num">@L("МойСклад")</th><th class="num">@L("Разница")</th></tr></thead>
+                            <tbody>
+                                @foreach (var d in st.Differences)
+                                {
+                                    <tr>
+                                        <td><a href="catalog/items/@d.ItemId">@d.Code</a></td>
+                                        <td>@d.Name</td>
+                                        <td class="num">@Quantities.Format(d.KnitErp)</td>
+                                        <td class="num">@Quantities.Format(d.MoySklad)</td>
+                                        <td class="num @(d.KnitErp - d.MoySklad < 0 ? "neg" : null)">@Quantities.Format(d.KnitErp - d.MoySklad)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (st.Different > st.Differences.Count)
+                    {
+                        <p class="muted small">@L("Показаны {0} самых больших расхождений.", st.Differences.Count)</p>
+                    }
+                }
             }
         </div>
     }
@@ -303,10 +365,20 @@ else
         "Услуги" => L("Услуги"),
         "Модификации" => L("Модификации"),
         "Комплекты" => L("Комплекты"),
+        "Доступ к аккаунту" => L("Доступ к аккаунту"),
+        "Единицы измерения" => L("Единицы измерения"),
+        "Страны" => L("Страны"),
+        "Остатки" => L("Остатки"),
         _ => name,
     };
 
     private PriceExportDto? _priceExport;
+    private IReadOnlyList<MoySkladProbeDto>? _probe;
+    private StockCompareDto? _stock;
+
+    private Task StockCompareAsync() => RunAsync(async () => _stock = await Import.StockCompareAsync(), null);
+
+    private Task ProbeAsync(string? token) => RunAsync(async () => _probe = await Import.ProbeAsync(token), null);
 
     private Task PriceExportPreviewAsync() => RunAsync(async () => _priceExport = await Import.PriceExportPreviewAsync(), null);
 
