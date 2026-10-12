@@ -491,7 +491,14 @@
         .chart-base { stroke: var(--line-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
         .chart-large .chart-axis { padding-left: 52px; }
         .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-top: 14px; align-items: start; }
-        .dash-box h2 { font-size: 14px; margin: 0 0 8px; }
+        /* Аудит 12.10.2026: на телефоне мелкие значки-ссылки и ссылки в строке — зона нажатия не меньше 32 px. */
+        details.fold-phone > summary { display: none; }
+        @@media (max-width: 599px) { details.fold-phone > summary { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 12px;
+            margin: 4px 0; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 14px; } }
+        .icon-link { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; text-decoration: none; }
+        @@media (max-width: 599px) { .dash-box a, .crm-kpi a, .doc-actions a { display: inline-block; min-height: 32px; line-height: 32px; } }
+        button:disabled { cursor: not-allowed; }
+        .dash-box h2 { font-size: 14px; margin: 0 0 8px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
         /* D108: главный экран — 12 колонок; блоки занимают продуманную ширину, пустоты заполняются (dense). */
         .dash-head, .dash-blocks, .dash-setup { max-width: 1760px; }
         .dash-blocks { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-flow: row dense; gap: 12px; align-items: start; }
@@ -642,6 +649,8 @@
             color: var(--text); text-decoration: none; }
         .prod-shift b { font-size: 17px; }
         .neg { color: var(--bad); }
+        /* Аудит 12.10.2026: на телефоне название этапа переносится, а не обрезается («Оплачен — в производ…»). */
+        @@media (max-width: 599px) { .prod-step .stage { white-space: normal; overflow: visible; } }
         @@media (max-width: 599px) { .prod-funnel { grid-template-columns: 1fr 1fr; } .prod-orders a { grid-template-columns: minmax(0, 1fr) 60px 36px; } .prod-orders a > :last-child:not(.prod-pct) { display: none; } }
         .attention { list-style: none; margin: 0; padding: 0; }
         .attention li a { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--line); color: var(--text); text-decoration: none; }
@@ -661,7 +670,9 @@
         .mini-stats a { display: flex; flex-direction: column; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); text-decoration: none; }
         .mini-stats a:hover { border-color: var(--accent); }
         .mini-stats b { font-size: 18px; font-variant-numeric: tabular-nums; }
-        .mini-stats span { font-size: 11px; color: var(--muted); }
+        .mini-stats > span { display: flex; flex-direction: column; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+        .mini-stats span span, .mini-stats a span { font-size: 11px; color: var(--muted); }
+        .mini-stats > span.neg b { color: var(--bad); }
         .charts-title { font-size: 13px; margin: 4px 0 6px; color: var(--muted); font-weight: 600; }
         .charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-bottom: 14px; }
         .chart { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: inherit; text-decoration: none; }
@@ -980,6 +991,14 @@
         knit-assistant { --knit-right: 16px; --knit-bottom: 16px; --knit-z: 60; --knit-accent: var(--accent); }
         body:has(.drawer.open) knit-assistant, body:has(.float-win) knit-assistant { display: none; }
         @@media print { knit-assistant { display: none; } }
+        /* Аудит 12.10.2026: персонаж помощника закрывал кнопки и плитки внизу экрана — под ним всегда остаётся свободное место. */
+        body:has(knit-assistant) main.main { padding-bottom: 104px; }
+        /* Аудит 12.10.2026: необработанная ошибка вкладки — сообщение и «Перезагрузить» вместо застывшего экрана (Blazor показывает блок сам). */
+        #blazor-error-ui { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; padding: 12px 16px;
+            background: var(--bad-bg-2, #fde8e8); color: var(--text, #111); border-top: 1px solid var(--bad-line, #e0a0a0);
+            box-shadow: 0 -2px 8px rgba(0,0,0,.15); font-size: 15px; }
+        #blazor-error-ui .reload { font-weight: 600; margin-left: 8px; }
+        @@media print { #blazor-error-ui { display: none !important; } }
     </style>
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>
@@ -995,6 +1014,10 @@
             <div class="kn-intro-bar"><span></span></div>
             <div class="kn-intro-brand">knit<b>ERP</b></div>
         </div>
+    </div>
+    <div id="blazor-error-ui" role="alert">
+        @L("Произошла ошибка, страница перестала отвечать. Введённые и не сохранённые данные могли не сохраниться.")
+        <a href="" class="reload">@L("Перезагрузить")</a>
     </div>
     <Routes @rendermode="PageRenderMode" />
     <script src="_framework/blazor.web.js"></script>

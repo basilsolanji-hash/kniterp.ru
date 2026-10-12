@@ -27,7 +27,7 @@ trap fail ERR
 KIND="${1:-full}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 KEY="${BACKUP_KEY_FILE:-/opt/kniterp/backup.key}"
-sql() { docker compose exec -T sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$SQL_SA_PASSWORD" "$@"; }
+sql() { SQLCMDPASSWORD="$SQL_SA_PASSWORD" docker compose exec -T -e SQLCMDPASSWORD sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa "$@"; }
 
 STEP="резервная копия SQL Server"
 case "$KIND" in
@@ -51,6 +51,9 @@ STEP="проверка зашифрованной копии"
 [[ -s "$PART" ]] || { echo "Зашифрованная копия пустая" >&2; false; }
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass "file:$KEY" -in "$PART" | gzip -t
 mv -f "$PART" "$OUT"
+# Аудит 12.10.2026: отпечаток копии хранится на сервере (во внешнее хранилище не уходит) — restore.sh сверяет его и замечает
+# подмену или порчу копии в хранилище до восстановления.
+(cd "$BACKUP_DIR/enc" && sha256sum "$(basename "$OUT")" >> SHA256SUMS)
 PART=""
 rm -f "$BACKUP_DIR/raw/$FILE"
 find "$BACKUP_DIR/enc" -name 'kniterp-*' -mtime +35 -delete

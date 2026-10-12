@@ -14,7 +14,7 @@ set -a; . ./.env; set +a
 RELEASE_LOG="${RELEASE_LOG:-/var/lib/kniterp-releases/releases.log}"
 mkdir -p "$(dirname "$RELEASE_LOG")"
 
-sql() { docker compose exec -T sql /opt/mssql-tools18/bin/sqlcmd -C -b -h -1 -W -S localhost -U sa -P "$SQL_SA_PASSWORD" -d kniterp "$@"; }
+sql() { SQLCMDPASSWORD="$SQL_SA_PASSWORD" docker compose exec -T -e SQLCMDPASSWORD sql /opt/mssql-tools18/bin/sqlcmd -C -b -h -1 -W -S localhost -U sa -d kniterp "$@"; }
 applied() { sql -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM [kniterp].[__ef_migrations_history];" 2>/dev/null | tr -d '[:space:]' || echo "?"; }
 image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null || true; }
 digest() { docker image inspect -f '{{join .RepoDigests ","}}' "$1" 2>/dev/null || echo "-"; }

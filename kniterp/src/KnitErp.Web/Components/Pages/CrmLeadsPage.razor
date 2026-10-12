@@ -68,6 +68,7 @@ else
         <CrmImportPanel Kind="CrmImportKind.Leads" Applied="ReloadAsync" />
     }
 
+    <FoldOnPhone Title="@L("Фильтры")">
     <form class="inline-form" @onsubmit="ReloadAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
@@ -98,6 +99,7 @@ else
         }
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
     </form>
+    </FoldOnPhone>
 
     <div class="scroll">
         <table class="compact">

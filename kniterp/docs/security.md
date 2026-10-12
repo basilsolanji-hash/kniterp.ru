@@ -70,6 +70,10 @@
 1. **Шифрование соединения с базой.** В строке подключения не указывать `Encrypt=false`; на SQL Server установить сертификат
    и не использовать `TrustServerCertificate=true` в рабочей среде. Если база на том же сервере и сеть не используется —
    допускается `Security:AllowUnencryptedDatabase=true`.
+   **Допущение для Beget (аудит 12.10.2026):** в `deploy/beget` приложение и SQL Server в одной закрытой сети Docker `kniterp`
+   (порт 1433 наружу не открыт), поэтому соединение шифруется, но сертификат SQL Server самоподписанный и стоит
+   `TrustServerCertificate=true`: перехват возможен только изнутри этой сети. При выносе базы на отдельный сервер —
+   выпустить сертификат на имя сервера базы и убрать `TrustServerCertificate`.
 2. **Шифрование базы на диске (TDE).** В SQL Server Standard 2019+ и Enterprise:
    ```sql
    USE master;

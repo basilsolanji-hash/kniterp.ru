@@ -93,6 +93,7 @@ else
         </div>
     }
 
+    <FoldOnPhone Title="@L("Фильтры")">
     <form class="inline-form" @onsubmit="ReloadAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
@@ -122,6 +123,7 @@ else
         <label class="inline"><input type="checkbox" @bind="_overdue" /> @L("Только просроченные")</label>
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
     </form>
+    </FoldOnPhone>
 
     var showSums = _rows.Any(r => r.Total is not null);
     var active = _rows.Where(r => r.Status != SalesOrderStatus.Cancelled).ToList();

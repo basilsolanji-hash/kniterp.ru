@@ -58,7 +58,7 @@ for i in $(seq 1 60); do
   sleep 5
 done
 
-sql() { docker compose exec -T sql /opt/mssql-tools18/bin/sqlcmd -C -b -I -S localhost -U sa -P "$SQL_SA_PASSWORD" "$@"; }
+sql() { SQLCMDPASSWORD="$SQL_SA_PASSWORD" docker compose exec -T -e SQLCMDPASSWORD sql /opt/mssql-tools18/bin/sqlcmd -C -b -I -S localhost -U sa "$@"; }
 
 echo "== 5/8 Схема базы (миграции)"
 docker compose run --rm -e ConnectionStrings__KnitErp="Server=sql;Database=kniterp;User Id=sa;Password=$SQL_SA_PASSWORD;Encrypt=true;TrustServerCertificate=true" app migrate
