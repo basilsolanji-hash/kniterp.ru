@@ -250,6 +250,17 @@ public static class AuditActions
     public const string SalesMailChanged = "sales.mail.changed";
     public const string SalesDocumentLinked = "sales.document.linked";
     public const string SalesDocumentUnlinked = "sales.document.unlinked";
+    // D1150–D1159, D1108 (продажи): сборка, отгрузка по нескольким заказам, возвраты, возврат денег, коды маркировки.
+    public const string SalesPickListCreated = "sales.pick_list.created";
+    public const string SalesPickListChanged = "sales.pick_list.changed";
+    public const string SalesShipmentGroupCreated = "sales.shipment_group.created";
+    public const string SalesShipmentGroupChanged = "sales.shipment_group.changed";
+    public const string SalesShippingSettingsChanged = "sales.shipping_settings.changed";
+    public const string SalesReturnChanged = "sales.return.changed";
+    public const string CustomerRefundCreated = "sales.refund.created";
+    public const string CustomerRefundCancelled = "sales.refund.cancelled";
+    public const string SalesAdvanceReleased = "sales.advance.released";
+    public const string SalesMarkingChanged = "sales.marking.changed";
     public const string ReceivedVatInvoiceRegistered = "purchase.vat_invoice.registered";
     public const string ReceivedVatInvoiceCancelled = "purchase.vat_invoice.cancelled";
     public const string PeriodClosed = "period.closed";
