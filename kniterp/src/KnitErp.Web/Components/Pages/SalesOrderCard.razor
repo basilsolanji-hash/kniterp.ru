@@ -510,6 +510,7 @@ else
     </div>
     <SalesOrderDocumentsPanel Data="_documents" OnChanged="LoadAsync" />
 
+    <SalesOrderShippingPanel OrderId="Id" Data="_shipping" OnChanged="LoadAsync" /> @* D1150–D1154 *@
     @if (_order.Documents.Count > 0)
     {
         <h2 style="margin-top: 20px">@L("Отгрузки и возвраты")</h2>
@@ -728,6 +729,7 @@ else
     private KnitErp.Application.Warehousing.SalesOrderBatchesDto? _lots;
     private SalesOrderDocumentsDto? _documents; // D1122–D1125
     private SalesCreditDto? _credit; // D1105, D1111: кредитный контроль заказа
+    private SalesOrderShippingDto? _shipping; // D1150–D1154
 
     private async Task LoadAsync()
     {
@@ -745,6 +747,7 @@ else
         _advances = _order.CanEdit && _order.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Closed ? await Sales.AvailableAdvancesAsync(Id) : 0;
         _documents = await OrderDocuments.PanelAsync(Id); // D1122–D1125: документы и письма клиенту
         _credit = _order.CanSeePrices && _order.Status is SalesOrderStatus.Draft or SalesOrderStatus.Confirmed ? await Sales.GetCreditAsync(Id) : null; // D1105
+        _shipping = await Sales.ShippingPanelAsync(Id); // D1150–D1154: сборка, доставка, деньги после возврата
     }
 
     /// <summary>Счёт по заказу и сразу его карточка: там печать.</summary>

@@ -148,6 +148,8 @@
             new("sales-orders", "Заказы покупателей", a => a.Has(Permissions.SalesView)),
             new("customer-invoices", "Счета покупателям", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("stock-documents?kind=6", "Отгрузки", Docs),
+            new("sales-pick-lists", "Задания на сборку", a => a.Has(Permissions.SalesView) || Docs(a)), // D1150
+            new("sales-shipments", "Отгрузки по нескольким заказам", a => a.Has(Permissions.SalesView) || Docs(a)), // D1151
             Soon("commission-reports", "Отчёты комиссионера"),
             new("stock-documents?kind=7", "Возвраты покупателей", Docs),
             new("vat-invoices/issued", "Счета-фактуры выданные", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
