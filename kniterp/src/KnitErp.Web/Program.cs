@@ -213,6 +213,8 @@ builder.Services.AddSingleton<KnitErp.Web.Exchange.FeedCache>(); // D314: кэш
 
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);
+// D914: индекс базы знаний помощника строится один раз при запуске, в фоне — первый вопрос не ждёт.
+_ = Task.Run(KnitErp.Application.Workspace.Knowledge.KnowledgeSearch.Warm);
 
 if (provisioning >= 0)
 {
