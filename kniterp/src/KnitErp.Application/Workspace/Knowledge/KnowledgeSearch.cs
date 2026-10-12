@@ -35,6 +35,8 @@ public static class KnowledgeSearch
     private const double VariantWeight = 2.5;
     private const double BodyWeight = 1.0;
     private const double SectionWeight = 0.5;
+    private const double PrefixWeight = 0.35;
+    private const int PrefixLength = 5;
 
     private static readonly Lazy<Index> Built = new(Build);
 
@@ -60,6 +62,7 @@ public static class KnowledgeSearch
         }
 
         var scores = new Dictionary<int, (double Score, double Matched, double TitleMatched)>();
+        var termIdf = new Dictionary<string, double>(StringComparer.Ordinal);
         var totalIdf = 0.0;
         foreach (var (term, weight) in terms)
         {
@@ -71,6 +74,7 @@ public static class KnowledgeSearch
 
             var idf = index.Idf(postings.Count) * weight;
             totalIdf += idf;
+            termIdf[term] = idf;
             foreach (var p in postings)
             {
                 var d = index.Stats[p.Doc];
@@ -91,9 +95,9 @@ public static class KnowledgeSearch
             {
                 var doc = index.Docs[x.Key];
                 var coverage = totalIdf > 0 ? x.Value.Matched / totalIdf : 0;
-                var titleCoverage = totalIdf > 0 ? x.Value.TitleMatched / totalIdf : 0;
-                // Доля смысла вопроса, найденная в записи, и особенно в её вопросе и вариантах, важнее частоты слов.
-                var score = x.Value.Score * (0.4 + coverage) * (0.8 + 0.4 * titleCoverage);
+                var phrase = totalIdf > 0 ? BestPhrase(index.Phrasings[x.Key], termIdf) / totalIdf : 0;
+                // Доля смысла вопроса, найденная в записи, и особенно в одной её формулировке (вопрос или вариант), важнее частоты слов.
+                var score = x.Value.Score * (0.4 + coverage) * (0.4 + phrase);
                 if (path.Length > 0 && doc.Links.Any(l => SameScreen(path, l)))
                 {
                     score *= 1.2;
@@ -110,6 +114,34 @@ public static class KnowledgeSearch
             .ThenBy(h => h.Doc.Id, StringComparer.Ordinal)
             .Take(take)
             .ToList();
+    }
+
+    /// <summary>
+    /// Лучшая формулировка записи: сумма весов слов вопроса, найденных в ней, с поправкой на то, какую часть формулировки
+    /// эти слова покрывают, — короткий вариант, совпавший целиком, сильнее длинного вопроса, где совпало одно слово.
+    /// </summary>
+    private static double BestPhrase(IReadOnlyList<HashSet<string>> phrasings, Dictionary<string, double> termIdf)
+    {
+        var best = 0.0;
+        foreach (var phrase in phrasings)
+        {
+            double matched = 0;
+            var hits = 0;
+            foreach (var (term, idf) in termIdf)
+            {
+                if (phrase.Contains(term))
+                {
+                    matched += idf;
+                    hits += term[0] is '^' or '~' ? 0 : 1;
+                }
+            }
+
+            var words = phrase.Count(t => t[0] is not ('^' or '~'));
+            var value = matched * (0.75 + 0.25 * (words == 0 ? 0 : Math.Min(1.0, (double)hits / words)));
+            best = Math.Max(best, value);
+        }
+
+        return best;
     }
 
     /// <summary>Доля смысла вопроса, которую должен покрыть лучший ответ, чтобы помощник показал его как готовый.</summary>
@@ -176,6 +208,9 @@ public static class KnowledgeSearch
         public required List<KnowledgeDoc> Docs { get; init; }
         public required Dictionary<string, KnowledgeDoc> ById { get; init; }
         public required List<DocStats> Stats { get; init; }
+
+        /// <summary>Формулировки записи — вопрос и каждый вариант отдельно — как наборы основ.</summary>
+        public required List<IReadOnlyList<HashSet<string>>> Phrasings { get; init; }
         public required Dictionary<string, List<Posting>> Postings { get; init; }
         public required List<IReadOnlyList<string>> SynonymGroups { get; init; }
 
@@ -236,7 +271,7 @@ public static class KnowledgeSearch
             var result = new List<(string, double)>();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (term, weight) in WithSynonyms(stems.Select(s => s.Stem).ToList()).Select((t, i) => (t, i)).Select(x =>
-                         (x.t, x.t.StartsWith('~') ? 0.8 : stems.FirstOrDefault(s => s.Stem == x.t).Weight)))
+                         (x.t, x.t.StartsWith('~') ? 0.8 : x.t.StartsWith('^') ? PrefixWeight : stems.FirstOrDefault(s => s.Stem == x.t).Weight)))
             {
                 if (seen.Add(term))
                 {
@@ -251,6 +286,9 @@ public static class KnowledgeSearch
         public List<string> WithSynonyms(IReadOnlyList<string> stems)
         {
             var result = new List<string>(stems);
+            // Беглые гласные и чередования («остаток» — «остатки», «провести» — «проведение») стеммер не сводит к одной основе:
+            // общие первые буквы длинной основы — слабый дополнительный признак.
+            result.AddRange(stems.Where(t => t.Length >= PrefixLength + 1 && t[0] is >= 'а' and <= 'я').Select(t => "^" + t[..PrefixLength]));
             for (var i = 0; i < stems.Count; i++)
             {
                 if (!Phrases.TryGetValue(stems[i], out var candidates))
@@ -403,7 +441,7 @@ public static class KnowledgeSearch
 
         var index = new Index
         {
-            Docs = docs, ById = byId, Stats = [], Postings = new(StringComparer.Ordinal), SynonymGroups = groups, Phrases = phrases,
+            Docs = docs, ById = byId, Stats = [], Phrasings = [], Postings = new(StringComparer.Ordinal), SynonymGroups = groups, Phrases = phrases,
             VocabularyByLength = [],
         };
 
@@ -415,7 +453,9 @@ public static class KnowledgeSearch
             var doc = docs[i];
             counts.Clear();
             var q = index.WithSynonyms(StemsOf(doc.Article.Title));
-            var v = doc.Variants.SelectMany(x => index.WithSynonyms(StemsOf(x))).ToList();
+            var variants = doc.Variants.Select(x => index.WithSynonyms(StemsOf(x))).ToList();
+            var v = variants.SelectMany(x => x).ToList();
+            index.Phrasings.Add([new HashSet<string>(q, StringComparer.Ordinal), .. variants.Select(x => new HashSet<string>(x, StringComparer.Ordinal))]);
             var b = index.WithSynonyms(StemsOf(doc.Article.Text));
             var s = StemsOf(doc.Article.Category);
             Count(counts, q, 0);
@@ -438,7 +478,7 @@ public static class KnowledgeSearch
             sumB += b.Count;
         }
 
-        foreach (var term in index.Postings.Keys.Where(t => !t.StartsWith('~') && t.Length >= 3))
+        foreach (var term in index.Postings.Keys.Where(t => !t.StartsWith('~') && !t.StartsWith('^') && t.Length >= 3))
         {
             if (!index.VocabularyByLength.TryGetValue(term.Length, out var list))
             {
@@ -451,7 +491,7 @@ public static class KnowledgeSearch
         var n = Math.Max(1, docs.Count);
         return new Index
         {
-            Docs = docs, ById = byId, Stats = stats, Postings = index.Postings, SynonymGroups = groups, Phrases = phrases,
+            Docs = docs, ById = byId, Stats = stats, Phrasings = index.Phrasings, Postings = index.Postings, SynonymGroups = groups, Phrases = phrases,
             VocabularyByLength = index.VocabularyByLength,
             AvgQuestion = Math.Max(1, sumQ / n), AvgVariant = Math.Max(1, sumV / n), AvgBody = Math.Max(1, sumB / n),
         };

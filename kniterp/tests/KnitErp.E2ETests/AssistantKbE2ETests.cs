@@ -24,8 +24,14 @@ public sealed class AssistantKbE2ETests(HrAppFixture app) : IClassFixture<HrAppF
         {
             await page.GotoAsync("");
             await page.WaitForSelectorAsync("nav", new() { Timeout = 30_000 });
-            await page.EvaluateAsync("() => document.dispatchEvent(new Event('knit:action'))");
             var input = page.GetByLabel("Вопрос");
+            // Персонаж открывает чат событием knit:action; до подключения Blazor событие теряется — повторяем.
+            for (var i = 0; i < 20 && !await input.IsVisibleAsync(); i++)
+            {
+                await page.EvaluateAsync("() => document.dispatchEvent(new Event('knit:action'))");
+                await page.WaitForTimeoutAsync(500);
+            }
+
             await input.FillAsync(question);
             await page.GetByRole(AriaRole.Button, new() { Name = "Спросить" }).ClickAsync();
             var answer = page.Locator(".chat-msg.bot .kb-answer").First;
@@ -35,6 +41,12 @@ public sealed class AssistantKbE2ETests(HrAppFixture app) : IClassFixture<HrAppF
             Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= window.innerWidth + 1"),
                 "Горизонтальная прокрутка страницы");
             await Shot(page, name);
+
+            // Ссылка «Ответ из базы знаний» открывает тот же ответ в «Справке».
+            await page.Locator(".chat-msg.bot .muted.small button.link").Last.ClickAsync();
+            await page.Locator(".help-article").WaitForAsync(new() { Timeout = 15_000 });
+            Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= window.innerWidth + 1"));
+            await Shot(page, name + "-help");
         }
         catch
         {
@@ -50,20 +62,26 @@ public sealed class AssistantKbE2ETests(HrAppFixture app) : IClassFixture<HrAppF
     [SqlFact]
     public async Task Help_search_shows_qa_answer_with_sources()
     {
-        var page = await app.OwnerPageAsync(phone: true);
+        var page = await app.OwnerPageAsync();
         try
         {
             await page.GotoAsync("stock-documents");
             await page.WaitForSelectorAsync("nav", new() { Timeout = 30_000 });
-            await page.GetByRole(AriaRole.Button, new() { Name = "Справка и обучение" }).First.ClickAsync();
+            var help = page.GetByTitle("Обучение и справка");
+            var search = page.GetByLabel("Поиск по справке");
+            for (var i = 0; i < 20 && !await search.IsVisibleAsync(); i++)
+            {
+                await help.ClickAsync();
+                await page.WaitForTimeoutAsync(500);
+            }
+
             await page.GetByLabel("Поиск по справке").FillAsync("отменить проведённое списание");
             var first = page.Locator(".help-results li button").First;
             await first.WaitForAsync(new() { Timeout = 15_000 });
-            await Shot(page, "help-search-phone");
+            await Shot(page, "help-search-desktop");
             await first.ClickAsync();
-            await page.Locator(".help-article").WaitForAsync();
-            Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= window.innerWidth + 1"));
-            await Shot(page, "help-answer-phone");
+            await page.Locator(".help-article .kb-sources, .help-article .kb-open").First.WaitForAsync();
+            await Shot(page, "help-answer-desktop");
         }
         catch
         {

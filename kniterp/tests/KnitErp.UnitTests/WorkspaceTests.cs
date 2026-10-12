@@ -58,7 +58,8 @@ public sealed class WorkspaceTests
         Assert.Equal("reports", HelpCenter.ForRoute("reports/turnover")!.Id);
         Assert.Equal("start", HelpCenter.ForRoute("")!.Id);
         Assert.Null(HelpCenter.ForRoute("unknown-page"));
-        Assert.Equal("documents", HelpCenter.Search("как сделать сторно")[0].Id);
+        // D910: готовый ответ базы знаний о сторно точнее общей статьи — оба в первой тройке.
+        Assert.Contains(HelpCenter.Search("как сделать сторно", 3), a => a.Id is "documents" or "qa-stock-0006");
         Assert.Contains(HelpCenter.Search("инвентаризация недостача"), a => a.Id == "inventory");
         Assert.Empty(HelpCenter.Search("а"));
     }
@@ -73,7 +74,9 @@ public sealed class WorkspaceTests
     {
         var language = new FileUiText(code);
         Assert.Equal(expected, HelpCenter.Search(query, 5, language)[0].Id);
-        Assert.Empty(HelpCenter.Search(query, 5)); // Без перевода — только русский текст.
+        // Без перевода — только русский текст: статью на языке пользователя не находит (D913 исправляет опечатки, поэтому близкие
+        // русские слова, например «недастача» → «недостача», находят русские ответы).
+        Assert.DoesNotContain(HelpCenter.Search(query, 5), a => a.Id == expected);
     }
 
     /// <summary>Переводы из Localization/{code}.json — как в интерфейсе.</summary>

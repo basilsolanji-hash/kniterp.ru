@@ -10,7 +10,7 @@ namespace KnitErp.UnitTests;
 /// D116, D900–D915: отраслевая база знаний и готовые ответы помощника — загружены, оформлены, ссылаются на настоящие экраны,
 /// отраслевые и правовые ответы — с источниками; поиск по вопросу своими словами точен и быстр (docs/kb/eval.json).
 /// </summary>
-public sealed class KnowledgeBaseTests
+public sealed class KnowledgeBaseTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     [Fact]
     public void Every_article_is_complete_unique_and_sourced()
@@ -34,7 +34,7 @@ public sealed class KnowledgeBaseTests
     [InlineData("разнооттеночность партия крашения", "kb-dye-lot")]
     [InlineData("класс вязальной машины", "kb-gauge")]
     [InlineData("маркировка честный знак", "kb-marking")]
-    [InlineData("как провести сторно", "documents")]
+    [InlineData("как провести сторно", "qa-stock-0006")]
     [InlineData("как исправить отметку на терминале", "prod-correction")]
     [InlineData("баллы отпуск болезнь табель", "prod-points")]
     [InlineData("маршрут изделия этапы", "prod-route")]
@@ -239,6 +239,8 @@ public sealed class KnowledgeBaseTests
         watch.Stop();
         var n = eval.Items.Count;
         var report = $"первым {first}/{n} ({100.0 * first / n:F1} %), в тройке {top3}/{n} ({100.0 * top3 / n:F1} %)\n" + string.Join("\n", misses);
+        output.WriteLine(report);
+        output.WriteLine($"Поиск в среднем {watch.Elapsed.TotalMilliseconds / n:F2} мс на вопрос, записей в базе: {KnowledgeSearch.Docs.Count}");
         Assert.True(first >= 0.85 * n, report);
         Assert.True(top3 >= 0.95 * n, report);
         Assert.True(watch.Elapsed.TotalMilliseconds / n < 50, $"Поиск в среднем {watch.Elapsed.TotalMilliseconds / n:F1} мс");

@@ -1,6 +1,7 @@
 """Компактный формат ответов → Knowledge/qa-<key>.json. id сохраняются по тексту вопроса."""
 import json, sys, os, re
-KN='/home/user/kniterp.ru/kniterp/src/KnitErp.Application/Workspace/Knowledge'
+ROOT=os.path.abspath(os.path.join(os.path.dirname(__file__),'..','..','..'))
+KN=os.path.join(ROOT,'src','KnitErp.Application','Workspace','Knowledge')
 SECTIONS={
  'start':'Программа · Начало работы и вход','sales':'Программа · Продажи и счета','purchases':'Программа · Закупки',
  'stock':'Программа · Склад и партии','money':'Программа · Деньги','production':'Программа · Производство',
