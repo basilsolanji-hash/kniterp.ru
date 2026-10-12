@@ -150,6 +150,12 @@ public interface IKnitErpDbContext : IAsyncDisposable
     /// </summary>
     Task ReloadAsync(object entity, CancellationToken cancellationToken = default);
 
+    /// <summary>Точка сохранения внутри текущей транзакции: часть работы (например, строку загрузки) можно откатить, не теряя остального.</summary>
+    Task SavepointAsync(string name, CancellationToken cancellationToken = default);
+
+    /// <summary>Откат к точке сохранения (изменения после неё в базе отменяются; отслеживание сбрасывает вызывающий — DiscardChanges).</summary>
+    Task RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Исключительная блокировка складов до конца текущей транзакции: проверка остатка и запись расхода
     /// не перемежаются с другим проведением по тем же складам.

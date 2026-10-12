@@ -150,6 +150,8 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
             var items = await db.Items.Where(i => i.OrganizationId == org && ids.Contains(i.Id) && !i.IsArchived).ToDictionaryAsync(i => i.Id, ct);
             var existingLinks = await db.ItemSuppliers.Where(s => s.OrganizationId == org && s.SupplierId == plan.SupplierId && ids.Contains(s.ItemId))
                 .ToDictionaryAsync(s => s.ItemId, ct);
+            var linkCounts = await db.ItemSuppliers.AsNoTracking().Where(s => s.OrganizationId == org && ids.Contains(s.ItemId))
+                .GroupBy(s => s.ItemId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
             foreach (var r in rows)
             {
                 if (!items.TryGetValue(r.ItemId!.Value, out var item))
@@ -165,9 +167,14 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
                 }
 
                 // Найдено по штрихкоду — запомнить артикул поставщика: следующий прайс сопоставится по нему.
-                if (r.Article is not null && item.Type != ItemType.Bundle && !existingLinks.ContainsKey(item.Id))
+                // Ревью: длинный артикул (не поместится в справочник) и предел поставщиков позиции — связь не создаётся, цена обновляется;
+                // длинное наименование обрезается. Раньше одна такая строка отменяла весь прайс.
+                if (r.Article is { Length: <= ItemSupplier.ArticleMaxLength } && item.Type != ItemType.Bundle && !existingLinks.ContainsKey(item.Id)
+                    && linkCounts.GetValueOrDefault(item.Id) < ItemSupplier.MaxPerItem)
                 {
-                    var link = ItemSupplier.Create(org, item, plan.SupplierId, r.Article, r.Name, !await db.ItemSuppliers.AnyAsync(s => s.ItemId == item.Id && s.IsMain, ct));
+                    var supplierName = r.Name is { Length: > ItemSupplier.NameMaxLength } longName ? longName[..ItemSupplier.NameMaxLength] : r.Name;
+                    var link = ItemSupplier.Create(org, item, plan.SupplierId, r.Article, supplierName, !await db.ItemSuppliers.AnyAsync(s => s.ItemId == item.Id && s.IsMain, ct));
+                    linkCounts[item.Id] = linkCounts.GetValueOrDefault(item.Id) + 1;
                     db.ItemSuppliers.Add(link);
                     existingLinks[item.Id] = link;
                     linked++;

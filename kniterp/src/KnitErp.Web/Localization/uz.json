@@ -2944,5 +2944,6 @@
   "Ценники": "Narx yorliqlari",
   "Этикетки": "Yorliqlar",
   "Этикетки и ценники для позиций этого экрана: по одной на каждую единицу количества": "Ushbu ekrandagi pozitsiyalar uchun yorliqlar va narx yorliqlari: miqdorning har bir birligiga bittadan",
-  "Этикетки по остатку": "Qoldiq bo‘yicha yorliqlar"
+  "Этикетки по остатку": "Qoldiq bo‘yicha yorliqlar",
+  "Количество компонента {0} не делится на единицу позиции (знаков после запятой: {1}) — состав комплекта не изменён.": "{0} komponent miqdori pozitsiya birligiga mos kelmaydi (verguldan keyingi belgilar: {1}) — to‘plam tarkibi o‘zgartirilmadi."
 }

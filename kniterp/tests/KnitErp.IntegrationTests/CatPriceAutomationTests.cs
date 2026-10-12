@@ -65,6 +65,23 @@ public sealed class CatPriceAutomationTests(SqlTestHost host) : IClassFixture<Sq
         Assert.Equal(2, result.AutoPrices);
         Assert.Equal("S-7", (await s.Suppliers.ListAsync(scarf)).Single().SupplierArticle);
 
+        // Ревью: длинный артикул поставщика (не помещается в справочник) и очень длинное наименование не отменяют весь прайс:
+        // цена обновляется, связь с длинным артикулом не создаётся.
+        var mitts = await s.Catalog.CreateItemAsync(new ItemCommand("В-1", "Варежки", ItemType.Finished, piece, null, vatRate.Id));
+        await s.Nomenclature.AddBarcodeAsync(mitts, "4600000000015");
+        var longFile = new MemoryStream(SqlTestHost.Spreadsheet.Write(
+        [
+            new SheetData("Прайс", ["Артикул", "Наименование", "Штрихкод", "Цена"],
+            [
+                [new string('A', 70), new string('Н', 400), "4600000000015", "300"],
+            ]),
+        ]));
+        var longPlan = await s.PriceLists.PreviewAsync(supplier, longFile, false);
+        var longResult = await s.PriceLists.ApplyAsync(longPlan);
+        Assert.Equal((1, 0), (longResult.Updated, longResult.Linked));
+        Assert.Equal(300m, (await s.Nomenclature.GetItemAsync(mitts)).Details.PurchasePrice);
+        Assert.Empty(await s.Suppliers.ListAsync(mitts));
+
         // Заголовка нет — понятная ошибка.
         var bad = new MemoryStream(SqlTestHost.Spreadsheet.Write([new SheetData("Л", ["что-то", "ещё"], [["1", "2"]])]));
         Assert.Equal("catalog.price_list.header", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.PriceLists.PreviewAsync(supplier, bad, false))).Code);

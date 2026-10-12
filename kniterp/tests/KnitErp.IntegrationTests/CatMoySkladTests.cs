@@ -212,6 +212,62 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
     }
 
     [SqlFact]
+    public async Task Failed_row_is_rolled_back_entirely_and_bundle_keeps_old_composition()
+    {
+        // Ревью: строка загрузки — всё или ничего (точка сохранения на строку).
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+        }
+
+        // Комплект в МойСклад изменён: 1,5 шапки (штучная единица) — ошибка строки; новый комплект с 0,4 шарфа — тоже.
+        var set = fake.Entities[MoySkladEntities.Bundle].Single();
+        var rows = set.Components!.Rows!;
+        fake.Entities[MoySkladEntities.Bundle] =
+        [
+            set with { Updated = "2026-10-05 10:00:00.000", Components = set.Components with { Rows = [rows[0] with { Quantity = 1.5m }, rows[1]] } },
+            set with { Id = "b-new", Code = "НБ-2", Name = "Новый набор", Updated = "2026-10-05 10:00:00.000",
+                       Components = set.Components with { Rows = [rows[0], rows[1] with { Quantity = 0.4m }] } },
+        ];
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+            var run = (await ms.StatusAsync()).Runs.First();
+            Assert.Equal((ImportRunStatus.Completed, 2), (run.Status, run.Errors));
+            Assert.Contains(await ms.IssuesAsync(run.Id), i => i.IsError && i.Text.Contains("не делится на единицу"));
+        }
+
+        await using var c = host.As(_user, _org);
+        var bundle = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "НБ-1"))).Items.Single();
+        Assert.Equal([("ШП-1", 1m), ("ШФ-1", 1m)], (await c.Bundles.GetAsync(bundle.Id)).Components.Select(x => (x.Code, x.Quantity)));
+        // Новая позиция с ошибкой в составе не осталась «полусозданной» (без связи, цен и состава).
+        Assert.Empty((await c.Catalog.ListItemsAsync(new ItemFilter(Search: "НБ-2"))).Items);
+
+        // Исправили в МойСклад — следующая загрузка создаёт новый комплект полностью.
+        fake.Entities[MoySkladEntities.Bundle][1] = fake.Entities[MoySkladEntities.Bundle][1] with
+        {
+            Updated = "2026-10-06 10:00:00.000", Components = set.Components with { Rows = [rows[0], rows[1] with { Quantity = 2m }] },
+        };
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+        }
+
+        var created = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "НБ-2"))).Items.Single();
+        Assert.Equal([("ШП-1", 1m), ("ШФ-1", 2m)], (await c.Bundles.GetAsync(created.Id)).Components.Select(x => (x.Code, x.Quantity)));
+    }
+
+    [SqlFact]
     public async Task Reimport_is_idempotent_protects_manual_changes_and_resumes()
     {
         var org = await CreateOrgAsync();

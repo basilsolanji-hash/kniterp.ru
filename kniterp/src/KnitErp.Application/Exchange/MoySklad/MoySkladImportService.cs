@@ -498,7 +498,20 @@ public sealed class MoySkladImportService(
             }
 
             await db.SaveChangesAsync(ct);
-            _links[(type, row.Id)] = existing;
+            var key = (type, row.Id);
+            var had = _links.TryGetValue(key, out var previous);
+            _undo.Add(() =>
+            {
+                if (had)
+                {
+                    _links[key] = previous!;
+                }
+                else
+                {
+                    _links.Remove(key);
+                }
+            });
+            _links[key] = existing;
         }
 
         private async Task IssueAsync(string entity, MsRow row, bool isError, string text, CancellationToken ct)
@@ -700,6 +713,10 @@ public sealed class MoySkladImportService(
         private async Task ItemAsync(string stage, MsRow row, CancellationToken ct)
         {
             var entity = StageName(stage);
+            // Ревью: строка — всё или ничего. Точка сохранения: отказ на любом шаге (цены, состав комплекта, характеристики)
+            // откатывает и уже записанное по этой строке (новую позицию, удалённый состав), а не оставляет половину в базе.
+            await db.SavepointAsync(RowSavepoint, ct);
+            _undo.Clear();
             try
             {
                 var decision = await DecideItemAsync(stage, row, ct);
@@ -758,10 +775,23 @@ public sealed class MoySkladImportService(
             }
             catch (Exception ex) when (ex is BusinessRuleException or DbUpdateException or KeyNotFoundException)
             {
+                await db.RollbackToSavepointAsync(RowSavepoint, ct);
                 db.DiscardChanges();
+                // Кэши движка — как до строки: связи и единицы, записанные этой строкой, откатились вместе с ней.
+                for (var i = _undo.Count - 1; i >= 0; i--)
+                {
+                    _undo[i]();
+                }
+
+                _undo.Clear();
                 await IssueAsync(entity, row, true, Message(ex), ct);
             }
         }
+
+        private const string RowSavepoint = "ms_row";
+
+        /// <summary>Отмена изменений кэшей движка, сделанных текущей строкой (на случай её отката).</summary>
+        private readonly List<Action> _undo = [];
 
         private void MarkLinked(Item item) => _codes[item.Code] = (item.Id, true);
 
@@ -997,15 +1027,26 @@ public sealed class MoySkladImportService(
                 return;
             }
 
-            db.BundleComponents.RemoveRange(current);
-            await db.SaveChangesAsync(ct);
             var ids = wanted.Select(w => w.ItemId).ToList();
             var precision = await db.Items.AsNoTracking().Where(i => ids.Contains(i.Id)).Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, u.Precision })
                 .ToDictionaryAsync(x => x.Id, x => x.Precision, ct);
+            // Ревью: количество проверяется ДО удаления старого состава; дробное для штучной единицы (1,5 шт) — ошибка строки, а не тихое округление.
+            foreach (var (itemId, quantity) in wanted)
+            {
+                if (decimal.Round(quantity, precision[itemId]) != quantity)
+                {
+                    throw new BusinessRuleException("exchange.moysklad.component_quantity",
+                        $"Количество компонента {quantity.ToString(CultureInfo.InvariantCulture)} не делится на единицу позиции (знаков после запятой: {precision[itemId]}) — состав комплекта не изменён.");
+                }
+
+                BundleRules.CheckQuantity(quantity, precision[itemId]);
+            }
+
+            db.BundleComponents.RemoveRange(current);
+            await db.SaveChangesAsync(ct);
             for (var i = 0; i < wanted.Count; i++)
             {
-                db.BundleComponents.Add(BundleComponent.Create(org, bundle.Id, wanted[i].ItemId, Round(wanted[i].Quantity, precision[wanted[i].ItemId])!.Value,
-                    precision[wanted[i].ItemId], i));
+                db.BundleComponents.Add(BundleComponent.Create(org, bundle.Id, wanted[i].ItemId, wanted[i].Quantity, precision[wanted[i].ItemId], i));
             }
         }
 
@@ -1042,6 +1083,8 @@ public sealed class MoySkladImportService(
                 db.Units.Add(local);
                 await db.SaveChangesAsync(ct);
                 _units.Add(local);
+                var added = local;
+                _undo.Add(() => _units.Remove(added));
             }
 
             await SaveLinkAsync(ExternalObjectType.UnitOfMeasure, local.Id, uom, null, ct);
