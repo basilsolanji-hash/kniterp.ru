@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.AddScoped<KnitErp.Application.Hr.PersonnelOrderService>();
         services.AddScoped<KnitErp.Application.Hr.TimesheetService>();
         services.AddScoped<KnitErp.Application.Hr.LeaveStatusSync>();
+        services.AddScoped<KnitErp.Application.Authentication.SessionCleanup>();
         services.AddScoped<KnitErp.Application.Hr.PayrollService>();
         services.AddScoped<KnitErp.Application.Hr.HrSettingsService>();
         services.AddScoped<KnitErp.Application.Hr.EmployeeAgreementService>(); // D227: документы перед доступом

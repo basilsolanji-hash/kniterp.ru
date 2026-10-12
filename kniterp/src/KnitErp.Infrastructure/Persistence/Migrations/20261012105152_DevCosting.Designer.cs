@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace KnitErp.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(KnitErpDbContext))]
-    [Migration("20261012101157_DevCosting")]
+    [Migration("20261012105152_DevCosting")]
     partial class DevCosting
     {
         /// <inheritdoc />
@@ -443,6 +443,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("LastSeenAtUtc")
+                        .HasDatabaseName("ix_user_sessions_last_seen");
+
                     b.HasIndex("PublicId")
                         .IsUnique()
                         .HasDatabaseName("ux_user_sessions_public_id");
@@ -759,6 +762,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("CatalogId")
+                        .HasColumnType("bigint");
+
                     b.Property<bool>("IsArchived")
                         .HasColumnType("bit");
 
@@ -779,17 +785,29 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
 
+                    b.Property<byte>("Type")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)1);
+
                     b.HasKey("Id");
 
                     b.HasAlternateKey("OrganizationId", "Id")
                         .HasName("ak_characteristics_org_id");
+
+                    b.HasIndex("OrganizationId", "CatalogId");
 
                     b.HasIndex("OrganizationId", "Name")
                         .IsUnique()
                         .HasDatabaseName("ux_characteristics_org_name_active")
                         .HasFilter("[IsArchived] = 0");
 
-                    b.ToTable("characteristics", "kniterp");
+                    b.ToTable("characteristics", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_characteristics_catalog", "([Type] = 4 AND [CatalogId] IS NOT NULL) OR ([Type] <> 4 AND [CatalogId] IS NULL)");
+
+                            t.HasCheckConstraint("ck_characteristics_type", "[Type] IN (1, 2, 3, 4)");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.CharacteristicValueSet", b =>
@@ -2497,7 +2515,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_custom_field_definitions_target", "[Target] IN (1, 2)");
 
-                            t.HasCheckConstraint("ck_custom_field_definitions_type", "[Type] IN (1, 2, 3, 4, 5)");
+                            t.HasCheckConstraint("ck_custom_field_definitions_type", "[Type] IN (1, 2, 3, 4, 5, 6, 7, 8)");
                         });
                 });
 
@@ -11145,6 +11163,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.UserCatalog", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "CatalogId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.CharacteristicValueSet", b =>

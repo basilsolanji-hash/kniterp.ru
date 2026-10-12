@@ -47,7 +47,7 @@ else
             <label>
                 @L("Тип")
                 <select @bind="_fieldType">
-                    @foreach (var t in Enum.GetValues<CustomFieldType>())
+                    @foreach (var t in Enum.GetValues<CustomFieldType>().Where(t => t <= CustomFieldType.Catalog)) @* D328: новые типы — пока у номенклатуры *@
                     {
                         <option value="@t">@TypeName(t)</option>
                     }

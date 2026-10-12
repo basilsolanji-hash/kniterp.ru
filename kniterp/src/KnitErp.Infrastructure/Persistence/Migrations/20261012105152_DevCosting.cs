@@ -232,7 +232,6 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 table: "dev_model_accessories",
                 columns: new[] { "OrganizationId", "ModelId", "ItemId" },
                 unique: true);
-
             // D744: версии расчёта себестоимости и их строки — только вставка.
             migrationBuilder.Sql("""
                 EXEC(N'CREATE OR ALTER TRIGGER [kniterp].[tr_dev_cost_runs_immutable]

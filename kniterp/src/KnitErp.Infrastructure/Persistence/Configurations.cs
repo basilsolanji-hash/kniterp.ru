@@ -190,6 +190,7 @@ internal sealed class UserSessionConfiguration : IEntityTypeConfiguration<UserSe
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.PublicId).IsUnique().HasDatabaseName("ux_user_sessions_public_id");
         b.HasIndex(x => new { x.UserId, x.RevokedAtUtc }).HasDatabaseName("ix_user_sessions_user");
+        b.HasIndex(x => x.LastSeenAtUtc).HasDatabaseName("ix_user_sessions_last_seen"); // D126: очистка старых сессий
     }
 }
 
@@ -536,8 +537,16 @@ internal sealed class CharacteristicConfiguration : IEntityTypeConfiguration<Cha
 {
     public void Configure(EntityTypeBuilder<Characteristic> b)
     {
-        b.ToTable("characteristics");
+        b.ToTable("characteristics", t =>
+        {
+            // D328: тип значений и свой справочник для типа «Справочник».
+            t.HasCheckConstraint("ck_characteristics_type", "[Type] IN (1, 2, 3, 4)");
+            t.HasCheckConstraint("ck_characteristics_catalog", "([Type] = 4 AND [CatalogId] IS NOT NULL) OR ([Type] <> 4 AND [CatalogId] IS NULL)");
+        });
         b.HasKey(x => x.Id);
+        b.Property(x => x.Type).HasConversion<byte>().HasDefaultValue(CharacteristicType.Text).HasSentinel(CharacteristicType.Text);
+        b.HasOne<UserCatalog>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CatalogId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Name).HasMaxLength(Characteristic.NameMaxLength).IsRequired();
         b.Property(x => x.RowVersion).IsRowVersion();
@@ -1128,7 +1137,7 @@ internal sealed class CustomFieldDefinitionConfiguration : IEntityTypeConfigurat
         b.ToTable("custom_field_definitions", t =>
         {
             t.HasCheckConstraint("ck_custom_field_definitions_target", "[Target] IN (1, 2)");
-            t.HasCheckConstraint("ck_custom_field_definitions_type", "[Type] IN (1, 2, 3, 4, 5)");
+            t.HasCheckConstraint("ck_custom_field_definitions_type", "[Type] IN (1, 2, 3, 4, 5, 6, 7, 8)");
             t.HasCheckConstraint("ck_custom_field_definitions_catalog", "([Type] = 5 AND [CatalogId] IS NOT NULL) OR ([Type] <> 5 AND [CatalogId] IS NULL)");
         });
         b.HasKey(x => x.Id);

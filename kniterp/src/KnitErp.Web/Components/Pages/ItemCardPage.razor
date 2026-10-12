@@ -15,6 +15,7 @@
 @inject ItemCopyService Copies
 @inject ValueSetService ValueSets
 @inject NavigationManager Nav
+@inject CounterpartyService CounterpartyList
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -142,6 +143,36 @@ else
                                         <option value="@entry.Id">@entry.Display</option>
                                     }
                                     @if (field.Value is not null && field.Display is not null && (_entries.GetValueOrDefault(field.CatalogId ?? 0) ?? []).All(x => x.Id.ToString() != field.Value))
+                                    {
+                                        <option value="@field.Value">@field.Display (@L("в архиве"))</option>
+                                    }
+                                </select>
+                            </label>
+                            break;
+                        case CustomFieldType.LongText:
+                            @* D328: многострочный текст — во всю ширину формы. *@
+                            <label class="wide">@field.Name <textarea rows="3" maxlength="@CustomFieldDefinition.ValueMaxLength" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)">@_form.Values.GetValueOrDefault(field.FieldId)</textarea></label>
+                            break;
+                        case CustomFieldType.Link:
+                            <label>
+                                @field.Name
+                                <input type="url" inputmode="url" placeholder="https://" maxlength="@CustomFieldDefinition.ValueMaxLength" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" />
+                                @if (field.Value is { } url && Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "http" or "https")
+                                {
+                                    <a href="@u.AbsoluteUri" target="_blank" rel="noopener noreferrer" class="small">@L("открыть")</a>
+                                }
+                            </label>
+                            break;
+                        case CustomFieldType.Counterparty:
+                            <label>
+                                @field.Name
+                                <select value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)">
+                                    <option value="">—</option>
+                                    @foreach (var cp in _counterparties)
+                                    {
+                                        <option value="@cp.Id">@cp.Name</option>
+                                    }
+                                    @if (field.Value is not null && field.Display is not null && _counterparties.All(x => x.Id.ToString() != field.Value))
                                     {
                                         <option value="@field.Value">@field.Display (@L("в архиве"))</option>
                                     }
@@ -666,7 +697,20 @@ else
                     {
                         var id = c.Id;
                         <label>
-                            @c.Name <input value="@_axes.GetValueOrDefault(id)" @onchange="e => _axes[id] = e.Value?.ToString()" placeholder="@L("через запятую или 42-56/2")" size="18" />
+                            @c.Name <input value="@_axes.GetValueOrDefault(id)" @onchange="e => _axes[id] = e.Value?.ToString()" size="18"
+                                           inputmode="@(c.Type == CharacteristicType.Number ? "decimal" : null)"
+                                           placeholder="@(c.Type == CharacteristicType.Number ? L("числа: 46, 48 или 42-56/2") : c.Type == CharacteristicType.Text ? L("через запятую или 42-56/2") : L("выберите справа"))" />
+                            @if (c.Options is { Count: > 0 } options)
+                            {
+                                @* D328: да/нет и записи своего справочника — выбором, другое значение сервер не примет. *@
+                                <select aria-label="@L("Добавить значение")" value="" @onchange="e => AppendValue(id, e)">
+                                    <option value="">@L("добавить…")</option>
+                                    @foreach (var o in options)
+                                    {
+                                        <option value="@o">@o</option>
+                                    }
+                                </select>
+                            }
                             @if (_valueSets.Where(v => v.CharacteristicId == id).ToList() is { Count: > 0 } sets)
                             {
                                 @* D321: набор значений — подставить одним выбором. *@
@@ -815,6 +859,17 @@ else
         }
     }
     private Dictionary<long, string?> _values = [];
+    private IReadOnlyList<CounterpartyDto> _counterparties = [];
+
+    /// <summary>D328: значение из справочника или «Да/Нет» — добавить к списку значений характеристики.</summary>
+    private void AppendValue(long characteristicId, ChangeEventArgs e)
+    {
+        if (e.Value?.ToString() is { Length: > 0 } value)
+        {
+            var current = _axes.GetValueOrDefault(characteristicId);
+            _axes[characteristicId] = string.IsNullOrWhiteSpace(current) ? value : $"{current}, {value}";
+        }
+    }
     private IReadOnlyList<ItemGroupDto> _groups = [];
     private IReadOnlyDictionary<long, IReadOnlyList<UserCatalogEntryDto>> _entries = new Dictionary<long, IReadOnlyList<UserCatalogEntryDto>>();
     private DetailsForm _form = new();
@@ -896,6 +951,10 @@ else
         _valueSets = await ValueSets.ListAsync();
         _groups = await Nomenclature.GroupsAsync();
         _entries = await Nomenclature.EntriesByCatalogAsync();
+        // D328: контрагенты — только если есть поле такого типа.
+        _counterparties = _item.CustomFields.Any(f => f.Type == CustomFieldType.Counterparty && !f.IsArchived)
+            ? (await CounterpartyList.ListAsync(new CounterpartyFilter())).Counterparties
+            : [];
         var d = _item.Details;
         static string? N(decimal? v) => v is { } x ? Amounts.Input(x) : null;
         _form = new DetailsForm
