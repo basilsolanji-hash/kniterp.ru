@@ -233,7 +233,7 @@ public sealed class SalesCreditTests(SqlTestHost host) : IClassFixture<SqlTestHo
             await ShipOnAsync(withManager, 5, -45);
             await ShipOnAsync(withManager, 3, -5);
             // «Бутик» без отсрочки: 2 000 двести дней назад; менеджер — ответственный последнего заказа (Владелец).
-            await ShipOnAsync(byOrder, 2, -200);
+            var foreignOrder = await ShipOnAsync(byOrder, 2, -200);
             // «Ничей»: 1 000 вчера, ответственный у заказа снят.
             var nobodyOrder = await ShipOnAsync(nobody, 1, -1);
             await using (var db = host.NewDb())
@@ -300,6 +300,12 @@ public sealed class SalesCreditTests(SqlTestHost host) : IClassFixture<SqlTestHo
                 Assert.True(report.OwnOnly);
                 Assert.Equal([withManager], report.Rows.Select(r => r.CustomerId));
                 await Assert.ThrowsAsync<NotFoundException>(() => m.Sales.OverdueLetterAsync(byOrder));
+
+                // D1110: журнал и карточка заказов — только свои (где менеджер ответственный); чужой заказ — 404.
+                var mine = await m.Sales.ListOrdersAsync(new SalesOrderFilter());
+                Assert.NotEmpty(mine);
+                Assert.All(mine, o => Assert.Equal("ООО «Магазин»", o.Customer));
+                await Assert.ThrowsAsync<NotFoundException>(() => m.Sales.GetOrderAsync(foreignOrder));
 
                 // Напоминание менеджеру — одно на покупателя в день; у Владельца — его покупатель «Бутик».
                 var alerts = (await m.Notifications.ListAsync()).Where(n => n.Key.StartsWith("sales-overdue:")).ToList();

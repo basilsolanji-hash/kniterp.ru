@@ -148,6 +148,12 @@ public sealed partial class SalesService(
     {
         var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
         var q = db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == ctx.OrganizationId);
+        if (await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        {
+            // D1110: роль видит только свои заказы — где пользователь ответственный.
+            q = q.Where(o => o.ResponsibleUserId == ctx.UserId);
+        }
+
         if (filter.CustomerId is { } customerId)
         {
             // D500: история заказов в карточке контрагента.
@@ -232,6 +238,11 @@ public sealed partial class SalesService(
         var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines)
                         .SingleOrDefaultAsync(o => o.Id == id && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Заказ покупателя");
+        if (order.ResponsibleUserId != ctx.UserId && await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        {
+            throw new NotFoundException("Заказ покупателя"); // D1110: чужой заказ при видимости «Свои» — как несуществующий
+        }
+
         var itemIds = order.Lines.Select(l => l.ItemId).ToList();
         var items = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision })
