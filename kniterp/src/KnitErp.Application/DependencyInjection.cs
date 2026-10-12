@@ -69,6 +69,7 @@ public static class DependencyInjection
         services.AddScoped<Sales.SalesService>();
         services.AddScoped<Sales.CustomerInvoiceService>();
         services.AddScoped<Sales.SalesStageService>();
+        services.AddScoped<Sales.SalesAgreementService>();
         services.AddScoped<Sales.SalesSettingsService>();
         // CRM (D600–D699).
         services.AddScoped<Crm.CrmSettingsService>();

@@ -1,0 +1,152 @@
+@*
+    D1102: вкладка «Условия продаж» карточки контрагента (подключается через ModuleUi). Открывается по нажатию вкладки, когда страница
+    свободна, поэтому работает с сервисом вкладки без параллельных запросов.
+*@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesAgreementService Agreements
+
+<SalesStyles />
+
+@if (_denied is not null)
+{
+    <p class="muted">@_denied</p>
+}
+else if (_terms is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span></div>
+    }
+
+    <div class="sx-kv">
+        <div><span>@L("Вид цены клиента")</span><span>@(_terms.PriceType ?? L("основной"))</span></div>
+        <div><span>@L("Менеджер")</span><span>@(_terms.Manager ?? "—")</span></div>
+        <div><span>@L("Действующее соглашение")</span><span>@(_terms.Current is { } c ? $"{c.Number} «{c.Name}»" : L("нет"))</span></div>
+        @if (_terms.Current is { } cur)
+        {
+            <div><span>@L("Скидка по соглашению")</span><span>@(cur.DiscountPercent > 0 ? $"{cur.DiscountPercent:0.##}%" : "—")</span></div>
+            <div><span>@L("Отсрочка / предоплата")</span><span>@(cur.PaymentDays?.ToString() ?? "—") @L("дн.") / @(cur.PrepaymentPercent is { } p ? $"{p:0.##}%" : "—")</span></div>
+            <div><span>@L("Кредитный лимит")</span><span>@(cur.CreditLimit is { } l ? Amounts.Format(l) : "—")</span></div>
+        }
+    </div>
+
+    @if (_terms.CanEdit && _options is not null)
+    {
+        <form class="inline-form" @onsubmit="SaveAsync">
+            <label>
+                @L("Вид цены клиента")
+                <select @bind="_priceType">
+                    <option value="">@L("— основной —")</option>
+                    @foreach (var t in _options.PriceTypes)
+                    {
+                        <option value="@t.Id">@t.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                @L("Менеджер")
+                <select @bind="_manager">
+                    <option value="">—</option>
+                    @foreach (var u in _options.Users)
+                    {
+                        <option value="@u.Id">@u.Name</option>
+                    }
+                </select>
+            </label>
+            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+            <a class="button secondary" href="sales-agreements?new=1">@L("Новое соглашение")</a>
+        </form>
+    }
+
+    <div class="scroll">
+        <table class="sx-table compact">
+            <thead><tr><th>@L("Соглашение")</th><th>@L("Вид цены")</th><th class="num">@L("Скидка")</th><th>@L("Срок")</th><th>@L("Статус")</th></tr></thead>
+            <tbody>
+                @if (_terms.Agreements.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">@L("Своих соглашений нет — действуют соглашения группы или типовое.")</td></tr>
+                }
+                @foreach (var a in _terms.Agreements)
+                {
+                    <tr class="@(a.Status == SalesAgreementStatus.Archived ? "archived" : null)">
+                        <td data-label="@L("Соглашение")">@a.Number <span class="sx-sub">@a.Name</span></td>
+                        <td data-label="@L("Вид цены")">@(a.PriceType ?? L("как у клиента"))</td>
+                        <td data-label="@L("Скидка")" class="num">@(a.DiscountPercent > 0 ? $"{a.DiscountPercent:0.##}%" : "—")</td>
+                        <td data-label="@L("Срок")">@a.ValidFrom.ToString("dd.MM.yyyy") – @(a.ValidTo?.ToString("dd.MM.yyyy") ?? L("бессрочно"))</td>
+                        <td data-label="@L("Статус")"><span class="tag @(a.ValidToday ? "ok" : "")">@(a.Status == SalesAgreementStatus.Archived ? L("В архиве") : a.ValidToday ? L("Действует") : L("Не действует"))</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long CounterpartyId { get; set; }
+
+    private CustomerSalesTermsDto? _terms;
+    private SalesAgreementOptionsDto? _options;
+    private string _priceType = string.Empty;
+    private string _manager = string.Empty;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _terms = await Agreements.CustomerTermsAsync(CounterpartyId);
+        if (_terms.CanEdit)
+        {
+            _options ??= await Agreements.OptionsAsync();
+        }
+
+        _priceType = _terms.PriceTypeId?.ToString() ?? string.Empty;
+        _manager = _terms.ManagerUserId?.ToString() ?? string.Empty;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Agreements.SetCustomerTermsAsync(CounterpartyId, long.TryParse(_priceType, out var t) ? t : null,
+                long.TryParse(_manager, out var m) ? m : null, _terms!.RowVersion);
+            _message = L("Условия продаж сохранены.");
+            _isError = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

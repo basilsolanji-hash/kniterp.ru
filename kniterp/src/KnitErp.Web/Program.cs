@@ -211,6 +211,10 @@ builder.Services.AddRateLimiter(o =>
 
 builder.Services.AddSingleton<KnitErp.Web.Exchange.FeedCache>(); // D314: кэш файлов фида каталога (свой, с лимитом объёма)
 
+// D1102 (продажи): вкладка «Условия продаж» в карточке контрагента — вид цены клиента, менеджер, соглашения.
+KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.ModuleUi.Text("Условия продаж"),
+    typeof(KnitErp.Web.Components.Pages.SalesCustomerTermsTab), KnitErp.Domain.Access.Permissions.SalesView);
+
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);
 

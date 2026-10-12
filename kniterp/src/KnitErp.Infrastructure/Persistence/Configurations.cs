@@ -207,6 +207,8 @@ internal sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         b.ToTable(t => t.HasCheckConstraint("ck_roles_archive_custom", "[IsArchived] = 0 OR [IsSystem] = 0"));
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique().HasDatabaseName("ux_roles_org_code");
+        // D1103 (сессия «Продажи»): ключ (организация, роль) — для составного внешнего ключа настроек продаж роли.
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_roles_org_id");
         b.HasMany(x => x.Permissions).WithOne().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.Permissions).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_permissions");
     }
@@ -1011,6 +1013,9 @@ internal sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOr
         b.ToTable("sales_orders", t =>
         {
             t.HasCheckConstraint("ck_sales_orders_status", "[Status] IN (1, 2, 3, 9)");
+            t.HasCheckConstraint("ck_sales_orders_price_override",
+                "([PriceOverrideReason] IS NULL AND [PriceOverrideByUserId] IS NULL AND [PriceOverrideAtUtc] IS NULL)"
+                + " OR ([PriceOverrideReason] IS NOT NULL AND [PriceOverrideByUserId] IS NOT NULL AND [PriceOverrideAtUtc] IS NOT NULL)");
             t.HasCheckConstraint("ck_sales_orders_confirmed",
                 "([Status] = 1 AND [ConfirmedByUserId] IS NULL) OR ([Status] IN (2, 3) AND [ConfirmedByUserId] IS NOT NULL AND [ConfirmedAtUtc] IS NOT NULL)"
                 + " OR [Status] = 9");
@@ -1050,6 +1055,15 @@ internal sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOr
         b.HasIndex(x => new { x.OrganizationId, x.LegalEntityId }).HasDatabaseName("ix_sales_orders_org_legal_entity");
         b.Property(x => x.OrderTime).HasColumnType("time(0)");
         b.Property(x => x.DeliveryAddress).HasMaxLength(SalesOrder.AddressMaxLength);
+        // D1101, D1104: соглашение заказа и разрешение цены ниже допустимой.
+        b.HasOne<SalesAgreement>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.AgreementId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_sales_orders_agreement");
+        b.HasIndex(x => new { x.OrganizationId, x.AgreementId }).HasFilter("[AgreementId] IS NOT NULL").HasDatabaseName("ix_sales_orders_org_agreement");
+        b.Property(x => x.PriceOverrideReason).HasMaxLength(SalesOrder.OverrideReasonMaxLength);
+        b.Property(x => x.PriceOverrideAtUtc).HasColumnType("datetime2(3)");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.PriceOverrideByUserId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_sales_orders_price_override_user");
         b.HasOne<Lookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProjectId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_sales_orders_project");

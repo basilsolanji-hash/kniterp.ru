@@ -75,6 +75,27 @@ public static class Permissions
     /// <summary>D310 (сессия № 4): подключение и загрузка из МойСклад. Через API не выдаётся.</summary>
     public const string MoySkladManage = "integration.moysklad.manage";
 
+    /// <summary>D1104 (продажи): подтвердить заказ с ценой ниже минимальной или скидкой выше допустимой — с причиной.</summary>
+    public const string SalesPriceOverride = "sales.price.override";
+
+    /// <summary>D1105 (продажи): подтвердить или отгрузить сверх кредитного лимита или при просрочке — с причиной.</summary>
+    public const string SalesCreditOverride = "sales.credit.override";
+
+    /// <summary>D1101 (продажи): соглашения с покупателями, вид цены клиента, настройки продаж ролей.</summary>
+    public const string SalesAgreementEdit = "sales.agreement.edit";
+
+    /// <summary>D1106 (продажи): правила скидок и акции.</summary>
+    public const string SalesDiscountEdit = "sales.discount.edit";
+
+    /// <summary>D1107 (продажи): отчёты продаж — выручка, ABC, план-факт, дебиторка (маржа — ещё и право цен).</summary>
+    public const string SalesReportView = "sales.report.view";
+
+    /// <summary>D1107 (продажи): план продаж менеджеров на месяц.</summary>
+    public const string SalesPlanEdit = "sales.plan.edit";
+
+    /// <summary>D1108 (продажи): коды маркировки в строках отгрузки.</summary>
+    public const string SalesMarkingEdit = "sales.marking.edit";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -130,6 +151,13 @@ public static class Permissions
         [CrmSettings] = "CRM: воронки, этапы, справочники и план",
         [CrmExport] = "CRM: выгрузка в Excel",
         [MoySkladManage] = "МойСклад: подключение и загрузка",
+        [SalesPriceOverride] = "Продажи: цена ниже минимальной и скидка сверх допустимой",
+        [SalesCreditOverride] = "Продажи: отгрузка сверх кредитного лимита и при просрочке",
+        [SalesAgreementEdit] = "Продажи: соглашения с покупателями и ограничения цен",
+        [SalesDiscountEdit] = "Продажи: скидки и акции",
+        [SalesReportView] = "Продажи: отчёты и дебиторская задолженность",
+        [SalesPlanEdit] = "Продажи: план продаж",
+        [SalesMarkingEdit] = "Продажи: коды маркировки в отгрузке",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;
