@@ -277,7 +277,9 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Sales.SalesDocumentSettingsService(db, guard, user, Clock, Mail),
             new KnitErp.Application.Sales.SalesDocumentPrintService(db, guard),
             new KnitErp.Application.Sales.SalesOrderDocumentsService(db, guard, user, Clock, Mail),
-            new KnitErp.Application.Sales.SalesMailDispatcher(db, Mail, PdfRenderer, Clock));
+            new KnitErp.Application.Sales.SalesMailDispatcher(db, Mail, PdfRenderer, Clock),
+            new KnitErp.Application.Sales.SalesReportService(db, guard, user, Clock),
+            new KnitErp.Application.Sales.MarketplaceReportService(db, guard, Spreadsheet, user, Clock));
     }
 
     /// <summary>D1123: PDF документов продаж — настоящий (PDFsharp/MigraDoc), без сети и системных шрифтов.</summary>
@@ -405,7 +407,9 @@ public sealed record Services(
     KnitErp.Application.Sales.SalesDocumentSettingsService DocumentSettings,
     KnitErp.Application.Sales.SalesDocumentPrintService DocumentPrint,
     KnitErp.Application.Sales.SalesOrderDocumentsService OrderDocuments,
-    KnitErp.Application.Sales.SalesMailDispatcher MailDispatcher) : IAsyncDisposable
+    KnitErp.Application.Sales.SalesMailDispatcher MailDispatcher,
+    KnitErp.Application.Sales.SalesReportService SalesReports,
+    KnitErp.Application.Sales.MarketplaceReportService Marketplace) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

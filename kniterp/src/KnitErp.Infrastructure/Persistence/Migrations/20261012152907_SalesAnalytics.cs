@@ -223,7 +223,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 {
                     table.PrimaryKey("PK_marketplace_report_lines", x => x.Id);
                     table.CheckConstraint("ck_marketplace_report_lines_kind", "[Kind] IN (1, 2, 3)");
-                    table.CheckConstraint("ck_marketplace_report_lines_match", "[MatchedBy] IN (0, 1, 2, 3) AND (([ItemId] IS NULL) = ([MatchedBy] = 0))");
+                    table.CheckConstraint("ck_marketplace_report_lines_match", "([ItemId] IS NULL AND [MatchedBy] = 0) OR ([ItemId] IS NOT NULL AND [MatchedBy] IN (1, 2, 3))");
                     table.ForeignKey(
                         name: "fk_marketplace_report_lines_item",
                         columns: x => new { x.OrganizationId, x.ItemId },

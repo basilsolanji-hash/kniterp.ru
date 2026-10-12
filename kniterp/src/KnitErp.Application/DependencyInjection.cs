@@ -130,6 +130,8 @@ public static class DependencyInjection
         services.AddScoped<Integrations.WebhookDispatcher>();
         services.AddScoped<Common.RequisitesLookupService>();
         services.AddScoped<Sales.SalesAnalyticsService>();
+        services.AddScoped<Sales.SalesReportService>(); // D1160–D1167: аналитика продаж, план-факт, воронка
+        services.AddScoped<Sales.MarketplaceReportService>(); // D1107, D1168–D1170: каналы и отчёты маркетплейсов
         services.AddScoped<Taxes.VatInvoiceService>();
         services.AddScoped<Printing.PrintService>();
         services.AddScoped<RecoveryCodeService>();
