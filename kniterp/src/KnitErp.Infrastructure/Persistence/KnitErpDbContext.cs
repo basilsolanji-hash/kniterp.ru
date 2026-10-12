@@ -113,6 +113,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
 
     public void DiscardChanges() => ChangeTracker.Clear();
 
+    public Task ReloadAsync(object entity, CancellationToken cancellationToken = default) => Entry(entity).ReloadAsync(cancellationToken);
+
     /// <summary>Участие во внешней транзакции: фиксация и откат — дело внешнего сценария.</summary>
     private sealed class JoinedTransaction(IDbContextTransaction outer) : IDbContextTransaction
     {

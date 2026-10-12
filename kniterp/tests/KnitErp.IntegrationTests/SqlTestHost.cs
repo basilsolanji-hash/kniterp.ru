@@ -201,7 +201,7 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)),
             new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.CatalogSettingsService(db, guard, user, Clock),
-            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock, new PlainFeedPhotoLinks()),
             new KnitErp.Application.Catalog.ItemCodesService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.LabelService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.GroupDefaultsService(db, guard, user, Clock),
@@ -330,4 +330,20 @@ public sealed class FakeRequisitesLookup : KnitErp.Application.Common.IRequisite
             ? new KnitErp.Application.Common.CompanyRequisites(false, "ООО «ТЕСТОВАЯ ФАБРИКА»", "ООО «ТФ»", inn, "773601001", "1027700132195",
                 "г. Москва, ул. Тестовая, д. 1", "ГЕНЕРАЛЬНЫЙ ДИРЕКТОР", "Тестов Тест Тестович", true, "ACTIVE")
             : null);
+}
+
+/// <summary>
+/// Ссылки на фото фида для тестов без подписи (D324): «фид.фото» открытым текстом — так тест сам подделывает токен и проверяет,
+/// что сервис всё равно не отдаст фото выключенного фида или чужой организации. Подпись — в Web (Data Protection), проверяется e2e.
+/// </summary>
+public sealed class PlainFeedPhotoLinks : KnitErp.Application.Catalog.IFeedPhotoLinks
+{
+    public string Token(long feedId, long photoId) => $"{feedId}.{photoId}";
+
+    public bool TryRead(string token, out long feedId, out long photoId)
+    {
+        photoId = 0;
+        var parts = token.Split('.');
+        return long.TryParse(parts[0], out feedId) & parts.Length == 2 && long.TryParse(parts[1], out photoId);
+    }
 }

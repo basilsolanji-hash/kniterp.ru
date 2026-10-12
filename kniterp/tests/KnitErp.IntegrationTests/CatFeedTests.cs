@@ -101,6 +101,66 @@ public sealed class CatFeedTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     }
 
     [SqlFact]
+    public async Task Feed_offers_carry_photo_links_served_only_for_active_feed_of_same_organization()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52];
+        byte[] jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0, 16, 0x4A, 0x46, 0x49, 0x46];
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+        var vat = (await s.VatRates.ActiveAsync()).First(r => r.Kind == VatRateKind.Standard).Id;
+        var price = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.IsDefault).Id;
+        var sweater = await s.Catalog.CreateItemAsync(new ItemCommand("СВ-Ф", "Свитер", ItemType.Finished, piece, null, vat));
+        var hat = await s.Catalog.CreateItemAsync(new ItemCommand("Ш-Ф", "Шапка\u000Bзимняя", ItemType.Finished, piece, null, vat));
+        await s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 2500 });
+        await s.Nomenclature.SetPricesAsync(hat, new Dictionary<long, decimal?> { [price] = 900 });
+        var main = await s.Modifications.AddPhotoAsync(sweater, png);
+        var back = await s.Modifications.AddPhotoAsync(sweater, jpeg);
+        var color = await s.Modifications.CreateCharacteristicAsync("Цвет");
+        await s.Modifications.CreateModificationsAsync(sweater, new Dictionary<long, string?> { [color] = "красный" });
+
+        var issued = await s.Feeds.CreateAsync(new CatalogFeedCommand("Маркет", price, null, null, false));
+        var yml = XDocument.Parse(System.Text.Encoding.UTF8.GetString((await s.Feeds.BuildAsync(issued.Key, "https://shop.example/"))!.Xml));
+        var offers = yml.Descendants("offer").ToList();
+        var variant = offers.Single(o => o.Attribute("group_id")?.Value == sweater.ToString());
+        // Модификация без своих фото — фото основной позиции, по порядку; позиция без фото — без picture.
+        Assert.Equal([$"https://shop.example/feeds/photos/{issued.Id}.{main}", $"https://shop.example/feeds/photos/{issued.Id}.{back}"],
+            variant.Elements("picture").Select(p => p.Value));
+        Assert.Empty(offers.Single(o => o.Attribute("id")!.Value == hat.ToString()).Elements("picture"));
+        // Символ, недопустимый в XML (вертикальная табуляция из Word), выброшен, а не ломает весь фид.
+        Assert.Equal("Шапказимняя", offers.Single(o => o.Attribute("id")!.Value == hat.ToString()).Element("name")!.Value);
+        // picture — после name, как требует схема YML.
+        Assert.Equal("name", ((XElement)variant.Element("picture")!.PreviousNode!).Name.LocalName);
+
+        var served = (await s.Feeds.PhotoAsync($"{issued.Id}.{main}"))!.Value;
+        Assert.Equal("image/png", served.ContentType);
+        Assert.Equal(png, served.Content);
+        Assert.Null(await s.Feeds.PhotoAsync("мусор"));
+        Assert.Null(await s.Feeds.PhotoAsync(null));
+
+        // Чужое фото по «своему» фиду (подделанный токен) — нет.
+        var other = await CreateOrgAsync();
+        long foreignPhoto;
+        await using (var o = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            var u = (await o.Catalog.ListUnitsAsync()).Single(x => x.Code == "796").Id;
+            var v = (await o.VatRates.ActiveAsync()).First(r => r.Kind == VatRateKind.Standard).Id;
+            foreignPhoto = await o.Modifications.AddPhotoAsync(await o.Catalog.CreateItemAsync(new ItemCommand("Ч-1", "Чужое", ItemType.Finished, u, null, v)), png);
+        }
+
+        Assert.Null(await s.Feeds.PhotoAsync($"{issued.Id}.{foreignPhoto}"));
+
+        // Выключенный фид — фото больше не отдаются.
+        var feed = (await s.Feeds.ListAsync()).Single(f => f.Id == issued.Id);
+        await s.Feeds.SetActiveAsync(feed.Id, false, feed.RowVersion);
+        Assert.Null(await s.Feeds.PhotoAsync($"{issued.Id}.{main}"));
+        Assert.False(await s.Feeds.IsLiveAsync(issued.Key));
+        // Отметка запроса сменила rowversion — включение со старой версией всё равно проходит (явное значение, не конфликт).
+        await s.Feeds.SetActiveAsync(feed.Id, true, feed.RowVersion);
+        Assert.True(await s.Feeds.IsLiveAsync(issued.Key));
+    }
+
+    [SqlFact]
     public async Task Only_owner_or_admin_manage_feeds_and_other_organization_objects_are_rejected()
     {
         var org = await CreateOrgAsync();

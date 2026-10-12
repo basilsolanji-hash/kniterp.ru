@@ -266,10 +266,14 @@ else
                 <b>@(_allByFilter ? L("Выбраны все по отбору: {0}", _list.Total) : L("Выбрано: {0}", _selected.Count))</b>
                 @if (!_allByFilter && _list.Total > _selected.Count)
                 {
-                    <button type="button" class="link" @onclick="() => _allByFilter = true">@L("Выбрать все по отбору ({0})", _list.Total)</button>
+                    <button type="button" class="link" @onclick="SelectAllByFilterAsync">@L("Выбрать все по отбору ({0})", _list.Total)</button>
                 }
                 <button type="button" class="link" @onclick="ClearSelection">@L("Снять выбор")</button>
                 <a class="button secondary" href="@SelectedLabelsLink" target="_blank" rel="noopener">@L("Этикетки для выбранных")</a>
+                @if (_allByFilter && _list.Total > LabelService.MaxItems)
+                {
+                    <span class="muted small">@L("Этикетки — для первых {0} позиций отбора.", LabelService.MaxItems)</span>
+                }
                 @if (_list.CanEdit)
                 {
                     <button type="button" class="secondary" @onclick="() => _bulkOpen = !_bulkOpen">@L("Изменить выбранные")</button>
@@ -569,7 +573,16 @@ else
         _bulkResult = null;
     }
 
-    private string SelectedLabelsLink => "catalog/labels/print?ids=" + string.Join(",", (_allByFilter ? _list!.Items.Select(i => i.Id) : _selected).Take(LabelService.MaxItems));
+    // Ревью: «все по отбору» — этикетки для всех позиций отбора (до LabelService.MaxItems), а не только для текущей страницы.
+    private string SelectedLabelsLink => "catalog/labels/print?ids=" + string.Join(",", (_allByFilter ? _allIds : (IEnumerable<long>)_selected).Take(LabelService.MaxItems));
+
+    private IReadOnlyList<long> _allIds = [];
+
+    private Task SelectAllByFilterAsync() => RunAsync(async () =>
+    {
+        _allIds = await Catalog.ListIdsAsync(CurrentFilter(), LabelService.MaxItems);
+        _allByFilter = true;
+    }, null);
 
     private ItemFilter CurrentFilter(int take = 500, int skip = 0)
     {

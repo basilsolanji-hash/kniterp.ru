@@ -26,6 +26,16 @@ public sealed record FeedOptionDto(long Id, string Name);
 
 public sealed record CatalogFeedOptionsDto(IReadOnlyList<FeedOptionDto> PriceTypes, IReadOnlyList<FeedOptionDto> Warehouses, IReadOnlyList<FeedOptionDto> Groups);
 
+/// <summary>
+/// Подписанные ссылки на фото для фида (D324): токен защищает пару «фид, фото» и срок действия; реализация — в Web (Data Protection).
+/// </summary>
+public interface IFeedPhotoLinks
+{
+    string Token(long feedId, long photoId);
+
+    bool TryRead(string token, out long feedId, out long photoId);
+}
+
 /// <summary>Готовый фид: XML и сколько предложений в нём.</summary>
 public sealed record CatalogFeedFile(long FeedId, byte[] Xml, int Offers);
 
@@ -35,8 +45,10 @@ public sealed record CatalogFeedFile(long FeedId, byte[] Xml, int Offers);
 /// товары, модификации (group_id основной позиции, характеристики — param) и комплекты (доступно — по компонентам); услуги и позиции без
 /// цены не попадают. Наличие — остаток минус резерв подтверждённых заказов по выбранному складу или по всем.
 /// </summary>
-public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)
+public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IFeedPhotoLinks? photoLinks = null)
 {
+    public const int MaxPicturesPerOffer = 5;
+
     public const int MaxOffers = 100_000;
 
     public async Task<IReadOnlyList<CatalogFeedDto>> ListAsync(CancellationToken ct = default)
@@ -103,12 +115,26 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task SetActiveAsync(long id, bool active, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await DemandAsync(ct);
-        var feed = await db.CatalogFeeds.SingleOrDefaultAsync(f => f.Id == id && f.OrganizationId == ctx.OrganizationId, ct)
+        // Ревью D324: отметка запроса площадкой меняет rowversion фида, поэтому включение/выключение — явное значение без проверки версии
+        // (последний выигрывает) и прямым UPDATE: устаревшая копия во вкладке не мешает срочно отключить утёкший ключ.
+        _ = rowVersion;
+        var name = await db.CatalogFeeds.AsNoTracking().Where(f => f.Id == id && f.OrganizationId == ctx.OrganizationId).Select(f => f.Name)
+                       .SingleOrDefaultAsync(ct)
                    ?? throw new NotFoundException("Фид каталога");
-        feed.EnsureVersion(feed.RowVersion, rowVersion);
-        feed.SetActive(active);
-        Audit(ctx, feed.Id, null, active ? "включён" : "выключен", $"Фид каталога «{feed.Name}»");
-        await db.SaveOrConflictAsync(ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.CatalogFeeds.Where(f => f.Id == id && f.OrganizationId == ctx.OrganizationId).ExecuteUpdateAsync(u => u.SetProperty(f => f.IsActive, active), ct);
+        Audit(ctx, id, null, active ? "включён" : "выключен", $"Фид каталога «{name}»");
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+
+        await tx.CommitAsync(ct);
     }
 
     /// <summary>
@@ -122,7 +148,7 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
         }
 
         var hash = CatalogFeed.Hash(key!);
-        var feed = await db.CatalogFeeds.SingleOrDefaultAsync(f => f.KeyHash == hash && f.IsActive, ct);
+        var feed = await db.CatalogFeeds.AsNoTracking().SingleOrDefaultAsync(f => f.KeyHash == hash && f.IsActive, ct);
         if (feed is null)
         {
             return null;
@@ -202,9 +228,20 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
                                  select new { v.ItemId, c.Name, v.Value }).ToListAsync(ct))
             .ToLookup(p => p.ItemId);
 
-        if (feed.Touch(clock.UtcNow))
+        // D324: до 5 фото предложения (основное — первым); у модификации без своих фото — фото основной позиции.
+        var photoOwners = offers.Select(o => o.Item.ParentItemId ?? o.Item.Id).Concat(offerIds).ToHashSet();
+        var photos = photoLinks is null
+            ? Enumerable.Empty<long>().ToLookup(x => x)
+            : (await db.ItemPhotos.AsNoTracking().Where(p => p.OrganizationId == org).OrderBy(p => p.SortOrder).ThenBy(p => p.Id)
+                .Select(p => new { p.Id, p.ItemId }).ToListAsync(ct)).Where(p => photoOwners.Contains(p.ItemId)).ToLookup(p => p.ItemId, p => p.Id);
+
+        // Ревью: отметка запроса — прямым UPDATE (без проверки версии): одновременные запросы площадки не дают 500.
+        var now = clock.UtcNow;
+        if (feed.Touch(now))
         {
-            await db.SaveChangesAsync(ct);
+            var minuteAgo = now.AddMinutes(-1);
+            await db.CatalogFeeds.Where(f => f.Id == feed.Id && (f.LastRequestedAtUtc == null || f.LastRequestedAtUtc < minuteAgo))
+                .ExecuteUpdateAsync(u => u.SetProperty(f => f.LastRequestedAtUtc, now), ct);
         }
 
         var currency = organization.CountryCode switch
@@ -224,9 +261,9 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
             x.WriteStartElement("yml_catalog");
             x.WriteAttributeString("date", clock.UtcNow.ToString("yyyy-MM-ddTHH:mm+00:00", CultureInfo.InvariantCulture));
             x.WriteStartElement("shop");
-            x.WriteElementString("name", Cut(organization.ShortName, 20));
-            x.WriteElementString("company", organization.FullName);
-            x.WriteElementString("url", organization.WebsiteUrl ?? fallbackUrl);
+            x.WriteElementString("name", XmlText(Cut(organization.ShortName, 20)));
+            x.WriteElementString("company", XmlText(organization.FullName));
+            x.WriteElementString("url", XmlText(organization.WebsiteUrl ?? fallbackUrl));
             x.WriteElementString("platform", "knitERP");
             x.WriteStartElement("currencies");
             x.WriteStartElement("currency");
@@ -245,7 +282,7 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
                     x.WriteAttributeString("parentId", parent.ToString(CultureInfo.InvariantCulture));
                 }
 
-                x.WriteString(g.Name);
+                x.WriteString(XmlText(g.Name));
                 x.WriteEndElement();
             }
 
@@ -263,7 +300,16 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
                     x.WriteAttributeString("group_id", pid.ToString(CultureInfo.InvariantCulture));
                 }
 
-                x.WriteElementString("name", i.Name);
+                x.WriteElementString("name", XmlText(i.Name));
+                if (photoLinks is not null)
+                {
+                    var own = photos[i.Id].ToList();
+                    foreach (var photoId in (own.Count > 0 || i.ParentItemId is not { } parent ? own : photos[parent]).Take(MaxPicturesPerOffer))
+                    {
+                        x.WriteElementString("picture", $"{fallbackUrl.TrimEnd('/')}/feeds/photos/{photoLinks.Token(feed.Id, photoId)}");
+                    }
+                }
+
                 x.WriteElementString("price", i.Price.ToString("0.##", CultureInfo.InvariantCulture));
                 x.WriteElementString("currencyId", currency);
                 if (o.GroupId is { } gid && usedGroups.Contains(gid))
@@ -271,21 +317,21 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
                     x.WriteElementString("categoryId", gid.ToString(CultureInfo.InvariantCulture));
                 }
 
-                x.WriteElementString("vendorCode", i.Article ?? i.Code);
-                x.WriteElementString("shop-sku", i.Code);
+                x.WriteElementString("vendorCode", XmlText(i.Article ?? i.Code));
+                x.WriteElementString("shop-sku", XmlText(i.Code));
                 foreach (var code in barcodes[i.Id].Concat(i.Gtin is { } gtin ? [gtin] : []).Distinct().Take(10))
                 {
-                    x.WriteElementString("barcode", code);
+                    x.WriteElementString("barcode", XmlText(code));
                 }
 
                 if (i.Description is { Length: > 0 } description)
                 {
-                    x.WriteElementString("description", description);
+                    x.WriteElementString("description", XmlText(description));
                 }
 
                 if (i.OriginCountryName is { Length: > 0 } country)
                 {
-                    x.WriteElementString("country_of_origin", country);
+                    x.WriteElementString("country_of_origin", XmlText(country));
                 }
 
                 if (i.WeightKg is > 0 and var weight)
@@ -297,8 +343,8 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
                 foreach (var p in parameters[i.Id])
                 {
                     x.WriteStartElement("param");
-                    x.WriteAttributeString("name", p.Name);
-                    x.WriteString(p.Value);
+                    x.WriteAttributeString("name", XmlText(p.Name));
+                    x.WriteString(XmlText(p.Value));
                     x.WriteEndElement();
                 }
 
@@ -312,6 +358,71 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
         }
 
         return new CatalogFeedFile(feed.Id, buffer.ToArray(), offers.Count);
+    }
+
+    /// <summary>Ключ фида всё ещё действует — проверка перед ответом из кэша: выключенный фид перестаёт отдаваться сразу.</summary>
+    public Task<bool> IsLiveAsync(string key, CancellationToken ct = default)
+    {
+        var hash = CatalogFeed.Hash(key);
+        return db.CatalogFeeds.AnyAsync(f => f.KeyHash == hash && f.IsActive, ct);
+    }
+
+    /// <summary>
+    /// Фото по подписанной ссылке из фида — без входа (D324): токен цел и не просрочен, фид включён, фото — той же организации; иначе null (404).
+    /// </summary>
+    public async Task<(string ContentType, byte[] Content)?> PhotoAsync(string? token, CancellationToken ct = default)
+    {
+        if (photoLinks is null || string.IsNullOrEmpty(token) || token.Length > 400 || !photoLinks.TryRead(token, out var feedId, out var photoId))
+        {
+            return null;
+        }
+
+        var org = await db.CatalogFeeds.AsNoTracking().Where(f => f.Id == feedId && f.IsActive).Select(f => (long?)f.OrganizationId).SingleOrDefaultAsync(ct);
+        if (org is null)
+        {
+            return null;
+        }
+
+        var photo = await db.ItemPhotos.AsNoTracking().Where(p => p.Id == photoId && p.OrganizationId == org)
+            .Select(p => new { p.ContentType, p.Content }).SingleOrDefaultAsync(ct);
+        return photo is null ? null : (photo.ContentType, photo.Content);
+    }
+
+    /// <summary>
+    /// Ревью: символы, недопустимые в XML (\u000B из Word, управляющие, одиночные суррогаты), выбрасываются — иначе один такой символ
+    /// в названии ломал весь фид (500).
+    /// </summary>
+    internal static string XmlText(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        StringBuilder? sb = null;
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+            var pair = char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]);
+            if (pair || XmlConvert.IsXmlChar(c))
+            {
+                if (sb is not null)
+                {
+                    sb.Append(c);
+                    if (pair)
+                    {
+                        sb.Append(value[i + 1]);
+                    }
+                }
+
+                i += pair ? 1 : 0;
+                continue;
+            }
+
+            sb ??= new StringBuilder(value, 0, i, value.Length);
+        }
+
+        return sb?.ToString() ?? value;
     }
 
     /// <summary>Группы предложений вместе с их родителями — дерево категорий фида без пустых веток.</summary>

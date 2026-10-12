@@ -117,3 +117,33 @@ public static class Ean13Pattern
 
     private static string Complement(string bits) => new(bits.Select(b => b == '1' ? '0' : '1').ToArray());
 }
+
+/// <summary>
+/// Проверка, что штрихкод прочитается сканером (D316): ширина модуля (самого тонкого штриха) на этикетке. Для термопринтера 203 dpi модуль
+/// должен быть не тоньше 2 точек ≈ 0,25 мм; EAN-13 со своим рисунком надёжно читается и при ≈ 0,2 мм (проверено декодером на 203 и 300 dpi).
+/// Тоньше — штрихи сливаются: длинный Code 128 на маленькой этикетке не читается.
+/// </summary>
+public static class BarcodeFit
+{
+    public const decimal MinModuleCode128Mm = 0.25m;
+    public const decimal MinModuleEan13Mm = 0.19m;
+
+    /// <summary>Модулей вместе с полями тишины, как их рисует этикетка: EAN-13 — 95 + 11 + 7; Code 128 — штрихи + 2 × 10.</summary>
+    public static int Modules(string code) =>
+        Ean13Pattern.CanEncode(code) ? 113 : KnitErp.Domain.Common.Code128.Widths(code).Sum() + 20;
+
+    /// <summary>Ширина модуля в мм на доступной ширине; EAN-13 ограничен ещё и высотой (рисуется с сохранением пропорций 113 × 46).</summary>
+    public static decimal ModuleMm(string code, decimal widthMm, decimal barcodeHeightMm)
+    {
+        var modules = Modules(code);
+        var byWidth = widthMm / modules;
+        return Ean13Pattern.CanEncode(code) ? Math.Min(byWidth, barcodeHeightMm / 46m) : byWidth;
+    }
+
+    public static bool Readable(string code, decimal widthMm, decimal barcodeHeightMm) =>
+        ModuleMm(code, widthMm, barcodeHeightMm) >= (Ean13Pattern.CanEncode(code) ? MinModuleEan13Mm : MinModuleCode128Mm);
+
+    /// <summary>Сколько мм ширины нужно, чтобы код прочитался.</summary>
+    public static decimal RequiredWidthMm(string code) =>
+        decimal.Round(Modules(code) * (Ean13Pattern.CanEncode(code) ? MinModuleEan13Mm : MinModuleCode128Mm), 1, MidpointRounding.ToPositiveInfinity);
+}

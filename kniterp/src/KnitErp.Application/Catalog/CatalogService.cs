@@ -255,7 +255,10 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         await RequireActiveUnitAsync(ctx, cmd.UnitId, ct);
         // D312: выключенный вид не создаётся; пустой код — следующий номер автокода (если он включён).
-        var settings = await db.CatalogSettings.SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct);
+        // Ревью: счётчики автокодов — свежие и под блокировкой организации до конца транзакции (иначе устаревшая копия во вкладке
+        // или одновременное создание из двух вкладок роняли страницу ошибкой версии).
+        await using var tx = await db.BeginTransactionAsync(ct);
+        var settings = await ItemCodesService.FreshSettingsAsync(db, ctx.OrganizationId, ct, lockCounters: true);
         // D317: незаданная ставка НДС, ТН ВЭД, страна и маркировка — из значений по умолчанию группы (с учётом родителей).
         var groupDefaults = await GroupDefaultsService.ResolveAsync(db, ctx.OrganizationId, cmd.GroupId, ct);
         cmd = cmd with { VatRateId = cmd.VatRateId ?? groupDefaults.VatRateId };
@@ -302,7 +305,6 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         db.Items.Add(item);
-        await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
         // D315: внутренний EAN-13 новой позиции (кроме услуги), если включён.
         if (settings is { AutoBarcode: true } && item.Type != ItemType.Service)
@@ -312,7 +314,7 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         Audit(ctx, AuditActions.CatalogCreated, nameof(Item), item.Id, null, $"{item.Code} {item.Name}", ItemTypes.Name(item.Type));
-        await db.SaveChangesAsync(ct);
+        await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
         return item.Id;
     }

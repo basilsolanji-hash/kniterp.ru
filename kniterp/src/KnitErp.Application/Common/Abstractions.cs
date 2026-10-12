@@ -145,6 +145,12 @@ public interface IKnitErpDbContext : IAsyncDisposable
     void DiscardChanges();
 
     /// <summary>
+    /// Перечитать отслеживаемую сущность из базы (значения и rowversion): у вкладки Blazor контекст живёт долго, и запрос с отслеживанием
+    /// вернул бы копию, загруженную раньше (например, счётчик автокодов, который уже сдвинул другой пользователь).
+    /// </summary>
+    Task ReloadAsync(object entity, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Исключительная блокировка складов до конца текущей транзакции: проверка остатка и запись расхода
     /// не перемежаются с другим проведением по тем же складам.
     /// </summary>

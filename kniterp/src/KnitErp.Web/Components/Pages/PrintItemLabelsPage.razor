@@ -62,6 +62,12 @@
         {
             <span class="warn">Шаблонов нет — печатается образец «@info.Template.Name». Свой шаблон — в конструкторе.</span>
         }
+        @if (ThinBarcodes(info) is { Count: > 0 } thin)
+        {
+            @* D316: штрихкод тоньше, чем надёжно читает сканер, — предупреждение, на бумагу не выводится. *@
+            <span class="warn" role="alert">Штрихкод может не прочитаться (слишком узкая этикетка) у @thin.Count поз.: @string.Join(", ", thin.Take(5))@(thin.Count > 5 ? " …" : "").
+                Создайте им EAN-13 в карточке или выберите этикетку шире.</span>
+        }
     }
 </form>
 
@@ -123,6 +129,20 @@ else
     private int SkipValue => Math.Clamp(Skip ?? 0, 0, 239);
 
     private static string Mm(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "mm";
+
+    /// <summary>Коды позиций, чей штрихкод на этой этикетке тоньше надёжного (BarcodeFit).</summary>
+    private static List<string> ThinBarcodes(LabelPrintDto d)
+    {
+        var bar = d.Template.Elements.FirstOrDefault(e => e.Field == LabelField.Barcode);
+        if (bar is null)
+        {
+            return [];
+        }
+
+        var width = d.Template.WidthMm - 2 * d.Template.PaddingMm;
+        return d.Items.Where(i => i.Barcode is { Length: > 0 and <= 80 } b && b.All(c => c is >= ' ' and <= '~') && !BarcodeFit.Readable(b, width, bar.BarcodeHeightMm))
+            .Select(i => i.Code).ToList();
+    }
 
     protected override async Task OnInitializedAsync()
     {

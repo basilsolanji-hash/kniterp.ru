@@ -41,6 +41,7 @@ public sealed class PriceRuleService(IKnitErpDbContext db, IAccessGuard guard, I
         }
         else
         {
+            await db.ReloadAsync(rule, ct); // копия во вкладке могла устареть — версия сравнивается со свежей
             rule.EnsureVersion(rule.RowVersion, rowVersion);
         }
 
@@ -57,11 +58,20 @@ public sealed class PriceRuleService(IKnitErpDbContext db, IAccessGuard guard, I
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.CatalogChanged, nameof(PriceRule), priceTypeId.ToString(), null,
             (isActive ? "включено: " : "выключено: ") + Revaluation.Describe(RevaluationMode.FromPurchase, factor, rounding), $"Автоцена «{type.Name}»",
             currentUser.CorrelationId));
-        await using var tx = await db.BeginTransactionAsync(ct);
-        await db.SaveOrConflictAsync(ct);
-        var changed = isActive ? await AutoPrices.ApplyAsync(db, org, null, ctx.UserId, clock.UtcNow, ct) : 0;
-        await tx.CommitAsync(ct);
-        return changed;
+        try
+        {
+            await using var tx = await db.BeginTransactionAsync(ct);
+            await db.SaveOrConflictAsync(ct);
+            var changed = isActive ? await AutoPrices.ApplyAsync(db, org, null, ctx.UserId, clock.UtcNow, ct) : 0;
+            await tx.CommitAsync(ct);
+            return changed;
+        }
+        catch
+        {
+            // Ревью: конфликт или отказ пересчёта не оставляют правило и часть цен в контексте вкладки.
+            db.DiscardChanges();
+            throw;
+        }
     }
 }
 
@@ -71,7 +81,9 @@ public static class AutoPrices
     /// <summary>itemIds null — все действующие позиции с закупочной ценой. Возвращает число изменённых цен; SaveChanges — здесь.</summary>
     public static async Task<int> ApplyAsync(IKnitErpDbContext db, long org, IReadOnlyCollection<long>? itemIds, long? userId, DateTime nowUtc, CancellationToken ct)
     {
-        var rules = await db.PriceRules.AsNoTracking().Where(r => r.OrganizationId == org && r.IsActive).ToListAsync(ct);
+        // Ревью: правило вида цены, ушедшего в архив, не применяется.
+        var rules = await db.PriceRules.AsNoTracking()
+            .Where(r => r.OrganizationId == org && r.IsActive && db.PriceTypes.Any(t => t.Id == r.PriceTypeId && !t.IsArchived)).ToListAsync(ct);
         if (rules.Count == 0 || itemIds is { Count: 0 })
         {
             return 0;
