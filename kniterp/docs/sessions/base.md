@@ -17,6 +17,7 @@
 | D800–D899 | проверка интерфейса всех экранов — `claude/ui-review`, ТЗ `docs/tz/ui-review.md` |
 | D900–D999 | база знаний помощника (4000 ответов) — `claude/assistant-kb`, ТЗ `docs/tz/knowledge-base.md` |
 | D1000–D1099 | подписка и коммерческий запуск — `claude/saas-subscription`, ТЗ `docs/tz/subscription.md` |
+| D1100–D1199 | «Продажи» — полная доработка — `claude/sales`, ТЗ `docs/tz/sales.md` |
 
 ## Состояние слияний (11.10.2026)
 - Владелец продукта разрешил сливать модули в базу всегда, без отдельного вопроса.
