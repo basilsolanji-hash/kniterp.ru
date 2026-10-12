@@ -20,6 +20,8 @@ public sealed class CrmServices(KnitErpDbContext db, CrmSettingsService settings
     public required CrmMailingService Mailings { get; init; }
     public required CrmImportService Import { get; init; }
     public required CrmMessengerService Messenger { get; init; }
+    public required CrmEmailTemplateService Templates { get; init; }
+    public required CrmMailboxService Mailbox { get; init; }
 
     public KnitErpDbContext Db { get; } = db;
     public CrmSettingsService Settings { get; } = settings;
@@ -40,6 +42,8 @@ public static class CrmTestKit
     public static FakeMessengerClient Max { get; } = new(KnitErp.Domain.Crm.CrmMessengerKind.Max);
     public static FakeMessengerClient Telegram { get; } = new(KnitErp.Domain.Crm.CrmMessengerKind.Telegram);
     public static FakeMessengerClient WhatsApp { get; } = new(KnitErp.Domain.Crm.CrmMessengerKind.WhatsApp);
+    /// <summary>IMAP без сети: письма кладёт тест.</summary>
+    public static FakeMailboxClient Imap { get; } = new();
     private static int _counterpartySeed = 961_000_000;
 
     public static CrmServices Crm(this SqlTestHost host, long userId, long organizationId,
@@ -63,6 +67,8 @@ public static class CrmTestKit
             Mailings = new CrmMailingService(db, guard, user, host.Clock, host.Mail),
             Import = new CrmImportService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet),
             Messenger = new CrmMessengerService(db, guard, user, host.Clock, [Max, Telegram, WhatsApp], host.Mail),
+            Templates = new CrmEmailTemplateService(db, guard, user, host.Clock),
+            Mailbox = new CrmMailboxService(db, guard, user, host.Clock, Imap),
         };
     }
 
@@ -132,4 +138,52 @@ public sealed class FakeMessengerClient(KnitErp.Domain.Crm.CrmMessengerKind kind
         Sent.Enqueue((peer, text));
         return Task.FromResult(true);
     }
+}
+
+public sealed class FakeMailboxClient : ICrmMailboxClient
+{
+    /// <summary>Письма ящика по логину: тест добавляет, клиент отдаёт те, что после курсора.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, List<CrmInboundEmail>> Boxes { get; } = new();
+
+    public Task TestAsync(CrmMailboxCredentials c, CancellationToken ct = default) =>
+        c.Password == "wrong" ? throw new CrmMailboxException("Логин или пароль не подошли.") : Task.CompletedTask;
+
+    public Task<CrmMailboxFetch> FetchAsync(CrmMailboxCredentials c, long? uidValidity, long? lastUid, int max, CancellationToken ct = default)
+    {
+        var list = Boxes.GetOrAdd(c.Login, _ => []);
+        lock (list)
+        {
+            return Task.FromResult(new CrmMailboxFetch(7, list.Where(e => uidValidity != 7 || lastUid is null || e.Uid > lastUid).OrderBy(e => e.Uid).Take(max).ToList()));
+        }
+    }
+
+    public void Add(string login, CrmInboundEmail email)
+    {
+        var list = Boxes.GetOrAdd(login, _ => []);
+        lock (list)
+        {
+            list.Add(email);
+        }
+    }
+}
+
+/// <summary>D676: IMAP не ходит во внутреннюю сеть (SSRF).</summary>
+public sealed class ImapAddressTests
+{
+    [Theory]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("10.1.2.3", true)]
+    [InlineData("172.20.0.5", true)]
+    [InlineData("192.168.1.10", true)]
+    [InlineData("169.254.169.254", true)]
+    [InlineData("100.64.0.1", true)]
+    [InlineData("0.0.0.0", true)]
+    [InlineData("::1", true)]
+    [InlineData("fd00::1", true)]
+    [InlineData("fe80::1", true)]
+    [InlineData("::ffff:10.0.0.1", true)]
+    [InlineData("93.184.216.34", false)]
+    [InlineData("2606:2800:220:1:248:1893:25c8:1946", false)]
+    public void Internal_addresses_are_refused(string ip, bool internalAddress) =>
+        Assert.Equal(internalAddress, KnitErp.Infrastructure.Email.ImapMailboxClient.IsInternal(System.Net.IPAddress.Parse(ip)));
 }

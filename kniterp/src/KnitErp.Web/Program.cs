@@ -109,6 +109,7 @@ if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
 if (!builder.Configuration.GetValue<bool>("Hr:StatusWorkerDisabled"))
 {
     builder.Services.AddHostedService<KnitErp.Web.Api.HrStatusWorker>();
+    builder.Services.AddHostedService<KnitErp.Web.Crm.CrmMailWorker>(); // D675, D676: очередь рассылок и входящая почта CRM
 }
 
 // D102: тело запросов API — как и ответы: перечисления строками («Receipt»), имена в camelCase.

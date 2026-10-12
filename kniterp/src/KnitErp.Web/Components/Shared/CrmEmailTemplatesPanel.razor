@@ -1,0 +1,148 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+
+@* D674: шаблоны писем CRM с переменными — для писем из карточек и рассылок. Свой контекст базы: панель не мешает операциям страницы. *@
+<section class="panel" id="templates" aria-label="@L("Шаблоны писем")">
+    <h2>@L("Шаблоны писем")</h2>
+    <p class="muted small">
+        @L("Переменные подставятся из карточки:")
+        @foreach (var v in CrmEmailTemplate.Variables)
+        {
+            <code title="@L(v.Meaning)">{{@v.Name}}</code> @(" ")
+        }
+    </p>
+    @if (_error is not null)
+    {
+        <div class="error" role="alert">@_error</div>
+    }
+    @if (_flash is not null)
+    {
+        <div class="flash" role="status">@_flash</div>
+    }
+    @if (_rows.Count > 0)
+    {
+        <div class="scroll">
+            <table class="compact">
+                <thead><tr><th>@L("Название")</th><th>@L("Тема")</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var t in _rows)
+                    {
+                        <tr class="@(t.IsArchived ? "muted" : null)">
+                            <td>@t.Name @if (t.IsArchived) { <span class="tag">@L("архив")</span> }</td>
+                            <td>@t.Subject</td>
+                            <td class="row-actions">
+                                @if (CanEdit)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => Edit(t)" disabled="@_busy">@L("Изменить")</button>
+                                    <button type="button" class="secondary" @onclick="() => ArchiveAsync(t)" disabled="@_busy">@(t.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <p class="muted small">@L("Шаблонов пока нет. Например: «Спасибо за заявку», «Напоминание о КП», «Образцы отправлены».")</p>
+    }
+    @if (CanEdit)
+    {
+        <form @onsubmit="SaveAsync" aria-label="@(_edit is null ? L("Новый шаблон") : L("Изменить шаблон"))">
+            <h3>@(_edit is null ? L("Новый шаблон") : L("Изменить «{0}»", _edit.Name))</h3>
+            <div class="grid">
+                <label>@L("Название") <input @bind="_name" maxlength="@CrmEmailTemplate.NameMaxLength" required placeholder="@L("Спасибо за заявку")" /></label>
+                <label class="wide">@L("Тема") <input @bind="_subject" maxlength="@CrmEmailTemplate.SubjectMaxLength" required placeholder="@L("{{Организация}}: ваша заявка принята")" /></label>
+                <label class="wide">@L("Текст") <textarea rows="5" @bind="_body" maxlength="@CrmEmailTemplate.BodyMaxLength" required placeholder="@L("Здравствуйте, {{Имя}}! Спасибо за обращение. Ваш менеджер — {{Менеджер}}.")"></textarea></label>
+            </div>
+            <div class="actions">
+                <button type="submit" disabled="@_busy">@(_edit is null ? L("Добавить шаблон") : L("Сохранить"))</button>
+                @if (_edit is not null)
+                {
+                    <button type="button" class="secondary" @onclick="() => Edit(null)">@L("Отмена")</button>
+                }
+            </div>
+        </form>
+    }
+</section>
+
+@code {
+    [Parameter] public bool CanEdit { get; set; }
+
+    private IReadOnlyList<CrmEmailTemplateDto> _rows = [];
+    private CrmEmailTemplateDto? _edit;
+    private string? _name;
+    private string? _subject;
+    private string? _body;
+    private string? _error;
+    private string? _flash;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => RunAsync(LoadAsync, null);
+
+    private async Task LoadAsync()
+    {
+        await using var db = Factory.Create();
+        _rows = await Service(db).ListAsync(includeArchived: true);
+    }
+
+    private void Edit(CrmEmailTemplateDto? t) => (_edit, _name, _subject, _body, _flash) = (t, t?.Name, t?.Subject, t?.Body, null);
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            if (_edit is null)
+            {
+                await Service(db).CreateAsync(_name, _subject, _body);
+            }
+            else
+            {
+                await Service(db).UpdateAsync(_edit.Id, _name, _subject, _body, _edit.RowVersion);
+            }
+        }
+
+        Edit(null);
+        await LoadAsync();
+    }, L("Шаблон сохранён."));
+
+    private Task ArchiveAsync(CrmEmailTemplateDto t) => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).SetArchivedAsync(t.Id, !t.IsArchived, t.RowVersion);
+        }
+
+        await LoadAsync();
+    }, t.IsArchived ? L("Шаблон возвращён.") : L("Шаблон в архиве."));
+
+    private CrmEmailTemplateService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        (_error, _flash) = (null, null);
+        try
+        {
+            await action();
+            _flash = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

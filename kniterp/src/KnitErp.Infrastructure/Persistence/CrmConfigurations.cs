@@ -473,7 +473,7 @@ internal sealed class CrmMailingConfiguration : IEntityTypeConfiguration<CrmMail
 {
     public void Configure(EntityTypeBuilder<CrmMailing> b)
     {
-        b.ToTable("crm_mailings", t => t.HasCheckConstraint("ck_crm_mailings_status", "[Status] IN (1, 2)"));
+        b.ToTable("crm_mailings", t => t.HasCheckConstraint("ck_crm_mailings_status", "[Status] IN (1, 2, 3, 4)"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Subject).HasMaxLength(CrmMailing.SubjectMaxLength).IsRequired();
@@ -481,9 +481,13 @@ internal sealed class CrmMailingConfiguration : IEntityTypeConfiguration<CrmMail
         b.Property(x => x.Status).HasConversion<byte>();
         b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.SentAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ScheduledAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.RowVersion).IsRowVersion();
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_created_by");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.QueuedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_queued_by");
+        // D675: фоновая отправка ищет запланированные и стоящие в очереди рассылки всех организаций.
+        b.HasIndex(x => new { x.Status, x.ScheduledAtUtc }).HasDatabaseName("ix_crm_mailings_queue");
         b.HasOne<KnitErp.Domain.Tagging.Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_tag");
         b.HasMany(x => x.Recipients).WithOne().HasForeignKey(x => x.MailingId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.Recipients).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_recipients");
@@ -499,6 +503,7 @@ internal sealed class CrmMailingRecipientConfiguration : IEntityTypeConfiguratio
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Email).HasMaxLength(CrmText.EmailMaxLength).IsRequired();
+        b.Property(x => x.AttemptedAtUtc).HasColumnType("datetime2(3)");
         b.HasOne<CrmContact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailing_recipients_contact");
         b.HasIndex(x => new { x.MailingId, x.ContactId }).IsUnique().HasDatabaseName("ux_crm_mailing_recipients");
     }
@@ -539,6 +544,46 @@ internal sealed class CrmMessengerChannelConfiguration : IEntityTypeConfiguratio
         b.Ignore(x => x.IsConnected);
         b.HasIndex(x => new { x.OrganizationId, x.Kind }).IsUnique().HasDatabaseName("ux_crm_messenger_channels_org_kind");
         b.HasIndex(x => x.SecretHash).IsUnique().HasFilter("[SecretHash] IS NOT NULL").HasDatabaseName("ux_crm_messenger_channels_secret");
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ConnectedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+internal sealed class CrmEmailTemplateConfiguration : IEntityTypeConfiguration<CrmEmailTemplate>
+{
+    public void Configure(EntityTypeBuilder<CrmEmailTemplate> b)
+    {
+        b.ToTable("crm_email_templates");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(CrmEmailTemplate.NameMaxLength).IsRequired();
+        b.Property(x => x.Subject).HasMaxLength(CrmEmailTemplate.SubjectMaxLength).IsRequired();
+        b.Property(x => x.Body).HasMaxLength(CrmEmailTemplate.BodyMaxLength).IsRequired();
+        b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique().HasDatabaseName("ux_crm_email_templates_org_name");
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+internal sealed class CrmMailboxConfiguration : IEntityTypeConfiguration<CrmMailbox>
+{
+    public void Configure(EntityTypeBuilder<CrmMailbox> b)
+    {
+        b.ToTable("crm_mailboxes", t => t.HasCheckConstraint("ck_crm_mailboxes_port", "[Port] IN (0, 143, 993)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Host).HasMaxLength(CrmMailbox.HostMaxLength).IsRequired();
+        b.Property(x => x.Login).HasMaxLength(CrmMailbox.LoginMaxLength).IsRequired();
+        // D676: пароль ящика — шифрованием мастер-ключом.
+        b.Property(x => x.Password).HasConversion(PersonalDataColumns.Text).HasMaxLength(PersonalDataColumns.Cipher(CrmMailbox.PasswordMaxLength));
+        b.Property(x => x.LastError).HasMaxLength(CrmMailbox.ErrorMaxLength);
+        b.Property(x => x.ConnectedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.LastCheckAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.IsConnected);
+        b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_crm_mailboxes_org");
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ConnectedByUserId).OnDelete(DeleteBehavior.Restrict);
     }

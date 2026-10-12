@@ -222,7 +222,8 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
             throw new BusinessRuleException("crm.mail.not_configured", "Почта сервера не настроена — обратитесь к администратору.");
         }
 
-        if (!await mail.SendAsync(address, subj, body, ct))
+        var (replyTo, replyName) = await CrmEmailTemplateService.ReplyToAsync(db, ctx.UserId, ct);
+        if (!await mail.SendAsync(new EmailMessage(address, subj, body, CrmEmailHtml.FromText(body), replyTo, replyName), ct))
         {
             throw new BusinessRuleException("crm.mail.failed", "Письмо не отправлено: почтовый сервер не принял его. Попробуйте позже.");
         }

@@ -22,7 +22,10 @@ public sealed class SmtpEmailSender(EmailOptions options, ILogger<SmtpEmailSende
 
     public string? PublicUrl => options.PublicUrl?.TrimEnd('/');
 
-    public async Task<bool> SendAsync(string to, string subject, string text, CancellationToken ct = default)
+    public Task<bool> SendAsync(string to, string subject, string text, CancellationToken ct = default) =>
+        SendAsync(new EmailMessage(to, subject, text), ct);
+
+    public async Task<bool> SendAsync(EmailMessage m, CancellationToken ct = default)
     {
         if (!IsConfigured)
         {
@@ -33,9 +36,21 @@ public sealed class SmtpEmailSender(EmailOptions options, ILogger<SmtpEmailSende
         {
             var message = new MimeMessage();
             message.From.Add(new MailboxAddress("knitERP", From!));
-            message.To.Add(MailboxAddress.Parse(to));
-            message.Subject = subject;
-            message.Body = new TextPart("plain") { Text = text };
+            message.To.Add(MailboxAddress.Parse(m.To));
+            if (m.ReplyTo is { } replyTo && MailboxAddress.TryParse(replyTo, out var reply))
+            {
+                reply.Name = m.ReplyToName;
+                message.ReplyTo.Add(reply);
+            }
+
+            if (m.UnsubscribeUrl is { } unsubscribe)
+            {
+                message.Headers.Add("List-Unsubscribe", $"<{unsubscribe}>");
+            }
+
+            message.Subject = m.Subject;
+            var builder = new BodyBuilder { TextBody = m.Text, HtmlBody = m.Html };
+            message.Body = builder.ToMessageBody();
 
             if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
             {
@@ -64,7 +79,7 @@ public sealed class SmtpEmailSender(EmailOptions options, ILogger<SmtpEmailSende
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Адрес получателя в лог не пишем: это персональные данные.
-            logger.LogWarning(ex, "Письмо «{Subject}» не отправлено", subject);
+            logger.LogWarning(ex, "Письмо «{Subject}» не отправлено", m.Subject);
             return false;
         }
     }

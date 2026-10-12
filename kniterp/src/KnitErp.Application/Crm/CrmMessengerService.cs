@@ -124,10 +124,14 @@ public sealed class CrmMessengerService(IKnitErpDbContext db, IAccessGuard guard
         if (channel is null)
         {
             channel = CrmMessengerChannel.Create(ctx.OrganizationId, kind);
-            db.CrmMessengerChannels.Add(channel);
+            channel.Connect(t, credentials.AccountId, appSecret?.Trim(), account, Hash(secret), ctx.UserId, clock.UtcNow);
+            db.CrmMessengerChannels.Add(channel); // добавляется только после проверки реквизитов
         }
-
-        channel.Connect(t, credentials.AccountId, appSecret?.Trim(), account, Hash(secret), ctx.UserId, clock.UtcNow);
+        else
+        {
+            CrmMessengerChannel.Create(ctx.OrganizationId, kind).Connect(t, credentials.AccountId, appSecret?.Trim(), account, Hash(secret), ctx.UserId, clock.UtcNow);
+            channel.Connect(t, credentials.AccountId, appSecret?.Trim(), account, Hash(secret), ctx.UserId, clock.UtcNow);
+        }
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmSettingsChanged, nameof(CrmMessengerChannel),
             ctx.OrganizationId.ToString(), before, $"{name} подключён: {account}", "Мессенджеры", currentUser.CorrelationId));
         await db.SaveOrConflictAsync(ct);

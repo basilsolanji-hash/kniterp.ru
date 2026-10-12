@@ -71,6 +71,8 @@ else
     }
 
     <CrmMessengersPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
+    <CrmMailboxPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
+    <CrmEmailTemplatesPanel CanEdit="@_data.CanEdit" />
 
     <h2>@L("Воронки")</h2>
     @if (_data.CanEdit)

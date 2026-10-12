@@ -160,6 +160,8 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Crm.CrmOffer> CrmOffers { get; }
     DbSet<KnitErp.Domain.Crm.CrmSettings> CrmSettings { get; }
     DbSet<KnitErp.Domain.Crm.CrmMessengerChannel> CrmMessengerChannels { get; }
+    DbSet<KnitErp.Domain.Crm.CrmEmailTemplate> CrmEmailTemplates { get; }
+    DbSet<KnitErp.Domain.Crm.CrmMailbox> CrmMailboxes { get; }
     DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans { get; }
     DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings { get; }
     DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks { get; }

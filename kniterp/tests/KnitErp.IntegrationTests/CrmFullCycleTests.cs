@@ -301,13 +301,27 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
         await crm.Contacts.SetConsentAsync(yes, new CrmConsentValues(CrmProcessingBasis.Contract, null, null, true), (await crm.Contacts.GetAsync(yes)).RowVersion);
         var id = await crm.Mailings.CreateAsync("Новая коллекция", "Весенняя коллекция трикотажа готова.", null);
         Assert.Equal(1, await crm.Mailings.AudienceCountAsync(null));
-        var delivered = await crm.Mailings.SendAsync(id, (await crm.Mailings.GetAsync(id)).RowVersion);
-        Assert.Equal(1, delivered);
+        var queued = await crm.Mailings.SendAsync(id, (await crm.Mailings.GetAsync(id)).RowVersion);
+        Assert.Equal(1, queued);
+        Assert.Equal((CrmMailingStatus.Sending, 1), ((await crm.Mailings.GetAsync(id)).Status, (await crm.Mailings.GetAsync(id)).Pending));
+        await using (var worker = host.NewDb())
+        {
+            await CrmMailingService.ProcessQueueAsync(worker, host.Clock, host.Mail);
+        }
+
+        Assert.Equal((CrmMailingStatus.Sent, 0, 1), ((await crm.Mailings.GetAsync(id)).Status, (await crm.Mailings.GetAsync(id)).Pending, (await crm.Mailings.GetAsync(id)).Delivered));
         var letter = await host.Mail.WaitForAsync("yes@example.org");
+        var html = host.Mail.Messages.Last(x => x.To == "yes@example.org");
+        Assert.StartsWith("Здравствуйте, Согласен!", html.Text);
+        Assert.Contains("<a href=\"https://erp.test/account/crm-unsubscribe/", html.Html);
+        Assert.StartsWith("https://erp.test/account/crm-unsubscribe/", html.UnsubscribeUrl);
         Assert.Contains("/account/crm-unsubscribe/", letter!.Value.Text);
         Assert.DoesNotContain(host.Mail.Sent, m => m.To == "no@example.org");
-        Assert.Equal("crm.mailing.sent", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
-            await crm.Mailings.UpdateAsync(id, "x", "y", null, (await crm.Mailings.GetAsync(id)).RowVersion))).Code);
+        await using (var fresh = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            Assert.Equal("crm.mailing.sent", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+                await fresh.Mailings.UpdateAsync(id, "x", "y", null, (await fresh.Mailings.GetAsync(id)).RowVersion))).Code);
+        }
 
         var token = letter.Value.Text.Split("/account/crm-unsubscribe/")[1].Trim();
         await using (var db = host.NewDb())
@@ -320,6 +334,150 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
         var manager = await host.CrmUserAsync(org, SystemRoles.SalesManager);
         await using var m = host.Crm(manager, org.OrganizationId);
         await Assert.ThrowsAsync<AccessDeniedException>(() => m.Mailings.ListAsync());
+    }
+
+    [SqlFact]
+    public async Task Templates_fill_card_values_and_reject_unknown_variables()
+    {
+        var org = await host.CreateCrmOrganizationAsync();
+        await using var crm = host.Crm(org.OwnerUserId, org.OrganizationId);
+        Assert.Equal("crm.template.variable", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            crm.Templates.CreateAsync("Плохой", "Тема", "Здравствуйте, {{Фамилия}}!"))).Code);
+        var id = await crm.Templates.CreateAsync("Спасибо за заявку", "{{Организация}}: заявка «{{Сделка}}»",
+            "Здравствуйте, {{Имя}}! Сумма {{Сумма}}, менеджер {{Менеджер}}, компания {{Компания}}.");
+        Assert.Equal("crm.template.duplicate", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            crm.Templates.CreateAsync("Спасибо за заявку", "x", "y"))).Code);
+        var customer = await CustomerAsync(org);
+        var contact = await crm.Contacts.CreateAsync(new CrmContactValues("Мария Покупкина", Email: "maria@example.org"));
+        var deal = await crm.Deals.CreateAsync(new CrmDealValues("Пледы к зиме", customer, contact, 25000m));
+        var mail = await crm.Templates.RenderAsync(id, CrmTarget.Deal, deal);
+        Assert.Contains("заявка «Пледы к зиме»", mail.Subject);
+        Assert.Contains("Здравствуйте, Мария Покупкина! Сумма 25", mail.Text);
+        Assert.DoesNotContain("{{", mail.Text);
+
+        // Письмо из карточки — HTML с ответом менеджеру.
+        await crm.Activities.SendEmailAsync(CrmTarget.Deal, deal, "maria@example.org", mail.Subject, mail.Text);
+        var sent = host.Mail.Messages.Last(x => x.To == "maria@example.org");
+        Assert.NotNull(sent.Html);
+        Assert.NotNull(sent.ReplyTo);
+
+        // Шаблоны — справочник: в архив, а не удаление; менеджер пользуется, но не правит; чужая карточка — 404.
+        var t = (await crm.Templates.ListAsync()).Single();
+        await crm.Templates.SetArchivedAsync(id, true, t.RowVersion);
+        Assert.Empty(await crm.Templates.ListAsync());
+        await Assert.ThrowsAsync<NotFoundException>(() => crm.Templates.RenderAsync(id, CrmTarget.Deal, deal));
+        var manager = await host.CrmUserAsync(org, SystemRoles.SalesManager);
+        await using var m = host.Crm(manager, org.OrganizationId);
+        await Assert.ThrowsAsync<AccessDeniedException>(() => m.Templates.CreateAsync("Мой", "x", "y"));
+        var other = await host.CreateCrmOrganizationAsync();
+        await using var o = host.Crm(other.OwnerUserId, other.OrganizationId);
+        var foreign = await o.Templates.CreateAsync("Чужой", "x", "y");
+        await Assert.ThrowsAsync<NotFoundException>(() => crm.Templates.RenderAsync(foreign, CrmTarget.Deal, deal));
+    }
+
+    [SqlFact]
+    public async Task Scheduled_mailing_goes_out_on_time_and_skips_unsubscribed()
+    {
+        var org = await host.CreateCrmOrganizationAsync();
+        await using var crm = host.Crm(org.OwnerUserId, org.OrganizationId);
+        var a = await crm.Contacts.CreateAsync(new CrmContactValues("Анна", Email: "anna.sched@example.org"));
+        var b = await crm.Contacts.CreateAsync(new CrmContactValues("Борис", Email: "boris.sched@example.org"));
+        foreach (var c in new[] { a, b })
+        {
+            await crm.Contacts.SetConsentAsync(c, new CrmConsentValues(CrmProcessingBasis.Contract, null, null, true), (await crm.Contacts.GetAsync(c)).RowVersion);
+        }
+
+        var id = await crm.Mailings.CreateAsync("Акция {{Организация}}", "{{Имя}}, для вас скидка.", null);
+        var tz = await CrmEvents.TimeZoneAsync(crm.Db, org.OrganizationId, default);
+        var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(host.Clock.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(tz));
+        Assert.Equal("crm.mailing.schedule", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+            await crm.Mailings.ScheduleAsync(id, nowLocal.AddMinutes(1), (await crm.Mailings.GetAsync(id)).RowVersion))).Code);
+        await crm.Mailings.ScheduleAsync(id, nowLocal.AddHours(2), (await crm.Mailings.GetAsync(id)).RowVersion);
+        Assert.Equal("crm.mailing.scheduled", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+            await crm.Mailings.UpdateAsync(id, "x", "y", null, (await crm.Mailings.GetAsync(id)).RowVersion))).Code);
+
+        await using (var worker = host.NewDb())
+        {
+            await CrmMailingService.ProcessQueueAsync(worker, host.Clock, host.Mail); // время не пришло
+        }
+
+        Assert.Equal(CrmMailingStatus.Scheduled, (await crm.Mailings.GetAsync(id)).Status);
+        var saved = host.Clock.UtcNow;
+        try
+        {
+            host.Clock.UtcNow = saved.AddHours(3);
+            await using (var worker = host.NewDb())
+            {
+                // Первый проход ставит в очередь и отправляет пачку из одного письма; Борис отписывается до второго прохода.
+                await CrmMailingService.ProcessQueueAsync(worker, host.Clock, host.Mail, batch: 1);
+            }
+
+            var contactB = await crm.Contacts.GetAsync(b);
+            await crm.Contacts.SetConsentAsync(b, new CrmConsentValues(CrmProcessingBasis.Contract, null, null, false), contactB.RowVersion);
+            await using (var worker = host.NewDb())
+            {
+                await CrmMailingService.ProcessQueueAsync(worker, host.Clock, host.Mail);
+            }
+        }
+        finally
+        {
+            host.Clock.UtcNow = saved;
+        }
+
+        var dto = await crm.Mailings.GetAsync(id);
+        Assert.Equal((CrmMailingStatus.Sent, 2, 1), (dto.Status, dto.Recipients, dto.Delivered));
+        var letter = host.Mail.Messages.Single(x => x.To == "anna.sched@example.org");
+        Assert.StartsWith("Анна, для вас скидка.", letter.Text);
+        Assert.DoesNotContain(host.Mail.Messages, x => x.To == "boris.sched@example.org");
+    }
+
+    [SqlFact]
+    public async Task Inbound_email_lands_in_contact_deal_or_new_lead_once()
+    {
+        var org = await host.CreateCrmOrganizationAsync();
+        var login = $"sales{org.OrganizationId}@example.org";
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            Assert.Equal("crm.mailbox.host", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                crm.Mailbox.ConnectAsync("127.0.0.1", 993, login, "secret", true))).Code);
+            Assert.Equal("crm.mailbox.port", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                crm.Mailbox.ConnectAsync("imap.example.org", 25, login, "secret", true))).Code);
+            Assert.Equal("crm.mailbox.connect", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                crm.Mailbox.ConnectAsync("imap.example.org", 993, login, "wrong", true))).Code);
+            await crm.Mailbox.ConnectAsync("imap.example.org", 993, login, "app-password-test", true);
+            Assert.True((await crm.Mailbox.StatusAsync()).Connected);
+            await using var raw = host.NewDb();
+            var stored = await raw.Database.SqlQueryRaw<string>("SELECT [Password] AS [Value] FROM [kniterp].[crm_mailboxes] WHERE [OrganizationId] = {0}",
+                org.OrganizationId).SingleAsync();
+            Assert.DoesNotContain("app-password-test", stored);
+
+            var customer = await CustomerAsync(org);
+            var contact = await crm.Contacts.CreateAsync(new CrmContactValues("Ирина Заказова", Email: "irina.in@example.org"));
+            await crm.Deals.CreateAsync(new CrmDealValues("Шапки для сети", customer, contact, 10000m));
+        }
+
+        CrmTestKit.Imap.Add(login, new CrmInboundEmail(1, "<m1@example.org>", "irina.in@example.org", "Ирина", "Re: КП", "Согласны, выставляйте счёт."));
+        CrmTestKit.Imap.Add(login, new CrmInboundEmail(2, "<m2@example.org>", "new.client@example.org", "Пётр", "Запрос", "Нужно 500 шарфов. ООО «Шарф-Опт»"));
+        CrmTestKit.Imap.Add(login, new CrmInboundEmail(3, "<m3@example.org>", login, null, "Копия", "Своё письмо"));
+        CrmTestKit.Imap.Add(login, new CrmInboundEmail(4, "<m1@example.org>", "irina.in@example.org", "Ирина", "Re: КП", "Повтор того же письма"));
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            Assert.Equal(2, await crm.Mailbox.CheckNowAsync());
+            Assert.Equal(0, await crm.Mailbox.CheckNowAsync()); // курсор не даёт прочитать письма дважды
+            var deal = (await crm.Deals.ListAsync(new CrmDealFilter())).Rows.Single();
+            var feed = await crm.Activities.FeedAsync(CrmTarget.Deal, deal.Id);
+            Assert.Contains(feed.Items, i => i.Text == "Согласны, выставляйте счёт.");
+            var lead = (await crm.Leads.ListAsync(new CrmLeadFilter())).Rows.Single();
+            Assert.Equal(("500 шарфов", "Пётр"), (lead.Title, lead.ContactName));
+        }
+
+        // Права подключившего отозваны — ящик не читается, ошибка видна в настройках.
+        var manager = await host.CrmUserAsync(org, SystemRoles.SalesManager);
+        await using (var m = host.Crm(manager, org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => m.Mailbox.ConnectAsync("imap.example.org", 993, login, "x", true));
+            Assert.Null((await m.Mailbox.StatusAsync()).LastError);
+        }
     }
 
     [SqlFact]

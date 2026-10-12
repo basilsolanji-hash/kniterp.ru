@@ -148,6 +148,12 @@ public enum CrmMailingStatus : byte
 {
     Draft = 1,
     Sent = 2,
+
+    /// <summary>Запланирована (D675): уйдёт в назначенное время с правами запланировавшего.</summary>
+    Scheduled = 3,
+
+    /// <summary>В очереди (D675): получатели зафиксированы, письма уходят пачками фоновой задачей.</summary>
+    Sending = 4,
 }
 
 /// <summary>
@@ -178,8 +184,63 @@ public sealed class CrmMailing
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime? SentAtUtc { get; private set; }
+    public DateTime? ScheduledAtUtc { get; private set; }
+
+    /// <summary>Кто поставил в очередь или запланировал: письма уходят с его правами (отозвали crm.mailing — рассылка встаёт).</summary>
+    public long? QueuedByUserId { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
     public IReadOnlyList<CrmMailingRecipient> Recipients => _recipients;
+
+    /// <summary>Запланировать (D675): не раньше чем через 5 минут и не позже чем через 90 дней.</summary>
+    public void Schedule(DateTime atUtc, long userId, DateTime nowUtc)
+    {
+        EnsureDraft();
+        if (atUtc < nowUtc.AddMinutes(5) || atUtc > nowUtc.AddDays(90))
+        {
+            throw new BusinessRuleException("crm.mailing.schedule", "Время отправки — не раньше чем через 5 минут и не позже чем через 90 дней.");
+        }
+
+        (Status, ScheduledAtUtc, QueuedByUserId) = (CrmMailingStatus.Scheduled, atUtc, userId);
+    }
+
+    public void Unschedule()
+    {
+        if (Status != CrmMailingStatus.Scheduled)
+        {
+            throw new BusinessRuleException("crm.mailing.not_scheduled", "Рассылка не запланирована.");
+        }
+
+        (Status, ScheduledAtUtc, QueuedByUserId) = (CrmMailingStatus.Draft, null, null);
+    }
+
+    /// <summary>Поставить в очередь: получатели уже добавлены; дальше письма уходят пачками.</summary>
+    public void Queue(long userId)
+    {
+        if (Status is not (CrmMailingStatus.Draft or CrmMailingStatus.Scheduled))
+        {
+            throw new BusinessRuleException("crm.mailing.sent", "Рассылка уже отправлена — менять её нельзя.");
+        }
+
+        if (_recipients.Count == 0)
+        {
+            throw new BusinessRuleException("crm.mailing.empty", "Нет получателей: у контактов нет согласия на рассылки или почты.");
+        }
+
+        Status = CrmMailingStatus.Sending;
+        QueuedByUserId ??= userId;
+    }
+
+    /// <summary>Очередь пуста — рассылка завершена.</summary>
+    public void Complete(DateTime nowUtc)
+    {
+        if (Status != CrmMailingStatus.Sending)
+        {
+            throw new BusinessRuleException("crm.mailing.not_sending", "Рассылка не в очереди.");
+        }
+
+        (Status, SentAtUtc) = (CrmMailingStatus.Sent, nowUtc);
+    }
 
     public static CrmMailing Create(long organizationId, string? subject, string? text, long? tagId, long userId, DateTime nowUtc)
     {
@@ -198,7 +259,11 @@ public sealed class CrmMailing
 
     public CrmMailingRecipient AddRecipient(long contactId, string email)
     {
-        EnsureDraft();
+        if (Status is not (CrmMailingStatus.Draft or CrmMailingStatus.Scheduled))
+        {
+            throw new BusinessRuleException("crm.mailing.sent", "Рассылка уже отправлена — менять её нельзя.");
+        }
+
         if (_recipients.Count >= MaxRecipients)
         {
             throw new BusinessRuleException("crm.mailing.too_many", $"В одной рассылке не больше {MaxRecipients} получателей.");
@@ -209,23 +274,12 @@ public sealed class CrmMailing
         return r;
     }
 
-    public void MarkSent(DateTime nowUtc)
-    {
-        EnsureDraft();
-        if (_recipients.Count == 0)
-        {
-            throw new BusinessRuleException("crm.mailing.empty", "Нет получателей: у контактов нет согласия на рассылки или почты.");
-        }
-
-        Status = CrmMailingStatus.Sent;
-        SentAtUtc = nowUtc;
-    }
-
     private void EnsureDraft()
     {
         if (Status != CrmMailingStatus.Draft)
         {
-            throw new BusinessRuleException("crm.mailing.sent", "Рассылка уже отправлена — менять её нельзя.");
+            throw new BusinessRuleException(Status == CrmMailingStatus.Scheduled ? "crm.mailing.scheduled" : "crm.mailing.sent",
+                Status == CrmMailingStatus.Scheduled ? "Рассылка запланирована — снимите её с расписания, чтобы изменить." : "Рассылка уже отправлена — менять её нельзя.");
         }
     }
 }
@@ -248,7 +302,10 @@ public sealed class CrmMailingRecipient
     public string Email { get; private set; } = string.Empty;
     public bool Delivered { get; private set; }
 
-    public void SetDelivered(bool delivered) => Delivered = delivered;
+    /// <summary>Когда была попытка отправки; null — письмо ещё в очереди.</summary>
+    public DateTime? AttemptedAtUtc { get; private set; }
+
+    public void SetDelivered(bool delivered, DateTime nowUtc) => (Delivered, AttemptedAtUtc) = (delivered, nowUtc);
 }
 
 /// <summary>Объект CRM для внешней ссылки импорта.</summary>

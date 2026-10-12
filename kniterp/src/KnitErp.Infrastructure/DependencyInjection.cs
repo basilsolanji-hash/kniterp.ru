@@ -43,6 +43,7 @@ public static class DependencyInjection
         services.AddTransient<KnitErp.Application.Crm.ICrmMessengerClient>(sp => sp.GetRequiredService<External.MaxMessengerClient>());
         services.AddTransient<KnitErp.Application.Crm.ICrmMessengerClient>(sp => sp.GetRequiredService<External.TelegramMessengerClient>());
         services.AddTransient<KnitErp.Application.Crm.ICrmMessengerClient>(sp => sp.GetRequiredService<External.WhatsAppMessengerClient>());
+        services.AddSingleton<KnitErp.Application.Crm.ICrmMailboxClient, Email.ImapMailboxClient>(); // D676: входящая почта CRM
         return services;
     }
 

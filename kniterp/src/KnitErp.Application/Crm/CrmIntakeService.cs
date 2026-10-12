@@ -17,6 +17,9 @@ public sealed record CrmIntakeLead(
 /// <param name="Repeat">true — это повторное обращение: к найденному лиду добавлена активность, новый лид не создан.</param>
 public sealed record CrmIntakeResult(long LeadId, string Number, bool Repeat);
 
+/// <summary>Входящее письмо из почтового ящика организации (D676). Uid — номер письма в папке IMAP.</summary>
+public sealed record CrmInboundEmail(long Uid, string? MessageId, string? FromEmail, string? FromName, string? Subject, string? Text);
+
 /// <summary>Событие телефонии (D643): звонок по номеру; ExternalId — id звонка АТС (повтор не создаёт вторую запись).</summary>
 public sealed record CrmCallEvent(string? Phone, bool Incoming = true, int? DurationSeconds = null, string? ExternalId = null, string? Comment = null);
 
@@ -226,6 +229,93 @@ public sealed class CrmIntakeService(IKnitErpDbContext db, IAccessGuard guard, I
         await tx.CommitAsync(ct);
         return new CrmCallResult(target, targetId, activity.Id, newLead, false);
     }
+
+    /// <summary>
+    /// Входящее письмо из ящика организации (D676): по адресу отправителя находит контакт (его открытую сделку) или открытый лид и пишет
+    /// письмо в ленту; незнакомый отправитель — новый лид «Письмо: тема» (если включено), иначе письмо пропускается. Повтор (тот же
+    /// Message-ID) не создаёт вторую запись. Возвращает null, если письмо пропущено.
+    /// </summary>
+    public async Task<CrmCallResult?> RegisterEmailAsync(CrmInboundEmail email, bool createLeads, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        await CrmSettingsService.EnsureDefaultsAsync(db, ctx.OrganizationId, ct);
+        var from = CrmText.NormalizeEmail(email.FromEmail);
+        if (from is null)
+        {
+            return null;
+        }
+
+        var subject = string.IsNullOrWhiteSpace(email.Subject) ? "(без темы)" : email.Subject.Trim();
+        var text = string.IsNullOrWhiteSpace(email.Text) ? subject : email.Text.Trim();
+        text = text.Length > CrmActivity.TextMaxLength ? text[..(CrmActivity.TextMaxLength - 1)] + "…" : text;
+        var externalId = $"mail:{email.MessageId ?? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(from + subject + text)))[..32]}";
+        externalId = externalId.Length > CrmActivity.ExternalRefMaxLength ? externalId[..CrmActivity.ExternalRefMaxLength] : externalId;
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync($"kniterp.crm.intake.{ctx.OrganizationId}", ct);
+        if (await db.CrmActivities.AsNoTracking()
+                .SingleOrDefaultAsync(a => a.OrganizationId == ctx.OrganizationId && a.Source == CrmActivitySource.Mail && a.ExternalRef == externalId, ct) is { } dup)
+        {
+            return new CrmCallResult(dup.Target, dup.TargetId, dup.Id, false, true);
+        }
+
+        var contact = await db.CrmContacts.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.ErasedAtUtc == null
+                && (x.Email == from || x.Channels.Any(ch => ch.Kind == CrmChannelKind.Email && ch.Value == from)))
+            .OrderBy(x => x.IsArchived).ThenByDescending(x => x.Id).Select(x => new { x.Id, x.ResponsibleUserId }).FirstOrDefaultAsync(ct);
+        var deal = contact is null ? null : await db.CrmDeals.AsNoTracking()
+            .Where(d => d.OrganizationId == ctx.OrganizationId && d.ContactId == contact.Id && d.Outcome == CrmDealOutcome.Open)
+            .OrderByDescending(d => d.Id).Select(d => new { d.Id, d.ResponsibleUserId }).FirstOrDefaultAsync(ct);
+        var lead = contact is not null ? null : await db.CrmLeads.AsNoTracking()
+            .Where(l => l.OrganizationId == ctx.OrganizationId && (l.Status == CrmLeadStatus.New || l.Status == CrmLeadStatus.InWork) && l.Email == from)
+            .OrderByDescending(l => l.Id).Select(l => new { l.Id, l.ResponsibleUserId }).FirstOrDefaultAsync(ct);
+        CrmTarget target;
+        long targetId, assignee;
+        var newLead = false;
+        if (deal is not null)
+        {
+            (target, targetId, assignee) = (CrmTarget.Deal, deal.Id, deal.ResponsibleUserId);
+        }
+        else if (contact is not null)
+        {
+            (target, targetId, assignee) = (CrmTarget.Contact, contact.Id, contact.ResponsibleUserId);
+        }
+        else if (lead is not null)
+        {
+            (target, targetId, assignee) = (CrmTarget.Lead, lead.Id, lead.ResponsibleUserId);
+        }
+        else if (!createLeads)
+        {
+            return null;
+        }
+        else
+        {
+            assignee = await CrmEvents.AssigneeAsync(db, ctx.OrganizationId, ctx.UserId, ct);
+            var parsed = CrmTextParser.Parse(text);
+            var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, CrmLead.NumberPrefix, ct);
+            var title = parsed.Title ?? (subject.Length > CrmLead.TitleMaxLength - 8 ? subject[..(CrmLead.TitleMaxLength - 8)] : subject);
+            var created = CrmLead.Create(ctx.OrganizationId, number, new CrmLeadValues(title, await SourceAsync(ctx, "Почта", ct), null, assignee,
+                    Short(email.FromName, CrmLead.NameMaxLength) ?? parsed.ContactName, parsed.Phone, from, null, parsed.CompanyName, parsed.Inn,
+                    text.Length > CrmLead.NeedMaxLength ? text[..CrmLead.NeedMaxLength] : text),
+                await CrmCommon.CurrencyAsync(db, ctx, ct), ctx.UserId, clock.UtcNow);
+            db.CrmLeads.Add(created);
+            await db.SaveChangesAsync(ct);
+            Audit(ctx, AuditActions.CrmLeadCreated, nameof(CrmLead), created.Id, null, created.Describe(), "входящее письмо");
+            (target, targetId, newLead) = (CrmTarget.Lead, created.Id, true);
+        }
+
+        var activitySubject = $"Письмо от {email.FromName ?? CrmText.MaskEmail(from)}: {subject}";
+        var activity = CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Email, target, targetId,
+            activitySubject.Length > CrmActivity.SubjectMaxLength ? activitySubject[..(CrmActivity.SubjectMaxLength - 1)] + "…" : activitySubject, text, null,
+            assignee, ctx.UserId, clock.UtcNow, done: true, result: "входящее", source: CrmActivitySource.Mail, externalRef: externalId);
+        db.CrmActivities.Add(activity);
+        await db.SaveChangesAsync(ct);
+        Audit(ctx, AuditActions.CrmEmailReceived, nameof(CrmActivity), activity.Id, null, $"письмо от {CrmText.MaskEmail(from)}", "почта");
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new CrmCallResult(target, targetId, activity.Id, newLead, false);
+    }
+
+    private static string? Short(string? value, int max) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim().Length > max ? value.Trim()[..max] : value.Trim();
 
     /// <summary>Источник по названию: действующий — его id, нет — новый (заявки с маркетплейсов приходят со своими именами).</summary>
     private async Task<long?> SourceAsync(AccessContext ctx, string? name, CancellationToken ct)
