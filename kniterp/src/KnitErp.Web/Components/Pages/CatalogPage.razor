@@ -20,6 +20,10 @@
 {
     <AccessDenied Message="@_denied" />
 }
+else if (_loadError is not null)
+{
+    <LoadError Message="@_loadError" />
+}
 else if (_list is null)
 {
     <p class="muted">@L("Загрузка…")</p>
@@ -491,6 +495,7 @@ else
     private ItemDto? _target;
     private Mode _mode;
     private bool _busy;
+    private string? _loadError;
     private string? _denied;
     private string? _formError;
     private string? _flash;
@@ -525,6 +530,10 @@ else
         catch (AccessDeniedException ex)
         {
             _denied = UiErrors.Message(ex);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _loadError = UiErrors.Message(ex);
         }
     }
 

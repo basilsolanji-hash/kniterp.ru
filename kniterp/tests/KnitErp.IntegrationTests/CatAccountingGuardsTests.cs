@@ -202,6 +202,24 @@ public sealed class CatAccountingGuardsTests(SqlTestHost host) : IClassFixture<S
     }
 
     [SqlFact]
+    public async Task Two_simultaneous_imports_of_same_new_codes_both_succeed()
+    {
+        // D347: загрузки организации идут по очереди — вторая видит позиции первой и не падает на уникальном коде.
+        var org = await CreateOrgAsync();
+        byte[] File() => SqlTestHost.Spreadsheet.Write([new SheetData("Номенклатура", ItemExchangeService.Columns,
+            [.. Enumerable.Range(1, 200).Select(n => (IReadOnlyList<string>)[$"ОД-{n}", $"Пряжа {n}", ItemTypes.Name(ItemType.RawMaterial), "шт", ""])])]);
+        await using var a = host.As(org.OwnerUserId, org.OrganizationId);
+        await using var b = host.As(org.OwnerUserId, org.OrganizationId);
+        var planA = await a.ItemExchange.PreviewAsync(new MemoryStream(File()));
+        var planB = await b.ItemExchange.PreviewAsync(new MemoryStream(File()));
+        var results = await Task.WhenAll(a.ItemExchange.ApplyAsync(planA.Rows, planA.Bundles), b.ItemExchange.ApplyAsync(planB.Rows, planB.Bundles));
+
+        Assert.Equal(200, results.Sum(r => r.Created));
+        await using var db = host.NewDb();
+        Assert.Equal(200, await db.Items.CountAsync(i => i.OrganizationId == org.OrganizationId && i.Code.StartsWith("ОД-")));
+    }
+
+    [SqlFact]
     public async Task Modification_follows_parent_unit_and_vat()
     {
         var org = await CreateOrgAsync();

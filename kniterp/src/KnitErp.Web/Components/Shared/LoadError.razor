@@ -1,0 +1,14 @@
+@inject NavigationManager Nav
+@*
+    Аудит каталога: страница не смогла загрузиться не из-за прав (правило сервиса, «не найдено», конфликт) — понятное
+    сообщение и «Повторить» вместо вечного «Загрузка…».
+*@
+<div class="flash error load-error" role="alert">
+    <span>@Message</span>
+    <button type="button" class="secondary" @onclick="() => Nav.NavigateTo(Nav.Uri, forceLoad: true)">@L("Повторить")</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Message { get; set; } = string.Empty;
+}

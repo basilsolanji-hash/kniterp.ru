@@ -9,6 +9,10 @@
 {
     <AccessDenied Message="@_denied" />
 }
+else if (_loadError is not null)
+{
+    <LoadError Message="@_loadError" />
+}
 else if (_units is null)
 {
     <p class="muted">@L("Загрузка…")</p>
@@ -43,6 +47,10 @@ else
         <table>
             <thead><tr><th>@L("Код")</th><th>@L("Наименование")</th><th>@L("Обозначение")</th><th class="num">@L("Знаков")</th><th class="num">@L("Позиций")</th>@if (CanArchive) { <th></th> }</tr></thead>
             <tbody>
+                @if (_units.Count == 0)
+                {
+                    <tr><td colspan="@(CanArchive ? 6 : 5)" class="muted">@L("Единиц пока нет.")</td></tr>
+                }
                 @foreach (var u in _units)
                 {
                     <tr class="@(u.IsArchived ? "archived" : null)">
@@ -71,6 +79,7 @@ else
     private UnitForm _form = new();
     private bool _busy;
     private bool _includeArchived;
+    private string? _loadError;
     private string? _denied;
     private string? _flash;
     private bool _flashIsError;
@@ -86,6 +95,10 @@ else
         catch (AccessDeniedException ex)
         {
             _denied = UiErrors.Message(ex);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _loadError = UiErrors.Message(ex);
         }
     }
 

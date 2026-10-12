@@ -23,6 +23,10 @@
 {
     <AccessDenied Message="@_denied" />
 }
+else if (_loadError is not null)
+{
+    <LoadError Message="@_loadError" />
+}
 else if (_notFound)
 {
     <h1>@L("Позиция не найдена")</h1>
@@ -652,7 +656,7 @@ else
                             @foreach (var h in withHistory.History)
                             {
                                 <tr>
-                                    <td>@h.ChangedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>@TimeZones.ToLocal(h.ChangedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</td>
                                     <td>@h.PriceType</td>
                                     <td class="num">@(h.OldPrice is { } o ? Amounts.Format(o) : "—")</td>
                                     <td class="num">@(h.NewPrice is { } n ? Amounts.Format(n) : "—")</td>
@@ -914,6 +918,7 @@ else
     private string _barcodeType = string.Empty;
     private bool _busy;
     private bool _notFound;
+    private string? _loadError;
     private string? _denied;
     private string? _message;
     private bool _isError;
@@ -937,6 +942,7 @@ else
     {
         try
         {
+            _loadError = null;
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -946,6 +952,10 @@ else
         catch (NotFoundException)
         {
             _notFound = true;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _loadError = UiErrors.Message(ex);
         }
     }
 

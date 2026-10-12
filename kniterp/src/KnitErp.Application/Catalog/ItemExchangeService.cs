@@ -275,8 +275,26 @@ public sealed partial class ItemExchangeService(
     public async Task<ItemImportResult> ApplyAsync(IReadOnlyList<ItemImportRow> rows, CancellationToken ct = default) =>
         await ApplyAsync(rows, [], ct);
 
-    /// <summary>Применение со строками листа «Состав комплектов» (D308): они тоже проверяются заново.</summary>
+    /// <summary>
+    /// Применение со строками листа «Состав комплектов» (D308): они тоже проверяются заново.
+    /// Аудит каталога (D347): загрузки одной организации идут по очереди (именованная блокировка до конца транзакции) — две
+    /// одновременные загрузки с одинаковыми кодами больше не падают на уникальном индексе. При отказе на середине отслеживание
+    /// DbContext вкладки сбрасывается: транзакция откатилась, и полузагруженные позиции не должны уйти следующим сохранением.
+    /// </summary>
     public async Task<ItemImportResult> ApplyAsync(IReadOnlyList<ItemImportRow> rows, IReadOnlyList<BundleImportRow> bundles, CancellationToken ct = default)
+    {
+        try
+        {
+            return await ApplyCoreAsync(rows, bundles, ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    private async Task<ItemImportResult> ApplyCoreAsync(IReadOnlyList<ItemImportRow> rows, IReadOnlyList<BundleImportRow> bundles, CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogImport, ct);
         if (rows.Count is 0 or > MaxRows)
@@ -290,6 +308,7 @@ public sealed partial class ItemExchangeService(
         }
 
         await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync($"kniterp.catalog.import.{ctx.OrganizationId}", ct); // D347: план строится заново уже под блокировкой
         var (plan, parsed) = await PlanAsync(ctx, rows, ct);
         IReadOnlyList<IReadOnlyList<string>> bundleSheet =
             [BundleColumns, .. bundles.Select(b => (IReadOnlyList<string>)[b.BundleCode, b.ComponentCode, b.QuantityText])];
@@ -363,6 +382,8 @@ public sealed partial class ItemExchangeService(
         {
             await ApplyExtrasAsync(ctx, item, parsed[row.RowNumber], ct);
         }
+
+        await db.SaveChangesAsync(ct);
 
         var bundlesChanged = await ApplyBundlesAsync(ctx, plan.Bundles, ct); // D308
 
@@ -440,13 +461,18 @@ public sealed partial class ItemExchangeService(
         if (p.Barcodes is { } barcodes)
         {
             var current = await db.ItemBarcodes.Where(b => b.ItemId == item.Id).ToListAsync(ct);
-            foreach (var old in current.Where(b => barcodes.All(n => n.Code != b.Code)))
+            var removed = current.Where(b => barcodes.All(n => n.Code != b.Code)).ToList();
+            foreach (var old in removed)
             {
                 db.ItemBarcodes.Remove(old);
                 Audit(ctx, AuditActions.CatalogChanged, nameof(Item), id, old.Code, null, "Импорт: штрихкод удалён");
             }
 
-            await db.SaveChangesAsync(ct);
+            if (removed.Count > 0)
+            {
+                await db.SaveChangesAsync(ct);
+            }
+
             foreach (var (type, code) in barcodes.Where(n => current.All(b => b.Code != n.Code)))
             {
                 db.ItemBarcodes.Add(ItemBarcode.Create(ctx.OrganizationId, item.Id, type, code));
@@ -498,15 +524,20 @@ public sealed partial class ItemExchangeService(
                 item.SetVariantKey(key);
             }
 
-            db.ItemCharacteristicValues.RemoveRange(current);
-            await db.SaveChangesAsync(ct);
+            if (current.Count > 0)
+            {
+                db.ItemCharacteristicValues.RemoveRange(current);
+                await db.SaveChangesAsync(ct); // освобождает уникальный ключ до вставки новых значений
+            }
+
             foreach (var (characteristicId, value) in values)
             {
                 db.ItemCharacteristicValues.Add(ItemCharacteristicValue.Create(ctx.OrganizationId, item.Id, characteristicId, value));
             }
         }
 
-        await db.SaveChangesAsync(ct);
+        // D347: без сохранения на каждую строку — одно на весь файл (ApplyCoreAsync). Раньше 5000 строк грузились ~5,5 мин:
+        // каждое сохранение заново просматривало тысячи отслеживаемых позиций.
     }
 
     /// <summary>Основная ставка НДС организации для новой услуги из файла (D300): действующая ставка вида «Основная».</summary>

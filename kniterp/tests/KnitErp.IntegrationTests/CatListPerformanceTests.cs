@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using KnitErp.Application.Catalog;
+using KnitErp.Application.Common;
 using KnitErp.Application.Organizations;
 using KnitErp.Domain.Catalog;
 using KnitErp.Domain.Warehousing;
@@ -152,6 +153,32 @@ public sealed class CatListPerformanceTests(SqlTestHost host, ITestOutputHelper 
         var p2 = await c.Catalog.ListItemsAsync(new ItemFilter(Take: 50, Skip: 1050));
         var both = await c.Catalog.ListItemsAsync(new ItemFilter(Take: 100, Skip: 1000));
         Assert.Equal(both.Items.Select(i => i.Id), p1.Items.Concat(p2.Items).Select(i => i.Id));
+    }
+
+    [SqlFact]
+    public async Task Excel_import_of_max_rows_previews_and_applies_in_seconds()
+    {
+        // Аудит каталога (D347): файл на предел строк (5000) — проверка и загрузка укладываются в секунды; повторная загрузка
+        // того же файла ничего не меняет.
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var file = SqlTestHost.Spreadsheet.Write([new SheetData("Номенклатура", ItemExchangeService.Columns,
+            [.. Enumerable.Range(1, ItemExchangeService.MaxRows).Select(n => (IReadOnlyList<string>)[$"ИМП-{n}", $"Пряжа для загрузки {n}", ItemTypes.Name(ItemType.RawMaterial), "шт", ""])])]);
+
+        var sw = Stopwatch.StartNew();
+        var plan = await s.ItemExchange.PreviewAsync(new MemoryStream(file));
+        output.WriteLine($"проверка файла {ItemExchangeService.MaxRows} строк: {sw.ElapsedMilliseconds} мс");
+        Assert.Equal(0, plan.ErrorRows);
+        sw.Restart();
+        var result = await s.ItemExchange.ApplyAsync(plan.Rows, plan.Bundles);
+        output.WriteLine($"загрузка {ItemExchangeService.MaxRows} строк: {sw.ElapsedMilliseconds} мс");
+        Assert.Equal(ItemExchangeService.MaxRows, result.Created);
+        Assert.True(sw.ElapsedMilliseconds < 30_000, $"загрузка: {sw.ElapsedMilliseconds} мс"); // до D347 — ~5,5 мин
+
+        sw.Restart();
+        var again = await s.ItemExchange.PreviewAsync(new MemoryStream(file));
+        output.WriteLine($"повторная проверка: {sw.ElapsedMilliseconds} мс, без изменений {again.Unchanged}");
+        Assert.Equal(ItemExchangeService.MaxRows, again.Unchanged);
     }
 
     private async Task<CreatedOrganization> CreateOrgAsync()

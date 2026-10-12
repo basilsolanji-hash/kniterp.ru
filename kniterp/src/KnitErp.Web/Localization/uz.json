@@ -3007,5 +3007,7 @@
   "Есть в открытом заказе поставщику {0}.": "Yetkazib beruvchiga ochiq {0} buyurtmasida bor.",
   "На складе остаток {0}: списать или переместить его можно будет только после возврата из архива.": "Omborda {0} qoldiq bor: uni faqat arxivdan qaytargandan keyin hisobdan chiqarish yoki ko‘chirish mumkin.",
   "Позиция «{0}» уже в учёте:": "«{0}» pozitsiyasi allaqachon hisobda:",
-  "скрыто": "yashirilgan"
+  "скрыто": "yashirilgan",
+  "Единиц пока нет.": "Birliklar hozircha yo‘q.",
+  "Повторить": "Qayta urinish"
 }
