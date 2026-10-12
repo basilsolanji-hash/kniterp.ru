@@ -24,7 +24,7 @@ else
 
     @if (_flash is not null)
     {
-        <div class="@(_flashIsError ? "flash error" : "flash")" role="@(_flashIsError ? "alert" : "status")">@_flash</div>
+        <div class="@(_flashIsError ? "flash error" : "flash")" role="@(_flashIsError ? "alert" : "status")"><span>@_flash</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _flash = null">×</button></div>
     }
 
     @if (CurrentAccess.Has(Permissions.CatalogEdit))

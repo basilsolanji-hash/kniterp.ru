@@ -233,6 +233,14 @@ public sealed class CatListPerformanceTests(SqlTestHost host, ITestOutputHelper 
         Assert.Equal((priceRows, priceRows), (applied.Updated, applied.Linked));
         Assert.True(sw.ElapsedMilliseconds < 40_000, $"прайс: {sw.ElapsedMilliseconds} мс");
 
+        // Этикетки на предел позиций за раз (1000) — данные для печати собираются быстро.
+        var labelIds = await c.Db.Items.Where(i => i.OrganizationId == org.OrganizationId).OrderBy(i => i.Id).Take(LabelService.MaxItems).Select(i => i.Id).ToListAsync();
+        sw.Restart();
+        var labels = await c.Labels.PrintAsync(labelIds, null);
+        output.WriteLine($"этикетки {labelIds.Count} позиций: {sw.ElapsedMilliseconds} мс");
+        Assert.Equal(LabelService.MaxItems, labels.Items.Count);
+        Assert.True(sw.ElapsedMilliseconds < 2000, $"этикетки: {sw.ElapsedMilliseconds} мс");
+
         var parties = SqlTestHost.Spreadsheet.Write([new SheetData("Лист", CounterpartyExchangeService.Columns,
             [.. Enumerable.Range(1, TableImport.MaxRows).Select(n => (IReadOnlyList<string>)[$"ООО «Клиент {n}»", "", "", "", "да", "", ""])])]);
         sw.Restart();
