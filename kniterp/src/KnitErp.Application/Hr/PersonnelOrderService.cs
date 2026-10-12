@@ -393,7 +393,7 @@ public sealed class PersonnelOrderService(
                             "У сотрудника есть учётная запись: заблокировать её может администратор. Попросите его провести приказ или сначала заблокировать вход.");
                     }
 
-                    await userAccess.BlockAsync(userId, $"Увольнение, приказ № {order.Number}", ct);
+                    await userAccess.BlockOnDismissalAsync(userId, $"Увольнение, приказ № {order.Number}", ct);
                 }
 
                 var ground = DismissalGrounds.Find(order.DismissalGround)!;

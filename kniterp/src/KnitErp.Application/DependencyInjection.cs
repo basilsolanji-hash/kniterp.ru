@@ -125,6 +125,10 @@ public static class DependencyInjection
         services.AddScoped<PasswordResetService>();
         services.AddScoped<TrustedDeviceService>();
         services.AddScoped<AccountSecurityService>();
+        // D123: отметка повторного подтверждения — на область DI (в Blazor — цепь вкладки), не в cookie и не у клиента.
+        services.AddScoped<StepUpState>();
+        services.AddScoped<StepUpGuard>();
+        services.AddScoped<StepUpService>();
         services.AddScoped<Structure.EmployeeExchangeService>();
         services.AddScoped<Organizations.LaunchReadinessService>();
         // Кэш главного экрана (DashboardService): общий на процесс, ключ — организация, пользователь и его права.

@@ -8,6 +8,7 @@
 @inject KnitErp.Application.Hr.HrSettingsService HrSettings
 
 <PageTitle>@L("Сотрудники") — knitERP</PageTitle>
+<StepUpDialog @ref="_stepUp" />
 
 @if (_denied is not null)
 {
@@ -216,6 +217,8 @@ else
 }
 
 @code {
+    private StepUpDialog? _stepUp;
+
     private enum Mode { None, Hire, Edit, Dismiss }
 
     [CascadingParameter]
@@ -355,7 +358,7 @@ else
         _flashIsError = false;
         try
         {
-            await action();
+            await (_stepUp?.RunAsync(action) ?? action()); // D123: повторное подтверждение опасных действий
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

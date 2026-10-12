@@ -230,7 +230,7 @@ public sealed class EmployeeService(
             && await db.OrganizationMembers.AnyAsync(m => m.OrganizationId == ctx.OrganizationId && m.UserId == userId
                                                           && m.Status == MembershipStatus.Active, ct))
         {
-            await userAccess.BlockAsync(userId, $"Увольнение: {reason}", ct);
+            await userAccess.BlockOnDismissalAsync(userId, $"Увольнение: {reason}", ct);
         }
 
         var change = employee.Dismiss(dismissedOn);

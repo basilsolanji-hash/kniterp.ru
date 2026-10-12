@@ -4923,5 +4923,12 @@
   "Сессия «{0}» закроется в течение минуты. Остальные сессии, включая эту, продолжат работать.": "«{0}» seansi bir daqiqa ichida yopiladi. Qolgan seanslar, shu jumladan bu seans ham, ishlashda davom etadi.",
   "Сеть": "Tarmoq",
   "Текущую сессию завершает кнопка «Выйти».": "Joriy seansni «Chiqish» tugmasi yakunlaydi.",
-  "это устройство": "shu qurilma"
+  "это устройство": "shu qurilma",
+  "Действие меняет доступ к организации. Введите текущий пароль и код из приложения — подтверждение действует 10 минут.": "Amal tashkilotga kirish huquqini o‘zgartiradi. Joriy parolni va ilovadagi kodni kiriting — tasdiq 10 daqiqa amal qiladi.",
+  "Действие меняет доступ к организации. Введите текущий пароль — подтверждение действует 10 минут.": "Amal tashkilotga kirish huquqini o‘zgartiradi. Joriy parolni kiriting — tasdiq 10 daqiqa amal qiladi.",
+  "Действие не выполнено: подтверждение отменено.": "Amal bajarilmadi: tasdiqlash bekor qilindi.",
+  "Действие подтверждено паролем": "Amal parol bilan tasdiqlandi",
+  "Неверный пароль при подтверждении действия": "Amalni tasdiqlashda parol noto‘g‘ri",
+  "Подтвердите действие паролем или кодом из приложения.": "Amalni parol yoki ilovadagi kod bilan tasdiqlang.",
+  "Подтвердите паролем или кодом": "Parol yoki kod bilan tasdiqlang"
 }

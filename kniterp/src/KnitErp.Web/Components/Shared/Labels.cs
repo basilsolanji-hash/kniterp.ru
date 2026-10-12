@@ -53,6 +53,8 @@ public static class AuditLabels
         [AuditActions.PasswordChanged] = "Пароль сменён пользователем",
         [AuditActions.BankStatementImported] = "Загружена выписка банка",
         [AuditActions.SessionsRevoked] = "Выход на всех устройствах",
+        [AuditActions.StepUpConfirmed] = "Действие подтверждено паролем",
+        [AuditActions.StepUpFailed] = "Неверный пароль при подтверждении действия",
         [AuditActions.SessionRevoked] = "Завершена сессия на другом устройстве",
         [AuditActions.PasswordResetIssued] = "Выдана ссылка смены пароля",
         [AuditActions.EmergencyAccess] = "Аварийное восстановление доступа на сервере",

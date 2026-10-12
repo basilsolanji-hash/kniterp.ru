@@ -11,6 +11,7 @@
 @inject IJSRuntime JS
 
 <PageTitle>@L("Пользователи") — knitERP</PageTitle>
+<StepUpDialog @ref="_stepUp" />
 
 @if (_denied is not null)
 {
@@ -281,6 +282,8 @@ else
 }
 
 @code {
+    private StepUpDialog? _stepUp;
+
     private enum Mode { None, Add, ChangeRole, Block, Unblock, ResetTwoFactor, ResetPassword }
 
     /// <summary>D112: открыта панель прав этого пользователя.</summary>
@@ -573,7 +576,7 @@ else
         _flashIsError = false;
         try
         {
-            await action();
+            await (_stepUp?.RunAsync(action) ?? action()); // D123: повторное подтверждение опасных действий
             return true;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))

@@ -143,6 +143,28 @@ public sealed class SqlTestHost : IAsyncLifetime
         new(new DbContextOptionsBuilder<KnitErpDbContext>()
             .UseSqlServer(_connectionString, KnitErp.Infrastructure.DependencyInjection.ConfigureSqlServer).AddInterceptors(interceptors).Options);
 
+    /// <summary>
+    /// D123: по умолчанию каждый набор сервисов получает свежую отметку повторного подтверждения — как администратор, только что
+    /// подтвердивший действие паролем; так опасные действия в прежних тестах проходят. Тесты D123 выключают это и проверяют порядок.
+    /// </summary>
+    public bool AutoStepUp { get; set; } = true;
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, StepUpState> _stepUp = new();
+
+    /// <summary>Отметка повторного подтверждения «сессии» пользователя — общая для всех его наборов сервисов в тест-классе.</summary>
+    public StepUpState StepUpStateOf(long? userId) => userId is { } id ? _stepUp.GetOrAdd(id, _ => new StepUpState()) : new StepUpState();
+
+    public StepUpGuard StepUpGuardFor(ICurrentUser user)
+    {
+        var state = StepUpStateOf(user.UserId);
+        if (AutoStepUp && user.UserId is { } id)
+        {
+            state.Grant(id, Clock.UtcNow);
+        }
+
+        return new StepUpGuard(state, user, Clock);
+    }
+
     /// <summary>Набор сервисов от имени пользователя. Каждый вызов — новый DbContext, как отдельный HTTP-запрос.</summary>
     public Services As(long? userId, long? organizationId, IReadOnlyCollection<string>? apiScope = null, Guid? sessionId = null)
     {
@@ -152,7 +174,8 @@ public sealed class SqlTestHost : IAsyncLifetime
             UserId = userId, OrganizationId = organizationId, ClientAddress = ClientAddress, UserAgent = UserAgent, SessionId = sessionId, ApiScope = apiScope,
         };
         var guard = new AccessGuard(db, user, Clock);
-        var access = new UserAccessService(db, guard, user, Clock);
+        var stepUp = StepUpGuardFor(user);
+        var access = new UserAccessService(db, guard, user, Clock, stepUp);
         return new Services(db,
             new OrganizationService(db, guard, user, Clock),
             access,
@@ -205,7 +228,7 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Finance.CashFlowItemService(db, guard, user, Clock),
             new KnitErp.Application.Finance.AccountableService(db, guard, user, Clock),
             new KnitErp.Application.Finance.CashReportsService(db, guard),
-            new KnitErp.Application.Integrations.IntegrationService(db, guard, user, Clock, new KnitErp.Application.Integrations.IntegrationSettings()),
+            new KnitErp.Application.Integrations.IntegrationService(db, guard, user, Clock, new KnitErp.Application.Integrations.IntegrationSettings(), stepUp),
             new KnitErp.Application.Warehousing.StockBatchService(db, guard, user, Clock),
             new KnitErp.Application.Warehousing.StockBatchBreakdownService(db, guard),
             new KnitErp.Application.Tagging.TagService(Factory, user, Clock),
@@ -222,7 +245,7 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Production.ShiftTaskService(db, guard, user, Clock),
             new KnitErp.Application.Production.ProductionSettingsService(db, guard, user, Clock),
             new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock, user, Spreadsheet),
-            new RoleService(db, guard, user, Clock),
+            new RoleService(db, guard, user, Clock, stepUp),
             new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.ItemTradeService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.RevaluationService(db, guard, user, Clock),
@@ -245,6 +268,7 @@ public sealed class SqlTestHost : IAsyncLifetime
                 new KnitErp.Application.Sales.SalesService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock)),
                 new KnitErp.Application.Purchasing.PurchaseService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock))),
             new KnitErp.Application.Sales.SalesAgreementService(db, guard, user, Clock),
+            new StepUpService(Factory, Hasher, user, Clock, StepUpStateOf(userId)),
             new KnitErp.Application.Sales.SalesDiscountService(db, guard, user, Clock));
     }
 
@@ -365,6 +389,7 @@ public sealed record Services(
     AccountSecurityService Account,
     KnitErp.Application.Finance.BankStatementService BankStatements,
     KnitErp.Application.Sales.SalesAgreementService Agreements,
+    StepUpService StepUp,
     KnitErp.Application.Sales.SalesDiscountService Discounts) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();

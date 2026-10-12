@@ -4,6 +4,7 @@
 @inject RoleService Roles
 
 <PageTitle>@L("Роли и права") — knitERP</PageTitle>
+<StepUpDialog @ref="_stepUp" />
 
 @* D112: свои роли с правами по группам; системные роли — шаблоны, их можно взять за основу. Матрица — для сравнения ролей. *@
 @if (_denied is not null)
@@ -169,6 +170,8 @@ else
 }
 
 @code {
+    private StepUpDialog? _stepUp;
+
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
@@ -300,7 +303,7 @@ else
         _isError = false;
         try
         {
-            await action();
+            await (_stepUp?.RunAsync(action) ?? action()); // D123: повторное подтверждение опасных действий
             if (reload)
             {
                 _roles = await Roles.ListAsync(_showArchived);
