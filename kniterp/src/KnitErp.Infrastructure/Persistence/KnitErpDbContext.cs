@@ -128,6 +128,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns => Set<KnitErp.Domain.Hr.PayrollRun>();
     public DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines => Set<KnitErp.Domain.Hr.PayrollLine>();
     public DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings => Set<KnitErp.Domain.Hr.HrSettings>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeDataRequest> EmployeeDataRequests => Set<KnitErp.Domain.Hr.EmployeeDataRequest>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeDataSubmission> EmployeeDataSubmissions => Set<KnitErp.Domain.Hr.EmployeeDataSubmission>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeDataSubmissionFile> EmployeeDataSubmissionFiles => Set<KnitErp.Domain.Hr.EmployeeDataSubmissionFile>();
 
     // Модуль «Разработка» (D700–D799).
     public DbSet<KnitErp.Domain.Development.DevModel> DevModels => Set<KnitErp.Domain.Development.DevModel>();

@@ -191,6 +191,10 @@ builder.Services.AddRateLimiter(o =>
         http.Request.Path.StartsWithSegments("/hooks")
             ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
+        // D125: открытая анкета сотрудника — не больше 30 открытий страницы в минуту с адреса (отправки — общим лимитом /account ниже).
+        HttpMethods.IsGet(http.Request.Method) && http.Request.Path.StartsWithSegments("/account/employee-data")
+            ? RateLimitPartition.GetFixedWindowLimiter("employee-data:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
         // D88: API — 100 запросов за 5 секунд на токен (ключ — отпечаток заголовка Authorization, без самого секрета).
         http.Request.Path.StartsWithSegments("/api")
             ? RateLimitPartition.GetFixedWindowLimiter("api:" + KnitErp.Web.Api.ApiErrors.RateKey(http),
@@ -324,6 +328,17 @@ app.Use(async (http, next) =>
     }
 });
 app.UseRateLimiter();
+// D125: тело анкеты сотрудника — не больше 16 МБ (пять сканов по 3 МБ и поля); остальные запросы — по умолчанию сервера.
+app.Use(async (http, next) =>
+{
+    if (HttpMethods.IsPost(http.Request.Method) && http.Request.Path.StartsWithSegments("/account/employee-data")
+        && http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+    {
+        limit.MaxRequestBodySize = KnitErp.Web.Components.Pages.Account.EmployeeDataPage.MaxBodyBytes;
+    }
+
+    await next();
+});
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -462,6 +477,25 @@ app.MapGet("/employees/consent-scans/{id:long}", async (long id, KnitErp.Applica
     try
     {
         var (fileName, contentType, content) = await personalData.GetConsentScanAsync(id, ct);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(content, contentType, fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
+// Скан из анкеты сотрудника до принятия (D125): право на ПДн и журнал просмотра — в сервисе; отдаётся вложением.
+app.MapGet("/employees/data-files/{id:long}", async (long id, KnitErp.Application.Hr.EmployeeDataRequestService requests, HttpContext http, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, contentType, content) = await requests.GetFileAsync(id, ct);
         http.Response.Headers.CacheControl = "no-store";
         return Results.File(content, contentType, fileName);
     }

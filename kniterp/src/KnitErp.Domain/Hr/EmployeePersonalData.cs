@@ -36,7 +36,8 @@ public sealed record PersonalDataValues(
     string? Education = null,
     string? Profession = null,
     string? MaritalStatus = null,
-    string? FamilyMembers = null);
+    string? FamilyMembers = null,
+    string? PersonalEmail = null);
 
 /// <summary>
 /// Персональные данные сотрудника (Т-2, 152-ФЗ) — отдельно от карточки (D200): своё право на чтение и изменение,
@@ -47,6 +48,7 @@ public sealed class EmployeePersonalData
 {
     public const int ShortMaxLength = 100;
     public const int LongMaxLength = 500;
+    public const int EmailMaxLength = 254;
 
     private EmployeePersonalData()
     {
@@ -71,6 +73,9 @@ public sealed class EmployeePersonalData
     public string? Profession { get; private set; }
     public string? MaritalStatus { get; private set; }
     public string? FamilyMembers { get; private set; }
+
+    /// <summary>Личная почта сотрудника (D125): на неё уходит ссылка анкеты, если у сотрудника нет учётной записи.</summary>
+    public string? PersonalEmail { get; private set; }
 
     /// <summary>Дата подписания согласия на обработку ПДн.</summary>
     public DateOnly? ConsentGivenOn { get; private set; }
@@ -117,6 +122,12 @@ public sealed class EmployeePersonalData
             throw new BusinessRuleException("hr.personal_data.division", "Код подразделения, выдавшего паспорт: «000-000».");
         }
 
+        var email = Optional(v.PersonalEmail, EmailMaxLength, "Личная почта");
+        if (email is not null && !IsEmail(email))
+        {
+            throw new BusinessRuleException("hr.personal_data.email", "Личная почта: адрес вида name@example.ru.");
+        }
+
         if (v.PassportIssuedOn is { } issued && issued > today)
         {
             throw new BusinessRuleException("hr.personal_data.passport_date", "Дата выдачи паспорта не может быть в будущем.");
@@ -144,6 +155,7 @@ public sealed class EmployeePersonalData
         Set(Profession, Optional(v.Profession, ShortMaxLength, "Профессия"), x => Profession = x, "Профессия", changed);
         Set(MaritalStatus, Optional(v.MaritalStatus, ShortMaxLength, "Семейное положение"), x => MaritalStatus = x, "Семейное положение", changed);
         Set(FamilyMembers, Optional(v.FamilyMembers, LongMaxLength, "Состав семьи"), x => FamilyMembers = x, "Состав семьи", changed);
+        Set(PersonalEmail, email, x => PersonalEmail = x, "Личная почта", changed);
         if (changed.Count > 0)
         {
             UpdatedAtUtc = nowUtc;
@@ -210,6 +222,14 @@ public sealed class EmployeePersonalData
         Gender.Female => "женский",
         _ => "не указан",
     };
+
+    /// <summary>Простая проверка адреса (D125): одна «@», имя и домен с точкой, без пробелов и угловых скобок.</summary>
+    public static bool IsEmail(string value)
+    {
+        var at = value.IndexOf('@');
+        return at > 0 && at == value.LastIndexOf('@') && at < value.Length - 1 && value.IndexOf('.', at) > at + 1
+               && !value.EndsWith('.') && !value.Any(c => char.IsWhiteSpace(c) || c is '<' or '>' or ',' or ';' or '"');
+    }
 
     private static string? Optional(string? value, int max, string field)
     {
@@ -307,6 +327,27 @@ public sealed class ConsentScan
     public static ConsentScan Create(long organizationId, long employeeId, string fileName, string contentType, byte[] content,
         DateTime nowUtc, long userId, EmployeeDocumentKind kind = EmployeeDocumentKind.Consent)
     {
+        var name = Check(kind, fileName, contentType, content);
+        return new ConsentScan
+        {
+            OrganizationId = organizationId,
+            EmployeeId = employeeId,
+            FileName = name,
+            ContentType = contentType.ToLowerInvariant(),
+            SizeBytes = content.Length,
+            Content = content,
+            UploadedAtUtc = nowUtc,
+            UploadedByUserId = userId,
+            Kind = kind,
+        };
+    }
+
+    /// <summary>
+    /// Проверка файла документа: вид, размер до 3 МБ, тип по сигнатуре (фото — только картинка). Возвращает очищенное имя файла.
+    /// Общая для загрузки кадровиком и анкеты сотрудника (D125).
+    /// </summary>
+    public static string Check(EmployeeDocumentKind kind, string? fileName, string contentType, byte[] content)
+    {
         if (!Enum.IsDefined(kind))
         {
             throw new BusinessRuleException("hr.document.kind", "Неизвестный вид документа.");
@@ -326,19 +367,12 @@ public sealed class ConsentScan
         }
 
         var name = Path.GetFileName(fileName ?? string.Empty).Trim();
-        return new ConsentScan
-        {
-            OrganizationId = organizationId,
-            EmployeeId = employeeId,
-            FileName = name.Length is 0 ? "consent" : name.Length > 200 ? name[..200] : name,
-            ContentType = contentType.ToLowerInvariant(),
-            SizeBytes = content.Length,
-            Content = content,
-            UploadedAtUtc = nowUtc,
-            UploadedByUserId = userId,
-            Kind = kind,
-        };
+        return name.Length is 0 ? "consent" : name.Length > 200 ? name[..200] : name;
     }
+
+    /// <summary>Тип файла по сигнатуре (D125: заголовку браузера на открытой странице не доверяем); неизвестный — null.</summary>
+    public static string? DetectType(byte[] content) =>
+        AllowedTypes.FirstOrDefault(t => SignatureMatches(t, content));
 
     private static bool SignatureMatches(string contentType, byte[] c) => contentType.ToLowerInvariant() switch
     {

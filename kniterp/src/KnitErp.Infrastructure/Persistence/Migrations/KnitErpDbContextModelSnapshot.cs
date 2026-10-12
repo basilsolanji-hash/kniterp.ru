@@ -5147,6 +5147,255 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataRequest", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("IssuedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("IssuedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("binary(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_hr_employee_data_requests_org_id");
+
+                    b.HasIndex("IssuedByUserId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_employee_data_requests_token");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "Status")
+                        .HasDatabaseName("ix_hr_employee_data_requests_employee");
+
+                    b.ToTable("hr_employee_data_requests", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_employee_data_requests_closed_immutable");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_closed", "([Status] = 1 AND [ClosedAtUtc] IS NULL) OR ([Status] <> 1 AND [ClosedAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_expires", "[ExpiresAtUtc] > [IssuedAtUtc]");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_hash", "DATALENGTH([TokenHash]) = 32");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_status", "[Status] IN (1, 2, 3)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmission", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ActualAddress")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("BirthDate")
+                        .HasMaxLength(104)
+                        .HasColumnType("nvarchar(104)");
+
+                    b.Property<string>("ClientAddress")
+                        .HasMaxLength(197)
+                        .HasColumnType("nvarchar(197)");
+
+                    b.Property<string>("ConsentTextHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("char(64)")
+                        .IsFixedLength();
+
+                    b.Property<string>("ConsentVersion")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Inn")
+                        .HasMaxLength(109)
+                        .HasColumnType("nvarchar(109)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PassportDivisionCode")
+                        .HasMaxLength(96)
+                        .HasColumnType("nvarchar(96)");
+
+                    b.Property<string>("PassportIssuedOn")
+                        .HasMaxLength(104)
+                        .HasColumnType("nvarchar(104)");
+
+                    b.Property<string>("PassportIssuer")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("PassportNumber")
+                        .HasMaxLength(130)
+                        .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("PersonalEmail")
+                        .HasMaxLength(754)
+                        .HasColumnType("nvarchar(754)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(130)
+                        .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("RegistrationAddress")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long>("RequestId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("ReviewedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Snils")
+                        .HasMaxLength(106)
+                        .HasColumnType("nvarchar(106)");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime>("SubmittedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_hr_employee_data_submissions_org_id");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_employee_data_submissions_request");
+
+                    b.HasIndex("ReviewedByUserId");
+
+                    b.HasIndex("OrganizationId", "RequestId");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "Status")
+                        .HasDatabaseName("ix_hr_employee_data_submissions_employee");
+
+                    b.ToTable("hr_employee_data_submissions", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_employee_data_submissions_immutable");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submissions_consent", "LEN([ConsentTextHash]) = 64 AND LEN([ConsentVersion]) > 0");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submissions_review", "([Status] = 1 AND [ReviewedAtUtc] IS NULL AND [ReviewedByUserId] IS NULL AND [RejectReason] IS NULL) OR ([Status] = 2 AND [ReviewedAtUtc] IS NOT NULL AND [ReviewedByUserId] IS NOT NULL AND [RejectReason] IS NULL) OR ([Status] = 3 AND [ReviewedAtUtc] IS NOT NULL AND [ReviewedByUserId] IS NOT NULL AND LEN([RejectReason]) > 0)");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submissions_status", "[Status] IN (1, 2, 3)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmissionFile", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("int");
+
+                    b.Property<long>("SubmissionId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "SubmissionId")
+                        .HasDatabaseName("ix_hr_employee_data_submission_files_submission");
+
+                    b.ToTable("hr_employee_data_submission_files", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_employee_data_submission_files_insert_only");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submission_files_kind", "[Kind] IN (2, 3, 4, 7, 8)");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submission_files_size", "[SizeBytes] BETWEEN 1 AND 3145728");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>
                 {
                     b.Property<long>("Id")
@@ -5216,6 +5465,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<string>("PassportNumber")
                         .HasMaxLength(130)
                         .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("PersonalEmail")
+                        .HasMaxLength(754)
+                        .HasColumnType("nvarchar(754)");
 
                     b.Property<string>("Phone")
                         .HasMaxLength(130)
@@ -11342,6 +11595,76 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_hr_employee_agreements_employee");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataRequest", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("IssuedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_requests_employee");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmission", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_submissions_employee");
+
+                    b.HasOne("KnitErp.Domain.Hr.EmployeeDataRequest", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "RequestId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_submissions_request");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmissionFile", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Hr.EmployeeDataSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SubmissionId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_submission_files_submission");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>

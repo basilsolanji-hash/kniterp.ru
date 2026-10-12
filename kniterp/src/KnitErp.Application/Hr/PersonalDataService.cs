@@ -388,7 +388,7 @@ public sealed class PersonalDataService(IKnitErpDbContext db, IAccessGuard guard
 
     private static PersonalDataValues ToValues(EmployeePersonalData p) => new(
         p.Gender, p.BirthPlace, p.Citizenship, p.PassportNumber, p.PassportIssuer, p.PassportIssuedOn, p.PassportDivisionCode,
-        p.Snils, p.Inn, p.RegistrationAddress, p.ActualAddress, p.Phone, p.Education, p.Profession, p.MaritalStatus, p.FamilyMembers);
+        p.Snils, p.Inn, p.RegistrationAddress, p.ActualAddress, p.Phone, p.Education, p.Profession, p.MaritalStatus, p.FamilyMembers, p.PersonalEmail);
 
     private void Audit(AccessContext ctx, string action, long employeeId, string? before, string? after, string? reason) =>
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, action, nameof(Employee), employeeId.ToString(),
