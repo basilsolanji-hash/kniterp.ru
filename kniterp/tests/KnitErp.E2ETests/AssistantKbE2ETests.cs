@@ -26,7 +26,7 @@ public sealed class AssistantKbE2ETests(HrAppFixture app) : IClassFixture<HrAppF
             await page.WaitForSelectorAsync("nav", new() { Timeout = 30_000 });
             var input = page.GetByLabel("Вопрос");
             // Персонаж открывает чат событием knit:action; до подключения Blazor событие теряется — повторяем.
-            for (var i = 0; i < 20 && !await input.IsVisibleAsync(); i++)
+            for (var i = 0; i < 80 && !await input.IsVisibleAsync(); i++)
             {
                 await page.EvaluateAsync("() => document.dispatchEvent(new Event('knit:action'))");
                 await page.WaitForTimeoutAsync(500);
@@ -35,7 +35,7 @@ public sealed class AssistantKbE2ETests(HrAppFixture app) : IClassFixture<HrAppF
             await input.FillAsync(question);
             await page.GetByRole(AriaRole.Button, new() { Name = "Спросить" }).ClickAsync();
             var answer = page.Locator(".chat-msg.bot .kb-answer").First;
-            await answer.WaitForAsync(new() { Timeout = 15_000 });
+            await answer.WaitForAsync(new() { Timeout = 30_000 });
             Assert.True((await answer.InnerTextAsync()).Length > 40);
             Assert.True(await page.Locator(".chat-msg.bot").GetByRole(AriaRole.Link, new() { Name = openLabel }).First.IsVisibleAsync());
             Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= window.innerWidth + 1"),

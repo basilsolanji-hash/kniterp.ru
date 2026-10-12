@@ -19,11 +19,14 @@ public static class CrmEndpoints
         app.MapGet("/crm/report.xlsx", (CrmReportService reports, DateOnly from, DateOnly to, long? pipeline, long? responsible, CancellationToken ct) =>
             FileAsync(() => reports.ExportAsync(new CrmReportFilter(from, to, pipeline, responsible), ct), $"crm-otchet-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.xlsx"));
 
-        // D648: вебхук MAX — без входа, организация по секрету в адресе (хранится хэшем) и заголовку X-Max-Bot-Api-Secret. Обрабатывается только
+        // D648: вебхук MAX — без входа, организация по секрету в адресе (хранится хэшем) и обязательному заголовку X-Max-Bot-Api-Secret. Обрабатывается только
         // message_created; ответ 200 — чтобы MAX не повторял доставку; неизвестный секрет — 404. Тело — не больше 64 КБ.
         app.MapPost("/hooks/crm/max/{secret}", async (HttpContext http, string secret, IKnitErpDbContextFactory factory, IClock clock, CancellationToken ct) =>
         {
-            if (http.Request.Headers.TryGetValue("X-Max-Bot-Api-Secret", out var header) && header.ToString() != secret)
+            // D121 (база): заголовок обязателен — секрет только в адресе оседает в журналах прокси; сравнение за постоянное время.
+            if (!http.Request.Headers.TryGetValue("X-Max-Bot-Api-Secret", out var header)
+                || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                    System.Text.Encoding.UTF8.GetBytes(header.ToString()), System.Text.Encoding.UTF8.GetBytes(secret)))
             {
                 return Results.NotFound();
             }
@@ -31,6 +34,12 @@ public static class CrmEndpoints
             if (http.Request.ContentLength is > 65_536)
             {
                 return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            }
+
+            // Без Content-Length (chunked) лимит выше не срабатывает — ограничиваем чтение тела сервером.
+            if (http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+            {
+                limit.MaxRequestBodySize = 65_536;
             }
 
             System.Text.Json.JsonElement doc;
@@ -41,6 +50,10 @@ public static class CrmEndpoints
             catch (System.Text.Json.JsonException)
             {
                 return Results.BadRequest();
+            }
+            catch (Microsoft.AspNetCore.Http.BadHttpRequestException)
+            {
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
             }
 
             await using var db = factory.Create();

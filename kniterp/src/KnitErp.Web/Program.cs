@@ -179,6 +179,10 @@ builder.Services.AddRateLimiter(o =>
         http.Request.Path.StartsWithSegments("/feeds")
             ? RateLimitPartition.GetFixedWindowLimiter("feeds:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
+        // D121 (база, проверка CRM): вебхук MAX без входа — не больше 120 запросов в минуту с адреса.
+        http.Request.Path.StartsWithSegments("/hooks")
+            ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
         // D88: API — 100 запросов за 5 секунд на токен (ключ — отпечаток заголовка Authorization, без самого секрета).
         http.Request.Path.StartsWithSegments("/api")
             ? RateLimitPartition.GetFixedWindowLimiter("api:" + KnitErp.Web.Api.ApiErrors.RateKey(http),
