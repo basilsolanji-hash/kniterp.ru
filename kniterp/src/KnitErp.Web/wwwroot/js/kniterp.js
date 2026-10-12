@@ -109,6 +109,12 @@ window.kniterp = {
     },
     copy: async function (text) {
         try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; }
+    },
+    // D124: «Поделиться» на телефоне — системное меню (мессенджеры, почта). Нет поддержки или отмена — false.
+    canShare: function () { return !!navigator.share; },
+    share: async function (title, text, url) {
+        if (!navigator.share) { return false; }
+        try { await navigator.share({ title: title, text: text, url: url }); return true; } catch (e) { return false; }
     }
 };
 

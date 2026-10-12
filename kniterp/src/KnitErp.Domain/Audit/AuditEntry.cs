@@ -85,6 +85,7 @@ public static class AuditActions
     public const string UserBlocked = "access.user.blocked";
     public const string UserUnblocked = "access.user.unblocked";
     public const string InvitationIssued = "access.invitation.issued";
+    public const string InvitationEmailed = "access.invitation.emailed";
     public const string TwoFactorReset = "access.2fa.reset";
     public const string SignedIn = "auth.signed_in";
     public const string SignInFailed = "auth.sign_in.failed";

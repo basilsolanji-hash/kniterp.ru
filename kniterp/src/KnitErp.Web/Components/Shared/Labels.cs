@@ -18,6 +18,7 @@ public static class AuditLabels
         [AuditActions.UserBlocked] = "Пользователь заблокирован",
         [AuditActions.UserUnblocked] = "Пользователь разблокирован",
         [AuditActions.InvitationIssued] = "Выдана ссылка приглашения",
+        [AuditActions.InvitationEmailed] = "Ссылка отправлена на почту",
         [AuditActions.TwoFactorReset] = "Сброшена 2FA",
         [AuditActions.RecoveryCodesIssued] = "Выданы резервные коды входа",
         [AuditActions.RecoveryCodeUsed] = "Вход по резервному коду",

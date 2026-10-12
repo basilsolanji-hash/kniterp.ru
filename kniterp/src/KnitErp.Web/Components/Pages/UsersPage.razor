@@ -7,6 +7,8 @@
 @inject StructureService Structure
 @inject WarehouseService Warehouses
 @inject NavigationManager Navigation
+@inject InvitationMailer Mailer
+@inject IJSRuntime JS
 
 <PageTitle>@L("Пользователи") — knitERP</PageTitle>
 
@@ -38,24 +40,41 @@ else
 
     @if (_invitation is not null)
     {
-        <div class="panel" role="status">
-            @if (_invitation.PasswordReset)
+        <div class="panel invite-panel" role="status">
+            <h2>@(_invitation.PasswordReset ? L("Ссылка смены пароля для {0}", _invitation.Name) : L("Приглашение для {0}", _invitation.Name))</h2>
+            @if (_invitation.Sent == true)
             {
-                <h2>@L("Ссылка смены пароля для {0}", _invitation.Name)</h2>
-                <p class="muted">
-                    @L("Передайте её пользователю лично (не в общий чат). Ссылка показывается один раз и действует до {0}. Прежний пароль работает, пока не задан новый; код 2FA при входе по-прежнему нужен.", _invitation.ExpiresAt)
-                </p>
+                <p class="invite-sent">✓ @L("Письмо со ссылкой отправлено на {0}. Ссылка действует до {1}.", _invitation.Email ?? "", _invitation.ExpiresAt)</p>
+                <p class="muted small">@L("Письмо не пришло? Попросите проверить «Спам» или передайте ссылку ниже лично.")</p>
+            }
+            else if (_invitation.Sent == false)
+            {
+                <p class="error" role="alert">@L("Письмо не отправлено. Передайте ссылку сами — кнопками ниже. Ссылка действует до {0}.", _invitation.ExpiresAt)</p>
             }
             else
             {
-                <h2>@L("Ссылка приглашения для {0}", _invitation.Name)</h2>
                 <p class="muted">
-                    @L("Передайте её пользователю сами: письма система пока не отправляет. Ссылка показывается один раз и действует до {0}.", _invitation.ExpiresAt)
+                    @L("Почта сервера не настроена — передайте ссылку сами: «Поделиться» (мессенджер на телефоне) или «Копировать». Ссылка личная, действует до {0}.", _invitation.ExpiresAt)
                 </p>
+            }
+            @if (_invitation.PasswordReset)
+            {
+                <p class="muted small">@L("Прежний пароль работает, пока не задан новый; код 2FA при входе по-прежнему нужен.")</p>
             }
             <label for="invite-link">@L("Ссылка")</label>
             <input id="invite-link" readonly value="@_invitation.Link" style="width: 100%" onfocus="this.select()" />
-            <div class="actions"><button type="button" class="secondary" @onclick="() => _invitation = null">@L("Готово")</button></div>
+            <div class="actions">
+                <button type="button" @onclick="CopyLinkAsync" disabled="@_busy">@(_copied ? L("Скопировано ✓") : L("Копировать ссылку"))</button>
+                @if (_canShare)
+                {
+                    <button type="button" class="secondary" @onclick="ShareLinkAsync" disabled="@_busy">@L("Поделиться")</button>
+                }
+                @if (_invitation.Sent != true && Mailer.IsAvailable)
+                {
+                    <button type="button" class="secondary" @onclick="ResendAsync" disabled="@_busy">@L("Отправить письмо ещё раз")</button>
+                }
+                <button type="button" class="secondary" @onclick="() => _invitation = null">@L("Готово")</button>
+            </div>
         </div>
     }
 
@@ -286,6 +305,8 @@ else
     private string? _flash;
     private bool _flashIsError;
     private IssuedInvitation? _invitation;
+    private bool _copied;
+    private bool _canShare;
 
     // Только для отображения кнопок: каждое действие сервер проверяет сам.
     private bool CanManage => CurrentAccess.Has(Permissions.UserManage);
@@ -418,7 +439,8 @@ else
             {
                 var result = await Access.InviteAsync(new InviteUserCommand(_form.Email, _form.DisplayName, _form.RoleCode, _form.Reason,
                     ScopeId, _form.EmployeeId == 0 ? null : _form.EmployeeId, WarehouseScopeId));
-                ShowInvitation(_form.DisplayName, result);
+                ShowInvitation(result.UserId, _form.DisplayName, result);
+                await MailInvitationAsync();
                 _flash = result.SetupToken is null
                     ? L("Пользователь «{0}» добавлен в организацию. Пароль у него уже есть — вход под своей учётной записью.", _form.DisplayName)
                     : L("Пользователь «{0}» приглашён.", _form.DisplayName);
@@ -459,8 +481,9 @@ else
                     break;
                 case Mode.ResetPassword:
                     var reset = await Access.IssuePasswordResetAsync(target.UserId, _form.Reason);
-                    _invitation = new IssuedInvitation(target.DisplayName, $"{Navigation.BaseUri}account/reset-password?token={reset.SetupToken}",
+                    _invitation = new IssuedInvitation(target.UserId, target.DisplayName, reset.SetupToken!, Mailer.Link(Navigation.BaseUri, reset.SetupToken!, true),
                         reset.ExpiresAtUtc is { } exp ? $"{TimeZones.ToLocal(exp, CurrentAccess.TimeZoneId):dd.MM.yyyy HH:mm}" : "—", PasswordReset: true);
+                    await MailInvitationAsync();
                     _flash = L("Выдана ссылка смены пароля. Прежняя ссылка больше не действует.");
                     break;
             }
@@ -477,17 +500,61 @@ else
     {
         await RunAsync(async () =>
         {
-            ShowInvitation(user.DisplayName, await Access.ReissueInvitationAsync(user.UserId));
+            ShowInvitation(user.UserId, user.DisplayName, await Access.ReissueInvitationAsync(user.UserId));
+            await MailInvitationAsync();
             _flash = L("Выдана новая ссылка. Прежняя больше не действует.");
         });
     }
 
-    private void ShowInvitation(string name, InvitationResult result)
+    private void ShowInvitation(long userId, string name, InvitationResult result)
     {
-        _invitation = result.SetupToken is null
+        _copied = false;
+        _invitation = result.SetupToken is not { } token
             ? null
-            : new IssuedInvitation(name, $"{Navigation.BaseUri}account/invite?token={result.SetupToken}",
+            : new IssuedInvitation(userId, name, token, Mailer.Link(Navigation.BaseUri, token, false),
                 result.ExpiresAtUtc is { } exp ? $"{TimeZones.ToLocal(exp, CurrentAccess.TimeZoneId):dd.MM.yyyy HH:mm}" : "—");
+    }
+
+    /// <summary>D124: письмо со ссылкой сразу после выдачи; почта не настроена — Sent = null, ссылка остаётся на экране.</summary>
+    private async Task MailInvitationAsync()
+    {
+        if (_invitation is null || !Mailer.IsAvailable)
+        {
+            return;
+        }
+
+        var sent = await Mailer.SendAsync(_invitation.UserId, _invitation.Token, _invitation.PasswordReset);
+        _invitation = _invitation with { Sent = sent.Sent, Email = sent.Email };
+    }
+
+    private async Task ResendAsync() => await RunAsync(MailInvitationAsync);
+
+    private async Task CopyLinkAsync()
+    {
+        if (_invitation is not null)
+        {
+            _copied = await JS.InvokeAsync<bool>("kniterp.copy", _invitation.Link);
+        }
+    }
+
+    private async Task ShareLinkAsync()
+    {
+        if (_invitation is not null)
+        {
+            await JS.InvokeAsync<bool>("kniterp.share", "knitERP", L("Ссылка для входа в knitERP (личная, не пересылайте):"), _invitation.Link);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _canShare = await JS.InvokeAsync<bool>("kniterp.canShare");
+            if (_canShare)
+            {
+                StateHasChanged();
+            }
+        }
     }
 
     private async Task ReloadAsync() => _users = await Access.ListUsersAsync();
@@ -558,7 +625,8 @@ else
     private static string StatusClass(UserRowDto u) =>
         u.MembershipStatus == MembershipStatus.Blocked ? "bad" : !u.HasPassword ? "warn" : "ok";
 
-    private sealed record IssuedInvitation(string Name, string Link, string ExpiresAt, bool PasswordReset = false);
+    private sealed record IssuedInvitation(long UserId, string Name, string Token, string Link, string ExpiresAt, bool PasswordReset = false,
+        bool? Sent = null, string? Email = null);
 
     private sealed class UserForm
     {

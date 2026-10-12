@@ -21,6 +21,7 @@ public static class DependencyInjection
         services.AddScoped<IAccessGuard, AccessGuard>();
         services.AddScoped<OrganizationService>();
         services.AddScoped<UserAccessService>();
+        services.AddScoped<InvitationMailer>();
         services.AddScoped<RoleService>();
         services.AddScoped<AuditQueryService>();
         services.AddScoped<StructureService>();
