@@ -1,0 +1,225 @@
+@page "/dev/tech/{Id:long}"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevTechService Tech
+@inject DevShopService Shop
+
+@*
+    Техкарта вязания у машины (D717): вязальщица открывает её с рабочего телефона или планшета; образцовщица здесь же записывает
+    факт образца по детали — время вязания, вес и доли цветов (в процентах или граммах). Печать — отдельной страницей.
+*@
+<PageTitle>@(_card is null ? L("Техкарта вязания") : $"{_card.ModelNumber} · {_card.DetailName}") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <h1>@L("Деталь не найдена")</h1>
+    <p><a href="dev/tech">@L("К техкартам вязания")</a></p>
+}
+else if (_card is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var c = _card;
+    <div class="actions dev-tech-bar">
+        <a href="dev/tech">@L("← Техкарты вязания")</a>
+        @if (CurrentAccess.Has(Permissions.DevView))
+        {
+            <a href="dev/models/@c.ModelId">@L("Карточка модели")</a>
+        }
+        @if (c.CanEditThreading)
+        {
+            <a class="button secondary" href="dev/details/@c.DetailId">@L("Изменить техзадание")</a>
+        }
+        <a class="button secondary" href="print/dev/tech/@c.DetailId" target="_blank" rel="noopener">@L("Печать")</a>
+        <DevLabelLink Kind="detail" Id="c.DetailId" />
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <DevTechCardView Card="c" />
+
+    @if (c.CanRecordFact)
+    {
+        <div class="panel" id="fact">
+            <h2>@L("Факт образца по детали")</h2>
+            @if (c.Samples.Count == 0)
+            {
+                <p class="muted">@L("Образца ещё нет — его создаёт технолог на вкладке «Образцы» карточки модели.")</p>
+            }
+            else
+            {
+                <form @onsubmit="SaveFactAsync">
+                    <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                        <div class="grid">
+                            <label>
+                                @L("Образец")
+                                <select @bind="_sampleId">
+                                    @foreach (var s in c.Samples)
+                                    {
+                                        <option value="@s.Id">@L("№ {0}", s.No)@(s.Size is null ? "" : " · " + s.Size) · @L(s.StatusName)</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Время вязания, мин") <input type="number" min="0" step="0.1" inputmode="decimal" @bind="_minutes" /></label>
+                            <label>@L("Вес детали, г") <input type="number" min="0" step="0.1" inputmode="decimal" @bind="_grams" /></label>
+                        </div>
+                        @if (c.Palette.Count > 0)
+                        {
+                            <p class="muted small" style="margin: 8px 0 4px">
+                                @L("Соотношение цветов в детали")
+                                <label class="inline" style="display: inline-flex; margin-left: 8px"><span><input type="checkbox" @bind="_inGrams" /> @L("ввожу граммы — пересчитать в %")</span></label>
+                            </p>
+                            <div class="grid">
+                                @foreach (var color in c.Palette)
+                                {
+                                    var id = color.Id;
+                                    <label>
+                                        <span>@if (color.Swatch is not null) { <span class="dev-swatch" style="background: @color.Swatch"></span> }@color.Label</span>
+                                        <input type="number" min="0" step="0.1" inputmode="decimal" value="@_shares.GetValueOrDefault(id)?.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                                               @onchange="e => _shares[id] = decimal.TryParse((e.Value as string)?.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null"
+                                               aria-label="@L("Доля цвета {0}", color.Label)" />
+                                    </label>
+                                }
+                            </div>
+                            <p class="muted small">@(_inGrams ? L("Сумма: {0} г", SharesSum()) : L("Сумма: {0} % (нужно 100 %)", SharesSum()))</p>
+                        }
+                        <div class="actions"><button type="submit" disabled="@_busy">@L("Записать факт")</button></div>
+                    </fieldset>
+                </form>
+            }
+        </div>
+    }
+
+    @if (c.Facts.Count > 0)
+    {
+        <div class="panel">
+            <h2>@L("Факты образцов по детали")</h2>
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>@L("Образец")</th><th class="num">@L("Время")</th><th class="num">@L("Вес")</th><th>@L("Цвета")</th><th class="opt">@L("Кто и когда")</th></tr></thead>
+                    <tbody>
+                        @foreach (var f in c.Facts)
+                        {
+                            <tr>
+                                <td>@L("№ {0}", f.SampleNo)</td>
+                                <td class="num @(Late(f) ? "late-text" : null)">@DevFormat.Duration(f.KnitSeconds)</td>
+                                <td class="num @(Heavy(f) ? "late-text" : null)">@DevFormat.Grams(f.WeightGrams)</td>
+                                <td>@(f.Shares.Count == 0 ? "—" : string.Join(", ", f.Shares.Select(s => $"{s.Label} {DevFormat.Percent(s.Percent)}")))</td>
+                                <td>@f.RecordedBy, @Local(f.RecordedAtUtc)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="muted small">@L("Красным — дольше плана или тяжелее плана больше чем на {0} %.", c.FactTolerancePercent)</p>
+        </div>
+    }
+
+    @* D719: обсуждение детали у машины — вязальщица, дессинатор и технолог пишут здесь же, с упоминанием коллег. *@
+    <div class="panel">
+        <h2>@L("Обсуждение детали")</h2>
+        <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.DevDetail" TargetId="c.DetailId" />
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private DevTechCardDto? _card;
+    private bool _busy;
+    private bool _notFound;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private long _sampleId;
+    private decimal? _minutes;
+    private decimal? _grams;
+    private bool _inGrams;
+    private readonly Dictionary<long, decimal?> _shares = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _card = null;
+        _notFound = false;
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _card = await Tech.TechCardAsync(Id);
+        if (_card.Samples.Count > 0 && _card.Samples.All(s => s.Id != _sampleId))
+        {
+            _sampleId = _card.Samples[0].Id;
+        }
+    }
+
+    private string SharesSum() => DevFormat.Number(_shares.Values.Sum(v => v ?? 0));
+
+    private bool Late(DevFactDto f) => DevSettings.OverPlan(f.KnitSeconds, _card!.PlanKnitSeconds, _card.FactTolerancePercent);
+
+    private bool Heavy(DevFactDto f) => DevSettings.OverPlan(f.WeightGrams, _card!.PlanWeightGrams, _card.FactTolerancePercent);
+
+    private async Task SaveFactAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Shop.RecordFactAsync(_sampleId, Id, DevFormat.SecondsFromMinutes(_minutes), _grams,
+                _shares.Where(s => s.Value is > 0).Select(s => (s.Key, s.Value!.Value)).ToList(), _inGrams);
+            _message = L("Факт записан.");
+            _minutes = null;
+            _grams = null;
+            _shares.Clear();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+}

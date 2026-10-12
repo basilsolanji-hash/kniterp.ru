@@ -42,6 +42,28 @@ public sealed class DevFile
     public DateTime UploadedAtUtc { get; private set; }
     public long UploadedByUserId { get; private set; }
 
+    /// <summary>Деталь, для которой загружена программа машины (D711).</summary>
+    public long? DetailId { get; private set; }
+
+    /// <summary>Станок программы (D710).</summary>
+    public long? MachineId { get; private set; }
+
+    /// <summary>Параметры станка на момент загрузки («STOLL CMS 530 · E7 · 8 нитеводителей») — программа хранится вместе с ними.</summary>
+    public string? MachineParams { get; private set; }
+
+    /// <summary>Привязать программу к детали и станку до сохранения (после вставки файл неизменяем).</summary>
+    public void AttachProgram(long detailId, long machineId, string machineParams)
+    {
+        if (Kind != DevFileKind.MachineProgram || Id != 0)
+        {
+            throw new BusinessRuleException("dev.file.program", "К станку привязывается только новая программа машины.");
+        }
+
+        DetailId = detailId;
+        MachineId = machineId;
+        MachineParams = machineParams.Length > 200 ? machineParams[..200] : machineParams;
+    }
+
     public static string KindName(DevFileKind kind) => kind switch
     {
         DevFileKind.Sketch => "Эскиз",

@@ -85,6 +85,9 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         var download = await models.GetFileAsync(prog);
         Assert.Equal(("jacquard.sin", DevFileTypes.Binary), (download.FileName, download.ContentType));
         Assert.Equal(Program, download.Content);
+        // D799: превью картинки журнал не пишет, превью не картинки не отдаётся.
+        Assert.Equal(Png, (await models.GetFileAsync(v1, preview: true)).Content);
+        await Assert.ThrowsAsync<NotFoundException>(() => models.GetFileAsync(prog, preview: true));
 
         await using var db = host.NewDb();
         // История стадий и файлы — только вставка, даже напрямую в базе.
@@ -100,7 +103,7 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         Assert.Contains(audit, e => e.Action == AuditActions.DevStageChanged && e.After == "Доработка");
         Assert.Contains(audit, e => e.Action == AuditActions.DevBriefChanged);
         Assert.Contains(audit, e => e.Action == AuditActions.DevFileAdded);
-        Assert.Contains(audit, e => e.Action == AuditActions.DevFileViewed);
+        Assert.Single(audit, e => e.Action == AuditActions.DevFileViewed);
         // Целевые суммы в журнал не попадают (журнал видят без права на себестоимость).
         Assert.DoesNotContain(audit, e => (e.After ?? "").Contains("1500") || (e.After ?? "").Contains("4200"));
     }

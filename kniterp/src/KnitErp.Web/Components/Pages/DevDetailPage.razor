@@ -1,0 +1,377 @@
+@page "/dev/details/{Id:long}"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevTechService Tech
+
+@*
+    Техзадание детали — экран дессинатора (D711): станок из справочника, переплетение, плановые время и вес, важные комментарии,
+    заправка нитеводителей (слева и справа: цвет палитры дизайнера, нитей, парафин, режим, эластан), программа машины с параметрами
+    станка. Меньше ввода: число нитеводителей — от станка, цвет — из палитры, заправку можно скопировать с другой детали.
+*@
+<PageTitle>@(_d is null ? L("Техзадание детали") : $"{_d.ModelNumber} · {_d.Name}") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <h1>@L("Деталь не найдена")</h1>
+    <p><a href="dev/models">@L("К списку моделей")</a></p>
+}
+else if (_d is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var d = _d;
+    <p><a href="dev/models/@d.ModelId">@L("← {0} {1}", d.ModelNumber, d.ModelName)</a></p>
+    <div class="page-head">
+        <h1>@L("Техзадание: {0}", d.Name)@(d.Quantity > 1 ? $" × {d.Quantity}" : "")</h1>
+        <div class="actions" style="margin: 0">
+            <a class="button secondary" href="dev/tech/@d.Id">@L("Техкарта вязания")</a>
+            <DevLabelLink Kind="detail" Id="d.Id" />
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="panel">
+        <h2>@L("Деталь и вязание")</h2>
+        <form @onsubmit="SaveKnittingAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !d.CanEdit)">
+                <div class="grid">
+                    <label>@L("Название детали") <input @bind="_name" maxlength="@DevDetail.NameMaxLength" required /></label>
+                    <label>@L("Деталей в изделии") <input type="number" min="1" max="@DevDetail.MaxQuantity" step="1" inputmode="numeric" @bind="_quantity" /></label>
+                    <label>
+                        @L("Станок")
+                        <select @bind="_machine">
+                            <option value="">—</option>
+                            @foreach (var m in d.Machines)
+                            {
+                                <option value="@m.Id">@m.Name · E@(m.Gauge) · @L("{0} нитевод.", m.FeederCount)@(m.Status == DevMachineStatus.Working ? "" : " · " + L(m.StatusName))</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Переплетение")
+                        <select @bind="_weave">
+                            <option value="">—</option>
+                            @foreach (var w in d.Weaves)
+                            {
+                                <option value="@w.Id">@w.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Время вязания, мин") <input type="number" min="0" step="0.1" inputmode="decimal" @bind="_minutes" /></label>
+                    <label>@L("Вес детали, г") <input type="number" min="0" step="0.1" inputmode="decimal" @bind="_grams" /></label>
+                    <label class="wide">@L("Важные комментарии для цеха") <textarea rows="3" @bind="_notes" maxlength="@DevDetail.NotesMaxLength"
+                                                                     placeholder="@L("Если хлопок 20/1 — заправляем в 4 конца, если 24/1 — в 5 концов.")"></textarea></label>
+                </div>
+                @if (d.Machines.Count == 0)
+                {
+                    <p class="muted small">@L("Справочник станков пуст — добавьте станки в разделе «Станки и программы».")</p>
+                }
+                @if (d.CanEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </fieldset>
+        </form>
+    </div>
+
+    <div class="panel">
+        <div class="page-head" style="margin: 0">
+            <h2>@L("Заправка")</h2>
+            @if (d.CanEditThreading && d.OtherDetails.Count > 0)
+            {
+                <span class="inline-form" style="margin: 0">
+                    <select @bind="_copyFrom" aria-label="@L("Скопировать заправку с детали")">
+                        <option value="">@L("Скопировать с детали…")</option>
+                        @foreach (var o in d.OtherDetails)
+                        {
+                            <option value="@o.Id">@o.Name</option>
+                        }
+                    </select>
+                    <button type="button" class="secondary" @onclick="CopyAsync" disabled="@(_busy || _copyFrom.Length == 0)">@L("Скопировать")</button>
+                </span>
+            }
+        </div>
+        @if (Feeders == 0)
+        {
+            <p class="muted">@L("Выберите станок и сохраните — заправка строится по числу его нитеводителей.")</p>
+        }
+        else
+        {
+            @if (d.Palette.Count == 0)
+            {
+                <p class="muted small">@L("Палитра модели пуста — дизайнер выбирает цвета пряжи на вкладке «Задание». Пока можно написать нить словами.")</p>
+            }
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !d.CanEditThreading)">
+                <div class="dev-feeders">
+                    @for (var n = Feeders; n >= 1; n--)
+                    {
+                        var feeder = n;
+                        <div class="dev-feeder">
+                            @SlotEditor(feeder, DevFeederSide.Left)
+                            <span class="n" aria-label="@L("Нитеводитель {0}", feeder)">@feeder</span>
+                            @SlotEditor(feeder, DevFeederSide.Right)
+                        </div>
+                    }
+                </div>
+                @if (d.CanEditThreading)
+                {
+                    <div class="actions"><button type="button" @onclick="SaveThreadingAsync" disabled="@_busy">@L("Сохранить заправку")</button></div>
+                }
+            </fieldset>
+        }
+    </div>
+
+    <div class="panel">
+        <h2>@L("Программа машины")</h2>
+        @if (d.MachineId is null)
+        {
+            <p class="muted">@L("Программа хранится вместе с параметрами станка — сначала выберите станок.")</p>
+        }
+        else if (d.CanEditThreading)
+        {
+            <div class="inline-form">
+                <label>@L("Комментарий") <input @bind="_programComment" maxlength="@DevFile.CommentMaxLength" placeholder="@L("что изменено")" /></label>
+                <label class="file-pick" title="@L("До 50 МБ")">@L("Загрузить программу (.sin, .dat)") <InputFile OnChange="UploadProgramAsync" accept=".sin,.dat" disabled="@_busy" /></label>
+            </div>
+        }
+        @if (d.Programs.Count == 0)
+        {
+            <p class="muted">@L("Программ пока нет.")</p>
+        }
+        else
+        {
+            <ul class="dev-files">
+                @foreach (var p in d.Programs)
+                {
+                    <li>
+                        @if (p.FileId == d.ProgramFileId) { <span class="tag ok">@L("текущая")</span> }
+                        <a href="dev/files/@p.FileId" download data-enhance-nav="false">@p.FileName</a>
+                        <span class="muted small">@L("версия {0}", p.Version) · @(p.MachineParams ?? "") · @p.UploadedBy, @Local(p.UploadedAtUtc)</span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+
+    <div class="panel">
+        <h2>@L("Обсуждение детали")</h2>
+        <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.DevDetail" TargetId="d.Id" />
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private sealed class SlotForm
+    {
+        public bool Used { get; set; }
+        public string Color { get; set; } = string.Empty;
+        public string? Label { get; set; }
+        public int Ends { get; set; } = 2;
+        public bool Paraffin { get; set; } = true;
+        public string? Mode { get; set; } = "N";
+        public bool Elastic { get; set; }
+    }
+
+    private DevDetailEditDto? _d;
+    private readonly Dictionary<(int, DevFeederSide), SlotForm> _slots = [];
+    private bool _busy;
+    private bool _notFound;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private string _name = string.Empty;
+    private int _quantity = 1;
+    private string _machine = string.Empty;
+    private string _weave = string.Empty;
+    private decimal? _minutes;
+    private decimal? _grams;
+    private string? _notes;
+    private string _copyFrom = string.Empty;
+    private string? _programComment;
+
+    private int Feeders => _d?.MachineId is { } mid ? _d.Machines.FirstOrDefault(m => m.Id == mid)?.FeederCount ?? 0 : 0;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _d = null;
+        _notFound = false;
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _d = await Tech.DetailAsync(Id);
+        _name = _d.Name;
+        _quantity = _d.Quantity;
+        _machine = _d.MachineId?.ToString() ?? string.Empty;
+        _weave = _d.WeaveId?.ToString() ?? string.Empty;
+        _minutes = DevFormat.MinutesFromSeconds(_d.PlanKnitSeconds);
+        _grams = _d.PlanWeightGrams;
+        _notes = _d.Notes;
+        _slots.Clear();
+        foreach (var t in _d.Threading)
+        {
+            _slots[(t.Feeder, t.Side)] = new SlotForm
+            {
+                Used = true, Color = t.ColorId?.ToString() ?? string.Empty, Label = t.Label, Ends = t.Ends, Paraffin = t.Paraffin, Mode = t.Mode, Elastic = t.Elastic,
+            };
+        }
+    }
+
+    private SlotForm Form(int feeder, DevFeederSide side)
+    {
+        if (!_slots.TryGetValue((feeder, side), out var f))
+        {
+            f = new SlotForm();
+            _slots[(feeder, side)] = f;
+        }
+
+        return f;
+    }
+
+    private RenderFragment SlotEditor(int feeder, DevFeederSide side) => __builder =>
+    {
+        var f = Form(feeder, side);
+        var sideText = side == DevFeederSide.Left ? L("слева") : L("справа");
+        <div class="dev-slot @(f.Used ? null : "off")">
+            <label class="check wide"><input type="checkbox" @bind="f.Used" /> @L("Нитеводитель {0}, {1}", feeder, sideText)</label>
+            @if (f.Used)
+            {
+                <label class="pick">
+                    @L("Цвет / нить")
+                    <select @bind="f.Color">
+                        <option value="">@L("своя нить (написать)")</option>
+                        @foreach (var c in _d!.Palette)
+                        {
+                            <option value="@c.Id">@c.Label@(c.ItemName is null ? "" : " — " + c.ItemName)</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Нитей") <input type="number" min="1" max="@DevThreading.MaxEnds" step="1" inputmode="numeric" @bind="f.Ends" /></label>
+                <label>@L("Режим") <input type="text" @bind="f.Mode" maxlength="@DevThreading.ModeMaxLength" /></label>
+                @if (f.Color.Length == 0)
+                {
+                    <label class="wide">@L("Какая нить") <input type="text" @bind="f.Label" maxlength="60" placeholder="@L("Разделитель (нейлон)")" /></label>
+                }
+                <div class="checks">
+                    <label class="check"><input type="checkbox" @bind="f.Paraffin" /> @L("парафин")</label>
+                    <label class="check"><input type="checkbox" @bind="f.Elastic" /> @L("эластан")</label>
+                </div>
+            }
+        </div>
+    };
+
+    private Task SaveKnittingAsync() => RunAsync(async () =>
+    {
+        if (_name != _d!.Name || _quantity != _d.Quantity)
+        {
+            await Tech.RenameDetailAsync(Id, _name, _quantity, _d.RowVersion);
+            _d = await Tech.DetailAsync(Id);
+        }
+
+        await Tech.SetKnittingAsync(Id, long.TryParse(_machine, out var m) ? m : null, long.TryParse(_weave, out var w) ? w : null,
+            DevFormat.SecondsFromMinutes(_minutes), _grams, _notes, _d.RowVersion);
+    }, L("Сохранено."));
+
+    private Task SaveThreadingAsync() => RunAsync(() => Tech.SetThreadingAsync(Id, _slots
+        .Where(s => s.Value.Used && s.Key.Item1 <= Feeders)
+        .Select(s => new DevThreadingRow(s.Key.Item1, s.Key.Item2, long.TryParse(s.Value.Color, out var c) ? c : null,
+            long.TryParse(s.Value.Color, out _) ? null : s.Value.Label, s.Value.Ends, s.Value.Paraffin, s.Value.Mode, s.Value.Elastic))
+        .ToList(), _d!.RowVersion), L("Заправка сохранена."));
+
+    private Task CopyAsync() => long.TryParse(_copyFrom, out var from)
+        ? RunAsync(async () =>
+        {
+            await Tech.CopyThreadingAsync(from, Id, _d!.RowVersion);
+            _copyFrom = string.Empty;
+        }, L("Заправка скопирована."))
+        : Task.CompletedTask;
+
+    private Task UploadProgramAsync(InputFileChangeEventArgs args) => RunAsync(async () =>
+    {
+        var file = args.File;
+        if (file.Size > DevFile.MaxBytes)
+        {
+            throw new BusinessRuleException("dev.file.size", "Файл модели — до 50 МБ.");
+        }
+
+        using var buffer = new MemoryStream();
+        await using (var stream = file.OpenReadStream(DevFile.MaxBytes))
+        {
+            await stream.CopyToAsync(buffer);
+        }
+
+        await Tech.AddProgramAsync(Id, file.Name, buffer.ToArray(), _programComment);
+        _programComment = null;
+    }, L("Программа загружена."));
+
+    /// <summary>Одна операция за раз, затем свежие данные: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                if (!_isError)
+                {
+                    await LoadAsync();
+                }
+                else
+                {
+                    _d = await Tech.DetailAsync(Id);
+                }
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+}

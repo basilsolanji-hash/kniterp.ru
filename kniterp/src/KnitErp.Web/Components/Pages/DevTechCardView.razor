@@ -1,0 +1,216 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+
+@*
+    Техкарта вязания детали (D717) — по образцу владельца «Техническая карта · Артикул 65153»: его палитра (#1A1A1C, #242427, #333336,
+    #2BA89A, #B0B0B4, #D4A04A, #4A8AD4), блоки 1–3 (заправка дессинатора; операции и размеры — во вкладках карточки модели), ровная сетка: одинаковые отступы, колонки заправки фиксированной ширины, плашки
+    общей информации одной высоты. Основной сценарий — телефон или планшет вязальщицы у машины; Print — светлый лист A4.
+*@
+<style>
+    .ks-tech { --kt-bg: #1A1A1C; --kt-card: #242427; --kt-border: #333336; --kt-accent: #2BA89A; --kt-text: #FFFFFF; --kt-muted: #B0B0B4;
+        --kt-warning: #D4A04A; --kt-info: #4A8AD4; --kt-error: #D45A5A; --kt-gap: 16px;
+        background: var(--kt-bg); color: var(--kt-text); border: 1px solid var(--kt-border); border-radius: 12px;
+        padding: 0 var(--kt-gap) var(--kt-gap); line-height: 1.45; font-variant-numeric: tabular-nums; }
+    .ks-tech.print { --kt-bg: #FFFFFF; --kt-card: #F4F4F5; --kt-border: #C9C9CF; --kt-accent: #13786D; --kt-text: #000000; --kt-muted: #4A4A50;
+        --kt-warning: #8A5A00; --kt-info: #1F5FA8; border: 0; border-radius: 0; max-width: 780px; margin: 0 auto; font-size: 12px; }
+    .ks-tech section { padding: var(--kt-gap) 0; border-bottom: 1px solid var(--kt-border); }
+    .ks-tech section:last-child { border-bottom: 0; }
+    .ks-tech .kt-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; padding: var(--kt-gap) 0; }
+    .ks-tech .kt-brand { font-weight: 600; font-size: 15px; }
+    .ks-tech .kt-brand span, .ks-tech .kt-eyebrow { color: var(--kt-accent); }
+    .ks-tech .kt-sub, .ks-tech .kt-note, .ks-tech .kt-meta { color: var(--kt-muted); font-size: 12px; }
+    .ks-tech .kt-meta { text-align: right; }
+    .ks-tech .kt-eyebrow { font-weight: 600; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 4px; }
+    .ks-tech h1 { font-size: 24px; margin: 0 0 12px; font-weight: 600; color: var(--kt-text); border: 0; padding: 0; }
+    .ks-tech h2 { font-size: 16px; margin: 0; font-weight: 600; color: var(--kt-text); }
+    .ks-tech .kt-section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+    .ks-tech .kt-chips { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+    .ks-tech .kt-chip { background: var(--kt-card); border: 1px solid var(--kt-border); padding: 8px 12px; min-height: 58px; display: flex;
+        flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
+    .ks-tech .kt-chip .k { color: var(--kt-muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; }
+    .ks-tech .kt-chip .v { font-weight: 600; overflow-wrap: anywhere; }
+    .ks-tech .kt-chip.warn .v { color: var(--kt-warning); }
+    .ks-tech .kt-feeder { display: grid; gap: 1px; background: var(--kt-border); border: 1px solid var(--kt-border); }
+    .ks-tech .kt-row { display: grid; grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr); background: var(--kt-bg); }
+    .ks-tech .kt-side { padding: 8px 10px; display: flex; align-items: center; gap: 8px; min-height: 52px; min-width: 0; }
+    .ks-tech .kt-side.left { justify-content: flex-end; text-align: right; }
+    .ks-tech .kt-side .y { font-size: 13.5px; font-weight: 500; overflow-wrap: break-word; hyphens: auto; }
+    .ks-tech .kt-side .y.el { color: var(--kt-info); }
+    .ks-tech .kt-side .m { font-size: 11px; color: var(--kt-muted); }
+    .ks-tech .kt-side .sw { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--kt-border); flex: none; }
+    .ks-tech .kt-flags { display: flex; gap: 4px; flex-wrap: wrap; }
+    .ks-tech .kt-side.left .kt-flags { justify-content: flex-end; }
+    .ks-tech .kt-flag { font-size: 10px; padding: 1px 5px; border: 1px solid var(--kt-border); color: var(--kt-muted); white-space: nowrap; }
+    .ks-tech .kt-flag.on { border-color: var(--kt-accent); color: var(--kt-accent); }
+    .ks-tech .kt-num { display: flex; align-items: center; justify-content: center; background: var(--kt-card); }
+    .ks-tech .kt-num b { width: 26px; height: 26px; border-radius: 50%; background: var(--kt-accent); color: #0D1615; font-size: 12.5px;
+        display: flex; align-items: center; justify-content: center; }
+    .ks-tech.print .kt-num b { color: #fff; }
+    .ks-tech .kt-legend { margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--kt-muted); }
+    .ks-tech .kt-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .ks-tech .kt-callout { display: flex; gap: 12px; background: var(--kt-card); border: 1px solid var(--kt-warning); border-left-width: 3px; padding: 12px 14px; }
+    .ks-tech .kt-callout .mark { color: var(--kt-warning); font-weight: 700; }
+    .ks-tech .kt-callout p { margin: 0; white-space: pre-line; }
+    .ks-tech .kt-sketch { max-width: 100%; max-height: 220px; border-radius: 8px; border: 1px solid var(--kt-border); display: block; }
+    .ks-tech .kt-foot { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: var(--kt-muted); font-size: 11.5px; padding-top: var(--kt-gap); }
+    .ks-tech .kt-empty { color: var(--kt-muted); }
+    /* Широкий экран (D719): без пустых полей — заправка слева на всю высоту, общая информация и важные комментарии справа.
+       Операции технолога и размеры конструктора в техкарту вязания не входят: они во вкладках «Операции» и «Размеры» карточки модели. */
+    .ks-tech .kt-intro { display: grid; gap: 12px; }
+    .ks-tech .kt-chip.warn { grid-column: 1 / -1; }
+    .ks-tech .kt-body { border-bottom: 1px solid var(--kt-border); }
+    .ks-tech .kt-body > section:last-child { border-bottom: 0; }
+    @@media screen and (min-width: 1100px) {
+        .ks-tech:not(.print) .kt-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr); grid-template-rows: auto 1fr;
+            grid-template-areas: "feed info" "feed notes"; column-gap: 24px; }
+        .ks-tech:not(.print) .kt-info { grid-area: info; }
+        .ks-tech:not(.print) .kt-main { grid-area: feed; border-bottom: 0; }
+        .ks-tech:not(.print) .kt-notes { grid-area: notes; border-bottom: 0; }
+        .ks-tech:not(.print) .kt-info, .ks-tech:not(.print) .kt-notes { border-left: 1px solid var(--kt-border); padding-left: 24px; }
+        .ks-tech:not(.print) .kt-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .ks-tech:not(.print) .kt-sketch { max-height: 200px; }
+    }
+    @@media (max-width: 640px) {
+        .ks-tech { --kt-gap: 12px; border-radius: 8px; }
+        .ks-tech h1 { font-size: 20px; }
+        .ks-tech .kt-row { grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); }
+        .ks-tech .kt-side { padding: 8px 6px; gap: 4px; flex-direction: column; align-items: flex-start; justify-content: center; }
+        .ks-tech .kt-side.left { align-items: flex-end; }
+        .ks-tech .kt-side .kt-flags { order: 2; }
+        .ks-tech .kt-side .y { font-size: 12.5px; }
+        .ks-tech .kt-meta { text-align: left; }
+        .ks-tech .kt-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @@media print { .ks-tech section { break-inside: avoid; } }
+</style>
+
+<article class="ks-tech @(Print ? "print" : null)" aria-label="@L("Техкарта вязания")">
+    <div class="kt-head">
+        <div>
+            <div class="kt-brand">@L("Техническая карта вязания")</div>
+            <div class="kt-sub">@Card.ModelNumber · @Card.ModelName</div>
+        </div>
+        <div class="kt-meta">
+            <b>@(Card.MachineName ?? L("станок не выбран"))</b><br />
+            @(Card.MachineParams ?? "")
+        </div>
+    </div>
+
+
+    <div class="kt-body">
+    <section class="kt-info">
+        <div class="kt-eyebrow">@L("Блок 1 · Общая информация")</div>
+        <h1>@Card.DetailName@(Card.Quantity > 1 ? $" × {Card.Quantity}" : "")</h1>
+        <div class="kt-intro">
+        <div class="kt-chips">
+            <div class="kt-chip"><span class="k">@L("Переплетение")</span><span class="v">@(Card.Weave ?? "—")</span></div>
+            <div class="kt-chip"><span class="k">@L("Время вязания")</span><span class="v">@DevFormat.Duration(Card.PlanKnitSeconds)</span></div>
+            <div class="kt-chip"><span class="k">@L("Вес")</span><span class="v">@DevFormat.Grams(Card.PlanWeightGrams)</span></div>
+            <div class="kt-chip"><span class="k">@L("Состав")</span><span class="v">@(Card.Composition ?? "—")</span></div>
+            <div class="kt-chip"><span class="k">@L("Программа")</span><span class="v">@(Card.ProgramName is null ? "—" : $"{Card.ProgramName} · v{Card.ProgramVersion}")</span></div>
+            @if (Card.MachineStatus is { } st && st != DevMachineStatus.Working)
+            {
+                <div class="kt-chip warn"><span class="k">@L("Станок")</span><span class="v">@L(Card.MachineStatusName!)@(Card.MachineLastNote is null ? "" : ": " + Card.MachineLastNote)</span></div>
+            }
+        </div>
+        @if (Card.SketchFileId is { } sketch && !Print)
+        {
+            <img class="kt-sketch" src="dev/files/@(sketch)?inline=1" alt="@L("Эскиз")" loading="lazy" />
+        }
+        </div>
+    </section>
+
+    <section class="kt-main">
+        <div class="kt-section-head">
+            <div><div class="kt-eyebrow">@L("Блок 2")</div><h2>@L("Заправка")</h2></div>
+            <div class="kt-note">@L("{0} нитеводителей · слева и справа", Card.FeederCount)</div>
+        </div>
+        @if (Card.Feeders.All(f => f.Left is null && f.Right is null))
+        {
+            <p class="kt-empty">@L("Заправка ещё не заполнена дессинатором.")</p>
+        }
+        else
+        {
+            <div class="kt-feeder">
+                @foreach (var f in Card.Feeders)
+                {
+                    <div class="kt-row">
+                        <div class="kt-side left">@Slot(f.Left, true)</div>
+                        <div class="kt-num"><b>@f.Feeder</b></div>
+                        <div class="kt-side">@Slot(f.Right, false)</div>
+                    </div>
+                }
+            </div>
+            <div class="kt-legend">
+                <span><i style="background: var(--kt-text)"></i>@L("нить основного или доп. цвета")</span>
+                <span><i style="background: var(--kt-info)"></i>@L("эластан (спандекс)")</span>
+                <span><i style="background: var(--kt-accent)"></i>@L("парафинирование включено")</span>
+            </div>
+        }
+    </section>
+
+    @if (Card.Notes is not null)
+    {
+        <section class="kt-notes">
+            <div class="kt-section-head"><div><div class="kt-eyebrow">@L("Блок 3")</div><h2>@L("Важные комментарии")</h2></div></div>
+            <div class="kt-callout"><span class="mark">!</span><p>@Card.Notes</p></div>
+        </section>
+    }
+    </div>
+
+    <div class="kt-foot">
+        <span>@Card.ModelNumber · @Card.DetailName</span>
+        <span>@(Card.ProgramParams ?? Card.MachineParams ?? "")</span>
+    </div>
+</article>
+
+@code {
+    [Parameter, EditorRequired]
+    public DevTechCardDto Card { get; set; } = default!;
+
+    [Parameter]
+    public bool Print { get; set; }
+
+    private RenderFragment Slot(DevThreadSlotDto? s, bool left) => __builder =>
+    {
+        if (s is null)
+        {
+            <span class="kt-empty">—</span>
+        }
+        else if (left)
+        {
+            @Yarn(s)
+            @Flags(s)
+        }
+        else
+        {
+            @Flags(s)
+            @Yarn(s)
+        }
+    };
+
+    private RenderFragment Flags(DevThreadSlotDto s) => __builder =>
+    {
+        <span class="kt-flags">
+            <span class="kt-flag @(s.Paraffin ? "on" : null)">@(s.Paraffin ? L("парафин") : L("без парафина"))</span>
+            @if (s.Mode is not null)
+            {
+                <span class="kt-flag">@s.Mode</span>
+            }
+        </span>
+    };
+
+    private RenderFragment Yarn(DevThreadSlotDto s) => __builder =>
+    {
+        <div style="min-width: 0">
+            <div class="y @(s.Elastic ? "el" : null)">
+                @if (s.Swatch is not null)
+                {
+                    <span class="sw" style="background: @s.Swatch; display: inline-block; margin-right: 6px; vertical-align: -1px"></span>
+                }
+                @s.Yarn
+            </div>
+            <div class="m">@(s.Ends == 1 ? L("1 нить") : L("{0} нит.", s.Ends))@(s.ItemName is null ? "" : " · " + s.ItemName)</div>
+        </div>
+    };
+}

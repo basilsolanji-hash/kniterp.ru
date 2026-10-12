@@ -1,0 +1,42 @@
+@page "/print/dev/tech/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Development
+@inject DevTechService Tech
+
+@* Печать техкарты вязания (D717): светлый лист A4, те же блоки, что на экране цеха. Внутренний документ цеха, печатается по-русски (D68). *@
+<PageTitle>@(_card is null ? "Техкарта вязания" : $"Техкарта {_card.ModelNumber} · {_card.DetailName}") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 10mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="dev/tech/@Id">@L("← Назад")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet"><p>@_error</p></div>
+}
+else if (_card is not null)
+{
+    <DevTechCardView Card="_card" Print="true" />
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private DevTechCardDto? _card;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _card = await Tech.TechCardAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

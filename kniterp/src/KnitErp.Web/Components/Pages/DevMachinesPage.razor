@@ -1,0 +1,268 @@
+@page "/dev/machines"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevTechService Tech
+
+@*
+    Станки и программы (D710): справочник вязальных машин с параметрами, журнал комментариев и состояния («перенёс, плохо работает»),
+    библиотека программ машин с параметрами станка на момент загрузки.
+*@
+<PageTitle>@L("Станки и программы") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_machines is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Станки и программы")</h1>
+        @if (CanSettings && _form is null)
+        {
+            <button type="button" @onclick="() => _form = new MachineForm()" disabled="@_busy">@L("Добавить станок")</button>
+        }
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_form is not null)
+    {
+        <div class="panel">
+            <h2>@(_form.Id is null ? L("Новый станок") : L("Изменить станок"))</h2>
+            <form @onsubmit="SaveMachineAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                    <div class="grid">
+                        <label>@L("Название") <input @bind="_form.Name" maxlength="@DevMachine.NameMaxLength" required placeholder="@L("STOLL №3")" /></label>
+                        <label>
+                            @L("Марка")
+                            <select @bind="_form.Brand">
+                                @foreach (var b in Enum.GetValues<DevMachineBrand>())
+                                {
+                                    <option value="@b">@L(DevMachine.BrandName(b))</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("Модель") <input @bind="_form.Model" maxlength="@DevMachine.ModelMaxLength" placeholder="CMS 530" /></label>
+                        <label>@L("Класс (E)") <input type="number" min="1" max="@DevMachine.MaxGauge" step="1" inputmode="numeric" @bind="_form.Gauge" /></label>
+                        <label>@L("Нитеводителей") <input type="number" min="1" max="@DevMachine.MaxFeeders" step="1" inputmode="numeric" @bind="_form.Feeders" /></label>
+                        <label>@L("Рабочая ширина, см") <input type="number" min="1" max="500" step="1" inputmode="numeric" @bind="_form.Width" /></label>
+                        <label>@L("Систем") <input type="number" min="1" max="12" step="1" inputmode="numeric" @bind="_form.Systems" /></label>
+                        <label>@L("Инвентарный номер") <input @bind="_form.Inventory" maxlength="@DevMachine.InventoryMaxLength" /></label>
+                    </div>
+                    <div class="actions">
+                        <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                        <button type="button" class="secondary" @onclick="() => _form = null">@L("Отмена")</button>
+                    </div>
+                </fieldset>
+            </form>
+        </div>
+    }
+
+    @if (_machines.Count == 0)
+    {
+        <p class="muted">@L("Станков пока нет.")</p>
+    }
+    <ul class="dev-tasks dev-tiles">
+        @foreach (var m in _machines)
+        {
+            var machine = m;
+            <li class="@(_open == m.Id ? "open" : null)">
+                <div class="page-head" style="margin: 0">
+                    <b>@m.Name</b>
+                    <span class="tag @(m.Status == DevMachineStatus.Working ? "ok" : m.Status == DevMachineStatus.Limited ? "warn" : "bad")">@L(m.StatusName)</span>
+                </div>
+                <div class="muted small">@m.Parameters@(m.InventoryNumber is null ? "" : " · " + L("инв. № {0}", m.InventoryNumber)) · @L("программ: {0}", m.Programs)@(m.IsArchived ? " · " + L("в архиве") : "")</div>
+                @if (m.LastNote is not null)
+                {
+                    <div class="small">@m.LastNote <span class="muted">@Local(m.LastNoteAtUtc!.Value)</span></div>
+                }
+                <div class="actions" style="margin-top: 6px">
+                    <button type="button" class="secondary" @onclick="() => OpenAsync(machine)" disabled="@_busy">@(_open == m.Id ? L("Свернуть") : L("Журнал и программы"))</button>
+                    @if (CanSettings)
+                    {
+                        <button type="button" class="secondary" @onclick="() => _form = MachineForm.From(machine)" disabled="@_busy">@L("Изменить")</button>
+                        <button type="button" class="secondary" @onclick="() => ArchiveAsync(machine)" disabled="@_busy">@(m.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
+                    }
+                </div>
+                @if (_open == m.Id)
+                {
+                    @if (CanNote)
+                    {
+                        <form class="inline-form" @onsubmit="() => AddNoteAsync(machine)">
+                            <label>@L("Комментарий") <input @bind="_noteText" maxlength="@DevMachineNote.TextMaxLength" placeholder="@L("перенёс, плохо работает")" /></label>
+                            <label>
+                                @L("Состояние")
+                                <select @bind="_noteStatus">
+                                    <option value="">@L("не менять")</option>
+                                    @foreach (var s in Enum.GetValues<DevMachineStatus>())
+                                    {
+                                        <option value="@((byte)s)">@L(DevMachine.StatusName(s))</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="submit" disabled="@_busy">@L("Записать")</button>
+                        </form>
+                    }
+                    @if (_notes is { Count: > 0 })
+                    {
+                        <ul class="dev-files">
+                            @foreach (var n in _notes)
+                            {
+                                <li><span class="muted small">@Local(n.AtUtc) · @n.User</span> @n.Text @if (n.StatusName is not null) { <span class="tag">@L(n.StatusName)</span> }</li>
+                            }
+                        </ul>
+                    }
+                    <h3>@L("Программы станка")</h3>
+                    @if (_programs is { Count: > 0 })
+                    {
+                        <ul class="dev-files">
+                            @foreach (var p in _programs)
+                            {
+                                <li>
+                                    <a href="dev/files/@p.FileId" download data-enhance-nav="false">@p.FileName</a>
+                                    <span class="muted small">@L("версия {0}", p.Version) · <a href="dev/models/@p.ModelId">@p.ModelNumber</a> @p.ModelName@(p.DetailName is null ? "" : " · " + p.DetailName) · @Local(p.UploadedAtUtc)</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="muted small">@L("Программ пока нет.")</p>
+                    }
+                    <h3>@L("Обсуждение станка")</h3>
+                    <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.DevMachine" TargetId="machine.Id" />
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private sealed class MachineForm
+    {
+        public long? Id { get; init; }
+        public byte[] RowVersion { get; init; } = [];
+        public string? Name { get; set; }
+        public DevMachineBrand Brand { get; set; } = DevMachineBrand.Stoll;
+        public string? Model { get; set; }
+        public int Gauge { get; set; } = 7;
+        public int Feeders { get; set; } = 8;
+        public int? Width { get; set; }
+        public int? Systems { get; set; }
+        public string? Inventory { get; set; }
+
+        public static MachineForm From(DevMachineDto m) => new()
+        {
+            Id = m.Id, RowVersion = m.RowVersion, Name = m.Name, Brand = m.Brand, Model = m.Model, Gauge = m.Gauge, Feeders = m.FeederCount, Width = m.WidthCm,
+            Systems = m.Systems, Inventory = m.InventoryNumber,
+        };
+
+        public DevMachineValues ToValues() => new(Name, Brand, Model, Gauge, Feeders, Width, Systems, Inventory);
+    }
+
+    private IReadOnlyList<DevMachineDto>? _machines;
+    private IReadOnlyList<DevMachineNoteDto>? _notes;
+    private IReadOnlyList<DevProgramDto>? _programs;
+    private MachineForm? _form;
+    private long? _open;
+    private string? _noteText;
+    private string _noteStatus = string.Empty;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private bool CanSettings => CurrentAccess.Has(Permissions.DevSettings);
+
+    private bool CanNote => CurrentAccess.Has(Permissions.DevEdit) || CurrentAccess.Has(Permissions.DevPattern) || CurrentAccess.Has(Permissions.DevSample)
+                            || CurrentAccess.Has(Permissions.DevSettings) || CurrentAccess.Has(Permissions.ProductionStageMark);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _machines = await Tech.MachinesAsync(includeArchived: true);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private Task OpenAsync(DevMachineDto m) => RunAsync(async () =>
+    {
+        if (_open == m.Id)
+        {
+            _open = null;
+            return;
+        }
+
+        _open = m.Id;
+        _notes = await Tech.MachineNotesAsync(m.Id);
+        _programs = CurrentAccess.Has(Permissions.DevView) ? await Tech.ProgramsAsync(m.Id) : [];
+    }, null);
+
+    private Task SaveMachineAsync() => RunAsync(async () =>
+    {
+        if (_form!.Id is { } id)
+        {
+            await Tech.UpdateMachineAsync(id, _form.ToValues(), _form.RowVersion);
+        }
+        else
+        {
+            await Tech.CreateMachineAsync(_form.ToValues());
+        }
+
+        _form = null;
+    }, L("Сохранено."));
+
+    private Task ArchiveAsync(DevMachineDto m) => RunAsync(() => Tech.SetMachineArchivedAsync(m.Id, !m.IsArchived, m.RowVersion), L("Сохранено."));
+
+    private Task AddNoteAsync(DevMachineDto m) => RunAsync(async () =>
+    {
+        await Tech.AddMachineNoteAsync(m.Id, _noteText, byte.TryParse(_noteStatus, out var s) ? (DevMachineStatus)s : null);
+        _noteText = null;
+        _noteStatus = string.Empty;
+        _notes = await Tech.MachineNotesAsync(m.Id);
+    }, L("Записано."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+            _machines = await Tech.MachinesAsync(includeArchived: true);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+}

@@ -27,7 +27,56 @@
     .dev-placeholder { color: var(--muted); }
     .dev-hints { border-color: var(--warn-line); background: var(--warn-bg); }
     .dev-hints ul { margin: 4px 0 0; padding-left: 18px; }
+    .dev-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); margin-right: 6px; vertical-align: -1px; }
+    .dev-progress { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0 10px; }
+    .dev-progress meter, .dev-progress progress { width: 160px; height: 10px; }
+    .dev-sections { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; padding: 0; margin: 0; font-size: 12px; }
+    .dev-sections li { padding: 1px 8px; border-radius: 999px; background: var(--line); color: var(--text-2); }
+    .dev-sections li.done { background: var(--ok-bg); color: var(--ok-text); }
+    .dev-feeders { display: grid; gap: 6px; }
+    .dev-feeder { display: grid; grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr); gap: 6px; align-items: stretch; }
+    .dev-feeder > .n { display: flex; align-items: center; justify-content: center; font-weight: 700; border-radius: 50%; background: var(--accent);
+        color: var(--on-accent); width: 30px; height: 30px; align-self: center; justify-self: center; }
+    .dev-slot { border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 6px;
+        background: var(--surface-2); min-width: 0; }
+    .dev-slot.off { opacity: .55; }
+    .dev-slot label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-2); min-width: 0; }
+    .dev-slot label.check { flex-direction: row; align-items: center; gap: 4px; }
+    .dev-slot select, .dev-slot input[type=text], .dev-slot input[type=number] { width: 100%; min-width: 0; }
+    .dev-slot .wide { grid-column: 1 / -1; }
+    .dev-slot input, .dev-slot select { box-sizing: border-box; }
+    .dev-slot.off { align-self: center; padding: 4px 6px; }
+    .dev-slot .checks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    /* Широкий экран: цвет, нитей и режим — в одну строку, флажки — под ними; выключенный нитеводитель — узкой строкой (D719). */
+    @@media (min-width: 900px) {
+        .dev-slot { grid-template-columns: minmax(0, 1fr) 72px 72px; align-content: start; }
+        .dev-slot label.pick { grid-column: 1; }
+    }
+    @@media (max-width: 640px) {
+        .dev-feeder { grid-template-columns: 1fr; }
+        .dev-feeder > .n { justify-self: start; }
+    }
     .late-text { color: var(--bad-text); }
+    /* Без пустых полей (D719): панели — сеткой на всю ширину, факты карточки — плитками, формы в строку слева, матрицы размеров — по содержимому. */
+    .dev-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: start; margin: 16px 0; }
+    .dev-panels > .panel { margin: 0; min-width: 0; }
+    dl.dev-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 8px; max-width: none; }
+    dl.dev-facts > div { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; }
+    dl.dev-facts > div.wide { grid-column: span 2; }
+    dl.dev-facts dt { font-size: 12px; }
+    dl.dev-facts dd { margin: 0; }
+    ul.dev-tiles > li.open { grid-column: 1 / -1; }
+    ul.dev-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 8px; }
+    .dev-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 4px 12px; }
+    table.dev-matrix { width: auto; }
+    table.dev-matrix th, table.dev-matrix td { padding-right: 16px; }
+    table.dev-matrix th:first-child { min-width: 160px; }
+    @@media (min-width: 600px) {
+        .panel form.inline-form { flex-direction: row; align-items: flex-end; }
+    }
+    @@media (max-width: 599px) {
+        dl.dev-facts > div.wide { grid-column: auto; }
+    }
     @@media (max-width: 899px) {
         .dev-board { grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
     }
