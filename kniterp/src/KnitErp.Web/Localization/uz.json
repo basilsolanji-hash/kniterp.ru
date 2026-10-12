@@ -5610,5 +5610,9 @@
   "фото эскиза добавлено": "eskiz fotosi qo‘shildi",
   "целевая цена": "maqsadli narx",
   "Чего не хватает для полного расчёта": "To‘liq hisob uchun nima yetishmaydi",
-  "Строк расчёта пока нет — заполните то, чего не хватает (выше).": "Hisob qatorlari hozircha yo‘q — yetishmayotganini to‘ldiring (yuqorida)."
+  "Строк расчёта пока нет — заполните то, чего не хватает (выше).": "Hisob qatorlari hozircha yo‘q — yetishmayotganini to‘ldiring (yuqorida).",
+  "Нельзя выдать право за пределами своей области: «{0}».": "Oʻz sohangizdan tashqarida huquq berib boʻlmaydi: «{0}».",
+  "Нельзя выдать право на всю организацию: «{0}» у вас только в своей области.": "Butun tashkilotga huquq berib boʻlmaydi: «{0}» sizda faqat oʻz sohangizda.",
+  "Нельзя подписаться на событие «{0}»: нет права «{1}».": "«{0}» hodisasiga obuna boʻlib boʻlmaydi: «{1}» huquqi yoʻq.",
+  "Свою роль меняет другой администратор или Владелец.": "Oʻz rolingizni boshqa administrator yoki Ega oʻzgartiradi."
 }

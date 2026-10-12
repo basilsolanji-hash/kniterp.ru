@@ -107,6 +107,8 @@ curl -X POST https://erp.example.ru/api/v1/stock-documents \
 
 Заголовки: `X-KnitErp-Event`, `X-KnitErp-Delivery` (один и тот же при повторах — по нему отбрасывайте дубли), `X-KnitErp-Timestamp` (Unix-секунды), `X-KnitErp-Signature: v1=<hex HMAC-SHA256(секрет, "<timestamp>.<тело>")>`. Порядок восстанавливайте по `sequence`. Подробности события запрашивайте через API по `data.id`.
 
+D128: `data.summary` — краткая подпись без сумм: у денежных событий (`sales_order.confirmed`, `purchase_order.confirmed`, `customer_payment.created`, `supplier_payment.created`, `money_operation.created`, `expense_report.approved`) — только номер документа. Суммы берите через API токеном с правом «Цены и суммы». Создать, включить или выключить подписку можно только после повторного подтверждения паролем и только на события модулей, которые видит сам пользователь (продажи, закупки, склад — отчёты склада, CRM; оплаты и денежные операции — ещё «Цены и суммы»). Если создатель подписки заблокирован или лишился этих прав, события не отправляются: доставка получает статус «не доставлено» с причиной.
+
 Проверка подписи (Python):
 
 ```python
