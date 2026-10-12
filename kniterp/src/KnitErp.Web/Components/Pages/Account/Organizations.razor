@@ -8,6 +8,11 @@
 <PageTitle>@L("Организация") — knitERP</PageTitle>
 <h1>@L("Выберите организацию")</h1>
 
+@if (_error is not null)
+{
+    <div class="error" role="alert">@_error</div>
+}
+
 @if (_organizations is { Count: > 0 })
 {
     <form method="post" @formname="switch-organization" @onsubmit="SwitchAsync">
@@ -32,6 +37,7 @@
 
     private SessionIdentity? _session;
     private IReadOnlyList<OrganizationChoice>? _organizations;
+    private string? _error;
 
     protected override async Task OnInitializedAsync()
     {
@@ -49,7 +55,18 @@
             return;
         }
 
-        var next = await SignIn.SwitchOrganizationAsync(_session, orgId, HttpContext.RequestAborted);
+        SessionIdentity next;
+        try
+        {
+            next = await SignIn.SwitchOrganizationAsync(_session, orgId, HttpContext.RequestAborted);
+        }
+        catch (BusinessRuleException ex)
+        {
+            // D127: в этой организации вход ограничен (адрес, время работы).
+            _error = UiErrors.Message(ex);
+            return;
+        }
+
         await HttpContext.SignInAsync(AuthSchemes.Session, SessionClaims.Create(next));
         Navigation.NavigateTo("/", forceLoad: true);
     }

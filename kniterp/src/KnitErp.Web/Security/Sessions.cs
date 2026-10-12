@@ -62,40 +62,138 @@ public static class PendingSignInCookie
 /// </summary>
 public static class SessionValidation
 {
+    /// <summary>Полная проверка: штамп, пользователь, участие, ограничения входа (D127).</summary>
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// D127: быстрая проверка записи сессии (завершена, наступил момент закрытия) — раз в 10 с: сессия, закрытая входом с другого
+    /// устройства, перестаёт приниматься не позднее чем через 10 с после своего момента закрытия.
+    /// </summary>
+    public static readonly TimeSpan QuickInterval = TimeSpan.FromSeconds(10);
+
+    /// <summary>Ключ HttpContext.Items: почему сессия закрыта — для сообщения на странице входа.</summary>
+    public const string ClosedItem = "kniterp.closed";
+
     private const string ValidatedAtKey = "kniterp.validated";
+    private const string CheckedAtKey = "kniterp.checked";
+    private const string AddressKey = "kniterp.addr";
+    private const string EndsAtKey = "kniterp.ends";
 
     public static async Task OnValidatePrincipal(CookieValidatePrincipalContext context)
     {
         var now = DateTimeOffset.UtcNow;
-        if (context.Properties.Items.TryGetValue(ValidatedAtKey, out var raw)
-            && DateTimeOffset.TryParse(raw, null, System.Globalization.DateTimeStyles.RoundtripKind, out var validatedAt)
-            && now - validatedAt < Interval)
+        var items = context.Properties.Items;
+        var address = context.HttpContext.Connection.RemoteIpAddress?.ToString();
+        var validatedAt = Read(items, ValidatedAtKey);
+        var checkedAt = Read(items, CheckedAtKey) ?? validatedAt;
+        var endsAt = Read(items, EndsAtKey);
+
+        // D127: адрес клиента сменился — полная проверка сразу (ограничение «разрешённые сети»), а не через минуту.
+        var full = validatedAt is not { } v || now - v >= Interval || (items.TryGetValue(AddressKey, out var known) ? known : null) != address
+                   || endsAt is { } e && now >= e;
+        if (!full && checkedAt is { } c && now - c < QuickInterval)
         {
             return;
         }
 
         var session = context.Principal is null ? null : SessionClaims.Read(context.Principal);
         var signIn = context.HttpContext.RequestServices.GetRequiredService<SignInService>();
-        if (session is null
-            || !await signIn.ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, session.SessionId,
-                context.HttpContext.RequestAborted))
+        var check = session is null
+            ? SessionCheck.Invalid
+            : await signIn.CheckSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, session.SessionId, address, full,
+                context.HttpContext.RequestAborted);
+        if (!check.Valid)
         {
+            if (ClosedCode(check.Closure) is { } code)
+            {
+                context.HttpContext.Items[ClosedItem] = code;
+            }
+
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(AuthSchemes.Session);
             return;
         }
 
-        context.Properties.Items[ValidatedAtKey] = now.ToString("O");
+        if (full)
+        {
+            items[ValidatedAtKey] = now.ToString("O");
+            items[AddressKey] = address;
+        }
+
+        items[CheckedAtKey] = now.ToString("O");
+        items[EndsAtKey] = check.EndsAtUtc is { } ends ? new DateTimeOffset(DateTime.SpecifyKind(ends, DateTimeKind.Utc)).ToString("O") : null;
         context.ShouldRenew = true;
     }
+
+    /// <summary>Код причины закрытия для адреса страницы входа: network, device, schedule; иначе null.</summary>
+    public static string? ClosedCode(SessionClosure closure) => closure switch
+    {
+        SessionClosure.Network => "network",
+        SessionClosure.OtherDevice => "device",
+        SessionClosure.Schedule => "schedule",
+        _ => null,
+    };
+
+    /// <summary>Перенаправление на вход дополняется причиной закрытия сессии (D127), если она известна.</summary>
+    public static Func<RedirectContext<CookieAuthenticationOptions>, Task> RedirectToLogin(
+        Func<RedirectContext<CookieAuthenticationOptions>, Task> fallback) => context =>
+    {
+        if (context.HttpContext.Items[ClosedItem] is string code)
+        {
+            context.RedirectUri = Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(context.RedirectUri, "closed", code);
+        }
+
+        return fallback(context);
+    };
+
+    private static DateTimeOffset? Read(IDictionary<string, string?> items, string key) =>
+        items.TryGetValue(key, out var raw)
+        && DateTimeOffset.TryParse(raw, null, System.Globalization.DateTimeStyles.RoundtripKind, out var value) ? value : null;
 }
 
-/// <summary>Та же проверка для открытой вкладки Blazor: цепь живёт долго, поэтому сверяемся раз в минуту.</summary>
-public sealed class SessionRevalidatingAuthenticationStateProvider(ILoggerFactory loggerFactory, IServiceScopeFactory scopeFactory)
+/// <summary>
+/// Адрес клиента вкладки Blazor (D127): запоминается при создании цепи — это адрес соединения WebSocket, он не меняется, пока
+/// соединение живо (новое соединение — новый HTTP-запрос с проверкой cookie). Может быть неизвестен — тогда сети проверяет HTTP.
+/// </summary>
+public sealed class CircuitClientAddress(IHttpContextAccessor accessor)
+{
+    public string? Address { get; } = accessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+}
+
+/// <summary>D127: «сеанс закроется через N с» — для баннера на старом устройстве.</summary>
+public sealed record SessionNotice(DateTime EndsAtUtc, KnitErp.Domain.Access.SessionEndReason? Reason);
+
+/// <summary>
+/// Та же проверка для открытой вкладки Blazor: цепь живёт долго. Быстрая проверка записи сессии — раз в 10 с, полная — раз в минуту
+/// (D127). Назначен момент закрытия — следующая проверка ровно в этот момент; баннер получает уведомление через <see cref="NoticeChanged"/>.
+/// </summary>
+public sealed class SessionRevalidatingAuthenticationStateProvider(
+    ILoggerFactory loggerFactory, IServiceScopeFactory scopeFactory, CircuitClientAddress clientAddress)
     : RevalidatingServerAuthenticationStateProvider(loggerFactory)
 {
-    protected override TimeSpan RevalidationInterval => SessionValidation.Interval;
+    private DateTime _lastFullUtc = DateTime.UtcNow;
+
+    public SessionNotice? Notice { get; private set; }
+
+    /// <summary>Причина закрытия, если цепь закрыта проверкой (для страницы входа).</summary>
+    public string? ClosedCode { get; private set; }
+
+    public event Action? NoticeChanged;
+
+    protected override TimeSpan RevalidationInterval
+    {
+        get
+        {
+            if (Notice is { } notice)
+            {
+                var left = notice.EndsAtUtc - DateTime.UtcNow + TimeSpan.FromMilliseconds(300);
+                return left < TimeSpan.FromMilliseconds(500) ? TimeSpan.FromMilliseconds(500)
+                    : left > SessionValidation.QuickInterval ? SessionValidation.QuickInterval : left;
+            }
+
+            return SessionValidation.QuickInterval;
+        }
+    }
 
     protected override async Task<bool> ValidateAuthenticationStateAsync(AuthenticationState state, CancellationToken cancellationToken)
     {
@@ -104,9 +202,27 @@ public sealed class SessionRevalidatingAuthenticationStateProvider(ILoggerFactor
             return false;
         }
 
+        var now = DateTime.UtcNow;
+        var full = now - _lastFullUtc >= SessionValidation.Interval;
         await using var scope = scopeFactory.CreateAsyncScope();
         var signIn = scope.ServiceProvider.GetRequiredService<SignInService>();
-        return await signIn.ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, session.SessionId, cancellationToken);
+        var check = await signIn.CheckSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, session.SessionId,
+            clientAddress.Address, full, cancellationToken);
+        if (full)
+        {
+            _lastFullUtc = now;
+        }
+
+        var notice = check.Valid && check.EndsAtUtc is { } ends ? new SessionNotice(ends, check.EndReason) : null;
+        ClosedCode = check.Valid ? null : SessionValidation.ClosedCode(check.Closure);
+        if (notice != Notice || !check.Valid)
+        {
+            // Закрытие тоже сообщается: маршрутизатор страниц не всегда перерисовывается при выходе — баннер уводит на вход сам.
+            Notice = notice;
+            NoticeChanged?.Invoke();
+        }
+
+        return check.Valid;
     }
 }
 

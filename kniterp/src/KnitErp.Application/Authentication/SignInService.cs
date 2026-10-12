@@ -21,6 +21,39 @@ public enum SignInStatus
 
     /// <summary>Нет ни одной активной организации (заблокирован везде или не приглашён).</summary>
     NoOrganization,
+
+    /// <summary>D127: пароль верный, но адрес вне разрешённых администратором сетей.</summary>
+    NetworkDenied,
+
+    /// <summary>D127: пароль верный, но сейчас вне разрешённого администратором времени работы.</summary>
+    ScheduleDenied,
+}
+
+/// <summary>D127: почему сессия закрыта при проверке (для сообщения на странице входа).</summary>
+public enum SessionClosure
+{
+    None,
+
+    /// <summary>Обычная недействительность: выход, блокировка, смена прав, простой.</summary>
+    Invalid,
+    Network,
+    OtherDevice,
+    Schedule,
+}
+
+/// <summary>
+/// D127: итог проверки сессии. EndsAtUtc — сессия действует, но закроется в этот момент (баннер с отсчётом на старом устройстве).
+/// </summary>
+public sealed record SessionCheck(bool Valid, DateTime? EndsAtUtc = null, SessionEndReason? EndReason = null, SessionClosure Closure = SessionClosure.None)
+{
+    public static readonly SessionCheck Invalid = new(false, Closure: SessionClosure.Invalid);
+
+    public static SessionCheck Closed(SessionEndReason? reason) => new(false, Closure: reason switch
+    {
+        SessionEndReason.Schedule => SessionClosure.Schedule,
+        SessionEndReason.OtherDevice => SessionClosure.OtherDevice,
+        _ => SessionClosure.Invalid,
+    });
 }
 
 /// <summary>Кто входит: штамп безопасности закрывает сессию при блокировке и смене прав.</summary>
@@ -118,12 +151,20 @@ public sealed class SignInService(
             return SignInResult.Of(SignInStatus.NoOrganization);
         }
 
+        // D127: ограничения входа (сети, время) проверяются после верного пароля и до второго фактора — неудачей входа это не считается.
+        var (organizationId, denied) = await ChooseOrganizationAsync(user, organizations, ct);
+        if (organizationId is null)
+        {
+            await db.SaveChangesAsync(ct);
+            return SignInResult.Of(denied);
+        }
+
         if (user.TwoFactorEnabled)
         {
             if (trusted is { } device)
             {
                 device.MarkUsed(now);
-                return await SucceedAsync(user, organizations[0], usedTwoFactor: true, ct, "пароль и доверенное устройство");
+                return await SucceedAsync(user, organizationId.Value, usedTwoFactor: true, ct, "пароль и доверенное устройство");
             }
 
             await db.SaveChangesAsync(ct);
@@ -136,7 +177,7 @@ public sealed class SignInService(
             return new SignInResult(SignInStatus.TwoFactorSetupRequired, Pending: new PendingSignIn(user.Id, user.SecurityStamp));
         }
 
-        return await SucceedAsync(user, organizations[0], usedTwoFactor: false, ct);
+        return await SucceedAsync(user, organizationId.Value, usedTwoFactor: false, ct);
     }
 
     /// <summary>
@@ -185,13 +226,20 @@ public sealed class SignInService(
             return SignInResult.Of(SignInStatus.NoOrganization);
         }
 
+        var (organizationId, denied) = await ChooseOrganizationAsync(user, organizations, ct);
+        if (organizationId is null)
+        {
+            await db.SaveChangesAsync(ct);
+            return SignInResult.Of(denied);
+        }
+
         string? deviceToken = null;
         if (trustDeviceLabel is not null)
         {
             deviceToken = await TrustDeviceAsync(user, trustDeviceLabel, ct);
         }
 
-        return await SucceedAsync(user, organizations[0], usedTwoFactor: true, ct) with { RecoveryCodesLeft = recoveryLeft, DeviceToken = deviceToken };
+        return await SucceedAsync(user, organizationId.Value, usedTwoFactor: true, ct) with { RecoveryCodesLeft = recoveryLeft, DeviceToken = deviceToken };
     }
 
     /// <summary>Действующее доверенное устройство этого пользователя по токену из cookie или null.</summary>
@@ -268,7 +316,14 @@ public sealed class SignInService(
             return SignInResult.Of(SignInStatus.NoOrganization);
         }
 
-        return await SucceedAsync(user, organizations[0], usedTwoFactor: true, ct);
+        var (organizationId, denied) = await ChooseOrganizationAsync(user, organizations, ct);
+        if (organizationId is null)
+        {
+            await db.SaveChangesAsync(ct);
+            return SignInResult.Of(denied);
+        }
+
+        return await SucceedAsync(user, organizationId.Value, usedTwoFactor: true, ct);
     }
 
     /// <summary>Установка пароля по ссылке приглашения. После неё пользователь входит обычным способом.</summary>
@@ -300,26 +355,87 @@ public sealed class SignInService(
     /// серверная запись сессии (D122) есть, принадлежит этому пользователю и не завершена. Cookie без записи — недействительна.
     /// Вызывается при каждом запросе не реже раза в минуту; время последней активности пишется не чаще раза в 5 минут.
     /// </summary>
-    public async Task<bool> ValidateSessionAsync(long userId, long organizationId, Guid securityStamp, Guid? sessionId, CancellationToken ct = default)
+    public async Task<bool> ValidateSessionAsync(long userId, long organizationId, Guid securityStamp, Guid? sessionId, CancellationToken ct = default) =>
+        (await CheckSessionAsync(userId, organizationId, securityStamp, sessionId, currentUser.ClientAddress, full: true, ct)).Valid;
+
+    /// <summary>
+    /// D127: проверка сессии. Быстрая (full = false, раз в 10 с) читает только запись сессии: завершена ли, наступил ли момент закрытия.
+    /// Полная (раз в минуту и при смене адреса) — ещё пользователя, участие и ограничения входа: адрес вне разрешённых сетей закрывает
+    /// сессию сразу, конец времени работы — с предупреждением за 30 с. Наступивший момент закрытия завершает сессию.
+    /// </summary>
+    /// <param name="clientAddress">Адрес клиента; null — неизвестен (вкладка Blazor), тогда сети проверит следующий HTTP-запрос.</param>
+    public async Task<SessionCheck> CheckSessionAsync(long userId, long organizationId, Guid securityStamp, Guid? sessionId, string? clientAddress,
+        bool full, CancellationToken ct = default)
     {
         if (sessionId is not { } publicId)
         {
-            return false;
+            return SessionCheck.Invalid;
         }
 
         var now = clock.UtcNow;
         var row = await db.UserSessions.AsNoTracking().Where(x => x.PublicId == publicId)
-            .Select(x => new { x.Id, x.UserId, x.SecurityStamp, x.LastSeenAtUtc, x.RevokedAtUtc }).SingleOrDefaultAsync(ct);
+            .Select(x => new { x.Id, x.UserId, x.SecurityStamp, x.LastSeenAtUtc, x.RevokedAtUtc, x.EndsAtUtc, x.EndReason }).SingleOrDefaultAsync(ct);
         if (row is null || row.UserId != userId || row.RevokedAtUtc is not null || row.SecurityStamp != securityStamp
             || now >= row.LastSeenAtUtc + SignInPolicy.SessionIdleLimit)
         {
-            return false;
+            return SessionCheck.Invalid;
+        }
+
+        if (row.EndsAtUtc is { } ends && now >= ends)
+        {
+            // D127: момент закрытия наступил — сессия завершается; cookie и вкладка больше не принимаются.
+            await db.UserSessions.Where(x => x.Id == row.Id && x.RevokedAtUtc == null)
+                .ExecuteUpdateAsync(x => x.SetProperty(v => v.RevokedAtUtc, now), ct);
+            return SessionCheck.Closed(row.EndReason);
+        }
+
+        if (!full)
+        {
+            return new SessionCheck(true, row.EndsAtUtc, row.EndReason);
         }
 
         var valid = await db.Users.AnyAsync(u => u.Id == userId && u.Status == UserStatus.Active && u.SecurityStamp == securityStamp, ct)
                     && await db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.OrganizationId == organizationId
                                                                   && m.Status == MembershipStatus.Active, ct);
-        if (valid && now - row.LastSeenAtUtc >= SignInPolicy.SessionTouchInterval)
+        if (!valid)
+        {
+            return SessionCheck.Invalid;
+        }
+
+        var (endsAt, reason) = (row.EndsAtUtc, row.EndReason);
+        var verdict = await SignInRestrictionRules.EvaluateAsync(db, userId, organizationId, clientAddress, enforceUnknownAddress: false, now, ct);
+        if (verdict.Denial == RestrictionDenial.Network)
+        {
+            // Адрес вне разрешённых сетей — сразу, без предупреждения: запись журнала одна (условный UPDATE).
+            var closed = await db.UserSessions.Where(x => x.Id == row.Id && x.RevokedAtUtc == null)
+                .ExecuteUpdateAsync(x => x.SetProperty(v => v.RevokedAtUtc, now), ct);
+            if (closed > 0)
+            {
+                db.AuditEntries.Add(AuditEntry.Create(now, organizationId, userId, AuditActions.SignInRestricted, nameof(UserAccount),
+                    userId.ToString(), after: "сессия закрыта",
+                    reason: WithAddress(SignInRestrictionRules.Describe(RestrictionDenial.Network), clientAddress), correlationId: currentUser.CorrelationId));
+                await db.SaveChangesAsync(ct);
+            }
+
+            return new SessionCheck(false, Closure: SessionClosure.Network);
+        }
+
+        if (SignInRestrictionRules.ScheduleEnd(verdict, now) is { } scheduleEnd && (endsAt is null || endsAt > scheduleEnd))
+        {
+            var marked = await db.UserSessions
+                .Where(x => x.Id == row.Id && x.RevokedAtUtc == null && (x.EndsAtUtc == null || x.EndsAtUtc > scheduleEnd))
+                .ExecuteUpdateAsync(x => x.SetProperty(v => v.EndsAtUtc, scheduleEnd).SetProperty(v => v.EndReason, SessionEndReason.Schedule), ct);
+            if (marked > 0)
+            {
+                (endsAt, reason) = (scheduleEnd, SessionEndReason.Schedule);
+                db.AuditEntries.Add(AuditEntry.Create(now, organizationId, userId, AuditActions.SessionEnding, nameof(UserAccount),
+                    userId.ToString(), after: $"закроется {scheduleEnd:yyyy-MM-dd HH:mm:ss} UTC",
+                    reason: "окончание разрешённого времени работы", correlationId: currentUser.CorrelationId));
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        if (now - row.LastSeenAtUtc >= SignInPolicy.SessionTouchInterval)
         {
             // Условный UPDATE: одновременные запросы одной сессии не пишут время по нескольку раз и не конфликтуют по rowversion.
             var stale = now - SignInPolicy.SessionTouchInterval;
@@ -327,7 +443,7 @@ public sealed class SignInService(
                 .ExecuteUpdateAsync(x => x.SetProperty(v => v.LastSeenAtUtc, now), ct);
         }
 
-        return valid;
+        return new SessionCheck(true, endsAt, reason);
     }
 
     public async Task<IReadOnlyList<OrganizationChoice>> ListOrganizationsAsync(long userId, CancellationToken ct = default) =>
@@ -345,6 +461,29 @@ public sealed class SignInService(
             || !(await ListOrganizationsAsync(session.UserId, ct)).Any(o => o.OrganizationId == organizationId))
         {
             throw new NotFoundException("Организация");
+        }
+
+        // D127: ограничения принадлежат участию в организации — в организацию с ограничением пускают по тем же правилам, что при входе.
+        var now = clock.UtcNow;
+        var verdict = await SignInRestrictionRules.EvaluateAsync(db, session.UserId, organizationId, currentUser.ClientAddress,
+            enforceUnknownAddress: true, now, ct);
+        if (verdict.Denial != RestrictionDenial.None)
+        {
+            db.AuditEntries.Add(AuditEntry.Create(now, organizationId, session.UserId, AuditActions.SignInRestricted, nameof(UserAccount),
+                session.UserId.ToString(), after: "смена организации отклонена", reason: WithAddress(SignInRestrictionRules.Describe(verdict.Denial)),
+                correlationId: currentUser.CorrelationId));
+            await db.SaveChangesAsync(ct);
+            throw SignInRestrictionRules.Refusal(verdict.Denial);
+        }
+
+        if (session.SessionId is { } current)
+        {
+            await ApplySessionRestrictionsAsync(session.UserId, organizationId, verdict, current, ct);
+            if (SignInRestrictionRules.ScheduleEnd(verdict, now) is { } scheduleEnd)
+            {
+                await db.UserSessions.Where(x => x.PublicId == current && x.RevokedAtUtc == null && (x.EndsAtUtc == null || x.EndsAtUtc > scheduleEnd))
+                    .ExecuteUpdateAsync(x => x.SetProperty(v => v.EndsAtUtc, scheduleEnd).SetProperty(v => v.EndReason, SessionEndReason.Schedule), ct);
+            }
         }
 
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, organizationId, session.UserId, AuditActions.SignedIn,
@@ -366,6 +505,58 @@ public sealed class SignInService(
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, organizationId, userId, AuditActions.SignedOut,
             nameof(UserAccount), userId.ToString(), correlationId: currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// D127: первая активная организация, где ограничения разрешают вход (адрес, время). Нет такой — отказ с причиной первой
+    /// организации и запись в журнал каждой организации, где вход запрещён.
+    /// </summary>
+    private async Task<(long? OrganizationId, SignInStatus Denied)> ChooseOrganizationAsync(UserAccount user, List<long> organizations, CancellationToken ct)
+    {
+        var now = clock.UtcNow;
+        var denials = new List<(long OrganizationId, RestrictionDenial Denial)>();
+        foreach (var organizationId in organizations)
+        {
+            var verdict = await SignInRestrictionRules.EvaluateAsync(db, user.Id, organizationId, currentUser.ClientAddress, enforceUnknownAddress: true, now, ct);
+            if (verdict.Denial == RestrictionDenial.None)
+            {
+                return (organizationId, SignInStatus.Succeeded);
+            }
+
+            denials.Add((organizationId, verdict.Denial));
+        }
+
+        foreach (var (organizationId, denial) in denials)
+        {
+            db.AuditEntries.Add(AuditEntry.Create(now, organizationId, user.Id, AuditActions.SignInRestricted, nameof(UserAccount),
+                user.Id.ToString(), after: "вход отклонён", reason: WithAddress(SignInRestrictionRules.Describe(denial)), correlationId: currentUser.CorrelationId));
+        }
+
+        return (null, denials[0].Denial == RestrictionDenial.Network ? SignInStatus.NetworkDenied : SignInStatus.ScheduleDenied);
+    }
+
+    /// <summary>
+    /// D127: «одно устройство» — другие действующие сессии пользователя закроются через 30 с (на старом устройстве — предупреждение
+    /// с отсчётом), запись в журнал организации.
+    /// </summary>
+    private async Task ApplySessionRestrictionsAsync(long userId, long organizationId, RestrictionVerdict verdict, Guid keepSessionId, CancellationToken ct)
+    {
+        if (verdict.Restriction?.SingleDevice != true)
+        {
+            return;
+        }
+
+        var now = clock.UtcNow;
+        var endsAt = now + UserSession.EndWarning;
+        var marked = await db.UserSessions
+            .Where(x => x.UserId == userId && x.PublicId != keepSessionId && x.RevokedAtUtc == null && (x.EndsAtUtc == null || x.EndsAtUtc > endsAt))
+            .ExecuteUpdateAsync(x => x.SetProperty(v => v.EndsAtUtc, endsAt).SetProperty(v => v.EndReason, SessionEndReason.OtherDevice), ct);
+        if (marked > 0)
+        {
+            db.AuditEntries.Add(AuditEntry.Create(now, organizationId, userId, AuditActions.SessionEnding, nameof(UserAccount), userId.ToString(),
+                after: $"прежние сессии ({marked}) закроются {endsAt:yyyy-MM-dd HH:mm:ss} UTC",
+                reason: WithAddress("вход с другого устройства (одно устройство)"), correlationId: currentUser.CorrelationId));
+        }
     }
 
     private async Task<SignInResult> FailAsync(UserAccount user, string reason, CancellationToken ct)
@@ -409,6 +600,15 @@ public sealed class SignInService(
         user.RegisterSuccessfulSignIn();
         // D122: каждая выдача cookie — своя серверная сессия; в cookie — только её GUID.
         var session = UserSession.Create(user.Id, user.SecurityStamp, currentUser.UserAgent, currentUser.ClientAddress, clock.UtcNow);
+        // D127: «одно устройство» — прежние сессии закроются через 30 с; конец времени работы близко — и эта сессия тоже.
+        var verdict = await SignInRestrictionRules.EvaluateAsync(db, user.Id, organizationId, currentUser.ClientAddress, enforceUnknownAddress: true,
+            clock.UtcNow, ct);
+        if (SignInRestrictionRules.ScheduleEnd(verdict, clock.UtcNow) is { } scheduleEnd)
+        {
+            session.ScheduleEnd(scheduleEnd, SessionEndReason.Schedule);
+        }
+
+        await ApplySessionRestrictionsAsync(user.Id, organizationId, verdict, session.PublicId, ct);
         db.UserSessions.Add(session);
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, organizationId, user.Id, AuditActions.SignedIn, nameof(UserAccount),
             user.Id.ToString(), after: via ?? (usedTwoFactor ? "пароль и 2FA" : "пароль"), reason: WithAddress(null), correlationId: currentUser.CorrelationId));
@@ -475,7 +675,9 @@ public sealed class SignInService(
     }
 
     /// <summary>Адрес, с которого пришёл запрос, — в причину записи журнала входов (поля журнала не меняются, D56).</summary>
-    private string? WithAddress(string? reason) => currentUser.ClientAddress is { } ip
+    private string? WithAddress(string? reason) => WithAddress(reason, currentUser.ClientAddress);
+
+    private static string? WithAddress(string? reason, string? address) => address is { } ip
         ? reason is null ? $"адрес {ip}" : $"{reason} · адрес {ip}"
         : reason;
 }

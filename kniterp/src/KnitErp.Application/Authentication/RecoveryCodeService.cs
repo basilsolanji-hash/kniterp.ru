@@ -70,11 +70,24 @@ public sealed class RecoveryCodeService(IKnitErpDbContext db, ICurrentUser curre
         db.RecoveryCodes.RemoveRange(await db.RecoveryCodes.Where(r => r.UserId == user.Id).ToListAsync(ct));
 
         var orgIds = await db.OrganizationMembers.Where(m => m.UserId == user.Id).Select(m => (long?)m.OrganizationId).ToListAsync(ct);
+
+        // D127: ограничения входа пользователя (сети, время, одно устройство) снимаются во всех организациях — иначе восстановленный
+        // вход мог бы снова упереться в ограничение, ошибочно заданное администратором.
+        var memberIds = await db.OrganizationMembers.Where(m => m.UserId == user.Id).Select(m => m.Id).ToListAsync(ct);
+        var restrictions = await db.SignInRestrictions.Where(r => memberIds.Contains(r.MemberId)).ToListAsync(ct);
+        var lifted = new HashSet<long>();
+        foreach (var r in restrictions.Where(r => !r.IsEmpty))
+        {
+            r.Update(false, [], null, null, now);
+            lifted.Add(r.OrganizationId);
+        }
+
         foreach (var orgId in orgIds.DefaultIfEmpty(null))
         {
             db.AuditEntries.Add(AuditEntry.Create(now, orgId, null, AuditActions.EmergencyAccess, nameof(UserAccount), user.Id.ToString(),
                 before: had2Fa ? "2FA включена" : "2FA не подключена",
-                after: $"2FA и резервные коды сброшены, ссылка нового пароля до {user.SetupTokenExpiresAtUtc:yyyy-MM-dd HH:mm} UTC",
+                after: $"2FA и резервные коды сброшены, ссылка нового пароля до {user.SetupTokenExpiresAtUtc:yyyy-MM-dd HH:mm} UTC"
+                       + (orgId is { } id && lifted.Contains(id) ? ", ограничения входа сняты" : ""),
                 reason: "команда сервера: " + reason.Trim(), correlationId: currentUser.CorrelationId));
         }
 

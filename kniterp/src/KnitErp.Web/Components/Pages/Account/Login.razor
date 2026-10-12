@@ -32,9 +32,17 @@
     [SupplyParameterFromQuery]
     private string? ReturnUrl { get; set; }
 
+    /// <summary>D127: прежняя сессия закрыта ограничением входа (network, device, schedule).</summary>
+    [SupplyParameterFromQuery]
+    private string? Closed { get; set; }
+
     private string? _message;
 
-    protected override void OnInitialized() => Input ??= new();
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+        _message ??= HttpMethods.IsGet(HttpContext.Request.Method) ? SignInMessages.ForClosed(Closed) : null;
+    }
 
     private async Task SubmitAsync()
     {

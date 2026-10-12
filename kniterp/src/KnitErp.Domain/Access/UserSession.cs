@@ -36,6 +36,13 @@ public sealed class UserSession
     public DateTime CreatedAtUtc { get; private set; }
     public DateTime LastSeenAtUtc { get; private set; }
     public DateTime? RevokedAtUtc { get; private set; }
+
+    /// <summary>D127: сессия закроется в этот момент (вход с другого устройства или конец времени работы) — за 30 с предупреждение.</summary>
+    public DateTime? EndsAtUtc { get; private set; }
+
+    /// <summary>D127: почему сессия закроется; задаётся вместе с <see cref="EndsAtUtc"/>.</summary>
+    public SessionEndReason? EndReason { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
 
     public static UserSession Create(long userId, Guid securityStamp, string? userAgent, string? clientAddress, DateTime nowUtc) => new()
@@ -51,9 +58,22 @@ public sealed class UserSession
 
     /// <summary>Сессия действует: не завершена, штамп не менялся, cookie не могла истечь от бездействия.</summary>
     public bool IsActive(Guid securityStamp, DateTime nowUtc) =>
-        RevokedAtUtc is null && SecurityStamp == securityStamp && nowUtc < LastSeenAtUtc + SignInPolicy.SessionIdleLimit;
+        RevokedAtUtc is null && SecurityStamp == securityStamp && nowUtc < LastSeenAtUtc + SignInPolicy.SessionIdleLimit
+        && (EndsAtUtc is null || nowUtc < EndsAtUtc);
+
+    /// <summary>D127: сколько длится предупреждение перед закрытием сессии.</summary>
+    public static readonly TimeSpan EndWarning = TimeSpan.FromSeconds(30);
 
     public void Revoke(DateTime nowUtc) => RevokedAtUtc ??= nowUtc;
+
+    /// <summary>D127: сессия закроется в этот момент; уже назначенный более ранний момент не откладывается.</summary>
+    public void ScheduleEnd(DateTime atUtc, SessionEndReason reason)
+    {
+        if (EndsAtUtc is null || atUtc < EndsAtUtc)
+        {
+            (EndsAtUtc, EndReason) = (atUtc < CreatedAtUtc ? CreatedAtUtc : atUtc, reason);
+        }
+    }
 }
 
 /// <summary>D122: короткие и обезличенные сведения об устройстве сессии.</summary>
