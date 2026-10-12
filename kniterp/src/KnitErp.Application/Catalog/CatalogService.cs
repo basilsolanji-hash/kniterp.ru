@@ -91,6 +91,13 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         var unit = await FindUnitAsync(ctx, id, ct);
         unit.EnsureVersion(unit.RowVersion, rowVersion);
+        // D339: меньше знаков после запятой — уже записанные дробные количества (2,5 кг) стали бы недопустимыми и «вечными».
+        if (cmd.Precision < unit.Precision && await db.ItemUsageAsync(ctx.OrganizationId, null, id, ct) is { } usage)
+        {
+            throw new BusinessRuleException("catalog.unit.precision_in_use",
+                $"Единица «{unit.Symbol}» уже в учёте ({ItemUsage.Describe(usage)}): уменьшать число знаков после запятой нельзя — записанные количества стали бы недопустимыми.");
+        }
+
         foreach (var c in unit.Update(cmd.Name, cmd.Symbol, cmd.Precision))
         {
             Audit(ctx, AuditActions.CatalogChanged, nameof(UnitOfMeasure), id, c.Before, c.After, c.Field);
@@ -357,6 +364,36 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             await EnsureTypeChangeAsync(ctx, item, cmd.Type, ct);
         }
 
+        // D339: модификация — та же единица и ставка НДС, что у основной позиции (D82); меняются у основной.
+        if (item.IsModification && (cmd.UnitId != item.UnitId || cmd.VatRateId != item.VatRateId))
+        {
+            throw new BusinessRuleException("catalog.variant.unit_vat", "У модификации единица и ставка НДС — как у основной позиции: меняйте их в основной позиции.");
+        }
+
+        var variants = item.IsModification ? [] : await db.Items.Where(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == id).ToListAsync(ct);
+        if (cmd.UnitId != item.UnitId)
+        {
+            // D339: количества в движениях, документах и заказах записаны без единицы — в единице позиции. Сменить её — переписать
+            // смысл всей истории (2,5 кг стали бы 2,5 шт). Для позиции (и её модификаций) в учёте — только новая позиция.
+            foreach (var target in variants.Prepend(item))
+            {
+                if (await db.ItemUsageAsync(ctx.OrganizationId, target.Id, null, ct) is { } usage)
+                {
+                    throw new BusinessRuleException("catalog.unit.in_use",
+                        $"Позиция {target.Code} уже в учёте ({ItemUsage.Describe(usage)}): единицу менять нельзя — записанные количества относятся к прежней. Создайте новую позицию с нужной единицей.");
+                }
+            }
+        }
+
+        // D339: код уникален навсегда — у позиции в учёте он не меняется (иначе старый код достался бы другой позиции, и загрузки
+        // и внешние системы попали бы не на ту вещь).
+        if (!string.Equals(Item.NormalizeCode(cmd.Code), item.Code, StringComparison.Ordinal)
+            && await db.ItemUsageAsync(ctx.OrganizationId, id, null, ct) is { } codeUsage)
+        {
+            throw new BusinessRuleException("catalog.code.in_use",
+                $"Позиция {item.Code} уже в учёте ({ItemUsage.Describe(codeUsage)}): код не меняется. Наименование и артикул менять можно.");
+        }
+
         if (cmd.UnitId != item.UnitId && await db.ItemPacks.AnyAsync(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == id, ct))
         {
             // D307: коэффициенты упаковок заданы в основной единице — при её смене они потеряли бы смысл.
@@ -364,6 +401,20 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         var changes = item.Update(cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description);
+        // D339: единица и ставка НДС основной позиции — сразу и у её модификаций (D82: «как у основной»).
+        foreach (var v in variants.Where(v => !v.IsArchived))
+        {
+            if (v.UnitId != cmd.UnitId)
+            {
+                v.Update(v.Code, v.Name, v.Type, cmd.UnitId, v.Description);
+            }
+
+            if (v.VatRateId != cmd.VatRateId)
+            {
+                v.SetVatRate(cmd.VatRateId);
+            }
+        }
+
         if (cmd.VatRateId != oldVat)
         {
             await RequireActiveVatRateAsync(ctx, cmd.VatRateId, ct);
@@ -463,6 +514,25 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var ctx = await guard.DemandAsync(Permissions.CatalogArchive, ct);
         var item = await FindItemAsync(ctx, id, ct);
         item.EnsureVersion(item.RowVersion, rowVersion);
+        // D339: в архив — только без остатка, без действующих модификаций и не компонентом действующего комплекта: иначе остаток
+        // «зависал» бы в отчётах (списать архивную позицию нельзя), а комплект молча становился недоступным.
+        var stock = await db.StockMovements.Where(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == id).SumAsync(m => (decimal?)m.Quantity, ct) ?? 0;
+        if (stock != 0)
+        {
+            throw new BusinessRuleException("catalog.archive.has_stock", $"У позиции {item.Code} есть остаток ({stock.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}): сначала спишите или переместите его.");
+        }
+
+        if (await db.Items.AnyAsync(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == id && !i.IsArchived, ct))
+        {
+            throw new BusinessRuleException("catalog.archive.has_variants", $"У позиции {item.Code} есть действующие модификации — сначала отправьте в архив их.");
+        }
+
+        if (await db.BundleComponents.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.ComponentItemId == id
+                                                    && db.Items.Any(b => b.Id == c.BundleItemId && !b.IsArchived), ct))
+        {
+            throw new BusinessRuleException("catalog.archive.in_bundle", $"Позиция {item.Code} входит в действующий комплект — уберите её из состава или отправьте комплект в архив.");
+        }
+
         item.Archive(clock.UtcNow);
         Audit(ctx, AuditActions.CatalogArchived, nameof(Item), id, $"{item.Code} {item.Name}", "в архиве", null);
         await db.SaveOrConflictAsync(ct);

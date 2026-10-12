@@ -684,6 +684,24 @@ public sealed partial class ItemExchangeService(
                             errors.Add($"У комплекта {current.Code} есть состав — сначала уберите компоненты, затем меняйте тип.");
                         }
 
+                        // D339: единица — как в карточке: не у модификации (она как у основной), не при упаковках (их коэффициенты
+                        // в старой единице), не у позиции в учёте (записанные количества относятся к прежней единице).
+                        if (current is not null && current.UnitId != candidate.UnitId)
+                        {
+                            if (current.IsModification)
+                            {
+                                errors.Add("У модификации единица — как у основной позиции: меняйте её в основной позиции.");
+                            }
+                            else if (await db.ItemPacks.AnyAsync(x => x.OrganizationId == org && x.ItemId == current.Id, ct))
+                            {
+                                errors.Add($"У позиции {current.Code} есть упаковки: их коэффициенты заданы в основной единице. Уберите упаковки, затем меняйте единицу.");
+                            }
+                            else if (await db.ItemUsageAsync(org, current.Id, null, ct) is { } usage)
+                            {
+                                errors.Add($"Позиция {current.Code} уже в учёте ({ItemUsage.Describe(usage)}): единицу менять нельзя — записанные количества относятся к прежней. Создайте новую позицию с нужной единицей.");
+                            }
+                        }
+
                         action = current is null
                             ? ImportAction.Create
                             : extrasChanged || current.Name != candidate.Name || current.Type != candidate.Type || current.UnitId != candidate.UnitId

@@ -163,7 +163,10 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         var barcodes = await db.ItemBarcodes.AsNoTracking().Where(b => b.OrganizationId == ctx.OrganizationId && b.ItemId == id).OrderBy(b => b.Id)
             .Select(b => new ItemBarcodeDto(b.Id, b.Type, b.Code)).ToListAsync(ct);
         var prices = ctx.Permissions.Has(Permissions.PriceView) ? await PricesAsync(ctx.OrganizationId, id, ct) : [];
-        var stock = await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == id)
+        // Ревью D339: остаток — только по складам, которые пользователь видит (как в подборе позиций), а не по всей организации.
+        var visible = KnitErp.Application.Warehousing.WarehouseScope.Visible(ctx, Permissions.WarehouseReportView, Permissions.WarehouseDocumentCreate, Permissions.SalesView);
+        var stock = await db.StockMovements.AsNoTracking()
+            .Where(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == id && (visible == null || visible.Contains(m.WarehouseId)))
             .SumAsync(m => (decimal?)m.Quantity, ct) ?? 0m;
         var details = ctx.Permissions.Has(Permissions.PriceView) ? item.Details : item.Details with { PurchasePrice = null };
         return new ItemCardDto(item.Id, item.Code, item.Name, item.Type, item.UnitId, unit, item.Description, item.VatRateId, item.IsArchived, details,
@@ -276,7 +279,22 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
 
         db.ItemBarcodes.Add(barcode);
         Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, null, $"{ItemBarcode.TypeName(barcode.Type)} {barcode.Code}", "Штрихкод добавлен");
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            db.DiscardChanges();
+            // Ревью D339: тот же штрихкод добавили одновременно в другой вкладке — понятная причина, а не сбой; вкладка остаётся рабочей.
+            if (await db.ItemBarcodes.AsNoTracking().AnyAsync(b => b.OrganizationId == ctx.OrganizationId && b.Code == barcode.Code, ct))
+            {
+                throw new BusinessRuleException("catalog.barcode.duplicate", $"Штрихкод {barcode.Code} только что добавлен к другой позиции.");
+            }
+
+            throw;
+        }
+
         return barcode.Id;
     }
 
@@ -320,6 +338,12 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         await guard.DemandAsync(Permissions.PriceView, ct);
         var item = await db.Items.AsNoTracking().SingleOrDefaultAsync(i => i.Id == itemId && i.OrganizationId == ctx.OrganizationId, ct)
                    ?? throw new NotFoundException("Номенклатура");
+        if (item.IsArchived)
+        {
+            // Ревью D339: цены архивной позиции не меняются (как и прочие её сведения) — сначала верните её из архива.
+            throw new BusinessRuleException("catalog.archived", "Позиция в архиве.");
+        }
+
         var types = await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(t => t.Id, ct);
         var current = await db.ItemPrices.Where(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == itemId).ToDictionaryAsync(p => p.PriceTypeId, ct);
         foreach (var (typeId, price) in prices)

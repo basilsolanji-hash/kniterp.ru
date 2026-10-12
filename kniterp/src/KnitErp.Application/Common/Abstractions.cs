@@ -150,6 +150,13 @@ public interface IKnitErpDbContext : IAsyncDisposable
     /// </summary>
     Task ReloadAsync(object entity, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// D339: где позиции организации уже участвуют в учёте количеств (движения, партии, строки документов, заказов, инвентаризаций,
+    /// техкарт, состав комплектов). itemId — одна позиция, unitId — все позиции с этой единицей. null — нигде. Возвращает код места
+    /// из <see cref="ItemUsage"/> — по нему сервис пишет понятную причину отказа.
+    /// </summary>
+    Task<string?> ItemUsageAsync(long organizationId, long? itemId, long? unitId, CancellationToken cancellationToken = default);
+
     /// <summary>Точка сохранения внутри текущей транзакции: часть работы (например, строку загрузки) можно откатить, не теряя остального.</summary>
     Task SavepointAsync(string name, CancellationToken cancellationToken = default);
 
@@ -164,6 +171,31 @@ public interface IKnitErpDbContext : IAsyncDisposable
 
     /// <summary>Исключительная именованная блокировка до конца текущей транзакции (sp_getapplock).</summary>
     Task LockAsync(string resource, CancellationToken cancellationToken = default);
+}
+
+/// <summary>D339: места, где количества позиции записаны в её единице (таблица → понятное название для сообщения).</summary>
+public static class ItemUsage
+{
+    public static readonly IReadOnlyDictionary<string, string> Tables = new Dictionary<string, string>
+    {
+        ["stock_movements"] = "складские движения",
+        ["stock_batches"] = "партии",
+        ["stock_batch_movements"] = "движения партий",
+        ["stock_document_lines"] = "строки складских документов",
+        ["stock_document_batch_lines"] = "партии в складских документах",
+        ["opening_balance_lines"] = "начальные остатки",
+        ["opening_balance_batch_lines"] = "партии начальных остатков",
+        ["inventory_lines"] = "инвентаризации",
+        ["inventory_batch_counts"] = "пересчёт партий",
+        ["sales_order_lines"] = "заказы покупателей",
+        ["purchase_order_lines"] = "заказы поставщикам",
+        ["customer_invoice_lines"] = "счета покупателям",
+        ["tech_card_lines"] = "техкарты (материалы)",
+        ["tech_cards"] = "техкарты (выпуск)",
+        ["bundle_components:ComponentItemId"] = "состав комплектов",
+    };
+
+    public static string Describe(string? code) => code is null ? "" : Tables.GetValueOrDefault(code, code);
 }
 
 /// <summary>

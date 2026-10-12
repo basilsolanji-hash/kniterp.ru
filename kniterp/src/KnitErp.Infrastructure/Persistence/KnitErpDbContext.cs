@@ -115,6 +115,23 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
 
     public Task ReloadAsync(object entity, CancellationToken cancellationToken = default) => Entry(entity).ReloadAsync(cancellationToken);
 
+    public async Task<string?> ItemUsageAsync(long organizationId, long? itemId, long? unitId, CancellationToken cancellationToken = default)
+    {
+        // Имена таблиц — из закрытого списка в коде (не из ввода); значения — параметрами.
+        var parts = KnitErp.Application.Common.ItemUsage.Tables.Keys.Select(key =>
+        {
+            var (table, column) = key.Contains(':') ? (key.Split(':')[0], key.Split(':')[1]) : (key, "ItemId");
+            return $"SELECT TOP 1 N'{key}' AS [Value] FROM [kniterp].[{table}] x JOIN [kniterp].[items] i ON i.[Id] = x.[{column}] " +
+                   "WHERE i.[OrganizationId] = @org AND (@item IS NULL OR i.[Id] = @item) AND (@unit IS NULL OR i.[UnitId] = @unit)";
+        });
+        var sql = "SELECT TOP 1 [Value] FROM (" + string.Join(" UNION ALL ", parts) + ") u";
+        return await Database.SqlQueryRaw<string>(sql,
+                new Microsoft.Data.SqlClient.SqlParameter("@org", organizationId),
+                new Microsoft.Data.SqlClient.SqlParameter("@item", (object?)itemId ?? DBNull.Value) { SqlDbType = System.Data.SqlDbType.BigInt },
+                new Microsoft.Data.SqlClient.SqlParameter("@unit", (object?)unitId ?? DBNull.Value) { SqlDbType = System.Data.SqlDbType.BigInt })
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public Task SavepointAsync(string name, CancellationToken cancellationToken = default) =>
         (Database.CurrentTransaction ?? throw new InvalidOperationException("Точка сохранения действует только внутри транзакции.")).CreateSavepointAsync(name, cancellationToken);
 
