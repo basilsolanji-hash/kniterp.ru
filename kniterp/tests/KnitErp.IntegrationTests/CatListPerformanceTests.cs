@@ -181,6 +181,69 @@ public sealed class CatListPerformanceTests(SqlTestHost host, ITestOutputHelper 
         Assert.Equal(ItemExchangeService.MaxRows, again.Unchanged);
     }
 
+    [SqlFact]
+    public async Task Supplier_price_list_and_counterparty_import_at_limits()
+    {
+        // Аудит каталога (D348): прайс поставщика на 20 000 строк (по штрихкодам) и загрузка 5000 контрагентов — секунды, не минуты.
+        const int priceRows = SupplierPriceListService.MaxRows;
+        var org = await CreateOrgAsync();
+        long supplier;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+            await s.Catalog.CreateItemAsync(new ItemCommand("ПР-0", "Пряжа образец", ItemType.RawMaterial, piece, null));
+            supplier = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Поставщик пряжи»", null, null, true, false, null));
+        }
+
+        await using (var db = host.NewDb())
+        {
+            db.Database.SetCommandTimeout(300);
+            var template = await db.Items.Where(i => i.OrganizationId == org.OrganizationId).Select(i => i.Id).SingleAsync();
+            var columns = await db.Database.SqlQueryRaw<string>(
+                    "SELECT c.name AS Value FROM sys.columns c WHERE c.object_id = OBJECT_ID('kniterp.items') AND c.is_identity = 0 AND c.is_computed = 0 " +
+                    "AND TYPE_NAME(c.system_type_id) <> 'timestamp'")
+                .ToListAsync();
+            string Pick(string c) => c switch
+            {
+                "Code" => "CONCAT(N'ПР-', n.n)",
+                "Name" => "CONCAT(N'Пряжа ', n.n)",
+                _ => $"t.[{c}]",
+            };
+            var sql = $"""
+                WITH n AS (SELECT TOP ({priceRows}) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS n FROM sys.all_objects a CROSS JOIN sys.all_objects b)
+                INSERT INTO [kniterp].[items] ({string.Join(", ", columns.Select(c => $"[{c}]"))})
+                SELECT {string.Join(", ", columns.Select(Pick))} FROM n CROSS JOIN [kniterp].[items] t WHERE t.[Id] = {template};
+                INSERT INTO [kniterp].[item_barcodes] ([OrganizationId], [ItemId], [Type], [Code])
+                SELECT [OrganizationId], [Id], 4, CONCAT('PL', SUBSTRING([Code], 4, 10)) FROM [kniterp].[items]
+                WHERE [OrganizationId] = {org.OrganizationId} AND [Id] <> {template};
+                """;
+            await db.Database.ExecuteSqlRawAsync(sql);
+        }
+
+        await using var c = host.As(org.OwnerUserId, org.OrganizationId);
+        var file = SqlTestHost.Spreadsheet.Write([new SheetData("Прайс", ["Артикул", "Наименование", "Штрихкод", "Цена"],
+            [.. Enumerable.Range(1, priceRows).Select(n => (IReadOnlyList<string>)[$"A-{n}", $"Пряжа {n}", $"PL{n}", (100 + n % 50).ToString()])])]);
+        var sw = Stopwatch.StartNew();
+        var plan = await c.PriceLists.PreviewAsync(supplier, new MemoryStream(file), false);
+        output.WriteLine($"прайс {priceRows} строк, проверка: {sw.ElapsedMilliseconds} мс, к обновлению {plan.ToUpdate}");
+        Assert.Equal(priceRows, plan.ToUpdate);
+        sw.Restart();
+        var applied = await c.PriceLists.ApplyAsync(plan);
+        output.WriteLine($"прайс {priceRows} строк, загрузка: {sw.ElapsedMilliseconds} мс, связано артикулов {applied.Linked}");
+        Assert.Equal((priceRows, priceRows), (applied.Updated, applied.Linked));
+        Assert.True(sw.ElapsedMilliseconds < 40_000, $"прайс: {sw.ElapsedMilliseconds} мс");
+
+        var parties = SqlTestHost.Spreadsheet.Write([new SheetData("Лист", CounterpartyExchangeService.Columns,
+            [.. Enumerable.Range(1, TableImport.MaxRows).Select(n => (IReadOnlyList<string>)[$"ООО «Клиент {n}»", "", "", "", "да", "", ""])])]);
+        sw.Restart();
+        var partyPlan = await c.CounterpartyExchange.PreviewAsync(new MemoryStream(parties));
+        output.WriteLine($"контрагенты {TableImport.MaxRows}, проверка: {sw.ElapsedMilliseconds} мс");
+        sw.Restart();
+        var partyResult = await c.CounterpartyExchange.ApplyAsync(partyPlan.Rows);
+        output.WriteLine($"контрагенты {TableImport.MaxRows}, загрузка: {sw.ElapsedMilliseconds} мс");
+        Assert.True(sw.ElapsedMilliseconds < 30_000, $"контрагенты: {sw.ElapsedMilliseconds} мс");
+    }
+
     private async Task<CreatedOrganization> CreateOrgAsync()
     {
         int[] w = [2, 4, 10, 3, 5, 9, 4, 6, 8];

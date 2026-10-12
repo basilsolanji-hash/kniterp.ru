@@ -152,6 +152,9 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
                 .ToDictionaryAsync(s => s.ItemId, ct);
             var linkCounts = await db.ItemSuppliers.AsNoTracking().Where(s => s.OrganizationId == org && ids.Contains(s.ItemId))
                 .GroupBy(s => s.ItemId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
+            // D348: «есть ли основной поставщик» — одним запросом на весь прайс, а не запросом на строку (20 000 строк — 20 000 запросов).
+            var withMain = (await db.ItemSuppliers.AsNoTracking().Where(s => s.OrganizationId == org && s.IsMain && ids.Contains(s.ItemId))
+                .Select(s => s.ItemId).Distinct().ToListAsync(ct)).ToHashSet();
             foreach (var r in rows)
             {
                 if (!items.TryGetValue(r.ItemId!.Value, out var item))
@@ -173,7 +176,7 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
                     && linkCounts.GetValueOrDefault(item.Id) < ItemSupplier.MaxPerItem)
                 {
                     var supplierName = r.Name is { Length: > ItemSupplier.NameMaxLength } longName ? longName[..ItemSupplier.NameMaxLength] : r.Name;
-                    var link = ItemSupplier.Create(org, item, plan.SupplierId, r.Article, supplierName, !await db.ItemSuppliers.AnyAsync(s => s.ItemId == item.Id && s.IsMain, ct));
+                    var link = ItemSupplier.Create(org, item, plan.SupplierId, r.Article, supplierName, withMain.Add(item.Id));
                     linkCounts[item.Id] = linkCounts.GetValueOrDefault(item.Id) + 1;
                     db.ItemSuppliers.Add(link);
                     existingLinks[item.Id] = link;
