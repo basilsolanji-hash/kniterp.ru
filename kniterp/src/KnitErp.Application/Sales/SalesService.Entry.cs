@@ -353,10 +353,15 @@ public sealed partial class SalesService
         }
 
         var ids = wanted.Keys.ToList();
-        var items = await StockEntry.ActiveItems(db, ctx.OrganizationId).Where(i => ids.Contains(i.Id)).ToListAsync(ct);
-        if (items.Count != ids.Count)
+        if (ids.Count > Variants.MaxPerBatch)
         {
-            throw new NotFoundException("Номенклатура");
+            throw new BusinessRuleException("sales.paste.too_many", $"За один раз — не больше {Variants.MaxPerBatch} строк.");
+        }
+
+        var items = new List<EntryItemDto>();
+        foreach (var id in ids)
+        {
+            items.Add(await StockEntry.ActiveItems(db, ctx.OrganizationId, id).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура"));
         }
 
         var quotes = await SalesPricing.QuoteAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, order.PricesIncludeVat, ids, order.AgreementId, ct);
