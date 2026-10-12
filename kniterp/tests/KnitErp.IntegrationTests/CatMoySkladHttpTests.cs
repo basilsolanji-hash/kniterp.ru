@@ -36,6 +36,32 @@ public sealed class CatMoySkladHttpTests
         new(code) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
     [Fact]
+    public async Task Price_update_posts_meta_with_fixed_address_and_rejects_unsafe_ids()
+    {
+        string? body = null;
+        var (client, handler) = Create((req, _) =>
+        {
+            body = req.Content!.ReadAsStringAsync().Result;
+            return Json("""[{"id":"0a1b2c3d-0000-0000-0000-000000000001","updated":"2026-10-12 12:00:00.000"}]""");
+        });
+
+        var rows = await client.UpdatePricesAsync(Token, MoySkladEntities.Product,
+            [new MsPriceUpdate("0a1b2c3d-0000-0000-0000-000000000001", [new MsPriceValue("pt-1", 150000m)], null)]);
+        Assert.Equal("2026-10-12 12:00:00.000", rows.Single().Updated);
+        var request = handler.Requests.Single();
+        Assert.Equal((HttpMethod.Post, "https://api.moysklad.ru/api/remap/1.2/entity/product"), (request.Method, request.RequestUri!.ToString()));
+        Assert.Contains("\"href\":\"https://api.moysklad.ru/api/remap/1.2/entity/product/0a1b2c3d-0000-0000-0000-000000000001\"", body);
+        Assert.Contains("context/companysettings/pricetype/pt-1", body);
+        Assert.DoesNotContain("buyPrice", body); // не меняем — не отправляем
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.UpdatePricesAsync(Token, MoySkladEntities.Product,
+            [new MsPriceUpdate("../../entity/organization", [], 1m)]));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.UpdatePricesAsync(Token, MoySkladEntities.Organization,
+            [new MsPriceUpdate("a", [], 1m)]));
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task Fixed_address_token_in_header_and_retry_after_on_429()
     {
         var (client, handler) = Create((_, n) =>

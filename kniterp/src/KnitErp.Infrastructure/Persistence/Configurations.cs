@@ -172,6 +172,27 @@ internal sealed class TrustedDeviceConfiguration : IEntityTypeConfiguration<Trus
     }
 }
 
+/// <summary>D122: серверные сессии входа — список «Активные сессии» и завершение одной сессии.</summary>
+internal sealed class UserSessionConfiguration : IEntityTypeConfiguration<UserSession>
+{
+    public void Configure(EntityTypeBuilder<UserSession> b)
+    {
+        b.ToTable("user_sessions", t =>
+        {
+            t.HasCheckConstraint("ck_user_sessions_seen", "[LastSeenAtUtc] >= [CreatedAtUtc]");
+            t.HasCheckConstraint("ck_user_sessions_revoked", "[RevokedAtUtc] IS NULL OR [RevokedAtUtc] >= [CreatedAtUtc]");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Label).HasMaxLength(UserSession.LabelMaxLength).IsRequired();
+        b.Property(x => x.AddressPrefix).HasColumnType("varchar(64)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.PublicId).IsUnique().HasDatabaseName("ux_user_sessions_public_id");
+        b.HasIndex(x => new { x.UserId, x.RevokedAtUtc }).HasDatabaseName("ix_user_sessions_user");
+    }
+}
+
 internal sealed class OrganizationMemberConfiguration : IEntityTypeConfiguration<OrganizationMember>
 {
     public void Configure(EntityTypeBuilder<OrganizationMember> b)

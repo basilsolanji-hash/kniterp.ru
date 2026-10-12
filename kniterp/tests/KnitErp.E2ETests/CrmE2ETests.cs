@@ -21,6 +21,7 @@ public sealed class CrmAppFixture : IAsyncLifetime
     private string? _ownerState;
 
     public string BaseUrl => _app?.BaseUrl ?? string.Empty;
+    public string AppLog => _app?.Log ?? string.Empty;
     public string Password { get; } = "E2e-" + Guid.NewGuid().ToString("N")[..16] + "!a";
     public IBrowser Browser { get; private set; } = default!;
 
@@ -179,25 +180,22 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await Assertions.Expect(page.GetByLabel("Позиция каталога")).ToHaveValueAsync(new Regex(@"\d+"));
         await page.GetByLabel("Количество").FillAsync("10");
         await page.GetByLabel("Цена").FillAsync("1500");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
+        await page.GetByRole(AriaRole.Form, new() { Name = "Добавить позицию" }).GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Позиция добавлена");
         await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex("СВ-E2E") })).ToContainTextAsync("15 000,00");
 
         await page.GetByRole(AriaRole.Button, new() { Name = "Создать заказ" }).ClickAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Создать черновик заказа" }).ClickAsync();
-        await page.WaitForURLAsync(new Regex(@"/sales-orders/\d+$"));
-        await WaitBlazorAsync(page);
-        await page.GetByRole(AriaRole.Button, new() { Name = "Подтвердить заказ" }).ClickAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Подтвердить заказ" })).ToBeHiddenAsync(new() { Timeout = 15_000 });
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Заказ покупателя создан");
 
-        // Подтверждённый заказ → сделка «Выиграна»; заказ виден в сделке.
-        await page.GotoAsync(dealUrl);
-        await WaitBlazorAsync(page);
+        // Заказ подтверждается прямо из сделки → сделка «Выиграна», дальше — «В производство».
+        await page.GetByRole(AriaRole.Button, new() { Name = "Подтвердить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "В производство" })).ToBeVisibleAsync(new() { Timeout = 15_000 });
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Выиграна" })).ToHaveAttributeAsync("aria-current", "step");
         await Assertions.Expect(page.Locator(".page-head .tag")).ToHaveTextAsync("Выиграна");
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex(@"^ЗК-\d+") })).ToBeVisibleAsync();
         await page.GetByText("История этапов").ClickAsync();
-        await Assertions.Expect(page.Locator("details.panel")).ToContainTextAsync("Образцы / расчёт → Выиграна");
+        await Assertions.Expect(page.Locator("details.panel")).ToContainTextAsync("Согласование → Выиграна");
     });
 
     [SqlFact]
@@ -217,10 +215,11 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
     [SqlFact]
     public Task Phone_lists_and_cards_fit_390() => RunAsync("crm-phone", true, "dark", async page =>
     {
-        foreach (var path in new[] { "crm/leads", "crm/deals", "crm/deals?view=table", "crm/contacts", "crm/settings" })
+        foreach (var path in new[] { "crm/leads", "crm/deals", "crm/deals?view=table", "crm/contacts", "crm/settings", "crm/tasks", "crm/summary", "crm/mailings", "crm/chats" })
         {
             await OpenAsync(page, path);
             Assert.True(await NoHorizontalScrollAsync(page), path);
+            await Shot(page, "crm-phone-" + path.Replace("crm/", "").Replace("?view=table", "-table"));
         }
 
         // Новая сделка с телефона и её карточка.
@@ -241,6 +240,101 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         Assert.True(await NoHorizontalScrollAsync(page));
         await page.ScreenshotAsync(new() { Path = Path.Combine(Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath(), "crm-phone-board.png"), FullPage = true });
     });
+
+    [SqlFact]
+    public Task Smart_paste_offer_print_and_new_screens() => RunAsync("crm-offer", false, "light", async page =>
+    {
+        // А1: умная вставка заполняет поля лида из сообщения клиента.
+        await OpenAsync(page, "crm/leads");
+        await page.GetByText("Умная вставка: вставьте сообщение клиента").ClickAsync();
+        await page.GetByLabel("Сообщение клиента").FillAsync($"Здравствуйте! Нужно 200 шапок {Stamp}. ООО «Вязаный мир». С уважением, Мария, +7 900 000-00-02, buyer{Stamp}@example.org");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Разобрать" }).ClickAsync();
+        await Assertions.Expect(page.GetByLabel("Телефон")).ToHaveValueAsync(new Regex("900"));
+        await Assertions.Expect(page.GetByLabel("Контактное лицо")).ToHaveValueAsync("Мария");
+        await page.GetByLabel("Что нужно клиенту").FillAsync($"200 шапок {Stamp}");
+        await Shot(page, "crm-01-lead-smart-paste");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить лид" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/leads/\d+$"));
+        await WaitBlazorAsync(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Квалифицировать" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать сделку" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/deals/\d+$"));
+        await WaitBlazorAsync(page);
+
+        // Б5: КП одной кнопкой из позиций сделки, печать / PDF.
+        await page.GetByLabel("Поиск позиции").FillAsync("СВ-E2E");
+        await page.GetByLabel("Поиск позиции").PressAsync("Tab");
+        await Assertions.Expect(page.GetByLabel("Позиция каталога")).ToHaveValueAsync(new Regex(@"\d+"));
+        await page.GetByLabel("Количество").FillAsync("200");
+        await page.GetByLabel("Цена").FillAsync("900");
+        await page.GetByRole(AriaRole.Form, new() { Name = "Добавить позицию" }).GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Позиция добавлена");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сформировать КП" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("КП сформировано");
+        await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"КП-\d+") })).ToContainTextAsync("180 000,00");
+        await Shot(page, "crm-02-deal-offer");
+        var href = await page.GetByRole(AriaRole.Link, new() { Name = "Печать / PDF" }).First.GetAttributeAsync("href");
+        await OpenAsync(page, href!);
+        await Assertions.Expect(page.Locator("body")).ToContainTextAsync("Коммерческое предложение");
+        await Assertions.Expect(page.Locator("body")).ToContainTextAsync("Свитер вязаный");
+        await Shot(page, "crm-03-offer-print");
+
+        // Новые экраны открываются без ошибок.
+        foreach (var (path, name) in new[] { ("crm/tasks", "crm-04-tasks"), ("crm/summary", "crm-05-summary"), ("crm/mailings", "crm-06-mailings"),
+                     ("crm/chats", "crm-07-chats"), ("crm/settings", "crm-08-settings") })
+        {
+            await OpenAsync(page, path);
+            await Assertions.Expect(page.Locator("h1")).ToBeVisibleAsync();
+            await Assertions.Expect(page.Locator(".error")).ToHaveCountAsync(0);
+            await Shot(page, name);
+        }
+    });
+
+    [SqlFact]
+    public Task Templates_messengers_mailbox_and_mailing_from_template() => RunAsync("crm-mail", false, "light", async page =>
+    {
+        // D670: три мессенджера в настройках; форма подключения Telegram открывается и закрывается.
+        await OpenAsync(page, "crm/settings");
+        var messengers = page.GetByRole(AriaRole.Region, new() { Name = "Мессенджеры" });
+        foreach (var name in new[] { "Telegram", "WhatsApp", "MAX" })
+        {
+            await Assertions.Expect(messengers.GetByRole(AriaRole.Article, new() { Name = name })).ToBeVisibleAsync();
+        }
+
+        var whatsapp = messengers.GetByRole(AriaRole.Article, new() { Name = "WhatsApp" });
+        await whatsapp.GetByRole(AriaRole.Button, new() { Name = "Подключить" }).ClickAsync();
+        await Assertions.Expect(whatsapp.GetByLabel("Phone number ID")).ToBeVisibleAsync();
+        await Assertions.Expect(whatsapp.GetByLabel("Секрет приложения (App secret)")).ToBeVisibleAsync();
+        await whatsapp.GetByRole(AriaRole.Button, new() { Name = "Отмена" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Region, new() { Name = "Входящая почта" }).GetByRole(AriaRole.Button, new() { Name = "Подключить ящик" })).ToBeVisibleAsync();
+
+        // D674: шаблон письма с переменными.
+        var templates = page.GetByRole(AriaRole.Region, new() { Name = "Шаблоны писем" });
+        await templates.GetByLabel("Название").FillAsync($"Спасибо за заявку {Stamp}");
+        await templates.GetByLabel("Тема").FillAsync("{{Организация}}: заявка принята");
+        await templates.GetByLabel("Текст").FillAsync("Здравствуйте, {{Имя}}! Ваш менеджер — {{Менеджер}}.");
+        await templates.GetByRole(AriaRole.Button, new() { Name = "Добавить шаблон" }).ClickAsync();
+        await Assertions.Expect(templates.GetByRole(AriaRole.Status)).ToContainTextAsync("Шаблон сохранён");
+        await Assertions.Expect(templates.GetByRole(AriaRole.Row, new() { NameRegex = new Regex($"Спасибо за заявку {Stamp}") })).ToBeVisibleAsync();
+        await templates.ScrollIntoViewIfNeededAsync();
+        await Shot(page, "crm-09-settings-messengers-mail");
+
+        // Рассылка из шаблона: тема и текст подставились с переменными.
+        await OpenAsync(page, "crm/mailings");
+        await page.GetByLabel("Шаблон").SelectOptionAsync(new SelectOptionValue { Label = $"Спасибо за заявку {Stamp}" });
+        await Assertions.Expect(page.GetByLabel("Тема")).ToHaveValueAsync("{{Организация}}: заявка принята");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить черновик" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Черновик сохранён" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByLabel("Время отправки")).ToBeVisibleAsync();
+        await Shot(page, "crm-10-mailing-template");
+    });
+
+    private static Task Shot(IPage page, string name)
+    {
+        var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath();
+        Directory.CreateDirectory(dir);
+        return page.ScreenshotAsync(new() { Path = Path.Combine(dir, name + ".png"), FullPage = true });
+    }
 
     private static Task<bool> NoHorizontalScrollAsync(IPage page) =>
         page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= window.innerWidth + 1");
@@ -274,7 +368,7 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         try
         {
             await scenario(page);
-            Assert.Empty(errors);
+            Assert.True(errors.Count == 0, string.Join("\n", errors) + "\n" + string.Concat(app.AppLog.Split('\n').Where(l => l.Contains("fail") || l.Contains("Exception") || l.Contains("   at ")).Take(40).Select(l => l + "\n")));
         }
         catch
         {

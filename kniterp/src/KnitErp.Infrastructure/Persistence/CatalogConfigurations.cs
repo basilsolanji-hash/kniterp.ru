@@ -60,7 +60,7 @@ internal sealed class ItemPriceHistoryConfiguration : IEntityTypeConfiguration<I
         b.ToTable("item_price_history", t =>
         {
             t.HasCheckConstraint("ck_item_price_history_prices", "([OldPrice] IS NULL OR [OldPrice] >= 0) AND ([NewPrice] IS NULL OR [NewPrice] >= 0)");
-            t.HasCheckConstraint("ck_item_price_history_source", "[Source] IN (1, 2, 3, 4, 5)");
+            t.HasCheckConstraint("ck_item_price_history_source", "[Source] IN (1, 2, 3, 4, 5, 6)");
             t.HasTrigger("tr_item_price_history_immutable");
         });
         b.HasKey(x => x.Id);
@@ -87,7 +87,7 @@ internal sealed class PriceRevaluationConfiguration : IEntityTypeConfiguration<P
     {
         b.ToTable("price_revaluations", t =>
         {
-            t.HasCheckConstraint("ck_price_revaluations_mode", "[Mode] IN (1, 2) AND [Rounding] IN (0, 1, 2, 3) AND [Items] >= 0");
+            t.HasCheckConstraint("ck_price_revaluations_mode", "[Mode] IN (1, 2) AND [Rounding] IN (0, 1, 2, 3, 4, 5) AND [Items] >= 0");
             t.HasTrigger("tr_price_revaluations_immutable");
         });
         b.HasKey(x => x.Id);
@@ -313,5 +313,70 @@ internal sealed class LabelTemplateConfiguration : IEntityTypeConfiguration<Labe
         b.HasIndex(x => x.OrganizationId, "ux_label_templates_default").IsUnique().HasFilter("[IsDefault] = 1");
         b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<PriceType>().WithMany().HasForeignKey(x => x.PriceTypeId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_label_templates_price_type");
+    }
+}
+
+/// <summary>D317: значения по умолчанию группы — одна строка на группу; единица и НДС — своей организации (составные FK).</summary>
+internal sealed class ItemGroupDefaultsConfiguration : IEntityTypeConfiguration<ItemGroupDefaults>
+{
+    public void Configure(EntityTypeBuilder<ItemGroupDefaults> b)
+    {
+        b.ToTable("item_group_defaults");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Type).HasConversion<byte?>();
+        b.Property(x => x.Tracking).HasConversion<byte?>();
+        b.Property(x => x.TnVedCode).HasColumnType("varchar(10)");
+        b.Property(x => x.OriginCountryCode).HasColumnType("char(3)");
+        b.Property(x => x.OriginCountryName).HasMaxLength(100);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Values);
+        b.HasIndex(x => x.GroupId).IsUnique().HasDatabaseName("ux_item_group_defaults_group");
+        b.HasOne<ItemGroup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.GroupId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_item_group_defaults_group");
+        b.HasOne<UnitOfMeasure>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.UnitId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_item_group_defaults_unit");
+        b.HasOne<VatRate>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.VatRateId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_item_group_defaults_vat");
+    }
+}
+
+/// <summary>D321: наборы значений характеристик.</summary>
+internal sealed class CharacteristicValueSetConfiguration : IEntityTypeConfiguration<CharacteristicValueSet>
+{
+    public void Configure(EntityTypeBuilder<CharacteristicValueSet> b)
+    {
+        b.ToTable("characteristic_value_sets");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(CharacteristicValueSet.NameMaxLength).IsRequired();
+        b.Property(x => x.ValuesText).HasMaxLength(2000).IsRequired();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Values);
+        b.HasIndex(x => new { x.OrganizationId, x.CharacteristicId }).HasDatabaseName("ix_characteristic_value_sets_org_char");
+        b.HasOne<Characteristic>().WithMany().HasForeignKey(x => x.CharacteristicId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_characteristic_value_sets_characteristic");
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+/// <summary>D322: правило автоцены — одно на вид цены.</summary>
+internal sealed class PriceRuleConfiguration : IEntityTypeConfiguration<PriceRule>
+{
+    public void Configure(EntityTypeBuilder<PriceRule> b)
+    {
+        b.ToTable("price_rules", t =>
+        {
+            t.HasCheckConstraint("ck_price_rules_factor", "[Factor] > 0 AND [Factor] <= 100");
+            t.HasCheckConstraint("ck_price_rules_rounding", "[Rounding] IN (0, 1, 2, 3, 4, 5)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Factor).HasColumnType("decimal(9,4)");
+        b.Property(x => x.Rounding).HasConversion<byte>();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasIndex(x => x.PriceTypeId).IsUnique().HasDatabaseName("ux_price_rules_price_type");
+        b.HasOne<PriceType>().WithMany().HasForeignKey(x => x.PriceTypeId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_price_rules_price_type");
+        b.HasOne<KnitErp.Domain.Organizations.Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
     }
 }

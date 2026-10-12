@@ -25,8 +25,9 @@ public enum SignInStatus
 
 /// <summary>Кто входит: штамп безопасности закрывает сессию при блокировке и смене прав.</summary>
 /// <summary>Language — язык интерфейса пользователя (D60), ставится в cookie при входе.</summary>
+/// <summary>SessionId — внешний идентификатор серверной записи сессии (D122): без неё или после её завершения cookie не действует.</summary>
 public sealed record SessionIdentity(
-    long UserId, string DisplayName, Guid SecurityStamp, long OrganizationId, bool UsedTwoFactor, string? Language = null);
+    long UserId, string DisplayName, Guid SecurityStamp, long OrganizationId, bool UsedTwoFactor, string? Language = null, Guid? SessionId = null);
 
 /// <summary>Состояние между паролем и вторым фактором. Подписано и хранится в отдельной короткой cookie.</summary>
 public sealed record PendingSignIn(long UserId, Guid SecurityStamp);
@@ -295,13 +296,39 @@ public sealed class SignInService(
     }
 
     /// <summary>
-    /// Сессия ещё действительна: штамп не менялся, учётная запись активна, участие в организации не заблокировано.
-    /// Вызывается при каждом запросе не реже раза в минуту.
+    /// Сессия ещё действительна: штамп не менялся, учётная запись активна, участие в организации не заблокировано,
+    /// серверная запись сессии (D122) есть, принадлежит этому пользователю и не завершена. Cookie без записи — недействительна.
+    /// Вызывается при каждом запросе не реже раза в минуту; время последней активности пишется не чаще раза в 5 минут.
     /// </summary>
-    public async Task<bool> ValidateSessionAsync(long userId, long organizationId, Guid securityStamp, CancellationToken ct = default) =>
-        await db.Users.AnyAsync(u => u.Id == userId && u.Status == UserStatus.Active && u.SecurityStamp == securityStamp, ct)
-        && await db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.OrganizationId == organizationId
-                                                      && m.Status == MembershipStatus.Active, ct);
+    public async Task<bool> ValidateSessionAsync(long userId, long organizationId, Guid securityStamp, Guid? sessionId, CancellationToken ct = default)
+    {
+        if (sessionId is not { } publicId)
+        {
+            return false;
+        }
+
+        var now = clock.UtcNow;
+        var row = await db.UserSessions.AsNoTracking().Where(x => x.PublicId == publicId)
+            .Select(x => new { x.Id, x.UserId, x.SecurityStamp, x.LastSeenAtUtc, x.RevokedAtUtc }).SingleOrDefaultAsync(ct);
+        if (row is null || row.UserId != userId || row.RevokedAtUtc is not null || row.SecurityStamp != securityStamp
+            || now >= row.LastSeenAtUtc + SignInPolicy.SessionIdleLimit)
+        {
+            return false;
+        }
+
+        var valid = await db.Users.AnyAsync(u => u.Id == userId && u.Status == UserStatus.Active && u.SecurityStamp == securityStamp, ct)
+                    && await db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.OrganizationId == organizationId
+                                                                  && m.Status == MembershipStatus.Active, ct);
+        if (valid && now - row.LastSeenAtUtc >= SignInPolicy.SessionTouchInterval)
+        {
+            // Условный UPDATE: одновременные запросы одной сессии не пишут время по нескольку раз и не конфликтуют по rowversion.
+            var stale = now - SignInPolicy.SessionTouchInterval;
+            await db.UserSessions.Where(x => x.Id == row.Id && x.RevokedAtUtc == null && x.LastSeenAtUtc <= stale)
+                .ExecuteUpdateAsync(x => x.SetProperty(v => v.LastSeenAtUtc, now), ct);
+        }
+
+        return valid;
+    }
 
     public async Task<IReadOnlyList<OrganizationChoice>> ListOrganizationsAsync(long userId, CancellationToken ct = default) =>
         await db.OrganizationMembers.AsNoTracking()
@@ -314,7 +341,7 @@ public sealed class SignInService(
     /// <summary>Переход в другую организацию того же пользователя. Чужая организация — «не найдено».</summary>
     public async Task<SessionIdentity> SwitchOrganizationAsync(SessionIdentity session, long organizationId, CancellationToken ct = default)
     {
-        if (!await ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, ct)
+        if (!await ValidateSessionAsync(session.UserId, session.OrganizationId, session.SecurityStamp, session.SessionId, ct)
             || !(await ListOrganizationsAsync(session.UserId, ct)).Any(o => o.OrganizationId == organizationId))
         {
             throw new NotFoundException("Организация");
@@ -326,8 +353,16 @@ public sealed class SignInService(
         return session with { OrganizationId = organizationId };
     }
 
-    public async Task RecordSignOutAsync(long userId, long organizationId, CancellationToken ct = default)
+    /// <summary>Выход: запись в журнал, серверная сессия (D122) завершается — её cookie больше не примут, даже если её скопировали.</summary>
+    public async Task RecordSignOutAsync(long userId, long organizationId, Guid? sessionId = null, CancellationToken ct = default)
     {
+        if (sessionId is { } publicId)
+        {
+            var now = clock.UtcNow;
+            await db.UserSessions.Where(x => x.PublicId == publicId && x.UserId == userId && x.RevokedAtUtc == null)
+                .ExecuteUpdateAsync(x => x.SetProperty(v => v.RevokedAtUtc, now), ct);
+        }
+
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, organizationId, userId, AuditActions.SignedOut,
             nameof(UserAccount), userId.ToString(), correlationId: currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
@@ -372,11 +407,14 @@ public sealed class SignInService(
     private async Task<SignInResult> SucceedAsync(UserAccount user, long organizationId, bool usedTwoFactor, CancellationToken ct, string? via = null)
     {
         user.RegisterSuccessfulSignIn();
+        // D122: каждая выдача cookie — своя серверная сессия; в cookie — только её GUID.
+        var session = UserSession.Create(user.Id, user.SecurityStamp, currentUser.UserAgent, currentUser.ClientAddress, clock.UtcNow);
+        db.UserSessions.Add(session);
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, organizationId, user.Id, AuditActions.SignedIn, nameof(UserAccount),
             user.Id.ToString(), after: via ?? (usedTwoFactor ? "пароль и 2FA" : "пароль"), reason: WithAddress(null), correlationId: currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
         return new SignInResult(SignInStatus.Succeeded,
-            new SessionIdentity(user.Id, user.DisplayName, user.SecurityStamp, organizationId, usedTwoFactor, user.Language));
+            new SessionIdentity(user.Id, user.DisplayName, user.SecurityStamp, organizationId, usedTwoFactor, user.Language, session.PublicId));
     }
 
     private async Task<UserAccount?> LoadPendingAsync(PendingSignIn pending, CancellationToken ct) =>

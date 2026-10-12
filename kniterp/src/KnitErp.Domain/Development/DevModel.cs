@@ -101,6 +101,12 @@ public sealed class DevModel
     public long? ConstructorUserId { get; private set; }
     public long? TechnologistUserId { get; private set; }
     public long? ProgrammerUserId { get; private set; }
+    /// <summary>Позиция «Готовая продукция», в которую передана модель (D750).</summary>
+    public long? ProductionItemId { get; private set; }
+
+    /// <summary>Черновик техкарты производства, созданный при передаче (D750).</summary>
+    public long? ProductionTechCardId { get; private set; }
+
     public DateOnly? PlannedLaunch { get; private set; }
     public DevPriority Priority { get; private set; }
 
@@ -126,6 +132,13 @@ public sealed class DevModel
 
     public DateTime CreatedAtUtc { get; private set; }
     public long CreatedByUserId { get; private set; }
+
+    /// <summary>Размер короба упаковки («40 × 30 × 30 см») — для техкарты (D713).</summary>
+    public string? PackBox { get; private set; }
+
+    /// <summary>Закреплённый дизайнером эскиз (файл модели вида «Эскиз»), D712.</summary>
+    public long? MainSketchFileId { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
 
     public static string CategoryName(DevCategory category) => category switch
@@ -213,6 +226,19 @@ public sealed class DevModel
         return Diff(BriefSnapshot, () => ApplyBrief(brief));
     }
 
+    public void SetPackBox(string? packBox)
+    {
+        EnsureEditable();
+        PackBox = DomainText.Optional(packBox, 60, "Размер короба");
+    }
+
+    /// <summary>Закрепить эскиз (файл проверяет сервис: свой, вида «Эскиз», картинка) или снять закрепление.</summary>
+    public void PinSketch(long? fileId)
+    {
+        EnsureEditable();
+        MainSketchFileId = fileId;
+    }
+
     /// <summary>Смена стадии; правило перехода проверяет <see cref="DevStages.CheckMove"/>.</summary>
     public DevModelStageEntry MoveTo(DevStage to, bool canApprove, Func<DevStage, bool> isEnabled, string? comment, DateTime nowUtc, long userId)
     {
@@ -222,6 +248,22 @@ public sealed class DevModel
         }
 
         return SetStage(to, comment, nowUtc, userId);
+    }
+
+    /// <summary>
+    /// Передача в производство (D750): только утверждённая модель; запоминает позицию и черновик техкарты, стадия — «Передано в производство».
+    /// Право «утверждение» проверяет сервис.
+    /// </summary>
+    public DevModelStageEntry HandOver(long itemId, long techCardId, DateTime nowUtc, long userId)
+    {
+        if (Stage != DevStage.Approved)
+        {
+            throw new BusinessRuleException("dev.handoff.stage", "Передать в производство можно только утверждённую модель.");
+        }
+
+        ProductionItemId = itemId;
+        ProductionTechCardId = techCardId;
+        return SetStage(DevStage.Handed, "Передано в производство", nowUtc, userId);
     }
 
     public DevModelStageEntry Cancel(string? reason, DateTime nowUtc, long userId)

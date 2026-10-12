@@ -65,8 +65,12 @@
 window.kniterp = {
     _returnFocus: null,
     registerHotkeys: function (dotnet) {
+        // Повторный вызов (переподключение Blazor) заменяет прежний обработчик, а не добавляет второй со старой ссылкой.
+        if (kniterp._onAction) document.removeEventListener('knit:action', kniterp._onAction);
         // D116: кнопка в панели персонажа помощника открывает чат помощника.
-        document.addEventListener('knit:action', function () { dotnet.invokeMethodAsync('OnHotkey', 'assistant'); });
+        kniterp._onAction = function () { dotnet.invokeMethodAsync('OnHotkey', 'assistant'); };
+        document.addEventListener('knit:action', kniterp._onAction);
+        kniterp.hotkeysReady = true;
         document.addEventListener('keydown', function (e) {
             if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K' || e.key === 'л' || e.key === 'Л')) {
                 e.preventDefault();
@@ -109,6 +113,12 @@ window.kniterp = {
     },
     copy: async function (text) {
         try { await navigator.clipboard.writeText(text); return true; } catch (e) { return false; }
+    },
+    // D124: «Поделиться» на телефоне — системное меню (мессенджеры, почта). Нет поддержки или отмена — false.
+    canShare: function () { return !!navigator.share; },
+    share: async function (title, text, url) {
+        if (!navigator.share) { return false; }
+        try { await navigator.share({ title: title, text: text, url: url }); return true; } catch (e) { return false; }
     }
 };
 

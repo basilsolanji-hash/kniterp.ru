@@ -47,6 +47,11 @@ if (!builder.Environment.IsDevelopment())
 
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddKnitErpApplication();
+// D648 (сессия CRM): адрес MAX Bot API для чатов с клиентами; пустая строка в настройках — MAX выключен.
+builder.Services.AddSingleton(new KnitErp.Infrastructure.External.MessengerOptions(
+    builder.Configuration["Messengers:MaxUrl"] ?? builder.Configuration["Max:BaseUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.MaxUrl,
+    builder.Configuration["Messengers:TelegramUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.TelegramUrl,
+    builder.Configuration["Messengers:WhatsAppUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.WhatsAppUrl));
 builder.Services.AddKnitErpInfrastructure(
     connectionString,
     // ИИ-помощник включается ключом из секретов сервера; без ключа он отвечает по справочному центру.
@@ -75,7 +80,7 @@ builder.Services.AddAuthentication(AuthSchemes.Session)
         o.LoginPath = "/account/login";
         o.AccessDeniedPath = "/account/login";
         // Допущение D27: сессия живёт 12 часов (рабочая смена) и продлевается при активности.
-        o.ExpireTimeSpan = TimeSpan.FromHours(12);
+        o.ExpireTimeSpan = KnitErp.Domain.Access.SignInPolicy.SessionLifetime;
         o.SlidingExpiration = true;
         o.Events.OnValidatePrincipal = SessionValidation.OnValidatePrincipal;
     })
@@ -104,6 +109,7 @@ if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
 if (!builder.Configuration.GetValue<bool>("Hr:StatusWorkerDisabled"))
 {
     builder.Services.AddHostedService<KnitErp.Web.Api.HrStatusWorker>();
+    builder.Services.AddHostedService<KnitErp.Web.Crm.CrmMailWorker>(); // D675, D676: очередь рассылок и входящая почта CRM
 }
 
 // D310 (сессия 4): фоновая загрузка из МойСклад; в тестовых стендах отключается ключом MoySklad:WorkerDisabled.
@@ -156,6 +162,7 @@ if (!string.IsNullOrWhiteSpace(proxyNetwork))
 }
 
 builder.Services.AddScoped<KnitErp.Web.Exports.ReportExports>();
+builder.Services.AddScoped<KnitErp.Web.Components.Pages.DevGate>(); // D718: очередь запросов разработки в вкладке
 builder.Services.AddHealthChecks().AddCheck<KnitErp.Web.Security.DatabaseHealthCheck>("database");
 
 // Ключи cookie и антиподделки — в базе, зашифрованные мастер-ключом: сессии переживают перезапуск и несколько серверов,
@@ -174,8 +181,20 @@ builder.Services.AddRateLimiter(o =>
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(http =>
         // D314 (сессия 4): фид каталога без входа — не больше 30 запросов в минуту с адреса (файл к тому же кэшируется на 5 минут).
+        // D324: фото фида площадка скачивает пачкой — свой, более широкий лимит (600 в минуту с адреса).
+        http.Request.Path.StartsWithSegments("/feeds/photos")
+            ? RateLimitPartition.GetFixedWindowLimiter("feed-photos:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 600, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
         http.Request.Path.StartsWithSegments("/feeds")
             ? RateLimitPartition.GetFixedWindowLimiter("feeds:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
+        // D121 (база, проверка CRM): вебхук MAX без входа — не больше 120 запросов в минуту с адреса.
+        http.Request.Path.StartsWithSegments("/hooks")
+            ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
+        // D125: открытая анкета сотрудника — не больше 30 открытий страницы в минуту с адреса (отправки — общим лимитом /account ниже).
+        HttpMethods.IsGet(http.Request.Method) && http.Request.Path.StartsWithSegments("/account/employee-data")
+            ? RateLimitPartition.GetFixedWindowLimiter("employee-data:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }) :
         // D88: API — 100 запросов за 5 секунд на токен (ключ — отпечаток заголовка Authorization, без самого секрета).
         http.Request.Path.StartsWithSegments("/api")
@@ -185,7 +204,11 @@ builder.Services.AddRateLimiter(o =>
                                                       && !http.Request.Path.StartsWithSegments("/account/logout")
                 ? RateLimitPartition.GetFixedWindowLimiter(http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })
-                : RateLimitPartition.GetNoLimiter("other"));
+                // D673: вебхуки мессенджеров (без входа) — 120 запросов за 10 секунд на адрес с одного IP: поток мусора не забьёт базу.
+                : http.Request.Path.StartsWithSegments("/hooks")
+                    ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromSeconds(10), QueueLimit = 0 })
+                    : RateLimitPartition.GetNoLimiter("other"));
     o.OnRejected = async (context, ct) =>
     {
         if (context.HttpContext.Request.Path.StartsWithSegments("/api"))
@@ -210,10 +233,16 @@ builder.Services.AddRateLimiter(o =>
 });
 
 builder.Services.AddSingleton<KnitErp.Web.Exchange.FeedCache>(); // D314: кэш файлов фида каталога (свой, с лимитом объёма)
+builder.Services.AddSingleton<KnitErp.Application.Catalog.IFeedPhotoLinks, KnitErp.Web.Exchange.FeedPhotoLinks>(); // D324: подписанные ссылки на фото фида
 
 // D1102 (продажи): вкладка «Условия продаж» в карточке контрагента — вид цены клиента, менеджер, соглашения.
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.ModuleUi.Text("Условия продаж"),
     typeof(KnitErp.Web.Components.Pages.SalesCustomerTermsTab), KnitErp.Domain.Access.Permissions.SalesView);
+
+// D616, D632 (сессия CRM): вкладка «Контакты и сделки» у контрагента и блок «CRM» главного экрана.
+KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("crm", KnitErp.Web.Modules.ModuleUi.Text("Контакты и сделки"),
+    typeof(KnitErp.Web.Components.Shared.CrmCounterpartyPanel), KnitErp.Domain.Access.Permissions.CrmView);
+KnitErp.Web.Modules.ModuleUi.AddDashboardBlock("crm", typeof(KnitErp.Web.Components.Shared.CrmDashboardBlock), order: 10);
 
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);
@@ -300,6 +329,17 @@ app.Use(async (http, next) =>
     }
 });
 app.UseRateLimiter();
+// D125: тело анкеты сотрудника — не больше 16 МБ (пять сканов по 3 МБ и поля); остальные запросы — по умолчанию сервера.
+app.Use(async (http, next) =>
+{
+    if (HttpMethods.IsPost(http.Request.Method) && http.Request.Path.StartsWithSegments("/account/employee-data")
+        && http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+    {
+        limit.MaxRequestBodySize = KnitErp.Web.Components.Pages.Account.EmployeeDataPage.MaxBodyBytes;
+    }
+
+    await next();
+});
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -317,7 +357,7 @@ app.MapPost("/account/logout", async (HttpContext http, IAntiforgery antiforgery
 
     if (SessionClaims.Read(http.User) is { } session)
     {
-        await signIn.RecordSignOutAsync(session.UserId, session.OrganizationId, http.RequestAborted);
+        await signIn.RecordSignOutAsync(session.UserId, session.OrganizationId, session.SessionId, http.RequestAborted);
     }
 
     await http.SignOutAsync(AuthSchemes.Session);
@@ -369,6 +409,7 @@ app.MapGet("/employees.xlsx", (KnitErp.Application.Structure.EmployeeExchangeSer
     FileOrForbid(() => exchange.ExportAsync(ct), $"sotrudniki-{DateTime.UtcNow:yyyy-MM-dd}.xlsx"));
 app.MapGet("/employees-template.xlsx", (KnitErp.Application.Structure.EmployeeExchangeService exchange, CancellationToken ct) =>
     FileOrForbid(() => exchange.TemplateAsync(ct), "shablon-sotrudnikov.xlsx"));
+KnitErp.Web.Crm.CrmEndpoints.MapCrm(app); // D614, D630, D645 (сессия CRM): выгрузки и шаблоны CRM
 
 // Табель подразделения за месяц в Excel (D209): право и область — в сервисе.
 app.MapGet("/hr/timesheet.xlsx", async (long department, int year, int month, KnitErp.Application.Hr.TimesheetService timesheets, CancellationToken ct) =>
@@ -450,6 +491,25 @@ app.MapGet("/employees/consent-scans/{id:long}", async (long id, KnitErp.Applica
     }
 });
 
+// Скан из анкеты сотрудника до принятия (D125): право на ПДн и журнал просмотра — в сервисе; отдаётся вложением.
+app.MapGet("/employees/data-files/{id:long}", async (long id, KnitErp.Application.Hr.EmployeeDataRequestService requests, HttpContext http, CancellationToken ct) =>
+{
+    try
+    {
+        var (fileName, contentType, content) = await requests.GetFileAsync(id, ct);
+        http.Response.Headers.CacheControl = "no-store";
+        return Results.File(content, contentType, fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 // Скан договора контрагента (D500): право, своя организация и журнал просмотра — в сервисе; отдаётся вложением.
 app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.Application.Catalog.CounterpartyCardService cards, HttpContext http, CancellationToken ct) =>
 {
@@ -470,14 +530,17 @@ app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.A
 });
 
 // Файл модели разработки (D705): право, своя организация и журнал скачивания — в сервисе; всегда вложением и без угадывания типа.
-app.MapGet("/dev/files/{id:long}", async (long id, KnitErp.Application.Development.DevModelService models, HttpContext http, CancellationToken ct) =>
+app.MapGet("/dev/files/{id:long}", async (long id, string? inline, KnitErp.Application.Development.DevModelService models, HttpContext http, CancellationToken ct) =>
 {
     try
     {
-        var (fileName, contentType, content) = await models.GetFileAsync(id, ct);
+        // ?inline=1 — превью картинки на карточке (без журнала, без имени файла); иначе — скачивание вложением с записью в журнал.
+        var preview = inline is "1" or "true";
+        var (fileName, contentType, content) = await models.GetFileAsync(id, preview, ct);
         http.Response.Headers.CacheControl = "private, no-store";
         http.Response.Headers.XContentTypeOptions = "nosniff";
-        return Results.File(content, contentType, fileName);
+        http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+        return preview ? Results.File(content, contentType) : Results.File(content, contentType, fileName);
     }
     catch (AccessDeniedException)
     {
@@ -583,7 +646,8 @@ app.MapGet("/feeds/{key}.yml", async (string key, KnitErp.Application.Catalog.Ca
     }
 
     var cacheKey = "feed:" + Convert.ToHexString(KnitErp.Domain.Catalog.CatalogFeed.Hash(key));
-    if (!cache.TryGet(cacheKey, out var xml))
+    // Ревью: ответ из кэша — только пока ключ включён (выключенный фид перестаёт отдаваться сразу, а не через 5 минут).
+    if (!cache.TryGet(cacheKey, out var xml) || !await feeds.IsLiveAsync(key, ct))
     {
         var file = await feeds.BuildAsync(key, $"{http.Request.Scheme}://{http.Request.Host}/", ct);
         if (file is null)
@@ -595,9 +659,24 @@ app.MapGet("/feeds/{key}.yml", async (string key, KnitErp.Application.Catalog.Ca
         cache.Set(cacheKey, xml);
     }
 
-    http.Response.Headers.CacheControl = "public, max-age=300";
+    http.Response.Headers.CacheControl = "private, max-age=300";
     http.Response.Headers["X-Robots-Tag"] = "noindex";
     return Results.File(xml!, "application/xml; charset=utf-8");
+}).AllowAnonymous();
+
+// D324 (сессия 4): фото предложений фида по подписанной ссылке (токен на 30 дней, фид должен быть включён). Иначе — 404.
+app.MapGet("/feeds/photos/{token}", async (string token, KnitErp.Application.Catalog.CatalogFeedService feeds, HttpContext http, CancellationToken ct) =>
+{
+    var photo = await feeds.PhotoAsync(token, ct);
+    if (photo is not { } p)
+    {
+        return Results.NotFound();
+    }
+
+    http.Response.Headers.CacheControl = "private, max-age=86400";
+    http.Response.Headers["X-Robots-Tag"] = "noindex";
+    http.Response.Headers.XContentTypeOptions = "nosniff";
+    return Results.File(p.Content, p.ContentType);
 }).AllowAnonymous();
 
 // Встраивать страницы knitERP в чужие сайты запрещено (как и в общей CSP).

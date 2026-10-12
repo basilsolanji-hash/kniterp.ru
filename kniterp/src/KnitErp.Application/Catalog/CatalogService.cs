@@ -99,9 +99,44 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await db.SaveOrConflictAsync(ct);
     }
 
-    public async Task<ItemListDto> ListItemsAsync(ItemFilter filter, CancellationToken ct = default)
+    /// <summary>
+    /// Позиции по отбору списка — в том же порядке, что и список (D318, «все по отбору» для массового изменения и этикеток).
+    /// </summary>
+    public async Task<IReadOnlyList<long>> ListIdsAsync(ItemFilter filter, int max, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
+        var query = await FilterAsync(ctx, filter, ct);
+        return await query.OrderBy(i => i.Type).ThenBy(i => i.Name).ThenBy(i => i.Id).Select(i => i.Id).Take(Math.Max(1, max)).ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// D320: похожие действующие позиции для подсказки при создании — то же наименование (без учёта регистра) или наименование, содержащее
+    /// введённое (от 5 знаков); не больше 5. Не запрет: одинаковые названия у разных позиций бывают.
+    /// </summary>
+    public async Task<IReadOnlyList<ItemDto>> SimilarAsync(string? name, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
+        var n = (name ?? string.Empty).Trim();
+        if (n.Length < 3)
+        {
+            return [];
+        }
+
+        var u = n.ToUpperInvariant();
+        var exact = "|" + u + "|";
+        var query = db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && !i.IsArchived && i.ParentItemId == null);
+        query = n.Length >= 5
+            ? query.Where(i => EF.Property<string>(i, ItemSearch.Column).Contains(exact) || EF.Property<string>(i, ItemSearch.Column).Contains(u))
+            : query.Where(i => EF.Property<string>(i, ItemSearch.Column).Contains(exact));
+        return await query.OrderBy(i => i.Name).Take(5)
+            .Select(i => new ItemDto(i.Id, i.Code, i.Name, i.Type, i.UnitId, "", i.Description, i.IsArchived, i.RowVersion, i.VatRateId, null, i.Article, i.GroupId,
+                null, i.ParentItemId))
+            .ToListAsync(ct);
+    }
+
+    /// <summary>Отбор списка номенклатуры: организация, архив, тип, вид, поиск, группа с подгруппами, тег.</summary>
+    private async Task<IQueryable<Item>> FilterAsync(AccessContext ctx, ItemFilter filter, CancellationToken ct)
+    {
         var query = db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId);
         if (filter.TagId is { } tagId)
         {
@@ -155,6 +190,13 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             query = query.Where(i => i.GroupId != null && ids.Contains(i.GroupId.Value));
         }
 
+        return query;
+    }
+
+    public async Task<ItemListDto> ListItemsAsync(ItemFilter filter, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
+        var query = await FilterAsync(ctx, filter, ct);
         var total = await query.CountAsync(ct);
         var items = await query
             .OrderBy(i => i.Type).ThenBy(i => i.Name).ThenBy(i => i.Id) // Id — устойчивый порядок страниц при одинаковых названиях
@@ -213,7 +255,13 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         await RequireActiveUnitAsync(ctx, cmd.UnitId, ct);
         // D312: выключенный вид не создаётся; пустой код — следующий номер автокода (если он включён).
-        var settings = await db.CatalogSettings.SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct);
+        // Ревью: счётчики автокодов — свежие и под блокировкой организации до конца транзакции (иначе устаревшая копия во вкладке
+        // или одновременное создание из двух вкладок роняли страницу ошибкой версии).
+        await using var tx = await db.BeginTransactionAsync(ct);
+        var settings = await ItemCodesService.FreshSettingsAsync(db, ctx.OrganizationId, ct, lockCounters: true);
+        // D317: незаданная ставка НДС, ТН ВЭД, страна и маркировка — из значений по умолчанию группы (с учётом родителей).
+        var groupDefaults = await GroupDefaultsService.ResolveAsync(db, ctx.OrganizationId, cmd.GroupId, ct);
+        cmd = cmd with { VatRateId = cmd.VatRateId ?? groupDefaults.VatRateId };
         settings?.EnsureEnabled(cmd.Type);
         settings?.EnsureGroup(cmd.GroupId);
         settings?.EnsureVat(cmd.VatRateId);
@@ -236,7 +284,17 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
                 throw new BusinessRuleException("catalog.archived", $"Группа «{group.Name}» в архиве.");
             }
 
-            item.SetDetails(item.Details with { GroupId = gid });
+            item.SetDetails(item.Details with
+            {
+                GroupId = gid,
+                TnVedCode = item.TnVedCode ?? groupDefaults.TnVedCode,
+                OriginCountryCode = item.OriginCountryCode ?? groupDefaults.OriginCountryCode,
+                OriginCountryName = item.OriginCountryCode is null ? groupDefaults.OriginCountryName : item.OriginCountryName,
+            });
+            if (groupDefaults.Tracking is { } tracking && ItemTypes.IsStocked(item.Type))
+            {
+                item.SetTrade(item.Trade with { IsMarked = tracking != TrackingType.None, TrackingType = tracking });
+            }
         }
 
         await EnsureCodeFreeAsync(ctx, item.Code, null, ct);
@@ -247,7 +305,6 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         db.Items.Add(item);
-        await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveChangesAsync(ct);
         // D315: внутренний EAN-13 новой позиции (кроме услуги), если включён.
         if (settings is { AutoBarcode: true } && item.Type != ItemType.Service)
@@ -257,7 +314,7 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         Audit(ctx, AuditActions.CatalogCreated, nameof(Item), item.Id, null, $"{item.Code} {item.Name}", ItemTypes.Name(item.Type));
-        await db.SaveChangesAsync(ct);
+        await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
         return item.Id;
     }

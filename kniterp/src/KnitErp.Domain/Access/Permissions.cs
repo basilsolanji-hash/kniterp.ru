@@ -96,6 +96,12 @@ public static class Permissions
     /// <summary>D1108 (продажи): коды маркировки в строках отгрузки.</summary>
     public const string SalesMarkingEdit = "sales.marking.edit";
 
+    /// <summary>D640 (CRM): приём заявок через API v1 (токен сайта или маркетплейса) и событий телефонии.</summary>
+    public const string CrmLeadsCreate = "crm.leads.create";
+
+    /// <summary>D615 (CRM): рассылки контактам с согласием на рекламу.</summary>
+    public const string CrmMailing = "crm.mailing";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -150,6 +156,8 @@ public static class Permissions
         [CrmAll] = "CRM: все лиды и сделки, переназначение ответственного",
         [CrmSettings] = "CRM: воронки, этапы, справочники и план",
         [CrmExport] = "CRM: выгрузка в Excel",
+        [CrmLeadsCreate] = "CRM: приём заявок и звонков через API",
+        [CrmMailing] = "CRM: рассылки клиентам",
         [MoySkladManage] = "МойСклад: подключение и загрузка",
         [SalesPriceOverride] = "Продажи: цена ниже минимальной и скидка сверх допустимой",
         [SalesCreditOverride] = "Продажи: отгрузка сверх кредитного лимита и при просрочке",

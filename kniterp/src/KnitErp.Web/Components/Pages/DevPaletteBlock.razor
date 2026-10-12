@@ -1,0 +1,168 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevGate Gate
+@inject DevTechService Tech
+
+@* Палитра модели (D712): дизайнер выбирает пряжу из номенклатуры для «Основной», «доп.1»…; заправка и цех берут цвета отсюда. *@
+<div class="panel">
+    <h2>@L("Палитра цветов")</h2>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    @if (_colors is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else
+    {
+        @if (_colors.Count == 0)
+        {
+            <p class="muted">@L("Цветов пока нет: добавьте «Основной», «доп.1», «доп.2» и выберите для каждого пряжу из номенклатуры.")</p>
+        }
+        <ul class="dev-files">
+            @foreach (var c in _colors)
+            {
+                var color = c;
+                <li>
+                    <span class="dev-swatch" style="background: @(c.Swatch ?? "transparent")"></span>
+                    <b>@c.Label</b>
+                    <span>@(c.ItemName ?? L("пряжа не выбрана"))</span>
+                    @if (c.Note is not null) { <span class="muted small">@c.Note</span> }
+                    @if (CanEdit)
+                    {
+                        <button type="button" class="secondary" @onclick="() => Edit(color)" disabled="@_busy">@L("Изменить")</button>
+                        <button type="button" class="secondary" @onclick="() => RemoveAsync(color)" disabled="@_busy">@L("Убрать")</button>
+                    }
+                </li>
+            }
+        </ul>
+        @if (CanEdit)
+        {
+            <form class="inline-form" @onsubmit="SaveAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                    <label>@L("Обозначение") <input @bind="_label" maxlength="@DevModelColor.LabelMaxLength" placeholder="@L("Основной")" required /></label>
+                    <label>
+                        @L("Пряжа из номенклатуры")
+                        <select @bind="_item">
+                            <option value="">—</option>
+                            @foreach (var y in _yarns ?? [])
+                            {
+                                <option value="@y.Id">@y.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Цвет на экране") <input type="color" @bind="_swatch" /></label>
+                    <label>@L("Комментарий") <input @bind="_note" maxlength="@DevModelColor.NoteMaxLength" /></label>
+                    <button type="submit" disabled="@_busy">@(_editId is null ? L("Добавить цвет") : L("Сохранить цвет"))</button>
+                    @if (_editId is not null)
+                    {
+                        <button type="button" class="secondary" @onclick="Reset">@L("Отмена")</button>
+                    }
+                </fieldset>
+            </form>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    [Parameter]
+    public bool CanEdit { get; set; }
+
+    private IReadOnlyList<DevColorDto>? _colors;
+    private IReadOnlyList<DevOptionDto>? _yarns;
+    private long? _editId;
+    private string? _label;
+    private string _item = string.Empty;
+    private string _swatch = "#2BA89A";
+    private string? _note;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded == ModelId)
+        {
+            return;
+        }
+
+        _loaded = ModelId;
+        await Gate.Run(async () =>
+        {
+            _colors = await Tech.ColorsAsync(ModelId);
+            _yarns = CanEdit ? await Tech.YarnOptionsAsync() : [];
+        });
+    }
+
+    private void Edit(DevColorDto c)
+    {
+        _editId = c.Id;
+        _label = c.Label;
+        _item = c.ItemId?.ToString() ?? string.Empty;
+        _swatch = c.Swatch ?? "#2BA89A";
+        _note = c.Note;
+    }
+
+    private void Reset()
+    {
+        _editId = null;
+        _label = null;
+        _item = string.Empty;
+        _note = null;
+    }
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        long? item = long.TryParse(_item, out var i) ? i : null;
+        if (_editId is { } id)
+        {
+            await Tech.UpdateColorAsync(id, _label, item, _swatch, _note);
+        }
+        else
+        {
+            await Tech.AddColorAsync(ModelId, _label, item, _swatch, _note);
+        }
+
+        Reset();
+    }, L("Палитра сохранена."));
+
+    private Task RemoveAsync(DevColorDto c) => RunAsync(() => Tech.RemoveColorAsync(c.Id), L("Цвет убран."));
+
+    private async Task RunAsync(Func<Task> action, string success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(action);
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _colors = await Gate.Run(() => Tech.ColorsAsync(ModelId));
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

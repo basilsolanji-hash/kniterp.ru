@@ -253,6 +253,12 @@ public sealed class NotificationService(IKnitErpDbContextFactory factory, Person
                 }
             }
 
+            // D623 (сессия CRM): просроченные задачи CRM, сделки без следующего шага, лиды без действий, чаты без ответа.
+            foreach (var a in await KnitErp.Application.Crm.CrmActivityService.AlertsAsync(db, ctx, clock.UtcNow, ct))
+            {
+                result.Add(new(a.Text, a.Href, null, a.Warning ? NotificationLevel.Warning : NotificationLevel.Action, a.Key));
+            }
+
             // D796 (разработка): модели на моей стадии, мои просрочки, ждущие утверждения.
             foreach (var a in await KnitErp.Application.Development.DevNotifications.ComputeAsync(db, ctx, today, clock.UtcNow, ct))
             {

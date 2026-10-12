@@ -55,8 +55,8 @@ await page.locator('label:has-text("Новый из образца") select').se
 await page.getByRole('button', { name: 'Начать с образца' }).click();
 await page.locator('label:has-text("Название") input').first().fill('Лист ' + sfx);
 await page.getByRole('button', { name: 'Сохранить шаблон' }).click();
-await page.waitForSelector('text=Шаблон сохранён.');
-await page.waitForTimeout(500);
+// Сообщение «Шаблон сохранён.» могло остаться от прошлого сохранения — ждём сам шаблон в списке.
+await page.locator('.plain-list button', { hasText: 'Лист ' + sfx }).first().waitFor({ timeout: 10000 }).catch(() => {});
 const a4 = await page.locator('.plain-list button', { hasText: 'Лист ' + sfx }).count();
 if (a4 !== 1) console.log(await page.locator('.plain-list').innerText());
 if (a4 !== 1) throw new Error('шаблон A4 не в списке');

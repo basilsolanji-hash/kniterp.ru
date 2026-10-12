@@ -1,0 +1,126 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevSettingsService Settings
+
+@*
+    Цех и печать (D719): допуск факта образца к плану, какие разделы входят в показатель заполнения модели, формат этикеток модуля.
+    Блок появляется после загрузки страницы настроек и ходит в базу через DevGate — без параллельных запросов в одном DbContext.
+*@
+<h2>@L("Цех и печать")</h2>
+<p class="muted">@L("Под свою фабрику: когда факт образца считать отклонением, что входит в «Заполнено N из M разделов» и на какие этикетки печатать.")</p>
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+@if (_s is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="panel">
+        <form @onsubmit="SaveAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !_s.CanEdit)">
+                <div class="grid">
+                    <label>@L("Допуск факта к плану, %") <input type="number" min="1" max="100" step="1" inputmode="numeric" @bind="_tolerance" /></label>
+                    <label>
+                        @L("Этикетки")
+                        <select @bind="_format">
+                            <option value="roll">@L("Рулон")</option>
+                            <option value="a4">@L("Лист A4, 3 × 8")</option>
+                        </select>
+                    </label>
+                    @if (_format == "roll")
+                    {
+                        <label>@L("Ширина этикетки, мм") <input type="number" min="@DevSettings.MinLabelMm" max="@DevSettings.MaxLabelMm" step="1" inputmode="numeric" @bind="_width" /></label>
+                        <label>@L("Высота этикетки, мм") <input type="number" min="@DevSettings.MinLabelMm" max="@DevSettings.MaxLabelMm" step="1" inputmode="numeric" @bind="_height" /></label>
+                    }
+                </div>
+                <p class="small" style="margin: 12px 0 4px"><b>@L("Разделы показателя заполнения")</b></p>
+                <div class="dev-checks">
+                    @foreach (var name in DevCompleteness.SectionNames)
+                    {
+                        var section = name;
+                        <label class="inline"><span><input type="checkbox" checked="@_sections.Contains(section)" @onchange="e => Toggle(section, e.Value is true)" /> @L(section)</span></label>
+                    }
+                </div>
+                @if (_s.CanEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </fieldset>
+        </form>
+    </div>
+}
+
+@code {
+    private DevShopSettingsDto? _s;
+    private int _tolerance;
+    private int _width;
+    private int _height;
+    private string _format = "roll";
+    private readonly HashSet<string> _sections = [];
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _s = await Gate.Run(() => Settings.ShopSettingsAsync());
+        _tolerance = _s.FactTolerancePercent;
+        _width = _s.LabelWidthMm;
+        _height = _s.LabelHeightMm;
+        _format = _s.LabelsOnA4 ? "a4" : "roll";
+        _sections.Clear();
+        _sections.UnionWith(_s.Sections.Where(x => x.Done).Select(x => x.Name));
+    }
+
+    private void Toggle(string section, bool on)
+    {
+        if (on)
+        {
+            _sections.Add(section);
+        }
+        else
+        {
+            _sections.Remove(section);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(() => Settings.SaveShopSettingsAsync(_tolerance, _sections.ToList(), _width, _height, _format == "a4"));
+            _message = L("Настройки цеха и печати сохранены.");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

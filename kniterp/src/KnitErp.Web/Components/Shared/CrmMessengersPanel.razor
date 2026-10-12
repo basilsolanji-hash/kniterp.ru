@@ -1,0 +1,171 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject IEnumerable<ICrmMessengerClient> Clients
+@inject IEmailSender Mail
+
+@* D648, D670: чаты с клиентами в Telegram, WhatsApp и MAX — подключение ботов организации. Токены после сохранения не показываются;
+   адрес вебхука с секретом — один раз, при подключении. Свой контекст базы: панель не мешает операциям страницы. *@
+<section class="panel" id="messengers" aria-label="@L("Мессенджеры")">
+    <h2>@L("Мессенджеры: чаты с клиентами")</h2>
+    <p class="muted small">@L("Клиенты пишут фабрике в Telegram, WhatsApp или MAX — переписка идёт в разделе «Чаты» и в ленте карточки, незнакомый клиент становится лидом, ответ уходит из knitERP. Технически переписка идёт через бота организации: создайте его и вставьте токен.")</p>
+    @if (_error is not null)
+    {
+        <div class="error" role="alert">@_error</div>
+    }
+    @if (_status is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else
+    {
+        <div class="crm-messengers">
+            @foreach (var c in _status.Channels)
+            {
+                <article class="crm-messenger" aria-label="@c.Name">
+                    <div class="page-head">
+                        <h3><span class="crm-channel crm-channel-@c.Name.ToLowerInvariant()">@c.Name</span></h3>
+                        <span class="tag @(c.Connected ? "ok" : null)">@(c.Connected ? L("подключён") : c.Available ? L("не подключён") : L("недоступен на сервере"))</span>
+                    </div>
+                    @if (c.Connected)
+                    {
+                        <p class="small"><b>@c.AccountName</b><br /><span class="muted">@L("Подключено: {0}, {1}", c.ConnectedBy ?? "—", c.ConnectedAtUtc is { } at ? TimeZones.ToLocal(at, TimeZoneId).ToString("dd.MM.yyyy HH:mm") : "")</span></p>
+                    }
+                    else
+                    {
+                        <p class="muted small">@Hint(c.Kind)</p>
+                    }
+                    @if (_result is { } r && r.Kind == c.Kind)
+                    {
+                        <div class="flash" role="status">
+                            <span>
+                                @L("Бот «{0}» подключён.", r.AccountName)
+                                @if (r.Subscribed)
+                                {
+                                    @L("Входящие сообщения настроены автоматически.")
+                                }
+                                else if (r.VerifyToken is not null)
+                                {
+                                    @L("В кабинете Meta → WhatsApp → Configuration укажите Callback URL и Verify token, подпишитесь на messages:")
+                                    <br /><code>@r.WebhookUrl</code><br /><code>@r.VerifyToken</code>
+                                }
+                                else
+                                {
+                                    @L("Укажите в настройках бота адрес вебхука:") <code>@r.WebhookUrl</code>
+                                }
+                            </span>
+                        </div>
+                    }
+                    @if (CanEdit && c.Available)
+                    {
+                        @if (_open == c.Kind)
+                        {
+                            <form @onsubmit="() => ConnectAsync(c.Kind)" aria-label="@L("Подключить {0}", c.Name)">
+                                <label>@(c.Kind == CrmMessengerKind.WhatsApp ? L("Постоянный токен доступа") : L("Токен бота")) <input type="password" @bind="_token" autocomplete="off" required /></label>
+                                @if (c.Kind == CrmMessengerKind.WhatsApp)
+                                {
+                                    <label>@L("Phone number ID") <input @bind="_accountId" inputmode="numeric" autocomplete="off" required /></label>
+                                    <label>@L("Секрет приложения (App secret)") <input type="password" @bind="_appSecret" autocomplete="off" required /></label>
+                                }
+                                <div class="actions">
+                                    <button type="submit" disabled="@_busy">@L("Подключить")</button>
+                                    <button type="button" class="secondary" @onclick="() => _open = null">@L("Отмена")</button>
+                                </div>
+                            </form>
+                        }
+                        else
+                        {
+                            <div class="actions">
+                                <button type="button" class="@(c.Connected ? "secondary" : null)" @onclick="() => Open(c.Kind)" disabled="@_busy">@(c.Connected ? L("Переподключить") : L("Подключить"))</button>
+                                @if (c.Connected)
+                                {
+                                    <ConfirmButton Class="secondary" OnConfirm="() => DisconnectAsync(c.Kind)" Disabled="@_busy" Question='@L("Отключить {0}? Клиенты перестанут попадать в чаты.", c.Name)'>@L("Отключить")</ConfirmButton>
+                                }
+                            </div>
+                        }
+                    }
+                </article>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public string TimeZoneId { get; set; } = "Europe/Moscow";
+
+    private CrmMessengersDto? _status;
+    private CrmMessengerConnectResult? _result;
+    private CrmMessengerKind? _open;
+    private string? _token;
+    private string? _accountId;
+    private string? _appSecret;
+    private string? _error;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => RunAsync(LoadAsync);
+
+    private async Task LoadAsync()
+    {
+        await using var db = Factory.Create();
+        _status = await Service(db).StatusAsync();
+    }
+
+    private void Open(CrmMessengerKind kind) => (_open, _token, _accountId, _appSecret, _result) = (kind, null, null, null, null);
+
+    private Task ConnectAsync(CrmMessengerKind kind) => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            _result = await Service(db).ConnectAsync(kind, _token, _accountId, _appSecret);
+        }
+
+        (_open, _token, _accountId, _appSecret) = (null, null, null, null);
+        await LoadAsync();
+    });
+
+    private Task DisconnectAsync(CrmMessengerKind kind) => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).DisconnectAsync(kind);
+        }
+
+        _result = null;
+        await LoadAsync();
+    });
+
+    private static string Hint(CrmMessengerKind kind) => kind switch
+    {
+        CrmMessengerKind.Telegram => L("Создайте бота у @BotFather (команда /newbot) и вставьте токен — вебхук настроится сам."),
+        CrmMessengerKind.WhatsApp => L("Нужен аккаунт WhatsApp Business Platform (Meta): номер, постоянный токен, Phone number ID и секрет приложения. Ответить можно в течение 24 часов после сообщения клиента."),
+        _ => L("Создайте бота организации в MAX (платформа для партнёров) и вставьте токен — вебхук настроится сам."),
+    };
+
+    private CrmMessengerService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock, Clients, Mail);
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -20,6 +20,15 @@ public static class SignInPolicy
     public static readonly TimeSpan TrustedDeviceLifetime = TimeSpan.FromDays(30);
     public const int MaxTrustedDevices = 10;
 
+    // Допущение D27: сессия живёт 12 часов (рабочая смена) и продлевается при активности.
+    public static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(12);
+
+    // D122: время последней активности сессии пишется в базу не чаще раза в 5 минут.
+    public static readonly TimeSpan SessionTouchInterval = TimeSpan.FromMinutes(5);
+
+    /// <summary>D122: после стольких минут без активности cookie уже истекла — запись сессии больше не действует.</summary>
+    public static TimeSpan SessionIdleLimit => SessionLifetime + SessionTouchInterval;
+
     // Допущение D25: 5 неудачных попыток подряд блокируют вход на 15 минут.
     public const int MaxFailedAttempts = 5;
     public static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);

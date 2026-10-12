@@ -32,6 +32,12 @@ public interface ICurrentUser
     /// <summary>IP-адрес клиента обычного HTTP-запроса (страницы входа) — для журнала входов. В Blazor-цепи и тестах — null.</summary>
     string? ClientAddress => null;
 
+    /// <summary>D122: заголовок User-Agent обычного HTTP-запроса (страницы входа) — для названия устройства в списке сессий.</summary>
+    string? UserAgent => null;
+
+    /// <summary>D122: внешний идентификатор сессии из cookie; null — запрос не из браузерной сессии (API, фоновые задачи, тесты).</summary>
+    Guid? SessionId => null;
+
     /// <summary>Запрос по токену API (D88): права ограничены этими кодами (пересечение с правами пользователя). null — обычная сессия.</summary>
     IReadOnlyCollection<string>? ApiScope => null;
 
@@ -54,6 +60,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<UserAccount> Users { get; }
     DbSet<RecoveryCode> RecoveryCodes { get; }
     DbSet<TrustedDevice> TrustedDevices { get; }
+
+    /// <summary>D122: серверные сессии входа.</summary>
+    DbSet<UserSession> UserSessions { get; }
     DbSet<Characteristic> Characteristics { get; }
     DbSet<ItemCharacteristicValue> ItemCharacteristicValues { get; }
     DbSet<ItemPhoto> ItemPhotos { get; }
@@ -71,6 +80,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<CatalogSettings> CatalogSettings { get; }
     DbSet<CatalogFeed> CatalogFeeds { get; }
     DbSet<LabelTemplate> LabelTemplates { get; }
+    DbSet<ItemGroupDefaults> ItemGroupDefaults { get; }
+    DbSet<CharacteristicValueSet> CharacteristicValueSets { get; }
+    DbSet<PriceRule> PriceRules { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }
@@ -156,6 +168,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns { get; }
     DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines { get; }
     DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeDataRequest> EmployeeDataRequests { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeDataSubmission> EmployeeDataSubmissions { get; }
+    DbSet<KnitErp.Domain.Hr.EmployeeDataSubmissionFile> EmployeeDataSubmissionFiles { get; }
 
     // Модуль «Разработка» (D700–D799).
     DbSet<KnitErp.Domain.Development.DevModel> DevModels { get; }
@@ -165,6 +180,21 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Development.DevLookup> DevLookups { get; }
     DbSet<KnitErp.Domain.Development.DevSettings> DevSettings { get; }
     DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates { get; }
+    DbSet<KnitErp.Domain.Development.DevMachine> DevMachines { get; }
+    DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes { get; }
+    DbSet<KnitErp.Domain.Development.DevModelColor> DevModelColors { get; }
+    DbSet<KnitErp.Domain.Development.DevDetail> DevDetails { get; }
+    DbSet<KnitErp.Domain.Development.DevThreading> DevThreading { get; }
+    DbSet<KnitErp.Domain.Development.DevModelSize> DevModelSizes { get; }
+    DbSet<KnitErp.Domain.Development.DevDetailSize> DevDetailSizes { get; }
+    DbSet<KnitErp.Domain.Development.DevMeasure> DevMeasures { get; }
+    DbSet<KnitErp.Domain.Development.DevMeasureValue> DevMeasureValues { get; }
+    DbSet<KnitErp.Domain.Development.DevSample> DevSamples { get; }
+    DbSet<KnitErp.Domain.Development.DevSampleDetail> DevSampleDetails { get; }
+    DbSet<KnitErp.Domain.Development.DevSampleColorShare> DevSampleColorShares { get; }
+    DbSet<KnitErp.Domain.Development.DevSampleMeasure> DevSampleMeasures { get; }
+    DbSet<KnitErp.Domain.Development.DevOperationType> DevOperationTypes { get; }
+    DbSet<KnitErp.Domain.Development.DevModelOperation> DevModelOperations { get; }
     // CRM (D600–D699).
     DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines { get; }
     DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages { get; }
@@ -177,6 +207,15 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements { get; }
     DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles { get; }
     DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings { get; }
+    DbSet<KnitErp.Domain.Crm.CrmActivity> CrmActivities { get; }
+    DbSet<KnitErp.Domain.Crm.CrmOffer> CrmOffers { get; }
+    DbSet<KnitErp.Domain.Crm.CrmSettings> CrmSettings { get; }
+    DbSet<KnitErp.Domain.Crm.CrmMessengerChannel> CrmMessengerChannels { get; }
+    DbSet<KnitErp.Domain.Crm.CrmEmailTemplate> CrmEmailTemplates { get; }
+    DbSet<KnitErp.Domain.Crm.CrmMailbox> CrmMailboxes { get; }
+    DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans { get; }
+    DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings { get; }
+    DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks { get; }
     DbSet<KnitErp.Domain.Sales.SalesDiscountRule> SalesDiscountRules { get; }
     DbSet<KnitErp.Domain.Sales.SalesDiscountSettings> SalesDiscountSettings { get; }
     DbSet<KnitErp.Domain.Sales.SalesCancelReason> SalesCancelReasons { get; }
@@ -190,6 +229,18 @@ public interface IKnitErpDbContext : IAsyncDisposable
     /// сущность (например, «проведённый» документ, проведение которого отклонено) ушла бы в базу со следующим сохранением.
     /// </summary>
     void DiscardChanges();
+
+    /// <summary>
+    /// Перечитать отслеживаемую сущность из базы (значения и rowversion): у вкладки Blazor контекст живёт долго, и запрос с отслеживанием
+    /// вернул бы копию, загруженную раньше (например, счётчик автокодов, который уже сдвинул другой пользователь).
+    /// </summary>
+    Task ReloadAsync(object entity, CancellationToken cancellationToken = default);
+
+    /// <summary>Точка сохранения внутри текущей транзакции: часть работы (например, строку загрузки) можно откатить, не теряя остального.</summary>
+    Task SavepointAsync(string name, CancellationToken cancellationToken = default);
+
+    /// <summary>Откат к точке сохранения (изменения после неё в базе отменяются; отслеживание сбрасывает вызывающий — DiscardChanges).</summary>
+    Task RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Исключительная блокировка складов до конца текущей транзакции: проверка остатка и запись расхода

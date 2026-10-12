@@ -7,6 +7,11 @@
 @inject ModificationService Modifications
 @inject CatalogSettingsService Settings
 @inject ItemCodesService Codes
+@inject GroupDefaultsService GroupDefaults
+@inject ValueSetService ValueSets
+@inject PriceRuleService PriceRules
+@inject CatalogService Catalog
+@inject VatRateService VatRates
 
 <PageTitle>@L("Настройки номенклатуры") — knitERP</PageTitle>
 
@@ -96,6 +101,7 @@ else
                                             @if (!g.IsArchived)
                                             {
                                                 <button type="button" class="secondary" @onclick="() => StartEdit(g.Id, g.Name, g.ParentId?.ToString())" disabled="@_busy">@L("Изменить")</button>
+                                                <button type="button" class="secondary" @onclick="() => OpenDefaultsAsync(g.Id)" disabled="@_busy">@L("По умолчанию")</button>
                                                 <ConfirmButton Class="secondary" OnConfirm='() => Run(() => Nomenclature.SetGroupArchivedAsync(g.Id, true, g.RowVersion), L("Группа в архиве."))' Disabled="@_busy" Question='@L("Отправить в архив?")'>@L("В архив")</ConfirmButton>
                                             }
                                             else
@@ -110,6 +116,68 @@ else
                     </tbody>
                 </table>
             </div>
+            @if (_defaultsGroup is { } dg && _defaults is not null)
+            {
+                @* D317: значения по умолчанию группы — новая позиция в группе получает их сама; пустое — как у родительской группы. *@
+                <form class="panel" @onsubmit="SaveDefaultsAsync" style="margin-top: 12px">
+                    <h3>@L("Значения по умолчанию: {0}", _groups!.FirstOrDefault(g => g.Id == dg)?.Path ?? "")</h3>
+                    <p class="muted small">@L("Новая позиция в этой группе и её подгруппах получит их сама. Пусто — как у родительской группы (в скобках — что будет на деле).")</p>
+                    <fieldset disabled="@(!CanEdit)">
+                        <div class="grid">
+                            <label>
+                                @L("Тип") <span class="muted small">(@(_defaults.Effective.Type is { } et ? L(ItemTypes.Name(et)) : "—"))</span>
+                                <select @bind="_dType">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var t in ItemTypes.All)
+                                    {
+                                        <option value="@((byte)t)">@L(ItemTypes.Name(t))</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                @L("Единица")
+                                <select @bind="_dUnit">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var u in _unitOptions)
+                                    {
+                                        <option value="@u.Id">@u.Name (@u.Symbol)</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                @L("Ставка НДС")
+                                <select @bind="_dVat">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var r in _vatOptions)
+                                    {
+                                        <option value="@r.Id">@L(r.Name)</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Код ТН ВЭД") <span class="muted small">(@(_defaults.Effective.TnVedCode ?? "—"))</span> <input @bind="_dTnVed" maxlength="10" inputmode="numeric" /></label>
+                            <label>@L("Страна (код ОКСМ)") <span class="muted small">(@(_defaults.Effective.OriginCountryCode ?? "—"))</span> <input @bind="_dCountry" maxlength="3" inputmode="numeric" placeholder="643" /></label>
+                            <label>@L("Страна — краткое наименование") <input @bind="_dCountryName" maxlength="100" placeholder="@L("Россия")" /></label>
+                            <label>
+                                @L("Маркировка")
+                                <select @bind="_dTracking">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var m in Marking.All)
+                                    {
+                                        <option value="@((byte)m)">@(m == TrackingType.None ? L("без маркировки") : L(Marking.Name(m)))</option>
+                                    }
+                                </select>
+                            </label>
+                        </div>
+                    </fieldset>
+                    <div class="actions">
+                        @if (CanEdit)
+                        {
+                            <button type="submit" disabled="@_busy">@L("Сохранить значения")</button>
+                        }
+                        <button type="button" class="secondary" @onclick="() => _defaultsGroup = null">@L("Закрыть")</button>
+                    </div>
+                </form>
+            }
             break;
 
         case Tab.Prices:
@@ -174,6 +242,46 @@ else
                         </tbody>
                     </table>
                 </div>
+            }
+            @if (_rules is { Count: > 0 })
+            {
+                @* D322: автоцены от закупочной цены. *@
+                <h2 style="margin-top: 20px">@L("Автоцены от закупки")</h2>
+                <p class="muted">@L("Цена вида = закупочная цена × коэффициент с округлением. Включённое правило пересчитывает цену при каждом изменении закупочной цены (карточка, Excel, прайс поставщика) и сразу при сохранении. Цены из МойСклад правило при загрузке не перезаписывает.")</p>
+                <div class="scroll">
+                    <table class="compact">
+                        <thead><tr><th>@L("Вид цены")</th><th>@L("Коэффициент")</th><th>@L("Округление")</th><th>@L("Включено")</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var r in _rules)
+                            {
+                                var rule = r;
+                                var form = _ruleForms[r.PriceTypeId];
+                                <tr>
+                                    <td>@r.PriceType</td>
+                                    <td><input type="number" min="0.01" max="100" step="0.01" @bind="form.Factor" style="width: 6em" disabled="@(!CanEditPrices)" aria-label="@L("Коэффициент")" /></td>
+                                    <td>
+                                        <select @bind="form.Rounding" disabled="@(!CanEditPrices)" aria-label="@L("Округление")">
+                                            <option value="@PriceRounding.Kopeck">@L("до копеек")</option>
+                                            <option value="@PriceRounding.Ruble">@L("до рубля")</option>
+                                            <option value="@PriceRounding.Ten">@L("до 10")</option>
+                                            <option value="@PriceRounding.Hundred">@L("до 100")</option>
+                                            <option value="@PriceRounding.Nine">@L("с окончанием на 9 (1 989)")</option>
+                                            <option value="@PriceRounding.NinetyNine">@L("с окончанием на 99 (1 999)")</option>
+                                        </select>
+                                    </td>
+                                    <td><input type="checkbox" @bind="form.Active" disabled="@(!CanEditPrices)" aria-label="@L("Включено")" /></td>
+                                    <td>
+                                        @if (CanEditPrices)
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => SaveRuleAsync(rule)" disabled="@_busy">@L("Сохранить")</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="muted small">@L("Пример: коэффициент 2,2 и окончание на 99 — закупка 850 → 1 899.")</p>
             }
             break;
 
@@ -544,6 +652,62 @@ else
                     </tbody>
                 </table>
             </div>
+            @* D321: наборы значений характеристик — модификации создаются выбором набора. *@
+            <h2 style="margin-top: 20px">@L("Наборы значений")</h2>
+            <p class="muted">@L("Размерные и цветовые сетки: «Женские 42–56», «XS–XXL», «Базовые цвета». В карточке позиции при создании модификаций набор подставляется одним выбором. Диапазон с шагом: «42-56/2»; «44-46» без шага — одно значение.")</p>
+            @if (CanEdit)
+            {
+                <form class="inline-form" @onsubmit="SaveSetAsync">
+                    <label>
+                        @L("Характеристика")
+                        <select @bind="_setChar">
+                            @foreach (var c in _characteristics.Where(c => !c.IsArchived))
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Название набора") <input @bind="_setName" maxlength="@CharacteristicValueSet.NameMaxLength" required placeholder="@L("Женские 42–56")" /></label>
+                    <label>@L("Значения") <input @bind="_setValues" required size="30" placeholder="42-56/2" /></label>
+                    <button type="submit" disabled="@(_busy || _characteristics.All(c => c.IsArchived))">@(_setId is null ? L("Добавить набор") : L("Сохранить набор"))</button>
+                    @if (_setId is not null)
+                    {
+                        <button type="button" class="secondary" @onclick="() => { _setId = null; _setName = null; _setValues = null; }">@L("Отмена")</button>
+                    }
+                    <button type="button" class="secondary" @onclick='() => Run(async () => { var n = await ValueSets.AddPresetsAsync(); _message = L("Добавлено готовых наборов: {0}.", n); }, null)' disabled="@_busy">@L("Добавить готовые")</button>
+                </form>
+            }
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Характеристика")</th><th>@L("Набор")</th><th>@L("Значения")</th>@if (CanEdit) { <th></th> }</tr></thead>
+                    <tbody>
+                        @if (_sets.Count == 0)
+                        {
+                            <tr><td colspan="4" class="muted">@L("Наборов пока нет — добавьте свой или готовые.")</td></tr>
+                        }
+                        @foreach (var vs in _sets)
+                        {
+                            <tr class="@(vs.IsArchived ? "archived" : null)">
+                                <td>@vs.Characteristic</td>
+                                <td>@vs.Name</td>
+                                <td class="small">@string.Join(", ", vs.Values)</td>
+                                @if (CanEdit)
+                                {
+                                    <td>
+                                        <div class="row-actions">
+                                            @if (!vs.IsArchived)
+                                            {
+                                                <button type="button" class="secondary" @onclick="() => EditSet(vs)" disabled="@_busy">@L("Изменить")</button>
+                                            }
+                                            <button type="button" class="secondary" @onclick='() => Run(() => ValueSets.SetArchivedAsync(vs.Id, !vs.IsArchived, vs.RowVersion), vs.IsArchived ? L("Набор снова действует.") : L("Набор в архиве."))' disabled="@_busy">@(vs.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                                        </div>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
             break;
     }
 }
@@ -659,6 +823,19 @@ else
         _catalogId ??= _catalogs.FirstOrDefault()?.Id;
         _entries = _catalogId is { } cid && _catalogs.Any(c => c.Id == cid) ? await Nomenclature.EntriesAsync(cid, includeArchived: true) : [];
         _characteristics = await Modifications.CharacteristicsAsync(includeArchived: true);
+        _sets = await ValueSets.ListAsync(includeArchived: true);
+        if (CurrentAccess.Has(Permissions.PriceView))
+        {
+            _rules = await PriceRules.ListAsync();
+            if (!_isError)
+            {
+                _ruleForms = _rules.ToDictionary(r => r.PriceTypeId, r => new RuleForm { Factor = r.Factor, Rounding = r.Rounding, Active = r.IsActive });
+            }
+        }
+        if (_setChar == 0 && _characteristics.FirstOrDefault(c => !c.IsArchived) is { } firstChar)
+        {
+            _setChar = firstChar.Id;
+        }
         _settings = await Settings.GetAsync();
         if (_isError)
         {
@@ -683,6 +860,86 @@ else
         CustomFieldType.Catalog => L("Справочник"),
         _ => L("Текст"),
     };
+
+    // D322: автоцены от закупки.
+    private sealed class RuleForm
+    {
+        public decimal Factor { get; set; }
+        public PriceRounding Rounding { get; set; }
+        public bool Active { get; set; }
+    }
+
+    private IReadOnlyList<PriceRuleDto>? _rules;
+    private Dictionary<long, RuleForm> _ruleForms = [];
+
+    private bool CanEditPrices => CurrentAccess.Has(Permissions.PriceEdit);
+
+    private Task SaveRuleAsync(PriceRuleDto r) => Run(async () =>
+    {
+        var f = _ruleForms[r.PriceTypeId];
+        var changed = await PriceRules.SaveAsync(r.PriceTypeId, f.Factor, f.Rounding, f.Active, r.RowVersion);
+        _message = f.Active ? L("Правило сохранено, пересчитано цен: {0}.", changed) : L("Правило сохранено и выключено.");
+    }, null);
+
+    // D321: наборы значений характеристик.
+    private IReadOnlyList<ValueSetDto> _sets = [];
+    private long _setChar;
+    private long? _setId;
+    private string? _setName;
+    private string? _setValues;
+
+    private void EditSet(ValueSetDto vs)
+    {
+        (_setId, _setChar, _setName, _setValues) = (vs.Id, vs.CharacteristicId, vs.Name, string.Join(", ", vs.Values));
+    }
+
+    private Task SaveSetAsync() => Run(async () =>
+    {
+        if (_setId is { } id)
+        {
+            await ValueSets.UpdateAsync(id, _setName, _setValues, _sets.Single(x => x.Id == id).RowVersion);
+        }
+        else
+        {
+            await ValueSets.CreateAsync(_setChar, _setName, _setValues);
+        }
+
+        (_setId, _setName, _setValues) = (null, null, null);
+    }, L("Набор значений сохранён."));
+
+    // D317: значения по умолчанию группы.
+    private long? _defaultsGroup;
+    private GroupDefaultsDto? _defaults;
+    private IReadOnlyList<UnitDto> _unitOptions = [];
+    private IReadOnlyList<VatRateDto> _vatOptions = [];
+    private string _dType = "", _dUnit = "", _dVat = "", _dTracking = "";
+    private string? _dTnVed, _dCountry, _dCountryName;
+
+    private Task OpenDefaultsAsync(long groupId) => Run(async () =>
+    {
+        _defaults = await GroupDefaults.GetAsync(groupId);
+        _defaultsGroup = groupId;
+        if (_unitOptions.Count == 0)
+        {
+            _unitOptions = await Catalog.ListUnitsAsync();
+            _vatOptions = await VatRates.ActiveAsync();
+        }
+
+        var o = _defaults.Own;
+        _dType = o.Type is { } t ? ((byte)t).ToString() : "";
+        _dUnit = o.UnitId?.ToString() ?? "";
+        _dVat = o.VatRateId?.ToString() ?? "";
+        _dTracking = o.Tracking is { } m ? ((byte)m).ToString() : "";
+        (_dTnVed, _dCountry, _dCountryName) = (o.TnVedCode, o.OriginCountryCode, o.OriginCountryName);
+    }, null);
+
+    private Task SaveDefaultsAsync() => Run(async () =>
+    {
+        var values = new GroupDefaultValues(byte.TryParse(_dType, out var t) ? (ItemType)t : null, long.TryParse(_dUnit, out var u) ? u : null,
+            long.TryParse(_dVat, out var v) ? v : null, _dTnVed, _dCountry, _dCountryName, byte.TryParse(_dTracking, out var m) ? (TrackingType)m : null);
+        await GroupDefaults.SaveAsync(_defaultsGroup!.Value, values, _defaults!.RowVersion);
+        _defaults = await GroupDefaults.GetAsync(_defaultsGroup.Value);
+    }, L("Значения по умолчанию группы сохранены."));
 
     private void StartEdit(long id, string name, string? parent)
     {

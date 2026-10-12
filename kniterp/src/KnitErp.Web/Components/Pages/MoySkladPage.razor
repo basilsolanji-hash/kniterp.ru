@@ -127,6 +127,28 @@ else
         }
     }
 
+    @if (_status.Connected && CurrentAccess.Has(Permissions.PriceView))
+    {
+        @* D327 (сессия 4): обратное направление — цены knitERP в МойСклад (связанные позиции, только отличающиеся). *@
+        <h2>@L("Выгрузка цен в МойСклад")</h2>
+        <div class="panel">
+            <p class="muted small">@L("Цены продажи видов, связанных при загрузке, и закупочная цена позиций, связанных с МойСклад. Отправляются только отличающиеся; прочие поля МойСклад не меняются, цена, которой нет в knitERP, остаётся как была.")</p>
+            <div class="actions">
+                <button type="button" class="secondary" @onclick="PriceExportPreviewAsync" disabled="@(_busy || Active is not null)">@L("Проверить цены")</button>
+                @if (_priceExport is { ToChange: > 0, Sent: 0 } pe)
+                {
+                    <ConfirmButton Disabled="@(_busy || Active is not null)" Question="@L("Отправить в МойСклад цены {0} позиций?", pe.ToChange)" OnConfirm="ExportPricesAsync">@L("Выгрузить цены ({0})", pe.ToChange)</ConfirmButton>
+                }
+            </div>
+            @if (_priceExport is { } x)
+            {
+                <p role="status">@(x.Sent > 0 ? L("Отправлено в МойСклад: {0} из {1} проверенных.", x.Sent, x.Checked)
+                                    : x.ToChange == 0 ? L("Цены совпадают с МойСклад (проверено: {0}).", x.Checked)
+                                    : L("Отличаются цены {0} из {1} связанных позиций: {2}{3}", x.ToChange, x.Checked, string.Join(", ", x.Samples), x.ToChange > x.Samples.Count ? " …" : ""))</p>
+            }
+        </div>
+    }
+
     <h2>@L("Загрузки")</h2>
     <div class="scroll">
         <table class="compact">
@@ -283,6 +305,16 @@ else
         "Комплекты" => L("Комплекты"),
         _ => name,
     };
+
+    private PriceExportDto? _priceExport;
+
+    private Task PriceExportPreviewAsync() => RunAsync(async () => _priceExport = await Import.PriceExportPreviewAsync(), null);
+
+    private Task ExportPricesAsync() => RunAsync(async () =>
+    {
+        _priceExport = null;
+        _priceExport = await Import.ExportPricesAsync();
+    }, null);
 
     private Task ConnectAsync() => RunAsync(async () =>
     {

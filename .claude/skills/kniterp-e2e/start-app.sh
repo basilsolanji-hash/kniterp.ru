@@ -12,6 +12,8 @@ mkdir -p "$E2E_DIR"
 pkill -f "[K]nitErp\.Web" 2>/dev/null || true
 # Ждём выхода прежнего экземпляра, иначе новый не займёт порт 5443.
 for i in $(seq 1 30); do pgrep -f "[K]nitErp\.Web" >/dev/null || break; sleep 0.5; done
+# …и освобождения порта (экземпляр, запущенный параллельно, мог занять его позже).
+for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/5443) 2>/dev/null || break; pkill -f "[K]nitErp\.Web" 2>/dev/null || true; sleep 0.5; done
 export ASPNETCORE_ENVIRONMENT=Development
 export ConnectionStrings__KnitErp="Server=localhost,1433;Database=$db;User Id=sa;Password=${KNITERP_SA_PASSWORD:?задайте KNITERP_SA_PASSWORD};TrustServerCertificate=true;Encrypt=false"
 dotnet build "$root/src/KnitErp.Web" -v q -nologo >/dev/null

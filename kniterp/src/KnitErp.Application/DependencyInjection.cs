@@ -21,6 +21,7 @@ public static class DependencyInjection
         services.AddScoped<IAccessGuard, AccessGuard>();
         services.AddScoped<OrganizationService>();
         services.AddScoped<UserAccessService>();
+        services.AddScoped<InvitationMailer>();
         services.AddScoped<RoleService>();
         services.AddScoped<AuditQueryService>();
         services.AddScoped<StructureService>();
@@ -33,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<KnitErp.Application.Hr.PayrollService>();
         services.AddScoped<KnitErp.Application.Hr.HrSettingsService>();
         services.AddScoped<KnitErp.Application.Hr.EmployeeAgreementService>(); // D227: документы перед доступом
+        services.AddScoped<KnitErp.Application.Hr.EmployeeDataRequestService>(); // D125: анкета сотрудника по ссылке
         services.AddScoped<KnitErp.Application.Hr.PayrollEnterpriseDataExport>();
         // Граница с производством: настоящая выработка регистрируется модулем производства и заменяет заглушку.
         services.TryAddScoped<KnitErp.Application.Hr.IWorkOutputSource, KnitErp.Application.Hr.EmptyWorkOutputSource>();
@@ -63,6 +65,11 @@ public static class DependencyInjection
         services.AddScoped<Development.DevModelService>();
         services.AddScoped<Development.DevSettingsService>();
         services.AddScoped<Development.DevExchangeService>();
+        services.AddScoped<Development.DevTechService>();
+        services.AddScoped<Development.DevShopService>();
+        services.AddScoped<Development.DevHandoffService>();
+        services.AddScoped<Development.DevYarnService>();
+        Development.DevObjects.Register();
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();
@@ -77,6 +84,16 @@ public static class DependencyInjection
         services.AddScoped<Crm.CrmLeadService>();
         services.AddScoped<Crm.CrmDealService>();
         services.AddScoped<Crm.CrmContactService>();
+        services.AddScoped<Crm.CrmActivityService>();
+        services.AddScoped<Crm.CrmOfferService>();
+        services.AddScoped<Crm.CrmReportService>();
+        services.AddScoped<Crm.CrmIntakeService>();
+        services.AddScoped<Crm.CrmMailingService>();
+        services.AddScoped<Crm.CrmImportService>();
+        services.AddScoped<Crm.CrmMessengerService>();
+        services.AddScoped<Crm.CrmEmailTemplateService>();
+        services.AddScoped<Crm.CrmMailboxService>();
+        services.AddScoped<Crm.ICrmDashboardSource, Crm.CrmDashboardSource>(); // ТЗ CRM §6: блок главного экрана подключает база
         services.AddScoped<Organizations.LegalEntityService>();
         services.AddScoped<Catalog.NomenclatureService>();
         services.AddScoped<Catalog.ModificationService>();
@@ -91,6 +108,12 @@ public static class DependencyInjection
         services.AddScoped<Catalog.CatalogFeedService>(); // D314 (сессия 4)
         services.AddScoped<Catalog.ItemCodesService>(); // D315 (сессия 4)
         services.AddScoped<Catalog.LabelService>(); // D316 (сессия 4)
+        services.AddScoped<Catalog.GroupDefaultsService>(); // D317 (сессия 4)
+        services.AddScoped<Catalog.BulkEditService>(); // D318 (сессия 4)
+        services.AddScoped<Catalog.ItemCopyService>(); // D319 (сессия 4)
+        services.AddScoped<Catalog.ValueSetService>(); // D321 (сессия 4)
+        services.AddScoped<Catalog.PriceRuleService>(); // D322 (сессия 4)
+        services.AddScoped<Catalog.SupplierPriceListService>(); // D323 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
         services.AddScoped<Finance.BankStatementService>();
@@ -108,6 +131,10 @@ public static class DependencyInjection
         services.AddScoped<PasswordResetService>();
         services.AddScoped<TrustedDeviceService>();
         services.AddScoped<AccountSecurityService>();
+        // D123: отметка повторного подтверждения — на область DI (в Blazor — цепь вкладки), не в cookie и не у клиента.
+        services.AddScoped<StepUpState>();
+        services.AddScoped<StepUpGuard>();
+        services.AddScoped<StepUpService>();
         services.AddScoped<Structure.EmployeeExchangeService>();
         services.AddScoped<Organizations.LaunchReadinessService>();
         // Кэш главного экрана (DashboardService): общий на процесс, ключ — организация, пользователь и его права.

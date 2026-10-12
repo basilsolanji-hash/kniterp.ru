@@ -192,6 +192,10 @@
             new("crm/deals", "Сделки", a => a.Has(Permissions.CrmView)),
             new("crm/leads", "Лиды", a => a.Has(Permissions.CrmView)),
             new("crm/contacts", "Контакты", a => a.Has(Permissions.CrmView)),
+            new("crm/chats", "Чаты", a => a.Has(Permissions.CrmView)),
+            new("crm/tasks", "Мои задачи CRM", a => a.Has(Permissions.CrmView)),
+            new("crm/summary", "Сводка и отчёты", a => a.Has(Permissions.CrmView)),
+            new("crm/mailings", "Рассылки", a => a.Has(Permissions.CrmMailing)),
             new("counterparties", "Контрагенты", a => a.Has(Permissions.CatalogView)),
             new("counterparties?role=customer", "Покупатели", a => a.Has(Permissions.CatalogView)),
             new("counterparties?role=supplier", "Поставщики", a => a.Has(Permissions.CatalogView)),
@@ -233,6 +237,8 @@
         [
             new("dev/models", "Модели", a => a.Has(Permissions.DevView)),
             new("dev/my", "Мои задачи разработки", a => a.Has(Permissions.DevView)),
+            new("dev/tech", "Техкарты вязания", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
+            new("dev/machines", "Станки и программы", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
             new("dev/settings", "Настройки разработки", a => a.Has(Permissions.DevView)),
         ]),
         // Модуль «Сотрудники» (D200–D299).
@@ -263,6 +269,7 @@
             new("catalog/settings?tab=Fields", "Доп. поля номенклатуры", a => a.Has(Permissions.CatalogView)),
             new("catalog/settings?tab=Catalogs", "Свои справочники", a => a.Has(Permissions.CatalogView)),
             new("catalog/labels", "Этикетки и ценники", a => a.Has(Permissions.CatalogView)),
+            new("catalog/price-list", "Прайс-лист поставщика", a => a.Has(Permissions.CatalogEdit) && a.Has(Permissions.PriceView)),
             new("catalog/settings?tab=General", "Настройки каталога", a => a.Has(Permissions.CatalogView)),
             new("sales-settings?section=projects", "Проекты", a => a.Has(Permissions.SalesView)),
             new("sales-settings?section=channels", "Каналы продаж", a => a.Has(Permissions.SalesView)),

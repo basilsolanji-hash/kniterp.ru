@@ -2,6 +2,7 @@
 @using KnitErp.Application.Crm
 @using KnitErp.Domain.Crm
 @inject CrmSettingsService Settings
+@inject CrmDealService Deals
 
 <PageTitle>@L("Настройки CRM") — knitERP</PageTitle>
 <CrmStyles />
@@ -23,6 +24,55 @@ else
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
     }
+
+    @if (_auto is not null)
+    {
+        <form class="panel" @onsubmit="SaveAutomationAsync" aria-label="@L("Автоматизация")">
+            <h2>@L("Автоматизация")</h2>
+            <fieldset disabled="@(!_data.CanEdit)">
+                <div class="grid">
+                    <label>
+                        @L("Заявки из API, телефонии и импорта")
+                        <select @bind="_auto.AssignMode">
+                            <option value="1">@L("на ответственного по умолчанию")</option>
+                            <option value="2">@L("по очереди между менеджерами продаж")</option>
+                        </select>
+                    </label>
+                    <label>
+                        @L("Ответственный по умолчанию")
+                        <select @bind="_auto.DefaultUser">
+                            <option value="">@L("автор заявки (владелец токена)")</option>
+                            @foreach (var u in _users)
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="inline"><input type="checkbox" @bind="_auto.NextStep" /> @L("Предлагать следующий шаг по этапу")</label>
+                    <label class="inline"><input type="checkbox" @bind="_auto.StageByEvents" /> @L("Менять этап по событиям (КП, заказ)")</label>
+                    <label>@L("Повторная продажа через, дней (пусто — выкл.)") <input type="number" min="1" max="730" @bind="_auto.RepeatDays" /></label>
+                    <label>@L("Лид без действий — напомнить через, дней") <input type="number" min="1" max="90" @bind="_auto.StaleDays" /></label>
+                    <label>
+                        @L("Факт плана продаж")
+                        <select @bind="_auto.PlanFact">
+                            <option value="1">@L("оплаты по заказам из сделок")</option>
+                            <option value="2">@L("выигранные сделки")</option>
+                        </select>
+                    </label>
+                    <label>@L("КП действует, дней") <input type="number" min="1" max="365" @bind="_auto.OfferDays" /></label>
+                    <label class="wide">@L("Условия КП по умолчанию") <textarea rows="3" @bind="_auto.OfferTerms" maxlength="@CrmSettings.OfferTermsMaxLength" placeholder="@L("Предоплата 50 %, срок изготовления 14 рабочих дней, доставка за счёт покупателя.")"></textarea></label>
+                </div>
+                @if (_data.CanEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </fieldset>
+        </form>
+    }
+
+    <CrmMessengersPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
+    <CrmMailboxPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
+    <CrmEmailTemplatesPanel CanEdit="@_data.CanEdit" />
 
     <h2>@L("Воронки")</h2>
     @if (_data.CanEdit)
@@ -54,7 +104,7 @@ else
             </div>
             <div class="scroll">
                 <table class="compact">
-                    <thead><tr><th>@L("Этап")</th><th class="num">@L("Вероятность")</th><th>@L("Вид")</th><th class="num">@L("Сделок")</th>@if (_data.CanEdit) { <th></th> }</tr></thead>
+                    <thead><tr><th>@L("Этап")</th><th class="num">@L("Вероятность")</th><th>@L("Вид")</th><th class="opt">@L("Следующий шаг")</th><th class="num">@L("Сделок")</th>@if (_data.CanEdit) { <th></th> }</tr></thead>
                     <tbody>
                         @foreach (var s in p.Stages)
                         {
@@ -72,6 +122,13 @@ else
                                     </td>
                                     <td class="num"><input type="number" min="0" max="100" @bind="_editProbability" disabled="@s.IsFinal" aria-label="@L("Вероятность")" /></td>
                                     <td>@KindName(s.Kind)</td>
+                                    <td>
+                                        @if (!s.IsFinal)
+                                        {
+                                            <input @bind="_editStepSubject" maxlength="@CrmActivity.SubjectMaxLength" placeholder="@L("Позвонить: обсудить КП")" aria-label="@L("Задача следующего шага")" />
+                                            <input type="number" min="0" max="365" @bind="_editStepDays" aria-label="@L("Через дней")" style="max-width: 70px" />
+                                        }
+                                    </td>
                                     <td class="num">@s.Deals</td>
                                     <td>
                                         <button type="button" @onclick="SaveStageAsync" disabled="@_busy">@L("Сохранить")</button>
@@ -83,6 +140,7 @@ else
                                     <td><span class="stage stage-@s.Color">@s.Name</span> @if (s.IsArchived) { <span class="tag">@L("архив")</span> }</td>
                                     <td class="num">@s.Probability %</td>
                                     <td>@KindName(s.Kind)</td>
+                                    <td>@(s.NextStepDays is { } nd ? L("«{0}» через {1} дн.", s.NextStepSubject ?? "", nd) : "—")</td>
                                     <td class="num">@s.Deals</td>
                                     @if (_data.CanEdit)
                                     {
@@ -152,6 +210,13 @@ else
     private string? _editName;
     private string _editColor = "gray";
     private int _editProbability;
+    private string? _editStepSubject;
+    private int? _editStepDays;
+    private AutoForm? _auto;
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<KnitErp.Application.Structure.LookupDto> _users = [];
     private readonly Dictionary<CrmReferenceKind, string?> _newRef = [];
 
     private RenderFragment RefList(string title, CrmReferenceKind kind, IReadOnlyList<CrmReferenceDto> items) => __builder =>
@@ -186,11 +251,41 @@ else
         try
         {
             _data = await Settings.GetAsync();
+            _users = (await Deals.OptionsAsync()).Users;
+            FillAuto();
         }
         catch (AccessDeniedException ex)
         {
             _denied = UiErrors.Message(ex);
         }
+    }
+
+    private void FillAuto()
+    {
+        var a = _data!.Automation ?? new CrmAutomationValues();
+        _auto = new AutoForm
+        {
+            AssignMode = ((byte)a.AssignMode).ToString(), DefaultUser = a.DefaultResponsibleUserId?.ToString() ?? "", NextStep = a.NextStepSuggestions,
+            StageByEvents = a.StageByEvents, RepeatDays = a.RepeatSaleDays, StaleDays = a.StaleLeadDays, PlanFact = ((byte)a.PlanFact).ToString(),
+            OfferDays = a.OfferValidDays, OfferTerms = a.OfferTerms,
+        };
+    }
+
+    private Task SaveAutomationAsync() => RunAsync(() => Settings.SaveAutomationAsync(new CrmAutomationValues(
+        (CrmAssignMode)byte.Parse(_auto!.AssignMode), long.TryParse(_auto.DefaultUser, out var u) ? u : null, _auto.NextStep, _auto.StageByEvents, _auto.RepeatDays,
+        _auto.StaleDays, (CrmPlanFact)byte.Parse(_auto.PlanFact), _auto.OfferTerms, _auto.OfferDays), _data!.AutomationVersion), L("Автоматизация сохранена."));
+
+    private sealed class AutoForm
+    {
+        public string AssignMode { get; set; } = "1";
+        public string DefaultUser { get; set; } = "";
+        public bool NextStep { get; set; }
+        public bool StageByEvents { get; set; }
+        public int? RepeatDays { get; set; }
+        public int StaleDays { get; set; }
+        public string PlanFact { get; set; } = "1";
+        public int OfferDays { get; set; }
+        public string? OfferTerms { get; set; }
     }
 
     private static string KindName(CrmStageKind kind) => kind switch
@@ -206,6 +301,8 @@ else
         _editName = s.Name;
         _editColor = s.Color;
         _editProbability = s.Probability;
+        _editStepSubject = s.NextStepSubject;
+        _editStepDays = s.NextStepDays;
     }
 
     private Task CreatePipelineAsync() => RunAsync(async () =>
@@ -223,6 +320,12 @@ else
     private Task SaveStageAsync() => RunAsync(async () =>
     {
         await Settings.UpdateStageAsync(_edit!.Id, _editName, _editColor, _editProbability, _edit.RowVersion);
+        if (!_edit.IsFinal && (_editStepDays != _edit.NextStepDays || _editStepSubject != _edit.NextStepSubject))
+        {
+            var fresh = (await Settings.GetAsync()).Pipelines.SelectMany(p => p.Stages).Single(x => x.Id == _edit.Id);
+            await Settings.SetNextStepAsync(_edit.Id, string.IsNullOrWhiteSpace(_editStepSubject) ? null : _editStepDays, _editStepSubject, fresh.RowVersion);
+        }
+
         _edit = null;
     }, L("Этап сохранён."));
 
@@ -257,6 +360,7 @@ else
             try
             {
                 _data = await Settings.GetAsync();
+                FillAuto();
             }
             finally
             {

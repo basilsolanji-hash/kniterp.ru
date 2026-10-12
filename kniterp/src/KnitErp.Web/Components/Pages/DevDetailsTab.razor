@@ -1,0 +1,123 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevGate Gate
+@inject DevTechService Tech
+
+@* Детали модели (D711): у каждой — техзадание дессинатора и техкарта вязания для цеха. *@
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+@if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    @if (_rows.Count == 0)
+    {
+        <p class="muted">@L("Деталей пока нет. Добавьте детали изделия — перед, спинка, рукав, воротник, подвяз…")</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Деталь")</th><th class="num">@L("Кол-во")</th><th>@L("Станок")</th><th>@L("Заправка")</th><th class="opt">@L("Программа")</th><th class="opt num">@L("Время")</th><th class="opt num">@L("Вес")</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var d in _rows)
+                    {
+                        <tr>
+                            <td><a href="dev/details/@d.Id">@d.Name</a></td>
+                            <td class="num">@d.Quantity</td>
+                            <td>@(d.MachineName ?? "—")</td>
+                            <td>@(d.ThreadingRows == 0 ? L("нет") : L("{0} поз.", d.ThreadingRows))</td>
+                            <td>@(d.HasProgram ? L("есть") : "—")</td>
+                            <td class="num">@DevFormat.Duration(d.PlanKnitSeconds)</td>
+                            <td class="num">@DevFormat.Grams(d.PlanWeightGrams)</td>
+                            <td class="row-actions"><a href="dev/tech/@d.Id">@L("Техкарта")</a> <DevLabelLink Kind="detail" Id="d.Id" /></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    @if (CanEdit)
+    {
+        <form class="inline-form" @onsubmit="AddAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                <label>@L("Новая деталь") <input @bind="_name" maxlength="@DevDetail.NameMaxLength" placeholder="@L("Перед")" list="dev-detail-names" required /></label>
+                <datalist id="dev-detail-names">
+                    @foreach (var n in Suggestions)
+                    {
+                        <option value="@n"></option>
+                    }
+                </datalist>
+                <label>@L("В изделии, шт") <input type="number" min="1" max="@DevDetail.MaxQuantity" step="1" inputmode="numeric" @bind="_quantity" /></label>
+                <button type="submit" disabled="@_busy">@L("Добавить деталь")</button>
+            </fieldset>
+        </form>
+    }
+}
+
+@code {
+    private static IEnumerable<string> Suggestions =>
+        [L("Перед"), L("Спинка"), L("Рукав"), L("Воротник"), L("Планка"), L("Манжета"), L("Подвяз"), L("Капюшон"), L("Карман"), L("Полотно")];
+
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    [Parameter]
+    public bool CanEdit { get; set; }
+
+    private IReadOnlyList<DevDetailRowDto>? _rows;
+    private string? _name;
+    private int _quantity = 1;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            _rows = await Gate.Run(() => Tech.DetailsAsync(ModelId));
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(() => Tech.AddDetailAsync(ModelId, _name, _quantity));
+            _message = L("Деталь добавлена.");
+            _name = null;
+            _quantity = 1;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _rows = await Gate.Run(() => Tech.DetailsAsync(ModelId));
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

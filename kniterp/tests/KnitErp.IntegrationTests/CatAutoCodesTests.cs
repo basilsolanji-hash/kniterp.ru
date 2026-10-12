@@ -56,6 +56,46 @@ public sealed class CatAutoCodesTests(SqlTestHost host) : IClassFixture<SqlTestH
         Assert.True(await db.AuditEntries.CountAsync(e => e.OrganizationId == org.OrganizationId && e.Reason!.StartsWith("Штрихкод")) >= 3);
     }
 
+    [SqlFact]
+    public async Task Auto_codes_survive_other_tabs_and_parallel_creates()
+    {
+        // Ревью: вкладка A держит в своём контексте строку настроек, вкладка B сдвигает счётчики — A всё равно создаёт позицию
+        // (без ошибки версии), а параллельные создания не берут один номер.
+        var org = await CreateOrgAsync();
+        long piece;
+        await using (var setup = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            piece = (await setup.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+            await setup.CatalogSettings.SaveAsync(new CatalogSettingsCommand(true, true, "ТВ-", 4, 1, ItemType.Finished), (await setup.CatalogSettings.GetAsync()).RowVersion);
+            await setup.CatalogSettings.SaveCodesAsync(new CatalogCodesCommand(true, 25, 1, true, "KN-{N}", 4, 1), (await setup.CatalogSettings.GetAsync()).RowVersion);
+        }
+
+        await using var a = host.As(org.OwnerUserId, org.OrganizationId);
+        await using var b = host.As(org.OwnerUserId, org.OrganizationId);
+        var first = await a.Catalog.CreateItemAsync(new ItemCommand("", "Шапка", ItemType.Finished, piece, null));
+        var second = await b.Catalog.CreateItemAsync(new ItemCommand("", "Шарф", ItemType.Finished, piece, null));
+        var third = await a.Catalog.CreateItemAsync(new ItemCommand("", "Варежки", ItemType.Finished, piece, null));
+        Assert.Equal(["ТВ-0001", "ТВ-0002", "ТВ-0003"],
+            [(await a.Nomenclature.GetItemAsync(first)).Code, (await a.Nomenclature.GetItemAsync(second)).Code, (await a.Nomenclature.GetItemAsync(third)).Code]);
+        // Настройки, прочитанные заново, сохраняются из вкладки A без ложного конфликта.
+        await a.CatalogSettings.SaveCodesAsync(new CatalogCodesCommand(true, 25, 10, true, "KN-{N}", 4, 10), (await a.CatalogSettings.GetAsync()).RowVersion);
+
+        // Параллельно из четырёх вкладок по 3 позиции — коды, штрихкоды и артикулы не повторяются.
+        await Task.WhenAll(Enumerable.Range(0, 4).Select(async t =>
+        {
+            await using var tab = host.As(org.OwnerUserId, org.OrganizationId);
+            for (var i = 0; i < 3; i++)
+            {
+                await tab.Catalog.CreateItemAsync(new ItemCommand("", $"Позиция {t}-{i}", ItemType.Finished, piece, null));
+            }
+        }));
+        await using var db = host.NewDb();
+        var items = await db.Items.Where(i => i.OrganizationId == org.OrganizationId).Select(i => new { i.Code, i.Article }).ToListAsync();
+        Assert.Equal(15, items.Select(i => i.Code).Distinct().Count());
+        Assert.Equal(15, items.Select(i => i.Article).Distinct().Count());
+        Assert.Equal(15, await db.ItemBarcodes.Where(x => x.OrganizationId == org.OrganizationId).Select(x => x.Code).Distinct().CountAsync());
+    }
+
     private async Task<CreatedOrganization> CreateOrgAsync()
     {
         int[] w = [2, 4, 10, 3, 5, 9, 4, 6, 8];

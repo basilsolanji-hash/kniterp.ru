@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using KnitErp.Application.Common;
 using KnitErp.Application.Workspace;
 using KnitErp.Infrastructure.External;
@@ -36,6 +37,17 @@ public static class DependencyInjection
         // Служебная почта (D81): «Забыли пароль». Без настроек — недоступна, вход по ссылке от администратора.
         services.AddSingleton(email ?? new EmailOptions(null, null, null, null, null));
         services.AddSingleton<IEmailSender, Email.SmtpEmailSender>();
+        // D648, D670 (сессия CRM): чаты с клиентами в MAX, Telegram и WhatsApp. Адреса API — Messengers:* в настройках сервера (Program
+        // регистрирует MessengerOptions раньше).
+        services.TryAddSingleton(External.MessengerOptions.Default);
+        // D678: стандартный журнал HttpClient пишет адрес запроса, а токен Telegram — часть адреса: журнал запросов у мессенджеров выключен.
+        services.AddHttpClient<External.MaxMessengerClient>(c => c.Timeout = TimeSpan.FromSeconds(8)).RemoveAllLoggers();
+        services.AddHttpClient<External.TelegramMessengerClient>(c => c.Timeout = TimeSpan.FromSeconds(8)).RemoveAllLoggers();
+        services.AddHttpClient<External.WhatsAppMessengerClient>(c => c.Timeout = TimeSpan.FromSeconds(8)).RemoveAllLoggers();
+        services.AddTransient<KnitErp.Application.Crm.ICrmMessengerClient>(sp => sp.GetRequiredService<External.MaxMessengerClient>());
+        services.AddTransient<KnitErp.Application.Crm.ICrmMessengerClient>(sp => sp.GetRequiredService<External.TelegramMessengerClient>());
+        services.AddTransient<KnitErp.Application.Crm.ICrmMessengerClient>(sp => sp.GetRequiredService<External.WhatsAppMessengerClient>());
+        services.AddSingleton<KnitErp.Application.Crm.ICrmMailboxClient, Email.ImapMailboxClient>(); // D676: входящая почта CRM
         return services;
     }
 

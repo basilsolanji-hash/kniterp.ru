@@ -38,10 +38,19 @@ public sealed class FakeEmailSender : IEmailSender
     public string? PublicUrl => "https://erp.test";
     public System.Collections.Concurrent.ConcurrentQueue<(string To, string Subject, string Text)> Sent { get; } = new();
 
+    /// <summary>Письма CRM целиком (HTML, Reply-To, List-Unsubscribe).</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<EmailMessage> Messages { get; } = new();
+
     public Task<bool> SendAsync(string to, string subject, string text, CancellationToken ct = default)
     {
         Sent.Enqueue((to, subject, text));
         return Task.FromResult(true);
+    }
+
+    public Task<bool> SendAsync(EmailMessage message, CancellationToken ct = default)
+    {
+        Messages.Enqueue(message);
+        return SendAsync(message.To, message.Subject, message.Text, ct);
     }
 
     /// <summary>Письмо уходит в фоне — ждём его не дольше 5 секунд.</summary>
@@ -68,6 +77,8 @@ public sealed class TestUser : ICurrentUser
     public long? OrganizationId { get; set; }
     public string? CorrelationId => "test";
     public string? ClientAddress { get; set; }
+    public string? UserAgent { get; set; }
+    public Guid? SessionId { get; set; }
     public IReadOnlyCollection<string>? ApiScope { get; set; }
     public long? ApiTokenId { get; set; }
 }
@@ -103,6 +114,9 @@ public sealed class SqlTestHost : IAsyncLifetime
     /// <summary>Адрес клиента для журнала входов (как у HTTP-запроса страницы входа).</summary>
     public string? ClientAddress { get; set; }
 
+    /// <summary>D122: заголовок User-Agent «браузера» тестов — для названия устройства сессии.</summary>
+    public string? UserAgent { get; set; }
+
     /// <summary>Модель ИИ-помощника для тестов: по умолчанию не подключена.</summary>
     public IAssistantModel AssistantModel { get; set; } = new DisabledAssistantModel();
 
@@ -129,13 +143,39 @@ public sealed class SqlTestHost : IAsyncLifetime
         new(new DbContextOptionsBuilder<KnitErpDbContext>()
             .UseSqlServer(_connectionString, KnitErp.Infrastructure.DependencyInjection.ConfigureSqlServer).AddInterceptors(interceptors).Options);
 
+    /// <summary>
+    /// D123: по умолчанию каждый набор сервисов получает свежую отметку повторного подтверждения — как администратор, только что
+    /// подтвердивший действие паролем; так опасные действия в прежних тестах проходят. Тесты D123 выключают это и проверяют порядок.
+    /// </summary>
+    public bool AutoStepUp { get; set; } = true;
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<long, StepUpState> _stepUp = new();
+
+    /// <summary>Отметка повторного подтверждения «сессии» пользователя — общая для всех его наборов сервисов в тест-классе.</summary>
+    public StepUpState StepUpStateOf(long? userId) => userId is { } id ? _stepUp.GetOrAdd(id, _ => new StepUpState()) : new StepUpState();
+
+    public StepUpGuard StepUpGuardFor(ICurrentUser user)
+    {
+        var state = StepUpStateOf(user.UserId);
+        if (AutoStepUp && user.UserId is { } id)
+        {
+            state.Grant(id, Clock.UtcNow);
+        }
+
+        return new StepUpGuard(state, user, Clock);
+    }
+
     /// <summary>Набор сервисов от имени пользователя. Каждый вызов — новый DbContext, как отдельный HTTP-запрос.</summary>
-    public Services As(long? userId, long? organizationId, IReadOnlyCollection<string>? apiScope = null)
+    public Services As(long? userId, long? organizationId, IReadOnlyCollection<string>? apiScope = null, Guid? sessionId = null)
     {
         var db = NewDb();
-        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = ClientAddress, ApiScope = apiScope };
+        var user = new TestUser
+        {
+            UserId = userId, OrganizationId = organizationId, ClientAddress = ClientAddress, UserAgent = UserAgent, SessionId = sessionId, ApiScope = apiScope,
+        };
         var guard = new AccessGuard(db, user, Clock);
-        var access = new UserAccessService(db, guard, user, Clock);
+        var stepUp = StepUpGuardFor(user);
+        var access = new UserAccessService(db, guard, user, Clock, stepUp);
         return new Services(db,
             new OrganizationService(db, guard, user, Clock),
             access,
@@ -188,7 +228,7 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Finance.CashFlowItemService(db, guard, user, Clock),
             new KnitErp.Application.Finance.AccountableService(db, guard, user, Clock),
             new KnitErp.Application.Finance.CashReportsService(db, guard),
-            new KnitErp.Application.Integrations.IntegrationService(db, guard, user, Clock, new KnitErp.Application.Integrations.IntegrationSettings()),
+            new KnitErp.Application.Integrations.IntegrationService(db, guard, user, Clock, new KnitErp.Application.Integrations.IntegrationSettings(), stepUp),
             new KnitErp.Application.Warehousing.StockBatchService(db, guard, user, Clock),
             new KnitErp.Application.Warehousing.StockBatchBreakdownService(db, guard),
             new KnitErp.Application.Tagging.TagService(Factory, user, Clock),
@@ -205,7 +245,7 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Production.ShiftTaskService(db, guard, user, Clock),
             new KnitErp.Application.Production.ProductionSettingsService(db, guard, user, Clock),
             new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock, user, Spreadsheet),
-            new RoleService(db, guard, user, Clock),
+            new RoleService(db, guard, user, Clock, stepUp),
             new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.ItemTradeService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.RevaluationService(db, guard, user, Clock),
@@ -213,14 +253,22 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)),
             new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.CatalogSettingsService(db, guard, user, Clock),
-            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock, new PlainFeedPhotoLinks()),
             new KnitErp.Application.Catalog.ItemCodesService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.LabelService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.GroupDefaultsService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.BulkEditService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.ItemCopyService(db, guard, user, Clock, new CatalogService(db, guard, user, Clock),
+                new KnitErp.Application.Catalog.NomenclatureService(db, guard, user, Clock)),
+            new KnitErp.Application.Catalog.ValueSetService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.PriceRuleService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.SupplierPriceListService(db, guard, Spreadsheet, user, Clock),
             new AccountSecurityService(db, Hasher, Mail, user, Clock),
             new KnitErp.Application.Finance.BankStatementService(db, guard, user, Clock,
                 new KnitErp.Application.Sales.SalesService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock)),
                 new KnitErp.Application.Purchasing.PurchaseService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock))),
             new KnitErp.Application.Sales.SalesAgreementService(db, guard, user, Clock),
+            new StepUpService(Factory, Hasher, user, Clock, StepUpStateOf(userId)),
             new KnitErp.Application.Sales.SalesDiscountService(db, guard, user, Clock));
     }
 
@@ -332,9 +380,16 @@ public sealed record Services(
     KnitErp.Application.Catalog.CatalogFeedService Feeds,
     KnitErp.Application.Catalog.ItemCodesService Codes,
     KnitErp.Application.Catalog.LabelService Labels,
+    KnitErp.Application.Catalog.GroupDefaultsService GroupDefaults,
+    KnitErp.Application.Catalog.BulkEditService Bulk,
+    KnitErp.Application.Catalog.ItemCopyService Copies,
+    KnitErp.Application.Catalog.ValueSetService ValueSets,
+    KnitErp.Application.Catalog.PriceRuleService PriceRules,
+    KnitErp.Application.Catalog.SupplierPriceListService PriceLists,
     AccountSecurityService Account,
     KnitErp.Application.Finance.BankStatementService BankStatements,
     KnitErp.Application.Sales.SalesAgreementService Agreements,
+    StepUpService StepUp,
     KnitErp.Application.Sales.SalesDiscountService Discounts) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
@@ -350,4 +405,20 @@ public sealed class FakeRequisitesLookup : KnitErp.Application.Common.IRequisite
             ? new KnitErp.Application.Common.CompanyRequisites(false, "ООО «ТЕСТОВАЯ ФАБРИКА»", "ООО «ТФ»", inn, "773601001", "1027700132195",
                 "г. Москва, ул. Тестовая, д. 1", "ГЕНЕРАЛЬНЫЙ ДИРЕКТОР", "Тестов Тест Тестович", true, "ACTIVE")
             : null);
+}
+
+/// <summary>
+/// Ссылки на фото фида для тестов без подписи (D324): «фид.фото» открытым текстом — так тест сам подделывает токен и проверяет,
+/// что сервис всё равно не отдаст фото выключенного фида или чужой организации. Подпись — в Web (Data Protection), проверяется e2e.
+/// </summary>
+public sealed class PlainFeedPhotoLinks : KnitErp.Application.Catalog.IFeedPhotoLinks
+{
+    public string Token(long feedId, long photoId) => $"{feedId}.{photoId}";
+
+    public bool TryRead(string token, out long feedId, out long photoId)
+    {
+        photoId = 0;
+        var parts = token.Split('.');
+        return long.TryParse(parts[0], out feedId) & parts.Length == 2 && long.TryParse(parts[1], out photoId);
+    }
 }

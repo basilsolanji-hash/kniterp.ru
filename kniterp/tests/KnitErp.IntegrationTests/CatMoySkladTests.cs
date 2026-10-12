@@ -79,6 +79,33 @@ public sealed class FakeMoySkladClient : IMoySkladClient
     public Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<MsPriceType>>(PriceTypes);
 
+    /// <summary>Отправленные изменения цен (D327) — и применены к строкам, как сделал бы МойСклад.</summary>
+    public List<(string Entity, MsPriceUpdate Update)> PriceUpdates { get; } = [];
+
+    public Task<IReadOnlyList<MsRow>> UpdatePricesAsync(string token, string entity, IReadOnlyList<MsPriceUpdate> updates, CancellationToken ct = default)
+    {
+        Assert.Equal(Token, token);
+        Assert.Contains(entity, MoySkladEntities.Writable);
+        Assert.InRange(updates.Count, 1, MoySkladEntities.MaxBatch);
+        var rows = Entities[entity];
+        var result = new List<MsRow>();
+        foreach (var u in updates)
+        {
+            PriceUpdates.Add((entity, u));
+            var i = rows.FindIndex(r => r.Id == u.Id);
+            var old = rows[i];
+            rows[i] = old with
+            {
+                Updated = "2026-10-12 12:00:00.000",
+                SalePrices = u.SalePrices.Select(p => new MsPrice(p.Value, old.SalePrices!.First(x => x.PriceType?.RefId == p.PriceTypeId).PriceType)).ToList(),
+                BuyPrice = u.BuyPrice is { } b ? new MsPrice(b, null) : old.BuyPrice,
+            };
+            result.Add(rows[i]);
+        }
+
+        return Task.FromResult<IReadOnlyList<MsRow>>(result);
+    }
+
     public const string PriceTypesJson = """
         [{"id":"pt-sale","name":"Цена продажи","externalCode":"cbcf493b"},{"id":"pt-opt","name":"Оптовая","externalCode":"opt-1"}]
         """;
@@ -209,6 +236,144 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         Assert.Contains((await c.Nomenclature.PriceTypesAsync()), t => t.Name == "Оптовая");
         var history = (await c.Trade.GetAsync(hatId)).History;
         Assert.All(history, h => Assert.Equal(PriceChangeSource.External, h.Source));
+    }
+
+    [SqlFact]
+    public async Task Failed_row_is_rolled_back_entirely_and_bundle_keeps_old_composition()
+    {
+        // Ревью: строка загрузки — всё или ничего (точка сохранения на строку).
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+        }
+
+        // Комплект в МойСклад изменён: 1,5 шапки (штучная единица) — ошибка строки; новый комплект с 0,4 шарфа — тоже.
+        var set = fake.Entities[MoySkladEntities.Bundle].Single();
+        var rows = set.Components!.Rows!;
+        fake.Entities[MoySkladEntities.Bundle] =
+        [
+            set with { Updated = "2026-10-05 10:00:00.000", Components = set.Components with { Rows = [rows[0] with { Quantity = 1.5m }, rows[1]] } },
+            set with { Id = "b-new", Code = "НБ-2", Name = "Новый набор", Updated = "2026-10-05 10:00:00.000",
+                       Components = set.Components with { Rows = [rows[0], rows[1] with { Quantity = 0.4m }] } },
+        ];
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+            var run = (await ms.StatusAsync()).Runs.First();
+            Assert.Equal((ImportRunStatus.Completed, 2), (run.Status, run.Errors));
+            Assert.Contains(await ms.IssuesAsync(run.Id), i => i.IsError && i.Text.Contains("не делится на единицу"));
+        }
+
+        await using var c = host.As(_user, _org);
+        var bundle = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "НБ-1"))).Items.Single();
+        Assert.Equal([("ШП-1", 1m), ("ШФ-1", 1m)], (await c.Bundles.GetAsync(bundle.Id)).Components.Select(x => (x.Code, x.Quantity)));
+        // Новая позиция с ошибкой в составе не осталась «полусозданной» (без связи, цен и состава).
+        Assert.Empty((await c.Catalog.ListItemsAsync(new ItemFilter(Search: "НБ-2"))).Items);
+
+        // Исправили в МойСклад — следующая загрузка создаёт новый комплект полностью.
+        fake.Entities[MoySkladEntities.Bundle][1] = fake.Entities[MoySkladEntities.Bundle][1] with
+        {
+            Updated = "2026-10-06 10:00:00.000", Components = set.Components with { Rows = [rows[0], rows[1] with { Quantity = 2m }] },
+        };
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+        }
+
+        var created = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "НБ-2"))).Items.Single();
+        Assert.Equal([("ШП-1", 1m), ("ШФ-1", 2m)], (await c.Bundles.GetAsync(created.Id)).Components.Select(x => (x.Code, x.Quantity)));
+    }
+
+    [SqlFact]
+    public async Task Preview_of_ten_thousand_linked_rows_reads_local_items_once()
+    {
+        // Ревью: предпросмотр не делает по запросу на каждую связанную строку.
+        const int count = 10_000;
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = new FakeMoySkladClient();
+        long piece;
+        await using (var s = host.As(_user, _org))
+        {
+            piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+            await Service(s, fake).ConnectAsync(FakeMoySkladClient.Token);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var items = Enumerable.Range(1, count).Select(i => Item.Create(_org, $"ПР-{i}", $"Позиция {i}", ItemType.Finished, piece, null, host.Clock.UtcNow)).ToList();
+            db.Items.AddRange(items);
+            await db.SaveChangesAsync();
+            db.ExternalLinks.AddRange(items.Select((it, i) => ExternalLink.Create(_org, ExternalSystem.MoySklad, ExternalObjectType.Item, it.Id, $"p-{i}", null, "v1", "old", host.Clock.UtcNow)));
+            await db.SaveChangesAsync();
+        }
+
+        fake.Entities[MoySkladEntities.Product] = Enumerable.Range(0, count).Select(i => new MsRow { Id = $"p-{i}", Name = $"Позиция {i + 1}", Code = $"ПР-{i + 1}", Updated = "v2" }).ToList();
+        await using var c = host.As(_user, _org);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var preview = await Service(c, fake).PreviewAsync();
+        sw.Stop();
+        var products = preview.Lines.Single(l => l.Entity == "Товары");
+        Assert.Equal((count, count), (products.Total, products.Skipped)); // изменены в knitERP после прошлой загрузки — не перезаписываются
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"предпросмотр {count} строк: {sw.Elapsed.TotalSeconds:0.0} с");
+    }
+
+    [SqlFact]
+    public async Task Prices_are_exported_only_when_changed_and_reimport_does_not_echo_them()
+    {
+        // D327: выгрузка цен в МойСклад — связанные позиции, только отличающиеся, все цены продажи объекта (непривязанные — как были).
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+            var first = await ms.PriceExportPreviewAsync(); Assert.True(first.ToChange == 0, string.Join(",", first.Samples)); // сразу после загрузки всё совпадает
+        }
+
+        await using var c = host.As(_user, _org);
+        var hat = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1"))).Items.Single(i => i.ParentItemId is null).Id;
+        var retail = (await c.Nomenclature.PriceTypesAsync()).Single(t => t.Name == "Цена продажи").Id;
+        await c.Nomenclature.SetPricesAsync(hat, new Dictionary<long, decimal?> { [retail] = 1600 });
+        var card = await c.Nomenclature.GetItemAsync(hat);
+        await c.Nomenclature.SaveItemDetailsAsync(hat, card.Details with { PurchasePrice = 650 }, new Dictionary<long, string?>(), card.RowVersion);
+
+        var ms2 = Service(c, fake);
+        var preview = await ms2.PriceExportPreviewAsync();
+        // Шапка — новая цена и закупочная; модификация хранит свою закупочную (600), а в МойСклад она наследовала цену товара (теперь 650) —
+        // её закупочная становится явной.
+        Assert.Equal((5, 2, 0), (preview.Checked, preview.ToChange, preview.Sent));
+        Assert.Equal(["ШП-1", "ШП-1-К"], preview.Samples.Order());
+        Assert.Empty(fake.PriceUpdates); // предпросмотр ничего не отправляет
+
+        var result = await ms2.ExportPricesAsync();
+        Assert.Equal(2, result.Sent);
+        var (entity, update) = fake.PriceUpdates.Single(u => u.Update.Id == "p-hat");
+        Assert.Equal((MoySkladEntities.Variant, 60000m), fake.PriceUpdates.Single(u => u.Update.Id == "v-hat-red") is var v ? (v.Entity, v.Update.BuyPrice) : default);
+        Assert.Equal((MoySkladEntities.Product, "p-hat", 65000m), (entity, update.Id, update.BuyPrice));
+        Assert.Equal([("pt-sale", 160000m), ("pt-opt", 120000m)], update.SalePrices.Select(p => (p.PriceTypeId, p.Value)));
+        Assert.Equal(0, (await ms2.PriceExportPreviewAsync()).ToChange);
+
+        // Повторная загрузка не считает свою выгрузку изменением в МойСклад: цены knitERP на месте.
+        await ms2.StartAsync();
+        Assert.True(await ms2.ProcessNextAsync());
+        Assert.Equal(1600m, (await c.Nomenclature.GetItemAsync(hat)).Prices.Single(p => p.PriceTypeId == retail).Price);
+
+        await using var db = host.NewDb();
+        Assert.True(await db.AuditEntries.AnyAsync(e => e.OrganizationId == _org && e.Reason == "Выгрузка цен в МойСклад"));
     }
 
     [SqlFact]
@@ -390,13 +555,14 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         }
 
         // Идущая: «Остановить» нажато из другой вкладки, пока читаются услуги; движок останавливается на контрольной точке.
+        // Ревью: та же вкладка потом нажимает «Продолжить» — её копия загрузки устарела (её закрыл фоновый процесс), но перечитывается.
+        await using var tab = host.As(_user, _org);
         fake.OnList = async entity =>
         {
             if (entity == MoySkladEntities.Service)
             {
                 fake.OnList = null;
-                await using var other = host.As(_user, _org);
-                await Service(other, fake).CancelAsync(runId);
+                await Service(tab, fake).CancelAsync(runId);
             }
         };
         await using (var s = host.As(_user, _org))
@@ -408,10 +574,10 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
             Assert.Equal("product", stopped.Stage);
         }
 
+        await Service(tab, fake).ResumeAsync(runId);
         await using (var s = host.As(_user, _org))
         {
             var ms = Service(s, fake);
-            await ms.ResumeAsync(runId);
             Assert.True(await ms.ProcessNextAsync());
             Assert.Equal(ImportRunStatus.Completed, (await ms.StatusAsync()).Runs.Single().Status);
             Assert.Single((await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ДОСТ"))).Items);

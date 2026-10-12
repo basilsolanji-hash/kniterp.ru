@@ -27,7 +27,7 @@ public sealed class AuthenticationTests(SqlTestHost host) : IClassFixture<SqlTes
         Assert.Equal(userId, result.Session!.UserId);
         Assert.Equal(org.OrganizationId, result.Session.OrganizationId);
         Assert.False(result.Session.UsedTwoFactor);
-        Assert.True(await s.SignIn.ValidateSessionAsync(userId, org.OrganizationId, result.Session.SecurityStamp));
+        Assert.True(await s.SignIn.ValidateSessionAsync(userId, org.OrganizationId, result.Session.SecurityStamp, result.Session.SessionId));
 
         await using var db = host.NewDb();
         Assert.True(await db.AuditEntries.AnyAsync(e => e.OrganizationId == org.OrganizationId && e.ActorUserId == userId
@@ -222,7 +222,7 @@ public sealed class AuthenticationTests(SqlTestHost host) : IClassFixture<SqlTes
 
         await using (var s = host.As(null, null))
         {
-            Assert.False(await s.SignIn.ValidateSessionAsync(userId, org.OrganizationId, session.SecurityStamp));
+            Assert.False(await s.SignIn.ValidateSessionAsync(userId, org.OrganizationId, session.SecurityStamp, session.SessionId));
             Assert.Equal(SignInStatus.NoOrganization, (await s.SignIn.PasswordSignInAsync(email, Password)).Status);
         }
     }
@@ -246,7 +246,7 @@ public sealed class AuthenticationTests(SqlTestHost host) : IClassFixture<SqlTes
 
         await using (var s = host.As(null, null))
         {
-            Assert.False(await s.SignIn.ValidateSessionAsync(userId, org.OrganizationId, session.SecurityStamp));
+            Assert.False(await s.SignIn.ValidateSessionAsync(userId, org.OrganizationId, session.SecurityStamp, session.SessionId));
         }
     }
 

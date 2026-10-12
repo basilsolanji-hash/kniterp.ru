@@ -1,0 +1,146 @@
+@using KnitErp.Application.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevYarnService Yarn
+
+@*
+    Списание пряжи на образец (D721): количество — по факту цеха (вес × штук × доли цветов), документ — черновик «Списание» склада;
+    проводит его кладовщик. Уже списано — ссылка на документ.
+*@
+@if (_p is not null)
+{
+    <div class="dev-yarn">
+        @if (_message is not null)
+        {
+            <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+        }
+        @if (_p.DocumentId is { } doc)
+        {
+            <p class="small">
+                @L("Документ списания пряжи"): <a href="stock-documents/@doc">@_p.DocumentNumber</a>
+                @if (_p.DocumentStatus is { } st) { <span class="tag">@L(StatusName(st))</span> }
+            </p>
+        }
+        @if (_p.Lines.Count > 0)
+        {
+            <table class="dev-matrix">
+                <thead><tr><th>@L("Пряжа")</th><th class="num">@L("Граммы")</th><th class="num">@L("Списать")</th></tr></thead>
+                <tbody>
+                    @foreach (var l in _p.Lines)
+                    {
+                        <tr><td>@l.ItemCode — @l.ItemName</td><td class="num">@DevFormat.Grams(l.Grams)</td><td class="num">@l.Quantity.ToString("0.######", CultureInfo.InvariantCulture) @l.Unit</td></tr>
+                    }
+                </tbody>
+            </table>
+        }
+        @if (_p.Warnings.Count > 0)
+        {
+            <ul class="small muted">
+                @foreach (var w in _p.Warnings)
+                {
+                    <li>@w</li>
+                }
+            </ul>
+        }
+        @if (_p.Refusal is null)
+        {
+            <form class="inline-form" @onsubmit="WriteOffAsync">
+                <label>
+                    @L("Склад")
+                    <select @bind="_warehouse" required>
+                        <option value="">—</option>
+                        @foreach (var w in _p.Warehouses)
+                        {
+                            <option value="@w.Id">@w.Name</option>
+                        }
+                    </select>
+                </label>
+                @if (_p.Reasons.Count > 0)
+                {
+                    <label>
+                        @L("Причина списания")
+                        <select @bind="_reason">
+                            <option value="">—</option>
+                            @foreach (var r in _p.Reasons)
+                            {
+                                <option value="@r.Id">@r.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+                <button type="submit" disabled="@(_busy || _warehouse.Length == 0)">@L("Создать черновик списания")</button>
+            </form>
+        }
+        else
+        {
+            <p class="muted small">@_p.Refusal</p>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long SampleId { get; set; }
+
+    private DevYarnWriteOffDto? _p;
+    private string _warehouse = string.Empty;
+    private string _reason = string.Empty;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != SampleId)
+        {
+            _loaded = SampleId;
+            _p = await Gate.Run(() => Yarn.PreviewAsync(SampleId));
+            if (_p.Warehouses.Count == 1)
+            {
+                _warehouse = _p.Warehouses[0].Id.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+    }
+
+    private static string StatusName(KnitErp.Domain.Warehousing.StockDocumentStatus s) => s switch
+    {
+        KnitErp.Domain.Warehousing.StockDocumentStatus.Draft => "Черновик",
+        KnitErp.Domain.Warehousing.StockDocumentStatus.Posted => "Проведён",
+        KnitErp.Domain.Warehousing.StockDocumentStatus.Reversed => "Сторнирован",
+        _ => "Отменён",
+    };
+
+    private async Task WriteOffAsync()
+    {
+        if (_busy || !long.TryParse(_warehouse, out var warehouse))
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(() => Yarn.WriteOffAsync(SampleId, warehouse, long.TryParse(_reason, out var r) ? r : null));
+            _message = L("Черновик списания создан — его проводит склад.");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _p = await Gate.Run(() => Yarn.PreviewAsync(SampleId));
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

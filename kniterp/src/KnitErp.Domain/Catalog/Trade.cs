@@ -155,6 +155,9 @@ public enum PriceChangeSource : byte
     Import = 3,
     External = 4,
     Modification = 5,
+
+    /// <summary>D322: автоцена по правилу вида цены (закупка × коэффициент) при изменении закупочной цены.</summary>
+    Rule = 6,
 }
 
 /// <summary>
@@ -204,6 +207,12 @@ public enum PriceRounding : byte
     Ruble = 1,
     Ten = 2,
     Hundred = 3,
+
+    /// <summary>D322: окончание на 9 — 1985 → 1989, 2010 → 2009.</summary>
+    Nine = 4,
+
+    /// <summary>D322: окончание на 99 — 1940 → 1899, 1960 → 1999.</summary>
+    NinetyNine = 5,
 }
 
 /// <summary>Журнал массовой переоценки (D306): кто, когда, вид цены, правило и сколько позиций изменено. Только вставка.</summary>
@@ -270,6 +279,13 @@ public static class Revaluation
 
     public static decimal Round(decimal price, PriceRounding rounding)
     {
+        if (rounding is PriceRounding.Nine or PriceRounding.NinetyNine)
+        {
+            // Психологическая цена: до ближайших 10 (100) и минус 1; не меньше 9 (99).
+            var unit = rounding == PriceRounding.Nine ? 10m : 100m;
+            return Math.Max(unit - 1, decimal.Round(price / unit, 0, MidpointRounding.AwayFromZero) * unit - 1);
+        }
+
         var step = rounding switch
         {
             PriceRounding.Ruble => 1m,
@@ -290,8 +306,50 @@ public static class Revaluation
             PriceRounding.Ruble => "до рубля",
             PriceRounding.Ten => "до 10",
             PriceRounding.Hundred => "до 100",
+            PriceRounding.Nine => "с окончанием на 9",
+            PriceRounding.NinetyNine => "с окончанием на 99",
             _ => "до копеек",
         };
         return $"{rule}, округление {round}";
     }
+}
+
+/// <summary>
+/// Правило автоцены вида цены (D322): цена = закупочная цена × коэффициент с округлением. Включённое правило пересчитывает цену этого вида
+/// при каждом изменении закупочной цены (карточка, Excel, прайс поставщика) и по кнопке «Пересчитать». Цены, загруженные из МойСклад,
+/// правилом не перезаписываются при загрузке.
+/// </summary>
+public sealed class PriceRule
+{
+    private PriceRule()
+    {
+    }
+
+    public long Id { get; private set; }
+    public long OrganizationId { get; private set; }
+    public long PriceTypeId { get; private set; }
+    public decimal Factor { get; private set; }
+    public PriceRounding Rounding { get; private set; }
+    public bool IsActive { get; private set; }
+    public DateTime UpdatedAtUtc { get; private set; }
+    public byte[] RowVersion { get; private set; } = [];
+
+    public static PriceRule Create(long organizationId, long priceTypeId) => new() { OrganizationId = organizationId, PriceTypeId = priceTypeId, Factor = 1 };
+
+    public void Set(decimal factor, PriceRounding rounding, bool isActive, DateTime nowUtc)
+    {
+        Revaluation.Validate(RevaluationMode.FromPurchase, factor);
+        if (!Enum.IsDefined(rounding))
+        {
+            throw new BusinessRuleException("catalog.revaluation.rounding", "Выберите округление.");
+        }
+
+        Factor = factor;
+        Rounding = rounding;
+        IsActive = isActive;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public decimal? PriceFor(decimal? purchasePrice) =>
+        purchasePrice is > 0 and var p ? Revaluation.NewPrice(RevaluationMode.FromPurchase, Factor, Rounding, null, p) : null;
 }

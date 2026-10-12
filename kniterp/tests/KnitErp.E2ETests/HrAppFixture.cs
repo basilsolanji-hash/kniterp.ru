@@ -152,16 +152,31 @@ public sealed class HrAppFixture : IAsyncLifetime
     {
         var context = await Browser.NewContextAsync(Options(false, null));
         var page = await context.NewPageAsync();
-        await page.GotoAsync("account/login");
-        await page.GetByLabel("Эл. почта").FillAsync(OwnerEmail);
-        await page.GetByLabel("Пароль").FillAsync(Password);
-        await page.GetByRole(AriaRole.Button, new() { Name = "Войти" }).ClickAsync();
-        await page.WaitForURLAsync(url => url.Contains("setup-2fa"), new() { Timeout = 30_000 });
-        var key = (await page.Locator(".key").InnerTextAsync()).Trim();
-        await page.GetByLabel("Код из приложения").FillAsync(Totp.Compute(key.Replace(" ", ""), Totp.StepAt(DateTime.UtcNow)));
-        await page.GetByRole(AriaRole.Button, new() { Name = "Подключить и войти" }).ClickAsync();
-        await page.WaitForURLAsync(url => !url.Contains("/account/"), new() { Timeout = 30_000 });
-        _ownerState = await context.StorageStateAsync();
-        await context.CloseAsync();
+        try
+        {
+            await page.GotoAsync("account/login");
+            await page.GetByLabel("Эл. почта").FillAsync(OwnerEmail);
+            await page.GetByLabel("Пароль").FillAsync(Password);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Войти" }).ClickAsync();
+            await page.WaitForURLAsync(url => url.Contains("setup-2fa"), new() { Timeout = 30_000 });
+            var key = (await page.Locator(".key").InnerTextAsync()).Trim();
+            await page.GetByLabel("Код из приложения").FillAsync(Totp.Compute(key.Replace(" ", ""), Totp.StepAt(DateTime.UtcNow)));
+            await page.GetByRole(AriaRole.Button, new() { Name = "Подключить и войти" }).ClickAsync();
+            await page.WaitForURLAsync(url => !url.Contains("/account/"), new() { Timeout = 30_000 });
+            _ownerState = await context.StorageStateAsync();
+        }
+        catch (TimeoutException ex)
+        {
+            // Вход падает в общей подготовке класса — без снимка и адреса в CI не понять, на каком шаге (страница входа или 2FA).
+            var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath();
+            Directory.CreateDirectory(dir);
+            await page.ScreenshotAsync(new() { Path = Path.Combine(dir, $"owner-sign-in-{Guid.NewGuid():N}.png"), FullPage = true });
+            var alert = await page.Locator("[role=alert], .alert, .error").AllInnerTextsAsync();
+            throw new TimeoutException($"Вход Владельца не завершён: {page.Url}; сообщения: {string.Join(" | ", alert)}", ex);
+        }
+        finally
+        {
+            await context.CloseAsync();
+        }
     }
 }

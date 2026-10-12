@@ -173,6 +173,7 @@ else
     }
 
     <div class="actions" style="margin-top: 16px">
+        <LabelsButton Lines="@(_doc.Lines.Select(l => (l.ItemId, l.Quantity)))" />
         @if (_doc.CanEdit)
         {
             <button type="button" @onclick="SubmitAsync" disabled="@(_busy || _doc.Lines.Count == 0)">@L("Отправить на утверждение")</button>

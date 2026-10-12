@@ -144,6 +144,8 @@ public static class RoleMatrixP0
         (Permissions.CrmAll,                  [Full, None, None, None, None, None, None, None]),
         (Permissions.CrmSettings,             [Full, Full, None, None, None, None, None, None]),
         (Permissions.CrmExport,               [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmLeadsCreate,          [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmMailing,              [Full, None, None, None, None, None, None, None]),
         // Допущение D1100 (продажи): обходы ограничений цены и кредита — Владелец; соглашения и скидки — Владелец, Администратор
         // и Бухгалтер (договорные условия); отчёты продаж — кто видит продажи и цены; план — Владелец; коды маркировки сканируют
         // кладовщики своих складов. Менеджер и руководитель продаж — CrmRoleMatrix.
@@ -273,6 +275,8 @@ public static class CrmRoleMatrix
         [Permissions.CrmAll] = Full,
         [Permissions.CrmSettings] = Full,
         [Permissions.CrmExport] = Full,
+        [Permissions.CrmLeadsCreate] = Full,
+        [Permissions.CrmMailing] = Full,
         [Permissions.SalesView] = Full,
         [Permissions.SalesEdit] = Full,
         [Permissions.PriceView] = Full,

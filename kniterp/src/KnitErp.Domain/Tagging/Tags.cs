@@ -39,6 +39,8 @@ public enum TaggedEntity : byte
     DevModel = 40,
     DevSample = 41,
     DevPattern = 42,
+    DevDetail = 43,
+    DevMachine = 44,
     // 30–39 — CRM (D601).
     CrmLead = 30,
     CrmDeal = 31,
@@ -92,6 +94,8 @@ public static class TagColors
         TaggedEntity.DevModel => "Модели в разработке",
         TaggedEntity.DevSample => "Образцы",
         TaggedEntity.DevPattern => "Рисунки",
+        TaggedEntity.DevDetail => "Детали моделей",
+        TaggedEntity.DevMachine => "Вязальные машины",
         TaggedEntity.CrmLead => "Лиды",
         TaggedEntity.CrmDeal => "Сделки",
         TaggedEntity.CrmContact => "Контакты",

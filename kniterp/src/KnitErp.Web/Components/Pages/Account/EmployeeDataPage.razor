@@ -1,0 +1,174 @@
+@page "/account/employee-data"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout AccountLayout
+@using KnitErp.Application.Hr
+@using KnitErp.Domain.Hr
+@inject EmployeeDataRequestService Requests
+
+@*
+    D125: анкета сотрудника по ссылке — без входа. Видны только организация и ФИО: сохранённые ПДн не показываются (ссылка могла
+    утечь). Присланное ждёт проверки кадровиком. Неизвестная, просроченная и использованная ссылки — один и тот же ответ.
+*@
+<PageTitle>@L("Анкета сотрудника") — knitERP</PageTitle>
+<HeadContent><meta name="referrer" content="no-referrer" /><meta name="robots" content="noindex, nofollow" /></HeadContent>
+<h1>@L("Анкета сотрудника")</h1>
+
+@if (_done)
+{
+    <div class="flash" role="status">@L("Спасибо! Данные отправлены кадровику на проверку. Ссылка больше не действует.")</div>
+}
+else if (_form is null)
+{
+    <div class="error" role="alert">@L("Ссылка недействительна: срок истёк, анкета уже отправлена или выдана новая ссылка. Попросите кадровика прислать новую.")</div>
+}
+else
+{
+    <p><strong>@_form.Organization</strong><br />@_form.EmployeeName</p>
+    <p class="muted small">@L("Заполните то, чего не хватает в вашей карточке; пустые поля останутся как есть. Ссылка одноразовая. Данные попадут в карточку после проверки кадровиком.")</p>
+    @if (_message is not null)
+    {
+        <div class="error" role="alert">@_message</div>
+    }
+
+    <EditForm Model="Input" method="post" FormName="employee-data" OnSubmit="SubmitAsync" enctype="multipart/form-data" class="employee-data-form">
+        <fieldset>
+            <legend>@L("Личные данные")</legend>
+            <label>@L("Дата рождения") <InputText @bind-Value="Input.BirthDate" type="date" autocomplete="bday" /></label>
+            <label>@L("Телефон") <InputText @bind-Value="Input.Phone" maxlength="20" inputmode="tel" autocomplete="tel" /></label>
+            <label>@L("Личная почта") <InputText @bind-Value="Input.PersonalEmail" type="email" maxlength="254" autocomplete="email" /></label>
+        </fieldset>
+        <fieldset>
+            <legend>@L("Паспорт")</legend>
+            <label>@L("Паспорт: серия и номер") <InputText @bind-Value="Input.PassportNumber" maxlength="20" autocomplete="off" /></label>
+            <label>@L("Кем выдан") <InputText @bind-Value="Input.PassportIssuer" maxlength="500" autocomplete="off" /></label>
+            <label>@L("Дата выдачи") <InputText @bind-Value="Input.PassportIssuedOn" type="date" autocomplete="off" /></label>
+            <label>@L("Код подразделения") <InputText @bind-Value="Input.PassportDivisionCode" maxlength="7" placeholder="000-000" autocomplete="off" /></label>
+        </fieldset>
+        <fieldset>
+            <legend>@L("Адреса")</legend>
+            <label>@L("Адрес регистрации") <InputText @bind-Value="Input.RegistrationAddress" maxlength="500" autocomplete="off" /></label>
+            <label>@L("Фактический адрес") <InputText @bind-Value="Input.ActualAddress" maxlength="500" autocomplete="street-address" /></label>
+        </fieldset>
+        <fieldset>
+            <legend>@L("СНИЛС и ИНН")</legend>
+            <label>@L("СНИЛС") <InputText @bind-Value="Input.Snils" maxlength="14" placeholder="000-000-000 00" inputmode="numeric" autocomplete="off" /></label>
+            <label>@L("ИНН") <InputText @bind-Value="Input.Inn" maxlength="12" inputmode="numeric" autocomplete="off" /></label>
+        </fieldset>
+        <fieldset>
+            <legend>@L("Документы (по желанию)")</legend>
+            <p class="muted small">@L("PDF, JPEG или PNG, каждый файл до 3 МБ; фотография — JPEG или PNG. После ошибки файлы нужно выбрать заново.")</p>
+            @foreach (var kind in EmployeeDataForm.DocumentKinds)
+            {
+                <label>
+                    @L(EmployeeDocumentKinds.Name(kind))
+                    <input type="file" name="@FileField(kind)" accept="@(kind == EmployeeDocumentKind.Photo ? ".jpg,.jpeg,.png" : ".pdf,.jpg,.jpeg,.png")" />
+                </label>
+            }
+        </fieldset>
+
+        <details>
+            <summary>@L(_form.Consent.Title)</summary>
+            @foreach (var p in _form.Consent.Paragraphs)
+            {
+                <p class="small">@p</p>
+            }
+        </details>
+        <label class="consent-check">
+            <InputCheckbox @bind-Value="Input.Consent" required />
+            <span>@L("Даю согласие на обработку моих персональных данных (ст. 9 Федерального закона № 152-ФЗ) на условиях, изложенных выше.")</span>
+        </label>
+        <p class="muted small">@L("Ссылка действует до {0} (UTC). Не пересылайте её никому.", _form.ExpiresAtUtc.ToString("dd.MM.yyyy HH:mm"))</p>
+        <button type="submit">@L("Отправить кадровику")</button>
+    </EditForm>
+}
+
+@code {
+    /// <summary>Тело формы: пять сканов по 3 МБ и поля (D125). Лимит ставит промежуточный обработчик в Program.cs.</summary>
+    public const long MaxBodyBytes = 16L * 1024 * 1024;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? Token { get; set; }
+
+    [SupplyParameterFromForm(FormName = "employee-data")]
+    private DataInput Input { get; set; } = default!;
+
+    private EmployeeDataFormDto? _form;
+    private string? _message;
+    private bool _done;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        _form = await Requests.DescribeAsync(Token, HttpContext.RequestAborted);
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_form is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var form = await HttpContext.Request.ReadFormAsync(HttpContext.RequestAborted);
+            var uploads = new List<EmployeeDataUpload>();
+            foreach (var kind in EmployeeDataForm.DocumentKinds)
+            {
+                if (form.Files.GetFile(FileField(kind)) is { Length: > 0 } file)
+                {
+                    if (file.Length > ConsentScan.MaxBytes)
+                    {
+                        throw new BusinessRuleException("hr.consent.scan_size", $"{EmployeeDocumentKinds.Name(kind)}: файл до 3 МБ.");
+                    }
+
+                    using var buffer = new MemoryStream();
+                    await file.CopyToAsync(buffer, HttpContext.RequestAborted);
+                    uploads.Add(new EmployeeDataUpload(kind, file.FileName, buffer.ToArray()));
+                }
+            }
+
+            var values = new EmployeeDataValues(Date(Input.BirthDate, "Дата рождения"), Input.PassportNumber, Input.PassportIssuer,
+                Date(Input.PassportIssuedOn, "Дата выдачи"), Input.PassportDivisionCode, Input.RegistrationAddress, Input.ActualAddress,
+                Input.Phone, Input.PersonalEmail, Input.Snils, Input.Inn);
+            await Requests.SubmitAsync(Token, values, uploads, Input.Consent, HttpContext.Connection.RemoteIpAddress?.ToString(), HttpContext.RequestAborted);
+            _done = true;
+            Input = new DataInput();
+        }
+        catch (BusinessRuleException ex)
+        {
+            _message = UiErrors.Message(ex);
+            if (ex.Code == EmployeeDataForm.InvalidLinkCode)
+            {
+                _form = null;
+            }
+        }
+    }
+
+    private static string FileField(EmployeeDocumentKind kind) => $"File{(int)kind}";
+
+    private static DateOnly? Date(string? value, string field) =>
+        string.IsNullOrWhiteSpace(value) ? null
+        : DateOnly.TryParseExact(value.Trim(), "yyyy-MM-dd", out var d) ? d
+        : throw new BusinessRuleException("field.date", L("Неверная дата «{0}»: укажите день, месяц и год.", L(field)));
+
+    private sealed class DataInput
+    {
+        public string? BirthDate { get; set; }
+        public string? PassportNumber { get; set; }
+        public string? PassportIssuer { get; set; }
+        public string? PassportIssuedOn { get; set; }
+        public string? PassportDivisionCode { get; set; }
+        public string? RegistrationAddress { get; set; }
+        public string? ActualAddress { get; set; }
+        public string? Phone { get; set; }
+        public string? PersonalEmail { get; set; }
+        public string? Snils { get; set; }
+        public string? Inn { get; set; }
+        public bool Consent { get; set; }
+    }
+}

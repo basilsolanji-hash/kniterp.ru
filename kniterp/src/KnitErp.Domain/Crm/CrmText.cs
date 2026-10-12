@@ -128,6 +128,11 @@ public static class CrmText
         return at <= 0 ? "***" : $"{normalized[0]}***{normalized[at..]}";
     }
 
+    /// <summary>Обязательный текст для сценариев приложения (DomainText — внутренний в домене).</summary>
+    public static string Require(string? value, int maxLength, string field) => DomainText.Require(value, maxLength, field);
+
+    public static string? Optional(string? value, int maxLength, string field) => DomainText.Optional(value, maxLength, field);
+
     /// <summary>Мессенджер: Telegram, WhatsApp, VK — ссылка или имя пользователя, как ввёл менеджер.</summary>
     public static string? Messenger(string? value) => DomainText.Optional(value, MessengerMaxLength, "Мессенджер");
 }

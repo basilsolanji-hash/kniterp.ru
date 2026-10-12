@@ -12,6 +12,9 @@
 @inject CatalogService Catalog
 @inject CatalogSettingsService CatalogSettings
 @inject ItemCodesService Codes
+@inject ItemCopyService Copies
+@inject ValueSetService ValueSets
+@inject NavigationManager Nav
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -80,6 +83,9 @@ else
     </div>
     <p class="muted">@L("Код, наименование, тип, единица и НДС меняются в списке номенклатуры кнопкой «Изменить».")</p>
 
+    @* Широкий экран: разделы карточки в две колонки, модификации — во всю ширину (замечание «пустая площадь»). *@
+    <div class="card-flow">
+    <section class="card-sec">
     <h2>@L("Сведения")</h2>
     <div class="panel">
         <form @onsubmit="SaveDetailsAsync">
@@ -164,9 +170,11 @@ else
         </form>
     </div>
 
+    </section>
     @if (_trade is { } trade && _settings.Shows(CardBlocks.Trade))
     {
         var tradeEditable = trade.CanEdit;
+        <section class="card-sec">
         <h2 style="margin-top: 20px">@L("Торговля и маркировка")</h2>
         <div class="panel">
             <form @onsubmit="SaveTradeAsync">
@@ -211,10 +219,12 @@ else
                 }
             </form>
         </div>
+        </section>
     }
 
     @if (_bundle is { } bundle)
     {
+        <section class="card-sec">
         <h2 style="margin-top: 20px">@L("Состав комплекта")</h2>
         <p class="muted">@L("Комплект продаётся одной строкой, а на складе списываются его компоненты. Изменение состава не меняет проведённые документы.")</p>
         <div class="totals" role="status">
@@ -312,18 +322,22 @@ else
                 <button type="submit" disabled="@_busy">@L("Добавить в состав")</button>
             </form>
         }
+        </section>
     }
 
     @if (_item.CustomFields.Any(f => f.IsArchived))
     {
+        <section class="card-sec wide">
         <dl class="facts">
             @foreach (var f in _item.CustomFields.Where(f => f.IsArchived))
             {
                 <dt>@f.Name (@L("в архиве"))</dt><dd>@(f.Display ?? f.Value)</dd>
             }
         </dl>
+        </section>
     }
 
+    <section class="card-sec">
     <h2 style="margin-top: 20px">@L("Штрихкоды")</h2>
     <div class="scroll">
         <table class="compact">
@@ -369,10 +383,26 @@ else
     <div class="actions" style="margin-top: 8px">
         @* D316: печать этикеток по шаблону организации. *@
         <a class="button secondary" href="catalog/labels/print?ids=@Id" target="_blank" rel="noopener">@L("Печать этикеток")</a>
+        @if (editable && _variants?.Parent is null)
+        {
+            <button type="button" class="secondary" @onclick="ToggleCopy" disabled="@_busy">@L("Создать по образцу")</button>
+        }
     </div>
+    @if (_copyOpen && editable)
+    {
+        @* D319: копия карточки — сведения, цены, упаковки, поставщики, состав комплекта; без штрихкодов, GTIN и артикула. *@
+        <form class="inline-form panel" @onsubmit="CopyAsync">
+            <label>@L("Код новой позиции") <input @bind="_copyCode" maxlength="40" placeholder="@L("пусто — по автокоду")" /></label>
+            <label>@L("Наименование") <input @bind="_copyName" maxlength="300" required /></label>
+            <button type="submit" disabled="@_busy">@L("Создать копию")</button>
+            <span class="muted small">@L("Скопируются сведения, цены, упаковки, поставщики и состав комплекта. Штрихкоды, GTIN и артикул — новые.")</span>
+        </form>
+    }
+    </section>
 
     @if (_item.IsStocked && _settings.Shows(CardBlocks.Packs))
     {
+        <section class="card-sec">
         <h2 style="margin-top: 20px">@L("Упаковки")</h2>
         <p class="muted">@L("Например, коробка = 12 шт или мешок = 25 кг. Свой штрихкод упаковки: скан даёт позицию и количество в основных единицах.")</p>
         <div class="scroll">
@@ -418,10 +448,12 @@ else
             </form>
             <p class="muted small">@L("Нет нужной единицы (коробка, мешок)? Добавьте её в справочник единиц:") <a href="catalog/settings">@L("Единицы")</a></p>
         }
+        </section>
     }
 
     @if (_item.Type != ItemType.Bundle && _settings.Shows(CardBlocks.Suppliers))
     {
+        <section class="card-sec">
         <h2 style="margin-top: 20px">@L("Поставщики")</h2>
         <div class="scroll">
             <table class="compact">
@@ -484,10 +516,12 @@ else
                 <button type="submit" disabled="@_busy">@L("Сохранить поставщика")</button>
             </form>
         }
+        </section>
     }
 
     @if (_settings.Shows(CardBlocks.Photos))
     {
+        <section class="card-sec">
         <h2 style="margin-top: 20px">@L("Фото")</h2>
         <p class="muted">@L("JPEG, PNG или WebP до 2 МБ, не больше {0}. Первое — основное: оно видно в списке номенклатуры.", ItemPhoto.MaxPerItem)</p>
         @if (_photos.Count > 0)
@@ -521,10 +555,12 @@ else
         {
             <label class="file-pick">@L("Добавить фото") <InputFile OnChange="UploadAsync" accept="image/jpeg,image/png,image/webp" multiple disabled="@_busy" /></label>
         }
+        </section>
     }
 
     @if (_item.CanSeePrices)
     {
+        <section class="card-sec">
         <h2 style="margin-top: 20px">@L("Цены")</h2>
         <form @onsubmit="SavePricesAsync">
             <div class="scroll">
@@ -589,10 +625,12 @@ else
                 </div>
             </details>
         }
+        </section>
     }
 
     @if (_variants is { Parent: null } variants && _item.IsStocked && _settings.Shows(CardBlocks.Modifications))
     {
+        <section class="card-sec wide">
         <h2 style="margin-top: 20px">@L("Модификации")</h2>
         <p class="muted">@L("Цвет, размер и другие характеристики. Каждая модификация — отдельная позиция со своим кодом, остатком, штрихкодом и ценой: в документах и отчётах она выбирается как обычная позиция.")</p>
         @if (variants.Modifications.Count > 0)
@@ -627,16 +665,33 @@ else
                     @foreach (var c in active)
                     {
                         var id = c.Id;
-                        <label>@c.Name <input value="@_axes.GetValueOrDefault(id)" @onchange="e => _axes[id] = e.Value?.ToString()" placeholder="@L("через запятую")" size="18" /></label>
+                        <label>
+                            @c.Name <input value="@_axes.GetValueOrDefault(id)" @onchange="e => _axes[id] = e.Value?.ToString()" placeholder="@L("через запятую или 42-56/2")" size="18" />
+                            @if (_valueSets.Where(v => v.CharacteristicId == id).ToList() is { Count: > 0 } sets)
+                            {
+                                @* D321: набор значений — подставить одним выбором. *@
+                                <select aria-label="@L("Набор значений")" @onchange="e => ApplySet(id, e)">
+                                    <option value="">@L("из набора…")</option>
+                                    @foreach (var vs in sets)
+                                    {
+                                        <option value="@vs.Id">@vs.Name</option>
+                                    }
+                                </select>
+                            }
+                        </label>
                     }
                     <button type="submit" disabled="@_busy">@L("Создать модификации")</button>
                 </form>
-                <p class="muted small">@L("Например, Цвет «красный, синий» и Размер «46, 48, 50» — 6 модификаций. Уже созданные сочетания пропускаются; цены копируются с этой позиции.")</p>
+                <p class="muted small">@L("Например, Цвет «красный, синий» и Размер «46, 48, 50» — 6 модификаций. Уже созданные сочетания пропускаются; цены копируются с этой позиции.")
+                    @L("Диапазон с шагом: «42-56/2». Свои наборы — в")
+                    <a href="catalog/settings?tab=Characteristics">@L("Характеристики")</a>.</p>
             }
         }
+        </section>
     }
     else if (_variants is { Parent: not null } own && editable)
     {
+        <section class="card-sec">
         <h2 style="margin-top: 20px">@L("Характеристики модификации")</h2>
         <form class="inline-form" @onsubmit="SaveValuesAsync">
             @foreach (var c in _characteristics.Where(c => !c.IsArchived || own.Values.Any(v => v.CharacteristicId == c.Id)))
@@ -646,7 +701,9 @@ else
             }
             <button type="submit" disabled="@_busy">@L("Сохранить")</button>
         </form>
+        </section>
     }
+    </div>
 }
 
 
@@ -732,6 +789,7 @@ else
         PriceChangeSource.Import => L("загрузка из Excel"),
         PriceChangeSource.External => L("внешняя система"),
         PriceChangeSource.Modification => L("создание модификации"),
+        PriceChangeSource.Rule => L("автоцена по правилу"),
         _ => L("вручную"),
     };
 
@@ -747,6 +805,15 @@ else
     private IReadOnlyList<ItemPhotoDto> _photos = [];
     private IReadOnlyList<CharacteristicDto> _characteristics = [];
     private Dictionary<long, string?> _axes = [];
+    private IReadOnlyList<ValueSetDto> _valueSets = [];
+
+    private void ApplySet(long characteristicId, ChangeEventArgs e)
+    {
+        if (long.TryParse(e.Value?.ToString(), out var setId) && _valueSets.FirstOrDefault(v => v.Id == setId) is { } set)
+        {
+            _axes[characteristicId] = string.Join(", ", set.Values);
+        }
+    }
     private Dictionary<long, string?> _values = [];
     private IReadOnlyList<ItemGroupDto> _groups = [];
     private IReadOnlyDictionary<long, IReadOnlyList<UserCatalogEntryDto>> _entries = new Dictionary<long, IReadOnlyList<UserCatalogEntryDto>>();
@@ -794,6 +861,28 @@ else
     // D312: блоки, скрытые настройками каталога организации (только отображение).
     private CatalogSettingsDto _settings = new(true, true, null, 5, 1, ItemType.Finished, null, false, []);
 
+    private bool _copyOpen;
+    private string? _copyCode;
+    private string? _copyName;
+
+    private void ToggleCopy()
+    {
+        _copyOpen = !_copyOpen;
+        _copyName = L("{0} (копия)", _item?.Name ?? "");
+        _copyCode = null;
+    }
+
+    private async Task CopyAsync()
+    {
+        long? id = null;
+        await RunAsync(async () => id = await Copies.CopyAsync(Id, _copyCode, string.IsNullOrWhiteSpace(_copyName) ? null : _copyName), null);
+        if (id is { } created)
+        {
+            _copyOpen = false;
+            Nav.NavigateTo($"catalog/items/{created}");
+        }
+    }
+
     private Task GenerateBarcodeAsync() => RunAsync(async () =>
     {
         await Codes.GenerateBarcodeAsync(Id);
@@ -804,6 +893,7 @@ else
     {
         _item = await Nomenclature.GetItemAsync(Id);
         _settings = await CatalogSettings.GetAsync();
+        _valueSets = await ValueSets.ListAsync();
         _groups = await Nomenclature.GroupsAsync();
         _entries = await Nomenclature.EntriesByCatalogAsync();
         var d = _item.Details;

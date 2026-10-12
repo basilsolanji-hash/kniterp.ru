@@ -20,6 +20,9 @@ public sealed record MoySkladStatusDto(bool Connected, string? Account, string? 
 /// <summary>Предпросмотр по виду объектов: сколько будет создано, обновлено, без изменений и пропущено.</summary>
 public sealed record PreviewLineDto(string Entity, int Total, int ToCreate, int ToUpdate, int Unchanged, int Skipped);
 
+/// <summary>D327: выгрузка цен — проверено связанных объектов, сколько отличаются, сколько отправлено, примеры кодов.</summary>
+public sealed record PriceExportDto(int Checked, int ToChange, int Sent, IReadOnlyList<string> Samples);
+
 public sealed record MoySkladPreviewDto(IReadOnlyList<PreviewLineDto> Lines, IReadOnlyList<string> Conflicts, bool Truncated);
 
 public sealed record ImportIssueDto(string Entity, string? Code, string? Name, bool IsError, string Text);
@@ -52,6 +55,154 @@ public sealed class MoySkladImportService(
         "bundle" => "Комплекты",
         _ => "—",
     };
+
+    // ---------- Выгрузка цен в МойСклад (D327) ----------
+
+    /// <summary>Сколько цен отличается от МойСклад — ничего не отправляет.</summary>
+    public Task<PriceExportDto> PriceExportPreviewAsync(CancellationToken ct = default) => PriceExportAsync(false, ct);
+
+    /// <summary>
+    /// Отправить в МойСклад цены продажи (виды, связанные при загрузке) и закупочную цену связанных позиций — только отличающиеся.
+    /// Остальные поля МойСклад не меняются. Цена, которой нет в knitERP, в МойСклад остаётся как есть.
+    /// </summary>
+    public Task<PriceExportDto> ExportPricesAsync(CancellationToken ct = default) => PriceExportAsync(true, ct);
+
+    private async Task<PriceExportDto> PriceExportAsync(bool apply, CancellationToken ct)
+    {
+        var ctx = await DemandAsync(ct);
+        await guard.DemandAsync(Permissions.PriceView, ct);
+        var org = ctx.OrganizationId;
+        var token = await TokenAsync(org, ct);
+        if (apply && await db.ExternalImportRuns.AnyAsync(r => r.OrganizationId == org && r.System == Sys
+                                                              && (r.Status == ImportRunStatus.Queued || r.Status == ImportRunStatus.Running), ct))
+        {
+            throw new BusinessRuleException("exchange.run.active", "Загрузка уже идёт — дождитесь её окончания.");
+        }
+
+        var links = await db.ExternalLinks.Where(l => l.OrganizationId == org && l.System == Sys
+                                                      && (l.ObjectType == ExternalObjectType.Item || l.ObjectType == ExternalObjectType.PriceType)).ToListAsync(ct);
+        var itemLinks = links.Where(l => l.ObjectType == ExternalObjectType.Item).ToDictionary(l => l.ExternalId, StringComparer.Ordinal);
+        var activeTypes = (await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == org && !t.IsArchived).Select(t => t.Id).ToListAsync(ct)).ToHashSet();
+        var typeLinks = links.Where(l => l.ObjectType == ExternalObjectType.PriceType && activeTypes.Contains(l.LocalId))
+            .ToDictionary(l => l.ExternalId, l => l.LocalId, StringComparer.Ordinal);
+        var prices = (await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == org).Select(p => new { p.ItemId, p.PriceTypeId, p.Price }).ToListAsync(ct))
+            .ToDictionary(p => (p.ItemId, p.PriceTypeId), p => p.Price);
+        var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == org && !i.IsArchived)
+            .Select(i => new { i.Id, i.Code, i.PurchasePrice, i.ParentItemId }).ToDictionaryAsync(i => i.Id, ct);
+
+        int checkedCount = 0, toChange = 0, sent = 0;
+        var samples = new List<string>();
+        foreach (var entity in new[] { MoySkladEntities.Product, MoySkladEntities.Service, MoySkladEntities.Bundle, MoySkladEntities.Variant })
+        {
+            for (var offset = 0; ; offset += MoySkladEntities.MaxBatch)
+            {
+                List<MsRow> rows;
+                try
+                {
+                    rows = [.. (await client.ListAsync(token, entity, offset, MoySkladEntities.MaxBatch, null, ct)).Rows ?? []];
+                }
+                catch (MoySkladException ex)
+                {
+                    throw new BusinessRuleException("exchange.moysklad.check", $"МойСклад не ответил: {ex.Message}");
+                }
+
+                var batch = new List<MsPriceUpdate>();
+                foreach (var row in rows)
+                {
+                    if (row.Archived || !itemLinks.TryGetValue(row.Id, out var link) || !items.TryGetValue(link.LocalId, out var item))
+                    {
+                        continue;
+                    }
+
+                    checkedCount++;
+                    var changed = false;
+                    var sale = new List<MsPriceValue>();
+                    foreach (var sp in row.SalePrices ?? [])
+                    {
+                        if (sp.PriceType?.RefId is not { } typeId)
+                        {
+                            continue;
+                        }
+
+                        var value = sp.Value ?? 0;
+                        if (typeLinks.TryGetValue(typeId, out var localType) && prices.TryGetValue((item.Id, localType), out var local)
+                            && ToKopecks(local) != value)
+                        {
+                            value = ToKopecks(local);
+                            changed = true;
+                        }
+
+                        sale.Add(new MsPriceValue(typeId, value));
+                    }
+
+                    // У комплекта закупочной цены в МойСклад нет — она складывается из компонентов.
+                    // У модификации без своей закупочной МойСклад берёт цену товара — совпадающую с основной позицией не отправляем.
+                    var inherited = row.BuyPrice is null && item.ParentItemId is { } parentId && items.TryGetValue(parentId, out var parent)
+                                    && parent.PurchasePrice == item.PurchasePrice;
+                    decimal? buy = null;
+                    if (entity != MoySkladEntities.Bundle && !inherited && item.PurchasePrice is { } purchase && ToKopecks(purchase) != (row.BuyPrice?.Value ?? 0))
+                    {
+                        buy = ToKopecks(purchase);
+                        changed = true;
+                    }
+
+                    if (changed)
+                    {
+                        toChange++;
+                        if (samples.Count < 20)
+                        {
+                            samples.Add(item.Code);
+                        }
+
+                        batch.Add(new MsPriceUpdate(row.Id, sale, buy));
+                    }
+                }
+
+                if (apply && batch.Count > 0)
+                {
+                    IReadOnlyList<MsRow> updated;
+                    try
+                    {
+                        updated = await client.UpdatePricesAsync(token, entity, batch, ct);
+                    }
+                    catch (MoySkladException ex)
+                    {
+                        // Отправленное раньше уже в МойСклад — в журнал, чтобы было видно, сколько успели.
+                        Audit(org, ctx.UserId, "Выгрузка цен в МойСклад", null, $"прервана: {ex.Message}; отправлено {sent} из {toChange}");
+                        await db.SaveChangesAsync(ct);
+                        throw new BusinessRuleException("exchange.moysklad.export", $"МойСклад не принял цены: {ex.Message}. Отправлено {sent}; повторите — уже отправленные не изменятся.");
+                    }
+
+                    // Версия связи — новая версия МойСклад: следующая загрузка не примет собственную выгрузку за изменение в МойСклад.
+                    foreach (var u in updated)
+                    {
+                        if (itemLinks.TryGetValue(u.Id, out var link))
+                        {
+                            link.Touch(link.ExternalCode, u.Updated, link.ContentHash, clock.UtcNow);
+                        }
+                    }
+
+                    sent += batch.Count;
+                    await db.SaveChangesAsync(ct);
+                }
+
+                if (rows.Count < MoySkladEntities.MaxBatch)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (apply)
+        {
+            Audit(org, ctx.UserId, "Выгрузка цен в МойСклад", null, $"проверено {checkedCount}, отправлено {sent}");
+            await db.SaveChangesAsync(ct);
+        }
+
+        return new PriceExportDto(checkedCount, toChange, sent, samples);
+
+        static decimal ToKopecks(decimal value) => decimal.Round(value * 100m, 0, MidpointRounding.AwayFromZero);
+    }
 
     // ---------- Подключение ----------
 
@@ -148,9 +299,19 @@ public sealed class MoySkladImportService(
 
         var run = ExternalImportRun.Queue(ctx.OrganizationId, Sys, overwrite, defaultItemType, ctx.UserId, clock.UtcNow);
         db.ExternalImportRuns.Add(run);
-        await db.SaveChangesAsync(ct);
-        Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} поставлена в очередь{(overwrite ? ", с перезаписью" : "")}");
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} поставлена в очередь{(overwrite ? ", с перезаписью" : "")}");
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex is not DbUpdateConcurrencyException)
+        {
+            // Ревью: две одновременные кнопки «Загрузить» — второй запуск упирается в уникальный индекс активной загрузки.
+            db.DiscardChanges();
+            throw new BusinessRuleException("exchange.run.active", "Загрузка уже идёт — дождитесь её окончания.");
+        }
+
         return run.Id;
     }
 
@@ -160,9 +321,19 @@ public sealed class MoySkladImportService(
         var ctx = await DemandAsync(ct);
         var run = await db.ExternalImportRuns.SingleOrDefaultAsync(r => r.Id == runId && r.OrganizationId == ctx.OrganizationId, ct)
                   ?? throw new NotFoundException("Загрузка");
-        run.RequestCancel(clock.UtcNow);
-        Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id}: запрошена остановка");
-        await db.SaveOrConflictAsync(ct);
+        // Ревью: загрузку меняет фоновый обработчик в своём контексте — копия во вкладке перечитывается, а отказ не оставляет её изменённой.
+        await db.ReloadAsync(run, ct);
+        try
+        {
+            run.RequestCancel(clock.UtcNow);
+            Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id}: запрошена остановка");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
     }
 
     /// <summary>Продолжить прерванную загрузку с последней записанной страницы.</summary>
@@ -171,9 +342,19 @@ public sealed class MoySkladImportService(
         var ctx = await DemandAsync(ct);
         var run = await db.ExternalImportRuns.SingleOrDefaultAsync(r => r.Id == runId && r.OrganizationId == ctx.OrganizationId, ct)
                   ?? throw new NotFoundException("Загрузка");
-        run.Resume(clock.UtcNow);
-        Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} продолжена с этапа «{StageName(run.Stage)}»");
-        await db.SaveOrConflictAsync(ct);
+        // Ревью: загрузку меняет фоновый обработчик в своём контексте — копия во вкладке перечитывается, а отказ не оставляет её изменённой.
+        await db.ReloadAsync(run, ct);
+        try
+        {
+            run.Resume(clock.UtcNow);
+            Audit(ctx.OrganizationId, ctx.UserId, "Загрузка из МойСклад", null, $"№ {run.Id} продолжена с этапа «{StageName(run.Stage)}»");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<ImportIssueDto>> IssuesAsync(long runId, int take = 500, CancellationToken ct = default)
@@ -319,11 +500,20 @@ public sealed class MoySkladImportService(
         private Dictionary<string, long> _articles = new(StringComparer.OrdinalIgnoreCase);
         private int _created, _updated, _skipped, _errors;
         private List<UnitOfMeasure> _units = [];
+
+        /// <summary>Отпечатки связанных позиций — только для предпросмотра (при загрузке позиции меняются по ходу, читаются заново).</summary>
+        private Dictionary<long, string>? _hashes;
         private List<VatRate> _rates = [];
 
         public async Task<MoySkladPreviewDto> PreviewAsync(CancellationToken ct)
         {
             await LoadAsync(ct);
+            // Ревью: отпечатки связанных позиций — одним запросом, а не по запросу на строку (50 000 строк = 50 000 запросов).
+            var linked = _links.Values.Where(l => l.ObjectType == ExternalObjectType.Item).Select(l => l.LocalId).ToHashSet();
+            _hashes = linked.Count == 0
+                ? []
+                : (await db.Items.AsNoTracking().Where(i => i.OrganizationId == org).ToListAsync(ct))
+                    .Where(i => linked.Contains(i.Id)).ToDictionary(i => i.Id, Hash);
             var lines = new List<PreviewLineDto>();
             var truncated = false;
             foreach (var (stage, entity) in new[] { ("folder", MoySkladEntities.Folder), ("product", MoySkladEntities.Product), ("service", MoySkladEntities.Service),
@@ -468,7 +658,20 @@ public sealed class MoySkladImportService(
             }
 
             await db.SaveChangesAsync(ct);
-            _links[(type, row.Id)] = existing;
+            var key = (type, row.Id);
+            var had = _links.TryGetValue(key, out var previous);
+            _undo.Add(() =>
+            {
+                if (had)
+                {
+                    _links[key] = previous!;
+                }
+                else
+                {
+                    _links.Remove(key);
+                }
+            });
+            _links[key] = existing;
         }
 
         private async Task IssueAsync(string entity, MsRow row, bool isError, string text, CancellationToken ct)
@@ -663,13 +866,24 @@ public sealed class MoySkladImportService(
                 return Decision.Unchanged;
             }
 
-            var item = await db.Items.AsNoTracking().SingleAsync(i => i.Id == localId, ct);
-            return link.ContentHash == Hash(item) || run.Overwrite ? Decision.Update : Decision.Skip;
+            if (run.Overwrite)
+            {
+                return Decision.Update;
+            }
+
+            var hash = _hashes is not null && _hashes.TryGetValue(localId.Value, out var known)
+                ? known
+                : Hash(await db.Items.AsNoTracking().SingleAsync(i => i.Id == localId, ct));
+            return link.ContentHash == hash ? Decision.Update : Decision.Skip;
         }
 
         private async Task ItemAsync(string stage, MsRow row, CancellationToken ct)
         {
             var entity = StageName(stage);
+            // Ревью: строка — всё или ничего. Точка сохранения: отказ на любом шаге (цены, состав комплекта, характеристики)
+            // откатывает и уже записанное по этой строке (новую позицию, удалённый состав), а не оставляет половину в базе.
+            await db.SavepointAsync(RowSavepoint, ct);
+            _undo.Clear();
             try
             {
                 var decision = await DecideItemAsync(stage, row, ct);
@@ -728,10 +942,23 @@ public sealed class MoySkladImportService(
             }
             catch (Exception ex) when (ex is BusinessRuleException or DbUpdateException or KeyNotFoundException)
             {
+                await db.RollbackToSavepointAsync(RowSavepoint, ct);
                 db.DiscardChanges();
+                // Кэши движка — как до строки: связи и единицы, записанные этой строкой, откатились вместе с ней.
+                for (var i = _undo.Count - 1; i >= 0; i--)
+                {
+                    _undo[i]();
+                }
+
+                _undo.Clear();
                 await IssueAsync(entity, row, true, Message(ex), ct);
             }
         }
+
+        private const string RowSavepoint = "ms_row";
+
+        /// <summary>Отмена изменений кэшей движка, сделанных текущей строкой (на случай её отката).</summary>
+        private readonly List<Action> _undo = [];
 
         private void MarkLinked(Item item) => _codes[item.Code] = (item.Id, true);
 
@@ -967,15 +1194,26 @@ public sealed class MoySkladImportService(
                 return;
             }
 
-            db.BundleComponents.RemoveRange(current);
-            await db.SaveChangesAsync(ct);
             var ids = wanted.Select(w => w.ItemId).ToList();
             var precision = await db.Items.AsNoTracking().Where(i => ids.Contains(i.Id)).Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, u.Precision })
                 .ToDictionaryAsync(x => x.Id, x => x.Precision, ct);
+            // Ревью: количество проверяется ДО удаления старого состава; дробное для штучной единицы (1,5 шт) — ошибка строки, а не тихое округление.
+            foreach (var (itemId, quantity) in wanted)
+            {
+                if (decimal.Round(quantity, precision[itemId]) != quantity)
+                {
+                    throw new BusinessRuleException("exchange.moysklad.component_quantity",
+                        $"Количество компонента {quantity.ToString(CultureInfo.InvariantCulture)} не делится на единицу позиции (знаков после запятой: {precision[itemId]}) — состав комплекта не изменён.");
+                }
+
+                BundleRules.CheckQuantity(quantity, precision[itemId]);
+            }
+
+            db.BundleComponents.RemoveRange(current);
+            await db.SaveChangesAsync(ct);
             for (var i = 0; i < wanted.Count; i++)
             {
-                db.BundleComponents.Add(BundleComponent.Create(org, bundle.Id, wanted[i].ItemId, Round(wanted[i].Quantity, precision[wanted[i].ItemId])!.Value,
-                    precision[wanted[i].ItemId], i));
+                db.BundleComponents.Add(BundleComponent.Create(org, bundle.Id, wanted[i].ItemId, wanted[i].Quantity, precision[wanted[i].ItemId], i));
             }
         }
 
@@ -1012,6 +1250,8 @@ public sealed class MoySkladImportService(
                 db.Units.Add(local);
                 await db.SaveChangesAsync(ct);
                 _units.Add(local);
+                var added = local;
+                _undo.Add(() => _units.Remove(added));
             }
 
             await SaveLinkAsync(ExternalObjectType.UnitOfMeasure, local.Id, uom, null, ct);

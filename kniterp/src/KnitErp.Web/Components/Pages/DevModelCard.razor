@@ -1,7 +1,9 @@
 @page "/dev/models/{Id:long}"
 @using KnitErp.Application.Development
 @using KnitErp.Domain.Development
+@inject DevGate Gate
 @inject DevModelService Models
+@inject DevTechService Tech
 @inject NavigationManager Navigation
 
 <PageTitle>@(_model is null ? L("Модель") : $"{_model.Number} {_model.Name}") — knitERP</PageTitle>
@@ -36,6 +38,20 @@ else
         }
     </ol>
 
+    @if (_completeness is { } done)
+    {
+        <div class="dev-progress" aria-label="@L("Показатели заполнения")">
+            <b>@L("Заполнено {0} из {1} разделов ({2} %)", done.Done, done.Total, done.Percent)</b>
+            <meter min="0" max="100" value="@done.Percent" low="50" high="90" optimum="100"></meter>
+            <ul class="dev-sections">
+                @foreach (var sec in done.Sections)
+                {
+                    <li class="@(sec.Done ? "done" : null)">@(sec.Done ? "✓ " : "")@L(sec.Name)</li>
+                }
+            </ul>
+        </div>
+    }
+
     @if (_message is not null)
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
@@ -63,30 +79,30 @@ else
     }
     else
     {
-        <dl class="facts">
-            <dt>@L("Стадия")</dt>
+        <dl class="facts dev-facts">
+            <div class="wide"><dt>@L("Стадия")</dt>
             <dd>
                 @L(m.StageName), @L("с {0}", Local(m.StageSinceUtc))
                 @if (m.StagePlanDays > 0 && !DevStages.IsFinal(m.Stage))
                 {
                     <span class="@(m.IsStageOverdue ? "late-text" : "muted")"> · @L("норматив {0} дн.", m.StagePlanDays)@(m.IsStageOverdue ? " — " + L("стадия дольше нормы") : "")</span>
                 }
-            </dd>
+            </dd></div>
             @if (m.CancelReason is not null)
             {
-                <dt>@L("Причина отмены")</dt><dd>@m.CancelReason</dd>
+                <div><dt>@L("Причина отмены")</dt><dd>@m.CancelReason</dd></div>
             }
-            <dt>@L("Категория")</dt><dd>@L(m.CategoryName), @L(m.AudienceName)@(m.ChildSafety ? " · " + L("ТР ТС 007/2011") : "")</dd>
-            <dt>@L("Рисунок")</dt><dd>@(m.HasPattern ? L("есть") : L("нет (гладь, ластик) — стадия «Рисунок» пропускается"))</dd>
-            <dt>@L("Коллекция")</dt><dd>@(m.CollectionName ?? "—")</dd>
-            <dt>@L("Заказчик")</dt><dd>@(m.CustomerName ?? "—")@(m.DealId is { } deal ? " · " + L("сделка № {0}", deal) : "")</dd>
-            <dt>@L("Плановый запуск")</dt><dd class="@(m.IsLate ? "late-text" : null)">@(m.PlannedLaunch?.ToString("dd.MM.yyyy") ?? "—")@(m.IsLate ? " — " + L("просрочено") : "")</dd>
-            <dt>@L("Приоритет")</dt><dd>@L(m.PriorityName)</dd>
+            <div><dt>@L("Категория")</dt><dd>@L(m.CategoryName), @L(m.AudienceName)@(m.ChildSafety ? " · " + L("ТР ТС 007/2011") : "")</dd></div>
+            <div><dt>@L("Рисунок")</dt><dd>@(m.HasPattern ? L("есть") : L("нет (гладь, ластик) — стадия «Рисунок» пропускается"))</dd></div>
+            <div><dt>@L("Коллекция")</dt><dd>@(m.CollectionName ?? "—")</dd></div>
+            <div><dt>@L("Заказчик")</dt><dd>@(m.CustomerName ?? "—")@(m.DealId is { } deal ? " · " + L("сделка № {0}", deal) : "")</dd></div>
+            <div><dt>@L("Плановый запуск")</dt><dd class="@(m.IsLate ? "late-text" : null)">@(m.PlannedLaunch?.ToString("dd.MM.yyyy") ?? "—")@(m.IsLate ? " — " + L("просрочено") : "")</dd></div>
+            <div><dt>@L("Приоритет")</dt><dd>@L(m.PriorityName)</dd></div>
             @foreach (var a in m.Assignees)
             {
-                <dt>@L(a.RoleName)</dt><dd>@(a.Name ?? "—")</dd>
+                <div><dt>@L(a.RoleName)</dt><dd>@(a.Name ?? "—")</dd></div>
             }
-            <dt>@L("Автор")</dt><dd>@m.CreatedBy, @Local(m.CreatedAtUtc)</dd>
+            <div><dt>@L("Автор")</dt><dd>@m.CreatedBy, @Local(m.CreatedAtUtc)</dd></div>
         </dl>
 
         <div class="actions">
@@ -123,6 +139,7 @@ else
             {
                 <button type="button" @onclick="RestoreAsync" disabled="@_busy">@L("Вернуть в работу")</button>
             }
+            <DevLabelLink Kind="model" Id="m.Id" />
         </div>
         @if (_cancelling)
         {
@@ -132,6 +149,11 @@ else
                 <button type="button" class="secondary" @onclick="() => _cancelling = false">@L("Не отменять")</button>
             </form>
         }
+    }
+
+    @if (m.Stage is DevStage.Approved or DevStage.Handed)
+    {
+        <DevHandoffPanel ModelId="Id" OnHanded="ReloadAfterHandoffAsync" />
     }
 
     <div class="tabs dev-tabs" role="tablist">
@@ -147,6 +169,18 @@ else
     {
         case Tab.Brief:
             @BriefTab
+            break;
+        case Tab.Details:
+            <DevDetailsTab ModelId="Id" CanEdit="@(m.CanEdit || (CurrentAccess.Has(Permissions.DevPattern) && !DevStages.IsFinal(m.Stage)))" />
+            break;
+        case Tab.Sizes:
+            <DevSizesTab ModelId="Id" />
+            break;
+        case Tab.Samples:
+            <DevSamplesTab ModelId="Id" />
+            break;
+        case Tab.Operations:
+            <DevOperationsTab ModelId="Id" />
             break;
         case Tab.Files:
             @FilesTab
@@ -186,10 +220,10 @@ else
     private enum Tab
     {
         Brief,
-        Pattern,
-        Yarn,
-        Samples,
+        Details,
         Sizes,
+        Samples,
+        Operations,
         Cost,
         Files,
         Discussion,
@@ -202,6 +236,7 @@ else
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
     private DevModelDto? _model;
+    private DevCompletenessDto? _completeness;
     private DevModelOptionsDto? _options;
     private Tab _tab = Tab.Brief;
     private bool _busy;
@@ -221,24 +256,18 @@ else
     private static string TabName(Tab tab) => tab switch
     {
         Tab.Brief => L("Задание"),
-        Tab.Pattern => L("Рисунок"),
-        Tab.Yarn => L("Пряжа и вязка"),
+        Tab.Details => L("Детали и заправка"),
+        Tab.Sizes => L("Размеры"),
         Tab.Samples => L("Образцы"),
-        Tab.Sizes => L("Размеры и замеры"),
+        Tab.Operations => L("Операции"),
         Tab.Cost => L("Себестоимость"),
         Tab.Files => L("Файлы"),
         _ => L("Обсуждение"),
     };
 
-    // Допущение D706: вкладки следующих этапов показаны сразу, чтобы карточка не менялась от этапа к этапу; пока — с пояснением.
-    private static string Placeholder(Tab tab) => tab switch
-    {
-        Tab.Pattern => L("Рисунок, раппорт, раскладка цветов и версии — следующий этап модуля. Пока приложите файл рисунка на вкладке «Файлы» (вид «Рисунок»)."),
-        Tab.Yarn => L("Пряжа, переплетение, класс машины, плотность и усадка — этап «Пряжа, вязка, образцы»."),
-        Tab.Samples => L("Образцы, доработки и передача заказчику — этап «Пряжа, вязка, образцы». Фото образцов пока — на вкладке «Файлы»."),
-        Tab.Sizes => L("Табель мер, градация и замеры образцов — этап «Размеры и замеры». Лекала пока — на вкладке «Файлы»."),
-        _ => L("Расчёт себестоимости по цветам рисунка и цена — этап «Себестоимость и цена». Целевые суммы — на вкладке «Задание»."),
-    };
+    // Допущение D706: вкладка следующего этапа показана сразу, чтобы карточка не менялась от этапа к этапу; пока — с пояснением.
+    private static string Placeholder(Tab tab) =>
+        L("Расчёт себестоимости по цветам и операциям и цена — этап «Себестоимость и цена». Целевые суммы — на вкладке «Задание», итог работы — на вкладке «Операции».");
 
     private long _loadedId;
 
@@ -271,13 +300,19 @@ else
         }
     }
 
+    private Task ReloadAfterHandoffAsync() => LoadAsync();
+
     private async Task LoadAsync()
     {
-        _model = await Models.GetAsync(Id);
+        await Gate.Run(async () =>
+        {
+            _model = await Models.GetAsync(Id);
+            _completeness = await Tech.CompletenessAsync(Id);
+        });
         _canEdit = CurrentAccess.Has(Permissions.DevEdit);
         if (!_editingBrief)
         {
-            _brief = BriefForm.From(_model.Brief);
+            _brief = BriefForm.From(_model!.Brief);
         }
     }
 
@@ -358,6 +393,15 @@ else
                 </div>
             }
         }
+        if (m.MainSketchFileId is { } sketch)
+        {
+            <div class="panel">
+                <h2>@L("Эскиз модели")</h2>
+                <img class="dev-thumb" style="max-width: 100%; max-height: 320px" src="dev/files/@(sketch)?inline=1" alt="@L("Эскиз")" loading="lazy" />
+            </div>
+        }
+
+        <DevPaletteBlock ModelId="Id" CanEdit="m.CanEdit" />
     };
 
     private RenderFragment FilesTab => __builder =>
@@ -395,7 +439,7 @@ else
                     <li>
                         @if (f.IsImage)
                         {
-                            <a href="dev/files/@f.Id" download data-enhance-nav="false"><img class="dev-thumb" src="dev/files/@f.Id" alt="@f.FileName" loading="lazy" /></a>
+                            <a href="dev/files/@f.Id" download data-enhance-nav="false"><img class="dev-thumb" src="dev/files/@(f.Id)?inline=1" alt="@f.FileName" loading="lazy" /></a>
                         }
                         <span class="tag">@L(f.KindName)</span>
                         <a href="dev/files/@f.Id" download data-enhance-nav="false">@f.FileName</a>
@@ -403,6 +447,18 @@ else
                         @if (f.Comment is not null)
                         {
                             <span class="small">@f.Comment</span>
+                        }
+                        @if (f.Kind == DevFileKind.Sketch && f.IsImage && m.CanEdit)
+                        {
+                            @if (m.MainSketchFileId == f.Id)
+                            {
+                                <span class="tag ok">@L("основной эскиз")</span>
+                            }
+                            else
+                            {
+                                var file = f;
+                                <button type="button" class="secondary" @onclick="() => PinAsync(file.Id)" disabled="@_busy">@L("Закрепить как основной эскиз")</button>
+                            }
                         }
                     </li>
                 }
@@ -441,6 +497,8 @@ else
     }
 
     private Task FillTemplateAsync() => RunAsync(() => Models.FillBriefFromTemplateAsync(Id, _model!.RowVersion), L("Задание дополнено из шаблона категории."));
+
+    private Task PinAsync(long fileId) => RunAsync(() => Tech.PinSketchAsync(Id, fileId, _model!.RowVersion), L("Эскиз закреплён."));
 
     private Task MoveAsync(DevStage to) => RunAsync(() => Models.MoveAsync(Id, to, null, _model!.RowVersion), L("Стадия изменена."));
 
@@ -492,7 +550,7 @@ else
         _isError = false;
         try
         {
-            await action();
+            await Gate.Run(action);
             _message = success;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))

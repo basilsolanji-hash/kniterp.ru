@@ -154,9 +154,13 @@ internal static class CrmCommon
             .OrderByDescending(l => l.Id).Take(10)
             .Select(l => new { l.Id, l.Number, l.Title, l.Status, l.Phone, l.Email, l.Inn }).ToListAsync(ct);
         var contacts = await db.CrmContacts.AsNoTracking()
-            .Where(c => c.OrganizationId == org && c.Id != exceptContactId && ((p != null && c.Phone == p) || (e != null && c.Email == e)))
+            .Where(c => c.OrganizationId == org && c.Id != exceptContactId && c.ErasedAtUtc == null
+                        && ((p != null && (c.Phone == p || c.Channels.Any(x => x.Kind == CrmChannelKind.Phone && x.Value == p)))
+                            || (e != null && (c.Email == e || c.Channels.Any(x => x.Kind == CrmChannelKind.Email && x.Value == e)))))
             .OrderByDescending(c => c.Id).Take(10)
-            .Select(c => new { c.Id, c.FullName, c.Position, c.Phone, c.Email }).ToListAsync(ct);
+            .Select(c => new { c.Id, c.FullName, c.Position,
+                Phone = p != null && (c.Phone == p || c.Channels.Any(x => x.Kind == CrmChannelKind.Phone && x.Value == p)) ? p : null,
+                Email = e != null && (c.Email == e || c.Channels.Any(x => x.Kind == CrmChannelKind.Email && x.Value == e)) ? e : null }).ToListAsync(ct);
         var counterparties = i is null ? [] : await db.Counterparties.AsNoTracking()
             .Where(c => c.OrganizationId == org && c.Inn == i).Take(5).Select(c => new { c.Id, c.Name }).ToListAsync(ct);
         return leads.Select(l => new CrmDuplicateDto(CrmDuplicateKind.Lead, l.Id, $"{l.Number} {l.Title}", null, $"crm/leads/{l.Id}",

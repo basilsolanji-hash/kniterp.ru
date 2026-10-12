@@ -124,11 +124,6 @@ else
     }
 
     <h2 style="margin-top: 16px">@L("Строки ({0})", _order.Lines.Count)</h2>
-    @if (_order.Lines.Count > 0)
-    {
-        @* D1136: печать этикеток позиций документа — по количеству. *@
-        <a class="button secondary sx-label-link" href="@LabelLinks.For(_order.Lines.Select(l => (l.ItemId, l.Quantity)))" target="_blank" rel="noopener">@L("Печать этикеток")</a>
-    }
 
     @if (editable)
     {
@@ -221,6 +216,7 @@ else
     }
 
     <div class="actions" style="margin-top: 12px">
+        <LabelsButton Lines="@(_order.Lines.Select(l => (l.ItemId, l.Quantity)))" />
         @if (editable)
         {
             <button type="button" @onclick="ConfirmAsync" disabled="@(_busy || _order.Lines.Count == 0)">@L("Подтвердить заказ")</button>

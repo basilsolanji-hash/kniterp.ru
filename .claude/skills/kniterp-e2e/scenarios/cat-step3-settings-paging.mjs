@@ -10,11 +10,11 @@ const sfx = Date.now().toString(36).slice(-4).toUpperCase();
 const prefix = 'E' + sfx + '-';
 
 await page.goto(`${BASE}/catalog/settings?tab=General`); await ready(page);
-await page.locator('label:has-text("Префикс автокода") input').fill(prefix.toLowerCase());
-await page.locator('label:has-text("Цифр в номере") select').selectOption('4');
-await page.locator('label:has-text("Следующий номер") input').fill('1');
+await page.locator('fieldset:has(legend:has-text("Код новой позиции")) label:has-text("Префикс автокода") input').fill(prefix.toLowerCase());
+await page.locator('fieldset:has(legend:has-text("Код новой позиции")) label:has-text("Цифр в номере") select').selectOption('4');
+await page.locator('fieldset:has(legend:has-text("Код новой позиции")) label:has-text("Следующий номер") input').fill('1');
 await page.keyboard.press('Tab'); // @bind срабатывает по change — при уходе из поля
-await page.locator('label:has-text("Комплекты") input[type=checkbox]').uncheck();
+await page.locator('fieldset:has(legend:has-text("Виды позиций")) label:has-text("Комплекты") input[type=checkbox]').uncheck();
 await page.waitForSelector(`text=Пример кода: ${prefix}0001`);
 await page.getByRole('button', { name: 'Сохранить настройки' }).click();
 await page.waitForSelector('text=Настройки каталога сохранены.');
@@ -48,18 +48,18 @@ await page.goto(`${BASE}/catalog?search=PG${sfx}-`); await ready(page);
 const pager = page.locator('nav.pager');
 await pager.waitFor();
 if (!/Позиции 1–100 из 150/.test(await pager.innerText())) throw new Error('пейджер: ' + await pager.innerText());
-const firstPage = await page.locator('table tbody tr td:first-child').allTextContents();
+const firstPage = await page.locator('table tbody tr td:nth-child(2)').allTextContents();
 await pager.getByRole('button', { name: 'Далее →' }).click();
 await page.waitForSelector('nav.pager:has-text("Позиции 101–150 из 150")');
-const secondPage = await page.locator('table tbody tr td:first-child').allTextContents();
+const secondPage = await page.locator('table tbody tr td:nth-child(2)').allTextContents();
 if (secondPage.length !== 50 || secondPage.some(c => firstPage.includes(c))) throw new Error('вторая страница: ' + secondPage.length);
 if (!(await pager.getByRole('button', { name: 'Далее →' }).isDisabled())) throw new Error('«Далее» доступна на последней странице');
 ok('серверные страницы: 100 + 50, без повторов, «Далее» выключена на последней');
 
 // Вернуть настройки (комплекты включены, код вручную) — другие сценарии рассчитывают на значения по умолчанию.
 await page.goto(`${BASE}/catalog/settings?tab=General`); await ready(page);
-await page.locator('label:has-text("Префикс автокода") input').fill('');
-await page.locator('label:has-text("Комплекты") input[type=checkbox]').check();
+await page.locator('fieldset:has(legend:has-text("Код новой позиции")) label:has-text("Префикс автокода") input').fill('');
+await page.locator('fieldset:has(legend:has-text("Виды позиций")) label:has-text("Комплекты") input[type=checkbox]').check();
 await page.getByRole('button', { name: 'Сохранить настройки' }).click();
 await page.waitForSelector('text=Настройки каталога сохранены.');
 ok('настройки возвращены');

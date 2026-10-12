@@ -58,6 +58,7 @@ internal sealed class EmployeePersonalDataConfiguration : IEntityTypeConfigurati
         Encrypted(b, x => x.Profession, EmployeePersonalData.ShortMaxLength);
         Encrypted(b, x => x.MaritalStatus, EmployeePersonalData.ShortMaxLength);
         Encrypted(b, x => x.FamilyMembers, EmployeePersonalData.LongMaxLength);
+        Encrypted(b, x => x.PersonalEmail, EmployeePersonalData.EmailMaxLength); // D125
         b.Property(x => x.UpdatedAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.RowVersion).IsRowVersion();
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
@@ -442,5 +443,118 @@ internal sealed class HrSettingsConfiguration : IEntityTypeConfiguration<HrSetti
         b.Ignore(x => x.Rules);
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_hr_settings_org");
+    }
+}
+
+/// <summary>D125: ссылка анкеты сотрудника — только хэш токена; закрытая ссылка не меняется и ссылки не удаляются (триггер).</summary>
+internal sealed class EmployeeDataRequestConfiguration : IEntityTypeConfiguration<EmployeeDataRequest>
+{
+    public void Configure(EntityTypeBuilder<EmployeeDataRequest> b)
+    {
+        b.ToTable("hr_employee_data_requests", t =>
+        {
+            t.HasCheckConstraint("ck_hr_employee_data_requests_status", "[Status] IN (1, 2, 3)");
+            t.HasCheckConstraint("ck_hr_employee_data_requests_closed",
+                "([Status] = 1 AND [ClosedAtUtc] IS NULL) OR ([Status] <> 1 AND [ClosedAtUtc] IS NOT NULL)");
+            t.HasCheckConstraint("ck_hr_employee_data_requests_expires", "[ExpiresAtUtc] > [IssuedAtUtc]");
+            t.HasCheckConstraint("ck_hr_employee_data_requests_hash", "DATALENGTH([TokenHash]) = 32");
+            t.HasTrigger("tr_hr_employee_data_requests_closed_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_hr_employee_data_requests_org_id");
+        b.Property(x => x.TokenHash).HasColumnType("binary(32)").IsRequired();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.IssuedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ExpiresAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ClosedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_hr_employee_data_requests_employee");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.IssuedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.TokenHash).IsUnique().HasDatabaseName("ux_hr_employee_data_requests_token");
+        b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.Status }).HasDatabaseName("ix_hr_employee_data_requests_employee");
+    }
+}
+
+/// <summary>D125: анкета сотрудника — значения зашифрованы; значения не меняются, решение принимается один раз (триггер).</summary>
+internal sealed class EmployeeDataSubmissionConfiguration : IEntityTypeConfiguration<EmployeeDataSubmission>
+{
+    public void Configure(EntityTypeBuilder<EmployeeDataSubmission> b)
+    {
+        b.ToTable("hr_employee_data_submissions", t =>
+        {
+            t.HasCheckConstraint("ck_hr_employee_data_submissions_status", "[Status] IN (1, 2, 3)");
+            t.HasCheckConstraint("ck_hr_employee_data_submissions_review",
+                "([Status] = 1 AND [ReviewedAtUtc] IS NULL AND [ReviewedByUserId] IS NULL AND [RejectReason] IS NULL)"
+                + " OR ([Status] = 2 AND [ReviewedAtUtc] IS NOT NULL AND [ReviewedByUserId] IS NOT NULL AND [RejectReason] IS NULL)"
+                + " OR ([Status] = 3 AND [ReviewedAtUtc] IS NOT NULL AND [ReviewedByUserId] IS NOT NULL AND LEN([RejectReason]) > 0)");
+            t.HasCheckConstraint("ck_hr_employee_data_submissions_consent", "LEN([ConsentTextHash]) = 64 AND LEN([ConsentVersion]) > 0");
+            t.HasTrigger("tr_hr_employee_data_submissions_immutable");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_hr_employee_data_submissions_org_id");
+        b.Property(x => x.BirthDate).HasConversion(PersonalDataColumns.Date).HasMaxLength(PersonalDataColumns.Cipher(10));
+        Encrypted(b, x => x.PassportNumber, 20);
+        Encrypted(b, x => x.PassportIssuer, EmployeePersonalData.LongMaxLength);
+        b.Property(x => x.PassportIssuedOn).HasConversion(PersonalDataColumns.Date).HasMaxLength(PersonalDataColumns.Cipher(10));
+        Encrypted(b, x => x.PassportDivisionCode, 7);
+        Encrypted(b, x => x.RegistrationAddress, EmployeePersonalData.LongMaxLength);
+        Encrypted(b, x => x.ActualAddress, EmployeePersonalData.LongMaxLength);
+        Encrypted(b, x => x.Phone, 20);
+        Encrypted(b, x => x.PersonalEmail, EmployeePersonalData.EmailMaxLength);
+        Encrypted(b, x => x.Snils, 11);
+        Encrypted(b, x => x.Inn, 12);
+        Encrypted(b, x => x.ClientAddress, 45);
+        b.Property(x => x.ConsentVersion).HasMaxLength(20).IsRequired();
+        b.Property(x => x.ConsentTextHash).HasMaxLength(64).IsFixedLength().IsUnicode(false).IsRequired();
+        b.Property(x => x.Status).HasConversion<byte>();
+        b.Property(x => x.SubmittedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ReviewedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RejectReason).HasMaxLength(EmployeeDataSubmission.ReasonMaxLength);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Values);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<Employee>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.EmployeeId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_hr_employee_data_submissions_employee");
+        b.HasOne<EmployeeDataRequest>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.RequestId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_hr_employee_data_submissions_request");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ReviewedByUserId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.RequestId).IsUnique().HasDatabaseName("ux_hr_employee_data_submissions_request");
+        b.HasIndex(x => new { x.OrganizationId, x.EmployeeId, x.Status }).HasDatabaseName("ix_hr_employee_data_submissions_employee");
+    }
+
+    private static void Encrypted(EntityTypeBuilder<EmployeeDataSubmission> b,
+        System.Linq.Expressions.Expression<Func<EmployeeDataSubmission, string?>> property, int plainMax) =>
+        b.Property(property).HasConversion(PersonalDataColumns.Text).HasMaxLength(PersonalDataColumns.Cipher(plainMax));
+}
+
+/// <summary>D125: сканы анкеты — зашифрованы, только вставка (триггер).</summary>
+internal sealed class EmployeeDataSubmissionFileConfiguration : IEntityTypeConfiguration<EmployeeDataSubmissionFile>
+{
+    public void Configure(EntityTypeBuilder<EmployeeDataSubmissionFile> b)
+    {
+        b.ToTable("hr_employee_data_submission_files", t =>
+        {
+            t.HasCheckConstraint("ck_hr_employee_data_submission_files_size", $"[SizeBytes] BETWEEN 1 AND {ConsentScan.MaxBytes}");
+            t.HasCheckConstraint("ck_hr_employee_data_submission_files_kind", "[Kind] IN (2, 3, 4, 7, 8)");
+            t.HasTrigger("tr_hr_employee_data_submission_files_insert_only");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.FileName).HasMaxLength(200).IsRequired();
+        b.Property(x => x.ContentType).HasMaxLength(50).IsRequired();
+        b.Property(x => x.Content).HasConversion(PersonalDataColumns.Bytes).HasColumnType("nvarchar(max)").IsRequired();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<EmployeeDataSubmission>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SubmissionId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_hr_employee_data_submission_files_submission");
+        b.HasIndex(x => new { x.OrganizationId, x.SubmissionId }).HasDatabaseName("ix_hr_employee_data_submission_files_submission");
     }
 }

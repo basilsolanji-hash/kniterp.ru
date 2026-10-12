@@ -22,7 +22,12 @@ else
 
     @if (_message is not null)
     {
-        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message
+            @if (!_isError && _repriced.Count > 0)
+            {
+                <LabelsButton Lines="@(_repriced.Select(id => (id, 1m)))" Text="@L("Напечатать новые ценники")" />
+            }
+        </div>
     }
 
     <div class="panel">
@@ -52,6 +57,8 @@ else
                         <option value="@PriceRounding.Ruble">@L("до рубля")</option>
                         <option value="@PriceRounding.Ten">@L("до 10")</option>
                         <option value="@PriceRounding.Hundred">@L("до 100")</option>
+                        <option value="@PriceRounding.Nine">@L("с окончанием на 9 (1 989)")</option>
+                        <option value="@PriceRounding.NinetyNine">@L("с окончанием на 99 (1 999)")</option>
                     </select>
                 </label>
                 <label>
@@ -170,6 +177,7 @@ else
     private bool _busy;
     private string? _denied;
     private string? _message;
+    private IReadOnlyList<long> _repriced = [];
     private bool _isError;
 
     protected override async Task OnInitializedAsync()
@@ -199,14 +207,17 @@ else
 
     private Task PreviewAsync() => RunAsync(async () =>
     {
+        _repriced = [];
         _preview = await Revaluations.PreviewAsync(Request());
         _previewMode = _mode;
     }, null);
 
     private Task ApplyAsync() => RunAsync(async () =>
     {
+        var toChange = _preview?.Rows.Where(r => r.NewPrice is not null && r.NewPrice != r.OldPrice).Select(r => r.ItemId).ToList() ?? [];
         var changed = await Revaluations.ApplyAsync(Request());
         _preview = null;
+        _repriced = toChange; // D325: ценники для позиций с новой ценой — сразу после переоценки
         _message = L("Цены изменены: {0}.", changed);
         _journal = await Revaluations.JournalAsync();
     }, null);

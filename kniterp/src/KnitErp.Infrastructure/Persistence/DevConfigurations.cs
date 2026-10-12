@@ -43,12 +43,20 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_collection");
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustomerId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_customer");
+        // D750: позиция и черновик техкарты, в которые передана модель, — только своей организации.
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionItemId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_production_item");
+        b.HasOne<KnitErp.Domain.Production.TechCard>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionTechCardId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_production_techcard");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DesignerUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_designer");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DessinatorUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_dessinator");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ConstructorUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_constructor");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.TechnologistUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_technologist");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ProgrammerUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_programmer");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_author");
+        b.Property(x => x.PackBox).HasMaxLength(60);
+        b.HasOne<DevFile>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.MainSketchFileId })
+            .HasPrincipalKey(f => new { f.OrganizationId, f.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_sketch");
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_models_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.Number }).IsUnique().HasDatabaseName("ux_dev_models_number");
         b.HasIndex(x => new { x.OrganizationId, x.Stage }).HasDatabaseName("ix_dev_models_stage");
@@ -116,6 +124,14 @@ internal sealed class DevFileConfiguration : IEntityTypeConfiguration<DevFile>
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_files_model");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UploadedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.Kind, x.FileName, x.Version }).IsUnique().HasDatabaseName("ux_dev_files_version");
+        // D710, D711: программа машины хранится с деталью, станком и его параметрами на момент загрузки.
+        b.Property(x => x.MachineParams).HasMaxLength(200);
+        b.HasOne<DevDetail>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DetailId }).HasPrincipalKey(d => new { d.OrganizationId, d.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_files_detail");
+        b.HasOne<DevMachine>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.MachineId }).HasPrincipalKey(m => new { m.OrganizationId, m.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_files_machine");
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_files_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.MachineId }).HasDatabaseName("ix_dev_files_machine");
     }
 }
 
@@ -148,6 +164,16 @@ internal sealed class DevSettingsConfiguration : IEntityTypeConfiguration<DevSet
         b.Property(x => x.OrganizationId).ValueGeneratedNever();
         b.Property(x => x.AutoLaunchDate).HasDefaultValue(true).HasSentinel(true);
         b.Property(x => x.AutoAdvance).HasDefaultValue(true).HasSentinel(true);
+        b.Property(x => x.FactTolerancePercent).HasDefaultValue(DevSettings.DefaultTolerance).HasSentinel(DevSettings.DefaultTolerance);
+        b.Property(x => x.CompletenessSections).HasDefaultValue(DevCompleteness.AllSections).HasSentinel(DevCompleteness.AllSections);
+        b.Property(x => x.LabelWidthMm).HasDefaultValue(DevSettings.DefaultLabelWidth).HasSentinel(DevSettings.DefaultLabelWidth);
+        b.Property(x => x.LabelHeightMm).HasDefaultValue(DevSettings.DefaultLabelHeight).HasSentinel(DevSettings.DefaultLabelHeight);
+        b.ToTable(t =>
+        {
+            t.HasCheckConstraint("ck_dev_settings_tolerance", "[FactTolerancePercent] BETWEEN 1 AND 100");
+            t.HasCheckConstraint("ck_dev_settings_sections", $"[CompletenessSections] BETWEEN 1 AND {DevCompleteness.AllSections}");
+            t.HasCheckConstraint("ck_dev_settings_label", $"[LabelWidthMm] BETWEEN {DevSettings.MinLabelMm} AND {DevSettings.MaxLabelMm} AND [LabelHeightMm] BETWEEN {DevSettings.MinLabelMm} AND {DevSettings.MaxLabelMm}");
+        });
         b.Property(x => x.RowVersion).IsRowVersion();
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DefaultDesignerUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_settings_designer");

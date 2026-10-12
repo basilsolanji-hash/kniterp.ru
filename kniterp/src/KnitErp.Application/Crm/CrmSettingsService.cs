@@ -9,7 +9,8 @@ using Microsoft.EntityFrameworkCore;
 namespace KnitErp.Application.Crm;
 
 public sealed record CrmStageDto(
-    long Id, long PipelineId, string Name, string Color, int Probability, CrmStageKind Kind, bool IsArchived, int Deals, byte[] RowVersion)
+    long Id, long PipelineId, string Name, string Color, int Probability, CrmStageKind Kind, bool IsArchived, int Deals, byte[] RowVersion,
+    int? NextStepDays = null, string? NextStepSubject = null)
 {
     public bool IsFinal => Kind != CrmStageKind.Open;
 }
@@ -19,7 +20,10 @@ public sealed record CrmPipelineDto(long Id, string Name, bool IsArchived, IRead
 public sealed record CrmReferenceDto(long Id, CrmReferenceKind Kind, string Name, bool IsArchived, byte[] RowVersion);
 
 public sealed record CrmSettingsDto(
-    IReadOnlyList<CrmPipelineDto> Pipelines, IReadOnlyList<CrmReferenceDto> Sources, IReadOnlyList<CrmReferenceDto> LossReasons, bool CanEdit);
+    IReadOnlyList<CrmPipelineDto> Pipelines, IReadOnlyList<CrmReferenceDto> Sources, IReadOnlyList<CrmReferenceDto> LossReasons, bool CanEdit,
+    CrmAutomationValues? Automation = null, byte[]? AutomationVersion = null);
+
+public sealed record CrmPlanRowDto(long Id, int Year, int Month, long? UserId, string? User, long? PipelineId, string? Pipeline, decimal Amount, byte[] RowVersion);
 
 /// <summary>
 /// Настройки CRM (D602, D603): воронки и их этапы, источники обращений, причины отказа. Смотреть — crm.view, менять —
@@ -36,8 +40,122 @@ public sealed class CrmSettingsService(IKnitErpDbContext db, IAccessGuard guard,
         var refs = await db.CrmReferences.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId)
             .OrderBy(r => r.IsArchived).ThenBy(r => r.SortOrder).ThenBy(r => r.Name)
             .Select(r => new CrmReferenceDto(r.Id, r.Kind, r.Name, r.IsArchived, r.RowVersion)).ToListAsync(ct);
+        var automation = await db.CrmSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
         return new CrmSettingsDto(pipelines, refs.Where(r => r.Kind == CrmReferenceKind.Source).ToList(),
-            refs.Where(r => r.Kind == CrmReferenceKind.LossReason).ToList(), ctx.Permissions.Has(Permissions.CrmSettings));
+            refs.Where(r => r.Kind == CrmReferenceKind.LossReason).ToList(), ctx.Permissions.Has(Permissions.CrmSettings),
+            (automation ?? CrmSettings.Default(ctx.OrganizationId)).Values, automation?.RowVersion);
+    }
+
+    /// <summary>Настройки автоматизации (D660–D669). rowVersion null — записи ещё нет.</summary>
+    public async Task SaveAutomationAsync(CrmAutomationValues values, byte[]? rowVersion, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        if (values.DefaultResponsibleUserId is { } uid
+            && !await db.OrganizationMembers.AnyAsync(m => m.OrganizationId == ctx.OrganizationId && m.UserId == uid && m.Status == KnitErp.Domain.Access.MembershipStatus.Active, ct))
+        {
+            throw new NotFoundException("Сотрудник");
+        }
+
+        var s = await db.CrmSettings.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
+        var isNew = s is null;
+        if (s is null)
+        {
+            if (rowVersion is { Length: > 0 })
+            {
+                throw new ConcurrencyConflictException();
+            }
+
+            s = CrmSettings.Default(ctx.OrganizationId);
+        }
+        else
+        {
+            s.EnsureVersion(s.RowVersion, rowVersion ?? []);
+        }
+
+        string change;
+        try
+        {
+            change = s.Set(values);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+
+        if (isNew)
+        {
+            db.CrmSettings.Add(s);
+        }
+
+        Audit(ctx, nameof(CrmSettings), ctx.OrganizationId, null, change, "Автоматизация");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>Правило следующего шага этапа (D622): days null — выключить.</summary>
+    public async Task SetNextStepAsync(long stageId, int? days, string? subject, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        var stage = await LoadStageAsync(ctx, stageId, rowVersion, ct);
+        try
+        {
+            stage.SetNextStep(days, subject);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+
+        Audit(ctx, nameof(CrmStage), stageId, null, days is null ? "следующий шаг выключен" : $"«{stage.NextStepSubject}» через {days} дн.", stage.Name);
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<CrmPlanRowDto>> PlansAsync(int year, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.CrmView, ct);
+        return await (from p in db.CrmPlans.AsNoTracking()
+                      join u in db.Users.AsNoTracking() on p.UserId equals u.Id into uj
+                      from u in uj.DefaultIfEmpty()
+                      join f in db.CrmPipelines.AsNoTracking() on p.PipelineId equals f.Id into fj
+                      from f in fj.DefaultIfEmpty()
+                      where p.OrganizationId == ctx.OrganizationId && p.Year == year
+                      orderby p.Month, u.DisplayName
+                      select new CrmPlanRowDto(p.Id, p.Year, p.Month, p.UserId, u == null ? null : u.DisplayName, p.PipelineId, f == null ? null : f.Name, p.Amount,
+                          p.RowVersion)).ToListAsync(ct);
+    }
+
+    /// <summary>План продаж на месяц по менеджеру и/или воронке (D631); тот же месяц и разрез — обновление суммы.</summary>
+    public async Task SetPlanAsync(int year, int month, long? userId, long? pipelineId, decimal amount, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        if (userId is { } uid && !await db.OrganizationMembers.AnyAsync(m => m.OrganizationId == ctx.OrganizationId && m.UserId == uid, ct))
+        {
+            throw new NotFoundException("Сотрудник");
+        }
+
+        if (pipelineId is { } pid && !await db.CrmPipelines.AnyAsync(p => p.Id == pid && p.OrganizationId == ctx.OrganizationId, ct))
+        {
+            throw new NotFoundException("Воронка");
+        }
+
+        var plan = await db.CrmPlans.SingleOrDefaultAsync(p => p.OrganizationId == ctx.OrganizationId && p.Year == year && p.Month == month
+                                                               && p.UserId == userId && p.PipelineId == pipelineId, ct);
+        var before = plan?.Amount;
+        if (plan is null)
+        {
+            plan = CrmPlan.Create(ctx.OrganizationId, year, month, userId, pipelineId, amount);
+            db.CrmPlans.Add(plan);
+        }
+        else
+        {
+            plan.SetAmount(amount);
+        }
+
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmPlanChanged, nameof(CrmPlan), null,
+            before?.ToString("0.00"), plan.Amount.ToString("0.00"), $"{month:00}.{year}, менеджер {userId?.ToString() ?? "все"}, воронка {pipelineId?.ToString() ?? "все"}",
+            currentUser.CorrelationId));
+        await db.SaveOrConflictAsync(ct);
     }
 
     public async Task<long> CreatePipelineAsync(string? name, CancellationToken ct = default)
@@ -285,7 +403,8 @@ public sealed class CrmSettingsService(IKnitErpDbContext db, IAccessGuard guard,
             .GroupBy(d => d.StageId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
         return pipelines.Select(p => new CrmPipelineDto(p.Id, p.Name, p.IsArchived,
                 Ordered(stages.Where(s => s.PipelineId == p.Id))
-                    .Select(s => new CrmStageDto(s.Id, s.PipelineId, s.Name, s.Color, s.Probability, s.Kind, s.IsArchived, counts.GetValueOrDefault(s.Id), s.RowVersion))
+                    .Select(s => new CrmStageDto(s.Id, s.PipelineId, s.Name, s.Color, s.Probability, s.Kind, s.IsArchived, counts.GetValueOrDefault(s.Id), s.RowVersion,
+                        s.NextStepDays, s.NextStepSubject))
                     .ToList(), p.RowVersion))
             .ToList();
     }
@@ -298,7 +417,13 @@ public sealed class CrmSettingsService(IKnitErpDbContext db, IAccessGuard guard,
         var order = 0;
         foreach (var (name, color, probability, kind) in CrmStage.Defaults)
         {
-            db.CrmStages.Add(CrmStage.Create(pipeline.OrganizationId, pipeline.Id, name, color, probability, kind, order += 10));
+            var stage = CrmStage.Create(pipeline.OrganizationId, pipeline.Id, name, color, probability, kind, order += 10);
+            if (CrmStage.DefaultNextStep(name) is { } step)
+            {
+                stage.SetNextStep(step.Days, step.Subject); // ТЗ §5: по умолчанию включено для двух этапов
+            }
+
+            db.CrmStages.Add(stage);
         }
     }
 

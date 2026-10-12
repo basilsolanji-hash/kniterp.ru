@@ -1,0 +1,207 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevShopService Shop
+
+@*
+    Технология модели (D715) — экран технолога: операции из справочника (операция, единица, норма, расценка), пояснение для цеха, своя
+    норма и расценка, порядок. «Добавить стандартные» — операции справочника с этапом производства, в порядке этапов. Расценки — с правом себестоимости.
+*@
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+@if (_o is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var o = _o;
+    @if (o.Rows.Count == 0)
+    {
+        <p class="muted">@L("Операций пока нет.")</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table>
+                <thead><tr><th class="num">№</th><th>@L("Операция")</th><th>@L("Пояснение для цеха")</th><th class="num">@L("Норма, мин")</th>@if (o.CanSeeCost) { <th class="num">@L("Расценка")</th> }@if (o.CanEdit) { <th></th> }</tr></thead>
+                <tbody>
+                    @foreach (var r in o.Rows)
+                    {
+                        var row = r;
+                        <tr>
+                            <td class="num">@r.Seq</td>
+                            <td>@r.Name <span class="muted small">@r.Unit</span></td>
+                            <td>
+                                @if (o.CanEdit)
+                                {
+                                    <input value="@r.Note" maxlength="@DevModelOperation.NoteMaxLength" @onchange="e => _notes[row.Id] = e.Value as string" aria-label="@L("Пояснение")" />
+                                }
+                                else
+                                {
+                                    @(r.Note ?? "")
+                                }
+                            </td>
+                            <td class="num">
+                                @if (o.CanEdit)
+                                {
+                                    <input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 80px" value="@Num(r.NormMinutes)" placeholder="@Num(r.TypeNorm)"
+                                           @onchange="e => _norms[row.Id] = Parse(e.Value)" aria-label="@L("Норма, мин")" />
+                                }
+                                else
+                                {
+                                    @DevFormat.Number(r.NormMinutes ?? r.TypeNorm)
+                                }
+                            </td>
+                            @if (o.CanSeeCost)
+                            {
+                                <td class="num">
+                                    @if (o.CanEdit)
+                                    {
+                                        <input type="number" min="0" step="0.01" inputmode="decimal" style="max-width: 90px" value="@Num(r.Price)" placeholder="@Num(r.TypePrice)"
+                                               @onchange="e => _prices[row.Id] = Parse(e.Value)" aria-label="@L("Расценка")" />
+                                    }
+                                    else
+                                    {
+                                        @Amounts.Format(r.Price ?? r.TypePrice)
+                                    }
+                                </td>
+                            }
+                            @if (o.CanEdit)
+                            {
+                                <td class="row-actions">
+                                    <button type="button" class="secondary" @onclick="() => SaveRowAsync(row)" disabled="@_busy">@L("Сохранить")</button>
+                                    <button type="button" class="secondary" @onclick="() => MoveAsync(row, -1)" disabled="@_busy" aria-label="@L("Выше")">↑</button>
+                                    <button type="button" class="secondary" @onclick="() => MoveAsync(row, 1)" disabled="@_busy" aria-label="@L("Ниже")">↓</button>
+                                    <button type="button" class="secondary" @onclick="() => RemoveAsync(row)" disabled="@_busy">@L("Убрать")</button>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p><b>@L("Итого: {0} мин на изделие", DevFormat.Number(o.TotalMinutes))</b>@(o.TotalCost is { } cost ? " · " + L("работа {0}", Amounts.Format(cost)) : "")</p>
+    }
+    @if (o.CanEdit)
+    {
+        @if (o.Types.Count == 0)
+        {
+            <p class="muted">@L("Справочник операций пуст — его заполняют в «Настройках разработки».")</p>
+        }
+        else
+        {
+            <form class="inline-form" @onsubmit="AddAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                    <label>
+                        @L("Операция из справочника")
+                        <select @bind="_type">
+                            <option value="">—</option>
+                            @foreach (var t in o.Types)
+                            {
+                                <option value="@t.Id">@t.Name@(t.NormMinutes is { } n ? $" · {DevFormat.Number(n)} " + L("мин") : "")</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Пояснение для цеха") <input @bind="_note" maxlength="@DevModelOperation.NoteMaxLength" placeholder="@L("На второй день парить 2 секунды")" /></label>
+                    <button type="submit" disabled="@(_busy || _type.Length == 0)">@L("Добавить операцию")</button>
+                    <button type="button" class="secondary" @onclick="AddStandardAsync" disabled="@_busy">@L("Добавить стандартные (по этапам производства)")</button>
+                </fieldset>
+            </form>
+        }
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    private DevOperationsDto? _o;
+    private readonly Dictionary<long, string?> _notes = [];
+    private readonly Dictionary<long, decimal?> _norms = [];
+    private readonly Dictionary<long, decimal?> _prices = [];
+    private string _type = string.Empty;
+    private string? _note;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            _o = await Gate.Run(() => Shop.OperationsAsync(ModelId));
+        }
+    }
+
+    private static string? Num(decimal? v) => v?.ToString("0.##", CultureInfo.InvariantCulture);
+
+    private static decimal? Parse(object? value) =>
+        decimal.TryParse((value as string)?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private Task AddAsync() => RunAsync(async () =>
+    {
+        await Shop.AddOperationAsync(ModelId, long.Parse(_type, CultureInfo.InvariantCulture), _note, null, null);
+        _type = string.Empty;
+        _note = null;
+    }, L("Операция добавлена."));
+
+    private async Task AddStandardAsync()
+    {
+        var added = 0;
+        await RunAsync(async () => added = await Shop.AddStandardOperationsAsync(ModelId), null);
+        if (!_isError)
+        {
+            _message = L("Добавлено операций: {0}.", added);
+        }
+    }
+
+    private Task SaveRowAsync(DevModelOperationDto r) => RunAsync(() => Shop.UpdateOperationAsync(r.Id,
+        _notes.TryGetValue(r.Id, out var n) ? n : r.Note, _norms.TryGetValue(r.Id, out var m) ? m : r.NormMinutes,
+        _prices.TryGetValue(r.Id, out var p) ? p : r.Price), L("Сохранено."));
+
+    private Task MoveAsync(DevModelOperationDto r, int delta) => RunAsync(() => Shop.MoveOperationAsync(r.Id, delta), null);
+
+    private Task RemoveAsync(DevModelOperationDto r) => RunAsync(() => Shop.RemoveOperationAsync(r.Id), L("Операция убрана."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(action);
+            _message = success;
+            _notes.Clear();
+            _norms.Clear();
+            _prices.Clear();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _o = await Gate.Run(() => Shop.OperationsAsync(ModelId));
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

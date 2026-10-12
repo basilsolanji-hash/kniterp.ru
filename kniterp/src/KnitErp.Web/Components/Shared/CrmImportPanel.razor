@@ -1,0 +1,141 @@
+@using KnitErp.Application.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject ISpreadsheetFormat Spreadsheet
+
+@* D645–D647, предложение А5: импорт из amoCRM, Битрикс24 или шаблона knitERP — столбцы и этапы сопоставляются по названиям, протокол ошибок,
+   применение всё или ничего, повторная загрузка обновляет по внешнему ID. *@
+<div class="actions" style="margin: 8px 0">
+    <button type="button" class="secondary" @onclick="() => _open = !_open" aria-expanded="@(_open ? "true" : "false")">
+        @L("Импорт из Excel, amoCRM, Битрикс24") @(_open ? "▲" : "▼")
+    </button>
+</div>
+@if (_open)
+{
+    <div class="panel">
+        <p class="muted small">@L("Выгрузите список из amoCRM или Битрикс24 в Excel (.xlsx) и загрузите как есть — столбцы сопоставятся по названиям. Строка с тем же ID при повторной загрузке обновится, а не задвоится; строки с уже известными телефоном или почтой пропускаются.")</p>
+        <div class="actions">
+            <a class="button secondary" href="crm/import-template.xlsx?kind=@Kind" download data-enhance-nav="false">@L("Шаблон knitERP")</a>
+        </div>
+        @if (_error is not null)
+        {
+            <div class="error" role="alert">@_error</div>
+        }
+        @if (_flash is not null)
+        {
+            <div class="flash" role="status">@_flash</div>
+        }
+        <label>@L("Файл .xlsx") <InputFile OnChange="PreviewAsync" accept=".xlsx" disabled="@_busy" /></label>
+        @if (_plan is not null)
+        {
+            <div class="totals" role="status">
+                <span>@L("Формат:") <b>@_plan.System</b></span>
+                <span>@L("Создать:") <b>@_plan.ToCreate</b></span>
+                <span>@L("Обновить:") <b>@_plan.ToUpdate</b></span>
+                <span>@L("Пропустить:") <b>@_plan.Skipped</b></span>
+                <span class="@(_plan.Errors > 0 ? "bad" : null)">@L("С ошибками:") <b>@_plan.Errors</b></span>
+            </div>
+            <p class="muted small">@L("Сопоставлено:") @string.Join(", ", _plan.Mapping.Values)</p>
+            <div class="scroll" style="max-height: 320px; overflow-y: auto">
+                <table class="compact">
+                    <thead><tr><th>@L("Строка")</th><th>@L("Данные")</th><th>@L("Действие")</th><th>@L("Ошибки")</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _plan.Rows.OrderBy(r => r.Action == CrmImportAction.Error ? 0 : 1).ThenBy(r => r.RowNumber).Take(300))
+                        {
+                            <tr>
+                                <td>@r.RowNumber</td>
+                                <td>@string.Join(" · ", r.Values.Values.Where(v => v.Length > 0).Take(4))</td>
+                                <td><span class="tag @(r.Action == CrmImportAction.Error ? "bad" : r.Action == CrmImportAction.Skip ? "warn" : "ok")">@ActionName(r.Action)</span></td>
+                                <td>@string.Join(" ", r.Messages)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="actions">
+                @if (_plan.CanApply)
+                {
+                    <button type="button" @onclick="ApplyAsync" disabled="@_busy">@L("Загрузить: создать {0}, обновить {1}", _plan.ToCreate, _plan.ToUpdate)</button>
+                }
+                <button type="button" class="secondary" @onclick="() => _plan = null" disabled="@_busy">@L("Закрыть протокол")</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public CrmImportKind Kind { get; set; }
+    [Parameter] public EventCallback Applied { get; set; }
+
+    private bool _open;
+    private bool _busy;
+    private string? _error;
+    private string? _flash;
+    private CrmImportPlan? _plan;
+
+    private Task PreviewAsync(InputFileChangeEventArgs e) => RunAsync(async () =>
+    {
+        _plan = null;
+        const long maxSize = 5 * 1024 * 1024;
+        if (e.File.Size > maxSize)
+        {
+            throw new BusinessRuleException("import.file_too_large", L("Файл больше 5 МБ. Разбейте его на части."));
+        }
+
+        await using var upload = e.File.OpenReadStream(maxAllowedSize: maxSize);
+        using var buffer = new MemoryStream();
+        await upload.CopyToAsync(buffer);
+        buffer.Position = 0;
+        await using var db = Factory.Create();
+        _plan = await Service(db).PreviewAsync(Kind, buffer);
+    });
+
+    private Task ApplyAsync() => RunAsync(async () =>
+    {
+        int created, updated;
+        await using (var db = Factory.Create())
+        {
+            (created, updated) = await Service(db).ApplyAsync(_plan!);
+        }
+
+        _plan = null;
+        _flash = L("Загружено: создано {0}, обновлено {1}.", created, updated);
+        await Applied.InvokeAsync();
+    });
+
+    /// <summary>Свой контекст базы на действие: панель не мешает операциям страницы.</summary>
+    private CrmImportService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock, Spreadsheet);
+
+    private static string ActionName(CrmImportAction a) => a switch
+    {
+        CrmImportAction.Create => L("создать"),
+        CrmImportAction.Update => L("обновить"),
+        CrmImportAction.Skip => L("пропустить"),
+        _ => L("ошибка"),
+    };
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _flash = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

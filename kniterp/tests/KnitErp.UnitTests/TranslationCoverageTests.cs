@@ -133,12 +133,19 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevLookupKind>().Select(KnitErp.Domain.Development.DevLookup.KindName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Tagging.TaggedEntity>().Select(KnitErp.Domain.Tagging.TagColors.EntityName));
         keys.UnionWith(KnitErp.Domain.Development.DevAutomationRules.AllHints);
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevMachineBrand>().Select(KnitErp.Domain.Development.DevMachine.BrandName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevMachineStatus>().Select(KnitErp.Domain.Development.DevMachine.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevSampleStatus>().Select(KnitErp.Domain.Development.DevSample.StatusName));
+        keys.UnionWith(KnitErp.Domain.Development.DevCompleteness.SectionNames);
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
 
         // CRM (D600–D699): статусы лидов, итоги сделок, виды справочников; готовая воронка и справочники выводятся как данные организации.
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmLeadStatus>().Select(KnitErp.Domain.Crm.CrmLead.StatusName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmDealOutcome>().Select(KnitErp.Domain.Crm.CrmDeal.OutcomeName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmReferenceKind>().Select(KnitErp.Domain.Crm.CrmReference.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmProcessingBasis>().Select(KnitErp.Domain.Crm.CrmContact.BasisName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Application.Crm.CrmImportKind>().Select(KnitErp.Application.Crm.CrmImportService.KindName));
+        keys.UnionWith(KnitErp.Domain.Crm.CrmEmailTemplate.Variables.Select(v => v.Meaning)); // D674: подсказки к переменным шаблонов
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.Select(c => c.Name));
         // Продажи (D1100–D1199): кому адресовано соглашение, видимость заказов роли, источник цены строки.
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesAgreementScope>().Select(KnitErp.Domain.Sales.SalesAgreement.ScopeName));

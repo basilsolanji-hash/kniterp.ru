@@ -373,6 +373,71 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await ShotAsync(page, "9-pechat-soglasiya");
     });
 
+    /// <summary>
+    /// D125: кадровик выдаёт ссылку, сотрудник без входа (телефон 390 px) заполняет анкету с согласием, ссылка одноразовая,
+    /// кадровик сравнивает и принимает. Не запускался в сессии, где был написан (общая машина) — проверить при сдаче.
+    /// </summary>
+    [SqlFact]
+    public Task Employee_fills_data_by_link() => RunAsync("hr-employee-data", false, async page =>
+    {
+        await OpenAsync(page, "employees");
+        await page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^Петрова Анна") }).First.ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/employees/\d+$"));
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        var card = page.Url;
+        var linkBox = page.Locator("#employee-data-link");
+        // До подключения Blazor щелчок теряется: повторяем, пока не появится ссылка (ожидание длиннее ответа сервера — новая
+        // ссылка отменяет прежнюю, второй щелчок после показа сделал бы прочитанную ссылку недействительной).
+        for (var i = 0; i < 6 && !await linkBox.IsVisibleAsync(); i++)
+        {
+            await page.GetByRole(AriaRole.Button, new() { Name = "Ссылка для заполнения данных" }).ClickAsync();
+            try
+            {
+                await linkBox.WaitForAsync(new() { Timeout = 5_000 });
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        await Expect(linkBox).ToHaveValueAsync(new Regex("/account/employee-data\\?token="));
+        var link = await linkBox.InputValueAsync();
+        await Expect(page.GetByRole(AriaRole.Button, new() { Name = "Копировать ссылку" })).ToBeVisibleAsync();
+
+        var worker = await app.AnonymousPageAsync();
+        try
+        {
+            await worker.SetViewportSizeAsync(390, 844);
+            await worker.GotoAsync(link);
+            await Expect(worker.GetByRole(AriaRole.Heading, new() { Name = "Анкета сотрудника" })).ToBeVisibleAsync();
+            await Expect(worker.GetByText("Петрова Анна Сергеевна").First).ToBeVisibleAsync();
+            Assert.True(await NoHorizontalScrollAsync(worker), "Горизонтальная прокрутка на анкете");
+            await worker.GetByLabel("СНИЛС", new() { Exact = true }).FillAsync("112-233-445 95");
+            await worker.GetByLabel("Телефон").FillAsync("+7 900 000-00-09");
+            await worker.GetByLabel("Скан паспорта").SetInputFilesAsync(new FilePayload
+            {
+                Name = "passport.pdf", MimeType = "application/pdf", Buffer = "%PDF-1.4 e2e"u8.ToArray(),
+            });
+            await worker.GetByRole(AriaRole.Checkbox).CheckAsync();
+            await worker.GetByRole(AriaRole.Button, new() { Name = "Отправить кадровику" }).ClickAsync();
+            await Expect(worker.GetByRole(AriaRole.Status)).ToContainTextAsync("Данные отправлены кадровику");
+
+            await worker.GotoAsync(link);
+            await Expect(worker.GetByRole(AriaRole.Alert)).ToContainTextAsync("Ссылка недействительна");
+        }
+        finally
+        {
+            await worker.Context.CloseAsync();
+        }
+
+        await OpenAsync(page, card);
+        await Expect(page.GetByText("Данные от сотрудника — проверить (1)")).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Показать анкету" }).ClickAsync();
+        await Expect(page.GetByText("112-233-445 95")).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Принять", Exact = true }).ClickAsync();
+        await Expect(page.GetByRole(AriaRole.Status).First).ToContainTextAsync("Анкета принята");
+    });
+
     /// <summary>D221: блок «Смена сегодня» на главном — неявка видна по имени (в выходной — выход сверх графика), ссылка ведёт в табель.</summary>
     [SqlFact]
     public async Task Dashboard_shows_shift_today_and_links_to_timesheet()

@@ -57,6 +57,7 @@ else
                     <label>@L("Телефон") <input type="tel" @bind="_f.Phone" maxlength="@CrmText.PhoneMaxLength" placeholder="+7 900 000-00-01" /></label>
                     <label>@L("Почта") <input type="email" @bind="_f.Email" maxlength="@CrmText.EmailMaxLength" /></label>
                     <label>@L("Мессенджер") <input @bind="_f.Messenger" maxlength="@CrmText.MessengerMaxLength" /></label>
+                    <label>@L("День рождения") <input type="date" @bind="_f.Birth" /></label>
                     <label>@L("Компания") <input @bind="_companySearch" @bind:after="SearchCompaniesAsync" placeholder="@L("Название или ИНН")" aria-label="@L("Поиск компании")" /></label>
                     <label>
                         @L("Основная компания")
@@ -77,6 +78,84 @@ else
             </fieldset>
         </form>
     </div>
+
+    <h2>@L("Телефоны, почты, мессенджеры")</h2>
+    @if (_contact.Channels is { Count: > 0 } channels)
+    {
+        <ul class="crm-channels">
+            @foreach (var c in channels)
+            {
+                <li>
+                    @ChannelName(c.Kind): <b>@(c.Kind == CrmChannelKind.Phone ? CrmText.FormatPhone(c.Value) : c.Value)</b> @if (c.Label is not null) { <span class="muted">(@c.Label)</span> }
+                    @if (canEdit)
+                    {
+                        <button type="button" class="secondary" @onclick="() => RunAsync(() => Contacts.MakePrimaryAsync(Id, c.Id, _contact!.RowVersion), null)" disabled="@_busy">@L("Сделать основным")</button>
+                        <button type="button" class="secondary" @onclick="() => RunAsync(() => Contacts.RemoveChannelAsync(Id, c.Id, _contact!.RowVersion), null)" disabled="@_busy" aria-label="@L("Удалить {0}", c.Value)">×</button>
+                    }
+                </li>
+            }
+        </ul>
+    }
+    @if (canEdit)
+    {
+        <form class="inline-form" @onsubmit="AddChannelAsync" aria-label="@L("Добавить телефон или почту")">
+            <label>
+                @L("Вид")
+                <select @bind="_channelKind">
+                    <option value="1">@L("Телефон")</option>
+                    <option value="2">@L("Почта")</option>
+                    <option value="3">@L("Мессенджер")</option>
+                </select>
+            </label>
+            <label>@L("Значение") <input @bind="_channelValue" required /></label>
+            <label>@L("Подпись") <input @bind="_channelLabel" maxlength="@CrmContact.ChannelLabelMaxLength" placeholder="@L("мобильный")" /></label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
+        </form>
+    }
+
+    @if (!_contact.IsErased)
+    {
+        <div class="panel">
+            <h2>@L("Персональные данные (152-ФЗ)")</h2>
+            <form @onsubmit="SaveConsentAsync">
+                <fieldset disabled="@(!canEdit)">
+                    <div class="grid">
+                        <label>
+                            @L("Основание обработки")
+                            <select @bind="_basis">
+                                <option value="1">@L("Договор / заявка клиента")</option>
+                                <option value="2">@L("Согласие")</option>
+                                <option value="3">@L("Иное")</option>
+                            </select>
+                        </label>
+                        <label>@L("Дата основания") <input type="date" @bind="_basisDate" /></label>
+                        <label class="wide">@L("Как получено / пояснение") <input @bind="_basisNote" maxlength="@CrmContact.BasisNoteMaxLength" /></label>
+                        <label class="inline"><input type="checkbox" @bind="_marketing" /> @L("Согласие на рекламные рассылки (38-ФЗ)")</label>
+                        <label>@L("Дата согласия на рассылки") <input type="date" @bind="_marketingDate" /></label>
+                    </div>
+                    @if (canEdit)
+                    {
+                        <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                    }
+                </fieldset>
+            </form>
+            @if (_contact.CanErase)
+            {
+                <details>
+                    <summary>@L("Удалить персональные данные по запросу")</summary>
+                    <p class="muted small">@L("ФИО, телефоны, почты и мессенджер контакта и связанных лидов будут заменены на «удалено по запросу». Сделки, суммы и история останутся. Отменить нельзя.")</p>
+                    <form class="inline-form" @onsubmit="EraseAsync">
+                        <label>@L("Основание (запрос субъекта)") <input @bind="_eraseReason" required placeholder="@L("заявление от 11.10.2026")" /></label>
+                        <button type="submit" disabled="@_busy">@L("Удалить персональные данные")</button>
+                    </form>
+                </details>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="flash warn" role="status">@L("Персональные данные удалены по запросу — карточка только для истории сделок.")</div>
+    }
 
     <h2>@L("Сделки")</h2>
     @if (_contact.Deals.Count == 0)
@@ -103,6 +182,8 @@ else
         </div>
     }
 
+    <CrmActivities Target="CrmTarget.Contact" TargetId="Id" CanEdit="@canEdit" Version="_feedVersion" />
+
     <Discussion Target="TaggedEntity.CrmContact" TargetId="Id" />
 }
 
@@ -119,6 +200,16 @@ else
     private string? _message;
     private bool _isError;
     private string? _companySearch;
+    private int _feedVersion;
+    private string _channelKind = "1";
+    private string? _channelValue;
+    private string? _channelLabel;
+    private string _basis = "1";
+    private DateTime? _basisDate;
+    private string? _basisNote;
+    private bool _marketing;
+    private DateTime? _marketingDate;
+    private string? _eraseReason;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -138,12 +229,22 @@ else
 
     private async Task LoadAsync()
     {
+        _feedVersion++;
         _contact = await Contacts.GetAsync(Id);
         var v = _contact.Values;
+        if (_contact.Consent is { } consent)
+        {
+            _basis = ((byte)consent.Basis).ToString();
+            _basisDate = consent.BasisDate?.ToDateTime(TimeOnly.MinValue);
+            _basisNote = consent.BasisNote;
+            _marketing = consent.MarketingConsent;
+            _marketingDate = consent.MarketingConsentDate?.ToDateTime(TimeOnly.MinValue);
+        }
+
         _f = new ContactForm
         {
             Name = v.FullName, Position = v.Position, Phone = v.Phone, Email = v.Email, Messenger = v.Messenger, Comment = v.Comment,
-            Company = v.CounterpartyId?.ToString() ?? "",
+            Company = v.CounterpartyId?.ToString() ?? "", Birth = v.BirthDate?.ToDateTime(TimeOnly.MinValue),
         };
         _companies = v.CounterpartyId is { } cp && _contact.Counterparty is { } name ? [new(cp, name)] : [];
     }
@@ -155,7 +256,26 @@ else
     }, null, reload: false);
 
     private Task SaveAsync() => RunAsync(() => Contacts.UpdateAsync(Id, new CrmContactValues(_f.Name, _f.Position, long.TryParse(_f.Company, out var c) ? c : null,
-        _f.Phone, _f.Email, _f.Messenger, _f.Comment), _contact!.RowVersion), L("Контакт сохранён."));
+        _f.Phone, _f.Email, _f.Messenger, _f.Comment, null, _f.Birth is { } b ? DateOnly.FromDateTime(b) : null), _contact!.RowVersion), L("Контакт сохранён."));
+
+    private Task AddChannelAsync() => RunAsync(async () =>
+    {
+        await Contacts.AddChannelAsync(Id, (CrmChannelKind)byte.Parse(_channelKind), _channelValue, _channelLabel, _contact!.RowVersion);
+        (_channelValue, _channelLabel) = (null, null);
+    }, L("Добавлено."));
+
+    private Task SaveConsentAsync() => RunAsync(() => Contacts.SetConsentAsync(Id, new CrmConsentValues((CrmProcessingBasis)byte.Parse(_basis),
+        _basisDate is { } d ? DateOnly.FromDateTime(d) : null, _basisNote, _marketing, _marketingDate is { } m ? DateOnly.FromDateTime(m) : null),
+        _contact!.RowVersion), L("Основание и согласие сохранены."));
+
+    private Task EraseAsync() => RunAsync(() => Contacts.ErasePersonalDataAsync(Id, _eraseReason), L("Персональные данные удалены."));
+
+    private static string ChannelName(CrmChannelKind kind) => kind switch
+    {
+        CrmChannelKind.Phone => L("Телефон"),
+        CrmChannelKind.Email => L("Почта"),
+        _ => L("Мессенджер"),
+    };
 
     private Task ToggleArchiveAsync() => RunAsync(() => Contacts.SetArchivedAsync(Id, !_contact!.IsArchived, _contact.RowVersion), null);
 
@@ -198,5 +318,6 @@ else
         public string? Messenger { get; set; }
         public string? Comment { get; set; }
         public string Company { get; set; } = "";
+        public DateTime? Birth { get; set; }
     }
 }

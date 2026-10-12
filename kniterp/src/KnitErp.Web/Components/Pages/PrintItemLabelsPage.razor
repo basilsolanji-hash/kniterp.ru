@@ -62,6 +62,12 @@
         {
             <span class="warn">Шаблонов нет — печатается образец «@info.Template.Name». Свой шаблон — в конструкторе.</span>
         }
+        @if (ThinBarcodes(info) is { Count: > 0 } thin)
+        {
+            @* D316: штрихкод тоньше, чем надёжно читает сканер, — предупреждение, на бумагу не выводится. *@
+            <span class="warn" role="alert">Штрихкод может не прочитаться (слишком узкая этикетка) у @thin.Count поз.: @string.Join(", ", thin.Take(5))@(thin.Count > 5 ? " …" : "").
+                Создайте им EAN-13 в карточке или выберите этикетку шире.</span>
+        }
     }
 </form>
 
@@ -88,7 +94,7 @@ else
         }
         @foreach (var item in _data.Items)
         {
-            for (var c = 0; c < CopiesValue * PerItem(item.Id); c++, n++)
+            for (var c = 0; c < CountOf(item.Id) * CopiesValue; c++, n++)
             {
                 if (t.Sheet == LabelSheet.A4 && n > 0 && n % perSheet == 0)
                 {
@@ -120,30 +126,36 @@ else
 
     private int CopiesValue => Math.Clamp(Copies ?? 1, 1, 100);
 
-    private readonly Dictionary<long, int> _counts = [];
+    private Dictionary<long, int> _counts = [];
 
-    private int PerItem(long itemId) => _counts.GetValueOrDefault(itemId, 1);
+    private int CountOf(long itemId) => _counts.TryGetValue(itemId, out var n) ? n : 1;
 
-    private int Total(LabelPrintDto data) => data.Items.Sum(i => PerItem(i.Id)) * CopiesValue;
+    private long Total(LabelPrintDto d) => d.Items.Sum(i => (long)CountOf(i.Id)) * CopiesValue;
 
     private int SkipValue => Math.Clamp(Skip ?? 0, 0, 239);
 
     private static string Mm(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "mm";
 
+    /// <summary>Коды позиций, чей штрихкод на этой этикетке тоньше надёжного (BarcodeFit).</summary>
+    private static List<string> ThinBarcodes(LabelPrintDto d)
+    {
+        var bar = d.Template.Elements.FirstOrDefault(e => e.Field == LabelField.Barcode);
+        if (bar is null)
+        {
+            return [];
+        }
+
+        var width = d.Template.WidthMm - 2 * d.Template.PaddingMm;
+        return d.Items.Where(i => i.Barcode is { Length: > 0 and <= 80 } b && b.All(c => c is >= ' ' and <= '~') && !BarcodeFit.Readable(b, width, bar.BarcodeHeightMm))
+            .Select(i => i.Code).ToList();
+    }
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            // D1136 (сессия «Продажи»): «id*количество» — этикеток по количеству в документе (заказ, отгрузка, поступление).
-            foreach (var part in (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                var pair = part.Split('*', 2);
-                if (long.TryParse(pair[0], out var id) && id > 0)
-                {
-                    _counts[id] = _counts.GetValueOrDefault(id) + (pair.Length > 1 && int.TryParse(pair[1], out var k) ? Math.Clamp(k, 1, LabelService.MaxLabels) : 1);
-                }
-            }
-
+            // D325: «12x5» — позиция и число этикеток (из строк документа); просто «12» — одна.
+            _counts = LabelLink.Parse(Ids).ToDictionary(x => x.ItemId, x => x.Count);
             var ids = _counts.Keys.ToList();
             if (ids.Count == 0)
             {

@@ -34,3 +34,13 @@ node .claude/skills/kniterp-e2e/scenarios/<сценарий>.mjs       # с те
 - Blazor: после `goto` вызывайте `ready(page)`, иначе клик может уйти до подключения схемы.
 - `InputSelect` для enum — значение опции = имя члена (`selectOption('Service')`).
 - Лог приложения — `$E2E_DIR/app.log` (ошибки сервера смотреть там).
+
+## Проверка штрихкодов декодером (этикетки, D316)
+Штрихкоды этикеток проверяются настоящим декодером, а не на глаз:
+1. Позиции со штрихкодами: строки `ItemId|Code` в `$E2E_DIR/bc-items.txt` (например, `SELECT ItemId, Code FROM kniterp.item_barcodes …`
+   через `sqlcmd -h -1 -W -s "|"`).
+2. Шаблоны с названиями `BC 40x30`, `BC 43x25`, `BC 30x20`, `BC A4 105x74`, `BC 58x40`, `BC A4 70x37` (создать из образцов в конструкторе).
+3. `node .claude/skills/kniterp-e2e/barcodes/render.mjs` — каждая этикетка картинкой при 203 и 300 dpi (`deviceScaleFactor = dpi / 96`).
+4. Декодер — в отдельном venv: `python3 -m venv <scratch>/bcvenv && <scratch>/bcvenv/bin/pip install zxing-cpp pillow numpy`,
+   затем `<scratch>/bcvenv/bin/python -I .claude/skills/kniterp-e2e/barcodes/decode.py` — итог по шаблону, dpi и типу кода (серый и 1 бит).
+Результат 12.10.2026: EAN-13 — 100 %; длинный Code 128 на 30×20 и 43×25 при 203 dpi не читается — экран предупреждает (`BarcodeFit`).

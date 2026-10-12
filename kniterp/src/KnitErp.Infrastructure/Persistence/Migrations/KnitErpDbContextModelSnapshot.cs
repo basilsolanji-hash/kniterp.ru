@@ -398,6 +398,63 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Access.UserSession", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AddressPrefix")
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("LastSeenAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<Guid>("PublicId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RevokedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid>("SecurityStamp")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PublicId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_user_sessions_public_id");
+
+                    b.HasIndex("UserId", "RevokedAtUtc")
+                        .HasDatabaseName("ix_user_sessions_user");
+
+                    b.ToTable("user_sessions", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_user_sessions_revoked", "[RevokedAtUtc] IS NULL OR [RevokedAtUtc] >= [CreatedAtUtc]");
+
+                            t.HasCheckConstraint("ck_user_sessions_seen", "[LastSeenAtUtc] >= [CreatedAtUtc]");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Audit.AuditEntry", b =>
                 {
                     b.Property<long>("Id")
@@ -730,6 +787,49 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasFilter("[IsArchived] = 0");
 
                     b.ToTable("characteristics", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CharacteristicValueSet", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("CharacteristicId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("ValuesText")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CharacteristicId");
+
+                    b.HasIndex("OrganizationId", "CharacteristicId")
+                        .HasDatabaseName("ix_characteristic_value_sets_org_char");
+
+                    b.ToTable("characteristic_value_sets", "kniterp");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.Counterparty", b =>
@@ -1463,6 +1563,63 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.ItemGroupDefaults", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("GroupId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OriginCountryCode")
+                        .HasColumnType("char(3)");
+
+                    b.Property<string>("OriginCountryName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("TnVedCode")
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<byte?>("Tracking")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte?>("Type")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long?>("UnitId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("VatRateId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_item_group_defaults_group");
+
+                    b.HasIndex("OrganizationId", "GroupId");
+
+                    b.HasIndex("OrganizationId", "UnitId");
+
+                    b.HasIndex("OrganizationId", "VatRateId");
+
+                    b.ToTable("item_group_defaults", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPack", b =>
                 {
                     b.Property<long>("Id")
@@ -1650,7 +1807,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_item_price_history_prices", "([OldPrice] IS NULL OR [OldPrice] >= 0) AND ([NewPrice] IS NULL OR [NewPrice] >= 0)");
 
-                            t.HasCheckConstraint("ck_item_price_history_source", "[Source] IN (1, 2, 3, 4, 5)");
+                            t.HasCheckConstraint("ck_item_price_history_source", "[Source] IN (1, 2, 3, 4, 5, 6)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -1876,10 +2033,58 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasTrigger("tr_price_revaluations_immutable");
 
-                            t.HasCheckConstraint("ck_price_revaluations_mode", "[Mode] IN (1, 2) AND [Rounding] IN (0, 1, 2, 3) AND [Items] >= 0");
+                            t.HasCheckConstraint("ck_price_revaluations_mode", "[Mode] IN (1, 2) AND [Rounding] IN (0, 1, 2, 3, 4, 5) AND [Items] >= 0");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.PriceRule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Factor")
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PriceTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Rounding")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("PriceTypeId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_price_rules_price_type");
+
+                    b.ToTable("price_rules", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_price_rules_factor", "[Factor] > 0 AND [Factor] <= 100");
+
+                            t.HasCheckConstraint("ck_price_rules_rounding", "[Rounding] IN (0, 1, 2, 3, 4, 5)");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.PriceType", b =>
@@ -2355,6 +2560,109 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmActivity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AssigneeUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("DoneAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("DoneByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("DueAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("ExternalRef")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDone")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long?>("OfferId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Peer")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Result")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Source")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte>("Target")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("TargetId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssigneeUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DoneByUserId");
+
+                    b.HasIndex("OfferId");
+
+                    b.HasIndex("OrganizationId", "Source", "ExternalRef")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_activities_external")
+                        .HasFilter("[ExternalRef] IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "AssigneeUserId", "IsDone", "DueAtUtc")
+                        .HasDatabaseName("ix_crm_activities_assignee_due");
+
+                    b.HasIndex("OrganizationId", "Target", "TargetId", "CreatedAtUtc")
+                        .HasDatabaseName("ix_crm_activities_target");
+
+                    b.ToTable("crm_activities", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_activities_done", "([IsDone] = 1 AND [DoneAtUtc] IS NOT NULL AND [DoneByUserId] IS NOT NULL) OR ([IsDone] = 0 AND [DoneAtUtc] IS NULL AND [DoneByUserId] IS NULL)");
+
+                            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 9 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 6");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmContact", b =>
                 {
                     b.Property<long>("Id")
@@ -2362,6 +2670,16 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateOnly?>("BasisDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("BasisNote")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<DateOnly?>("BirthDate")
+                        .HasColumnType("date");
 
                     b.Property<string>("Comment")
                         .HasMaxLength(1000)
@@ -2380,6 +2698,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(254)
                         .HasColumnType("nvarchar(254)");
 
+                    b.Property<DateTime?>("ErasedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<string>("FullName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -2387,6 +2708,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("IsArchived")
                         .HasColumnType("bit");
+
+                    b.Property<bool>("MarketingConsent")
+                        .HasColumnType("bit");
+
+                    b.Property<DateOnly?>("MarketingConsentDate")
+                        .HasColumnType("date");
 
                     b.Property<string>("Messenger")
                         .HasMaxLength(100)
@@ -2402,6 +2729,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("nvarchar(150)");
 
+                    b.Property<byte>("ProcessingBasis")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)1);
+
                     b.Property<long>("ResponsibleUserId")
                         .HasColumnType("bigint");
 
@@ -2411,6 +2743,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<Guid>("UnsubscribeToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWID()");
+
                     b.HasKey("Id");
 
                     b.HasAlternateKey("OrganizationId", "Id")
@@ -2419,6 +2756,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("ResponsibleUserId");
+
+                    b.HasIndex("UnsubscribeToken")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_contacts_unsubscribe");
 
                     b.HasIndex("OrganizationId", "CounterpartyId")
                         .HasDatabaseName("ix_crm_contacts_org_counterparty");
@@ -2431,7 +2772,50 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_crm_contacts_org_phone")
                         .HasFilter("[Phone] IS NOT NULL");
 
-                    b.ToTable("crm_contacts", "kniterp");
+                    b.ToTable("crm_contacts", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_contacts_basis", "[ProcessingBasis] IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("ck_crm_contacts_marketing", "[MarketingConsent] = 0 OR [MarketingConsentDate] IS NOT NULL");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmContactChannel", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ContactId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("nvarchar(254)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Value")
+                        .HasDatabaseName("ix_crm_contact_channels_kind_value");
+
+                    b.HasIndex("ContactId", "Kind", "Value")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_contact_channels_value");
+
+                    b.ToTable("crm_contact_channels", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_contact_channels_kind", "[Kind] IN (1, 2, 3)");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmDeal", b =>
@@ -2723,6 +3107,97 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmEmailTemplate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_email_templates_org_name");
+
+                    b.ToTable("crm_email_templates", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmExternalLink", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<byte>("Entity")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("EntityId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("System")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "System", "Entity", "ExternalId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_external_links");
+
+                    b.ToTable("crm_external_links", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_external_links_entity", "[Entity] IN (1, 2, 3)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmLead", b =>
                 {
                     b.Property<long>("Id")
@@ -2882,6 +3357,376 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("ConnectedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("ConnectedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("CreateLeads")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("LastCheckAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("LastUid")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Login")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Password")
+                        .HasMaxLength(877)
+                        .HasColumnType("nvarchar(877)");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("UidValidity")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectedByUserId");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_mailboxes_org");
+
+                    b.ToTable("crm_mailboxes", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_mailboxes_port", "[Port] IN (0, 143, 993)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailing", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("QueuedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("ScheduledAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("SentAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<long?>("TagId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("QueuedByUserId");
+
+                    b.HasIndex("TagId");
+
+                    b.HasIndex("OrganizationId", "CreatedAtUtc")
+                        .HasDatabaseName("ix_crm_mailings_org");
+
+                    b.HasIndex("Status", "ScheduledAtUtc")
+                        .HasDatabaseName("ix_crm_mailings_queue");
+
+                    b.ToTable("crm_mailings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_mailings_status", "[Status] IN (1, 2, 3, 4)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailingRecipient", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("AttemptedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("ContactId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("Delivered")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("nvarchar(254)");
+
+                    b.Property<long>("MailingId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContactId");
+
+                    b.HasIndex("MailingId", "ContactId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_mailing_recipients");
+
+                    b.ToTable("crm_mailing_recipients", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMessengerChannel", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AccountId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("AccountName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("AppSecret")
+                        .HasMaxLength(610)
+                        .HasColumnType("nvarchar(610)");
+
+                    b.Property<DateTime>("ConnectedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("ConnectedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("DisconnectedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte[]>("SecretHash")
+                        .HasColumnType("binary(32)");
+
+                    b.Property<string>("Token")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectedByUserId");
+
+                    b.HasIndex("SecretHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_messenger_channels_secret")
+                        .HasFilter("[SecretHash] IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "Kind")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_messenger_channels_org_kind");
+
+                    b.ToTable("crm_messenger_channels", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_messenger_channels_kind", "[Kind] IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmOffer", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasColumnType("char(3)");
+
+                    b.Property<long>("DealId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateOnly>("OfferDate")
+                        .HasColumnType("date");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("PriceTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Terms")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateOnly>("ValidUntil")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_crm_offers_org_id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("PriceTypeId");
+
+                    b.HasIndex("OrganizationId", "DealId");
+
+                    b.HasIndex("OrganizationId", "Number")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_offers_org_number");
+
+                    b.ToTable("crm_offers", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_crm_offers_immutable");
+
+                            t.HasCheckConstraint("ck_crm_offers_dates", "[ValidUntil] >= [OfferDate] AND [Amount] >= 0");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmOfferLine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<long>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("LineNo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<long>("OfferId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Price")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<decimal>("Quantity")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("UnitSymbol")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ItemId");
+
+                    b.HasIndex("OfferId", "LineNo")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_offer_lines_no");
+
+                    b.ToTable("crm_offer_lines", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_crm_offer_lines_immutable");
+
+                            t.HasCheckConstraint("ck_crm_offer_lines_values", "[Quantity] > 0 AND [Price] >= 0 AND [Amount] >= 0");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmPipeline", b =>
                 {
                     b.Property<long>("Id")
@@ -2921,6 +3766,55 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasFilter("[IsArchived] = 0");
 
                     b.ToTable("crm_pipelines", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmPlan", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<int>("Month")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("PipelineId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Year")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("OrganizationId", "PipelineId");
+
+                    b.HasIndex("OrganizationId", "Year", "Month", "UserId", "PipelineId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_plans_period")
+                        .HasFilter("[UserId] IS NOT NULL AND [PipelineId] IS NOT NULL");
+
+                    b.ToTable("crm_plans", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_plans_values", "[Month] BETWEEN 1 AND 12 AND [Year] BETWEEN 2000 AND 2100 AND [Amount] >= 0");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmReference", b =>
@@ -2970,6 +3864,68 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmSettings", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<byte>("AssignMode")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long?>("DefaultResponsibleUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("LastAssignedUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("NextStepSuggestions")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("OfferTerms")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("OfferValidDays")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("PlanFact")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int?>("RepeatSaleDays")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<bool>("StageByEvents")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("StaleLeadDays")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DefaultResponsibleUserId");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_settings_org");
+
+                    b.ToTable("crm_settings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_settings_values", "[AssignMode] IN (1, 2) AND [PlanFact] IN (1, 2) AND [StaleLeadDays] BETWEEN 1 AND 90 AND [OfferValidDays] BETWEEN 1 AND 365 AND ([RepeatSaleDays] IS NULL OR [RepeatSaleDays] BETWEEN 1 AND 730)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmStage", b =>
                 {
                     b.Property<long>("Id")
@@ -2992,6 +3948,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(60)
                         .HasColumnType("nvarchar(60)");
+
+                    b.Property<int?>("NextStepDays")
+                        .HasColumnType("int");
+
+                    b.Property<string>("NextStepSubject")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
@@ -3081,6 +4044,128 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Development.DevDetail", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("MachineId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ModelId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("PlanKnitSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("PlanWeightGrams")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long?>("ProgramFileId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ThreadingRevision")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("WeaveId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_details_org_id");
+
+                    b.HasIndex("OrganizationId", "MachineId");
+
+                    b.HasIndex("OrganizationId", "ProgramFileId");
+
+                    b.HasIndex("OrganizationId", "WeaveId");
+
+                    b.HasIndex("OrganizationId", "ModelId", "SortOrder")
+                        .HasDatabaseName("ix_dev_details_model");
+
+                    b.ToTable("dev_details", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_details_plan", "([PlanKnitSeconds] IS NULL OR [PlanKnitSeconds] > 0) AND ([PlanWeightGrams] IS NULL OR [PlanWeightGrams] > 0)");
+
+                            t.HasCheckConstraint("ck_dev_details_quantity", "[Quantity] BETWEEN 1 AND 20");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevDetailSize", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("DetailId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("LengthAfterSteamCm")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal?>("LengthOffMachineCm")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long>("SizeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("WidthCm")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "SizeId");
+
+                    b.HasIndex("OrganizationId", "DetailId", "SizeId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_detail_sizes");
+
+                    b.ToTable("dev_detail_sizes", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Development.DevFile", b =>
                 {
                     b.Property<long>("Id")
@@ -3102,6 +4187,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<long?>("DetailId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -3109,6 +4197,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<byte>("Kind")
                         .HasColumnType("tinyint");
+
+                    b.Property<long?>("MachineId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MachineParams")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<long>("ModelId")
                         .HasColumnType("bigint");
@@ -3130,7 +4225,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_files_org_id");
+
                     b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("OrganizationId", "DetailId");
+
+                    b.HasIndex("OrganizationId", "MachineId")
+                        .HasDatabaseName("ix_dev_files_machine");
 
                     b.HasIndex("OrganizationId", "ModelId", "Kind", "FileName", "Version")
                         .IsUnique()
@@ -3199,6 +4302,206 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_dev_lookups_number", "[Number] IS NULL OR [Number] BETWEEN 0 AND 1000");
                         });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMachine", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<byte>("Brand")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int>("FeederCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Gauge")
+                        .HasColumnType("int");
+
+                    b.Property<string>("InventoryNumber")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<int?>("Systems")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("WidthCm")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_machines_org_id");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_machines_name");
+
+                    b.ToTable("dev_machines", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_machines_brand", "[Brand] IN (1, 2, 9)");
+
+                            t.HasCheckConstraint("ck_dev_machines_feeders", "[FeederCount] BETWEEN 1 AND 32");
+
+                            t.HasCheckConstraint("ck_dev_machines_gauge", "[Gauge] BETWEEN 1 AND 30");
+
+                            t.HasCheckConstraint("ck_dev_machines_status", "[Status] BETWEEN 1 AND 3");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMachineNote", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("AtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("MachineId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte?>("StatusAfter")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long>("UserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("OrganizationId", "MachineId", "Id")
+                        .HasDatabaseName("ix_dev_machine_notes_machine");
+
+                    b.ToTable("dev_machine_notes", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_dev_machine_notes_immutable");
+
+                            t.HasCheckConstraint("ck_dev_machine_notes_status", "[StatusAfter] IS NULL OR [StatusAfter] BETWEEN 1 AND 3");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMeasure", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ModelId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("Step")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal>("Tolerance")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_measures_org_id");
+
+                    b.HasIndex("OrganizationId", "ModelId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_measures_name");
+
+                    b.ToTable("dev_measures", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_measures_tolerance", "[Tolerance] >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMeasureValue", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("MeasureId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long>("SizeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Value")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "SizeId");
+
+                    b.HasIndex("OrganizationId", "MeasureId", "SizeId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_measure_values");
+
+                    b.ToTable("dev_measure_values", "kniterp");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevModel", b =>
@@ -3272,6 +4575,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
+                    b.Property<long?>("MainSketchFileId")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -3285,11 +4591,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("PackBox")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
                     b.Property<DateOnly?>("PlannedLaunch")
                         .HasColumnType("date");
 
                     b.Property<byte>("Priority")
                         .HasColumnType("tinyint");
+
+                    b.Property<long?>("ProductionItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ProductionTechCardId")
+                        .HasColumnType("bigint");
 
                     b.Property<long?>("ProgrammerUserId")
                         .HasColumnType("bigint");
@@ -3348,9 +4664,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrganizationId", "CustomerId");
 
+                    b.HasIndex("OrganizationId", "MainSketchFileId");
+
                     b.HasIndex("OrganizationId", "Number")
                         .IsUnique()
                         .HasDatabaseName("ux_dev_models_number");
+
+                    b.HasIndex("OrganizationId", "ProductionItemId");
+
+                    b.HasIndex("OrganizationId", "ProductionTechCardId");
 
                     b.HasIndex("OrganizationId", "Stage")
                         .HasDatabaseName("ix_dev_models_stage");
@@ -3374,6 +4696,147 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_dev_models_run", "[RunQuantity] IS NULL OR [RunQuantity] > 0");
 
                             t.HasCheckConstraint("ck_dev_models_stage", "[Stage] BETWEEN 1 AND 11 OR [Stage] = 99");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevModelColor", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("ItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<long>("ModelId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Swatch")
+                        .HasMaxLength(7)
+                        .HasColumnType("nvarchar(7)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_model_colors_org_id");
+
+                    b.HasIndex("OrganizationId", "ItemId");
+
+                    b.HasIndex("OrganizationId", "ModelId", "Label")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_model_colors_label");
+
+                    b.ToTable("dev_model_colors", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevModelOperation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ModelId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("NormMinutes")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<long>("OperationTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("Price")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<int>("Seq")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "OperationTypeId");
+
+                    b.HasIndex("OrganizationId", "ModelId", "Seq")
+                        .HasDatabaseName("ix_dev_model_operations_model");
+
+                    b.ToTable("dev_model_operations", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_model_operations_values", "([Price] IS NULL OR [Price] >= 0) AND ([NormMinutes] IS NULL OR [NormMinutes] > 0)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevModelSize", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("IsBase")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("ModelId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("PerBox")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_model_sizes_org_id");
+
+                    b.HasIndex("OrganizationId", "ModelId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_model_sizes_name");
+
+                    b.ToTable("dev_model_sizes", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_model_sizes_box", "[PerBox] IS NULL OR [PerBox] > 0");
                         });
                 });
 
@@ -3429,6 +4892,255 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Development.DevOperationType", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<decimal?>("NormMinutes")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("Price")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<byte?>("ProductionStage")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_operation_types_org_id");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_operation_types_name");
+
+                    b.ToTable("dev_operation_types", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_operation_types_stage", "[ProductionStage] IS NULL OR [ProductionStage] BETWEEN 1 AND 5");
+
+                            t.HasCheckConstraint("ck_dev_operation_types_values", "([Price] IS NULL OR [Price] >= 0) AND ([NormMinutes] IS NULL OR [NormMinutes] > 0)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSample", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ModelId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("No")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("SizeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long?>("YarnWriteOffDocumentId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_samples_org_id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "SizeId");
+
+                    b.HasIndex("OrganizationId", "YarnWriteOffDocumentId");
+
+                    b.HasIndex("OrganizationId", "ModelId", "No")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_samples_no");
+
+                    b.ToTable("dev_samples", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_samples_status", "[Status] BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSampleColorShare", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("ColorId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Percent")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<long>("SampleDetailId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ColorId");
+
+                    b.HasIndex("OrganizationId", "SampleDetailId", "ColorId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_sample_color_shares");
+
+                    b.ToTable("dev_sample_color_shares", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_sample_color_shares_percent", "[Percent] BETWEEN 0 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSampleDetail", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("DetailId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("KnitSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("RecordedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long>("SampleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("WeightGrams")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_dev_sample_details_org_id");
+
+                    b.HasIndex("RecordedByUserId");
+
+                    b.HasIndex("OrganizationId", "DetailId");
+
+                    b.HasIndex("OrganizationId", "SampleId", "DetailId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_sample_details");
+
+                    b.ToTable("dev_sample_details", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_sample_details_fact", "([KnitSeconds] IS NULL OR [KnitSeconds] > 0) AND ([WeightGrams] IS NULL OR [WeightGrams] > 0)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSampleMeasure", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("MeasureId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long>("SampleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Value")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "MeasureId");
+
+                    b.HasIndex("OrganizationId", "SampleId", "MeasureId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_sample_measures");
+
+                    b.ToTable("dev_sample_measures", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Development.DevSettings", b =>
                 {
                     b.Property<long>("OrganizationId")
@@ -3444,6 +5156,11 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
+                    b.Property<int>("CompletenessSections")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1023);
+
                     b.Property<long?>("DefaultConstructorUserId")
                         .HasColumnType("bigint");
 
@@ -3458,6 +5175,24 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<long?>("DefaultTechnologistUserId")
                         .HasColumnType("bigint");
+
+                    b.Property<int>("FactTolerancePercent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(10);
+
+                    b.Property<int>("LabelHeightMm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(40);
+
+                    b.Property<int>("LabelWidthMm")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(58);
+
+                    b.Property<bool>("LabelsOnA4")
+                        .HasColumnType("bit");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -3477,7 +5212,14 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("DefaultTechnologistUserId");
 
-                    b.ToTable("dev_settings", "kniterp");
+                    b.ToTable("dev_settings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_settings_label", "[LabelWidthMm] BETWEEN 20 AND 150 AND [LabelHeightMm] BETWEEN 20 AND 150");
+
+                            t.HasCheckConstraint("ck_dev_settings_sections", "[CompletenessSections] BETWEEN 1 AND 1023");
+
+                            t.HasCheckConstraint("ck_dev_settings_tolerance", "[FactTolerancePercent] BETWEEN 1 AND 100");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevStageSetting", b =>
@@ -3509,6 +5251,66 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_dev_stage_settings_enabled", "[IsEnabled] = 1 OR [Stage] IN (5, 7, 8, 9)");
 
                             t.HasCheckConstraint("ck_dev_stage_settings_stage", "[Stage] BETWEEN 1 AND 10");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevThreading", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long?>("ColorId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("DetailId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("Elastic")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("Ends")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Feeder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("Mode")
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("Paraffin")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("Side")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ColorId");
+
+                    b.HasIndex("OrganizationId", "DetailId", "Feeder", "Side")
+                        .IsUnique()
+                        .HasDatabaseName("ux_dev_threading_feeder");
+
+                    b.ToTable("dev_threading", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_threading_ends", "[Ends] BETWEEN 1 AND 20");
+
+                            t.HasCheckConstraint("ck_dev_threading_feeder", "[Feeder] BETWEEN 1 AND 32");
+
+                            t.HasCheckConstraint("ck_dev_threading_side", "[Side] IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_dev_threading_yarn", "[ColorId] IS NOT NULL OR [Label] IS NOT NULL");
                         });
                 });
 
@@ -4184,6 +5986,255 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataRequest", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ClosedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime>("IssuedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("IssuedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte[]>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("binary(32)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_hr_employee_data_requests_org_id");
+
+                    b.HasIndex("IssuedByUserId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_employee_data_requests_token");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "Status")
+                        .HasDatabaseName("ix_hr_employee_data_requests_employee");
+
+                    b.ToTable("hr_employee_data_requests", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_employee_data_requests_closed_immutable");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_closed", "([Status] = 1 AND [ClosedAtUtc] IS NULL) OR ([Status] <> 1 AND [ClosedAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_expires", "[ExpiresAtUtc] > [IssuedAtUtc]");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_hash", "DATALENGTH([TokenHash]) = 32");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_requests_status", "[Status] IN (1, 2, 3)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmission", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ActualAddress")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("BirthDate")
+                        .HasMaxLength(104)
+                        .HasColumnType("nvarchar(104)");
+
+                    b.Property<string>("ClientAddress")
+                        .HasMaxLength(197)
+                        .HasColumnType("nvarchar(197)");
+
+                    b.Property<string>("ConsentTextHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("char(64)")
+                        .IsFixedLength();
+
+                    b.Property<string>("ConsentVersion")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<long>("EmployeeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Inn")
+                        .HasMaxLength(109)
+                        .HasColumnType("nvarchar(109)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("PassportDivisionCode")
+                        .HasMaxLength(96)
+                        .HasColumnType("nvarchar(96)");
+
+                    b.Property<string>("PassportIssuedOn")
+                        .HasMaxLength(104)
+                        .HasColumnType("nvarchar(104)");
+
+                    b.Property<string>("PassportIssuer")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("PassportNumber")
+                        .HasMaxLength(130)
+                        .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("PersonalEmail")
+                        .HasMaxLength(754)
+                        .HasColumnType("nvarchar(754)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(130)
+                        .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("RegistrationAddress")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.Property<string>("RejectReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long>("RequestId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ReviewedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("ReviewedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Snils")
+                        .HasMaxLength(106)
+                        .HasColumnType("nvarchar(106)");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime>("SubmittedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_hr_employee_data_submissions_org_id");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_hr_employee_data_submissions_request");
+
+                    b.HasIndex("ReviewedByUserId");
+
+                    b.HasIndex("OrganizationId", "RequestId");
+
+                    b.HasIndex("OrganizationId", "EmployeeId", "Status")
+                        .HasDatabaseName("ix_hr_employee_data_submissions_employee");
+
+                    b.ToTable("hr_employee_data_submissions", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_employee_data_submissions_immutable");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submissions_consent", "LEN([ConsentTextHash]) = 64 AND LEN([ConsentVersion]) > 0");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submissions_review", "([Status] = 1 AND [ReviewedAtUtc] IS NULL AND [ReviewedByUserId] IS NULL AND [RejectReason] IS NULL) OR ([Status] = 2 AND [ReviewedAtUtc] IS NOT NULL AND [ReviewedByUserId] IS NOT NULL AND [RejectReason] IS NULL) OR ([Status] = 3 AND [ReviewedAtUtc] IS NOT NULL AND [ReviewedByUserId] IS NOT NULL AND LEN([RejectReason]) > 0)");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submissions_status", "[Status] IN (1, 2, 3)");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmissionFile", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("int");
+
+                    b.Property<long>("SubmissionId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "SubmissionId")
+                        .HasDatabaseName("ix_hr_employee_data_submission_files_submission");
+
+                    b.ToTable("hr_employee_data_submission_files", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_hr_employee_data_submission_files_insert_only");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submission_files_kind", "[Kind] IN (2, 3, 4, 7, 8)");
+
+                            t.HasCheckConstraint("ck_hr_employee_data_submission_files_size", "[SizeBytes] BETWEEN 1 AND 3145728");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>
                 {
                     b.Property<long>("Id")
@@ -4253,6 +6304,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<string>("PassportNumber")
                         .HasMaxLength(130)
                         .HasColumnType("nvarchar(130)");
+
+                    b.Property<string>("PersonalEmail")
+                        .HasMaxLength(754)
+                        .HasColumnType("nvarchar(754)");
 
                     b.Property<string>("Phone")
                         .HasMaxLength(130)
@@ -8803,6 +10858,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Access.UserSession", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.BundleComponent", b =>
                 {
                     b.HasOne("KnitErp.Domain.Catalog.Item", null)
@@ -8861,6 +10925,22 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.Characteristic", b =>
                 {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CharacteristicValueSet", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.Characteristic", null)
+                        .WithMany()
+                        .HasForeignKey("CharacteristicId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_characteristic_value_sets_characteristic");
+
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId")
@@ -9055,6 +11135,31 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_item_groups_parent");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.ItemGroupDefaults", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.ItemGroup", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "GroupId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_group_defaults_group");
+
+                    b.HasOne("KnitErp.Domain.Catalog.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "UnitId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_item_group_defaults_unit");
+
+                    b.HasOne("KnitErp.Domain.Catalog.VatRate", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "VatRateId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_item_group_defaults_vat");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPack", b =>
                 {
                     b.HasOne("KnitErp.Domain.Catalog.Item", null)
@@ -9189,6 +11294,22 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_price_revaluations_type");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.PriceRule", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.PriceType", null)
+                        .WithMany()
+                        .HasForeignKey("PriceTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_price_rules_price_type");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.PriceType", b =>
                 {
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
@@ -9316,6 +11437,41 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmActivity", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("AssigneeUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_activities_assignee");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_activities_created_by");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DoneByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_activities_done_by");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmOffer", null)
+                        .WithMany()
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_activities_offer");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmContact", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -9344,6 +11500,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_crm_contacts_counterparty");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmContactChannel", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Crm.CrmContact", null)
+                        .WithMany("Channels")
+                        .HasForeignKey("ContactId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmDeal", b =>
@@ -9519,6 +11684,30 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_crm_deal_stage_history_to");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmEmailTemplate", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmExternalLink", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmLead", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -9591,6 +11780,126 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_crm_leads_source");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailbox", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ConnectedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailing", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_mailings_created_by");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("QueuedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_mailings_queued_by");
+
+                    b.HasOne("KnitErp.Domain.Tagging.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_mailings_tag");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailingRecipient", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Crm.CrmContact", null)
+                        .WithMany()
+                        .HasForeignKey("ContactId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_mailing_recipients_contact");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmMailing", null)
+                        .WithMany("Recipients")
+                        .HasForeignKey("MailingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMessengerChannel", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ConnectedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmOffer", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_offers_created_by");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.PriceType", null)
+                        .WithMany()
+                        .HasForeignKey("PriceTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_offers_price_type");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmDeal", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DealId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_offers_deal");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmOfferLine", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_offer_lines_item");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmOffer", null)
+                        .WithMany("Lines")
+                        .HasForeignKey("OfferId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmPipeline", b =>
                 {
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
@@ -9600,8 +11909,45 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmPlan", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_plans_user");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmPipeline", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PipelineId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_plans_pipeline");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmReference", b =>
                 {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmSettings", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultResponsibleUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_settings_default_user");
+
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
                         .WithMany()
                         .HasForeignKey("OrganizationId")
@@ -9635,6 +11981,69 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Development.DevDetail", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevMachine", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MachineId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_details_machine");
+
+                    b.HasOne("KnitErp.Domain.Development.DevModel", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ModelId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_details_model");
+
+                    b.HasOne("KnitErp.Domain.Development.DevFile", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProgramFileId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_details_program");
+
+                    b.HasOne("KnitErp.Domain.Development.DevLookup", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "WeaveId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_details_weave");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevDetailSize", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevDetail", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DetailId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_detail_sizes_detail");
+
+                    b.HasOne("KnitErp.Domain.Development.DevModelSize", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SizeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_detail_sizes_size");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Development.DevFile", b =>
                 {
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
@@ -9648,6 +12057,20 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("UploadedByUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevDetail", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DetailId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_files_detail");
+
+                    b.HasOne("KnitErp.Domain.Development.DevMachine", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MachineId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_files_machine");
 
                     b.HasOne("KnitErp.Domain.Development.DevModel", null)
                         .WithMany()
@@ -9665,6 +12088,80 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMachine", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMachineNote", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevMachine", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MachineId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_machine_notes_machine");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMeasure", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevModel", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ModelId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_measures_model");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevMeasureValue", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MeasureId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_measure_values_measure");
+
+                    b.HasOne("KnitErp.Domain.Development.DevModelSize", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SizeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_measure_values_size");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevModel", b =>
@@ -9725,6 +12222,93 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_dev_models_customer");
+
+                    b.HasOne("KnitErp.Domain.Development.DevFile", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MainSketchFileId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_models_sketch");
+
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProductionItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_models_production_item");
+
+                    b.HasOne("KnitErp.Domain.Production.TechCard", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProductionTechCardId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_models_production_techcard");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevModelColor", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_model_colors_item");
+
+                    b.HasOne("KnitErp.Domain.Development.DevModel", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ModelId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_model_colors_model");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevModelOperation", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevModel", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ModelId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_model_operations_model");
+
+                    b.HasOne("KnitErp.Domain.Development.DevOperationType", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "OperationTypeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_model_operations_type");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevModelSize", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevModel", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ModelId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_model_sizes_model");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevModelStageEntry", b =>
@@ -9750,6 +12334,133 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_dev_model_stages_model");
 
                     b.Navigation("Model");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevOperationType", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSample", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevModel", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ModelId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_samples_model");
+
+                    b.HasOne("KnitErp.Domain.Development.DevModelSize", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SizeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_samples_size");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.StockDocument", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "YarnWriteOffDocumentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_samples_yarn_writeoff");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSampleColorShare", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevModelColor", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ColorId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_sample_color_shares_color");
+
+                    b.HasOne("KnitErp.Domain.Development.DevSampleDetail", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SampleDetailId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_sample_color_shares_fact");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSampleDetail", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("RecordedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevDetail", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DetailId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_sample_details_detail");
+
+                    b.HasOne("KnitErp.Domain.Development.DevSample", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SampleId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_sample_details_sample");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSampleMeasure", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MeasureId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_sample_measures_measure");
+
+                    b.HasOne("KnitErp.Domain.Development.DevSample", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SampleId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_sample_measures_sample");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevSettings", b =>
@@ -9798,6 +12509,30 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevThreading", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevModelColor", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ColorId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_threading_color");
+
+                    b.HasOne("KnitErp.Domain.Development.DevDetail", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DetailId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_threading_detail");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Finance.BankStatementLine", b =>
@@ -10088,6 +12823,76 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_hr_employee_agreements_employee");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataRequest", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("IssuedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_requests_employee");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmission", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ReviewedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Structure.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "EmployeeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_submissions_employee");
+
+                    b.HasOne("KnitErp.Domain.Hr.EmployeeDataRequest", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "RequestId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_submissions_request");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Hr.EmployeeDataSubmissionFile", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Hr.EmployeeDataSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "SubmissionId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_hr_employee_data_submission_files_submission");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Hr.EmployeePersonalData", b =>
@@ -11673,11 +14478,26 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Navigation("Periods");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmContact", b =>
+                {
+                    b.Navigation("Channels");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmDeal", b =>
                 {
                     b.Navigation("Lines");
 
                     b.Navigation("Participants");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailing", b =>
+                {
+                    b.Navigation("Recipients");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmOffer", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Finance.ExpenseReport", b =>

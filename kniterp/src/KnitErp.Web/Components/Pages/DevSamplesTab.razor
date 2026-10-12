@@ -1,0 +1,251 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevShopService Shop
+
+@*
+    Образцы (D714): образец № 1, 2, 3 в размере сетки; по деталям — план и факт цеха (время, вес, доли цветов); замеры по табелю мер
+    с отклонением (выход за допуск — красным); решение: принят, на доработку, отклонён. Факт цех вносит в техкарте вязания детали.
+*@
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+@if (_s is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var data = _s;
+    @if (data.CanEdit)
+    {
+        <form class="inline-form" @onsubmit="CreateAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                <label>
+                    @L("Размер образца")
+                    <select @bind="_size">
+                        <option value="">—</option>
+                        @foreach (var z in data.Sizes)
+                        {
+                            <option value="@z.Id">@z.Name</option>
+                        }
+                    </select>
+                </label>
+                <button type="submit" disabled="@_busy">@L("Новый образец")</button>
+            </fieldset>
+        </form>
+    }
+    @if (data.Samples.Count == 0)
+    {
+        <p class="muted">@L("Образцов пока нет.")</p>
+    }
+    @foreach (var smp in data.Samples)
+    {
+        var sample = smp;
+        <div class="panel">
+            <div class="page-head" style="margin: 0">
+                <h2>@L("Образец № {0}", smp.No)@(smp.Size is null ? "" : " · " + L("размер {0}", smp.Size))</h2>
+                <span class="actions" style="margin: 0; align-items: center">
+                    <span class="tag @(smp.Status == DevSampleStatus.Accepted ? "ok" : smp.Status is DevSampleStatus.Rework or DevSampleStatus.Rejected ? "bad" : "warn")">@L(smp.StatusName)</span>
+                    <DevLabelLink Kind="sample" Id="smp.Id" />
+                    @if (data.CanEdit || data.CanRecord)
+                    {
+                        <button type="button" class="secondary" @onclick="() => _yarnFor = _yarnFor == sample.Id ? null : sample.Id">@(_yarnFor == smp.Id ? L("Скрыть списание") : L("Списать пряжу"))</button>
+                    }
+                </span>
+            </div>
+            @if (smp.Comment is not null)
+            {
+                <p class="small">@smp.Comment</p>
+            }
+            @if (_yarnFor == smp.Id)
+            {
+                <DevYarnWriteOff SampleId="smp.Id" />
+            }
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>@L("Деталь")</th><th class="num">@L("Время: план / факт")</th><th class="num">@L("Вес: план / факт")</th><th>@L("Цвета")</th></tr></thead>
+                    <tbody>
+                        @foreach (var d in smp.Details)
+                        {
+                            <tr>
+                                <td>@d.Detail</td>
+                                <td class="num @(DevSettings.OverPlan(d.Fact?.KnitSeconds, d.PlanKnitSeconds, data.FactTolerancePercent) ? "late-text" : null)">@DevFormat.Duration(d.PlanKnitSeconds) / @DevFormat.Duration(d.Fact?.KnitSeconds)</td>
+                                <td class="num @(DevSettings.OverPlan(d.Fact?.WeightGrams, d.PlanWeightGrams, data.FactTolerancePercent) ? "late-text" : null)">@DevFormat.Grams(d.PlanWeightGrams) / @DevFormat.Grams(d.Fact?.WeightGrams)</td>
+                                <td>@(d.Fact is null || d.Fact.Shares.Count == 0 ? "—" : string.Join(", ", d.Fact.Shares.Select(x => $"{x.Label} {DevFormat.Percent(x.Percent)}")))</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (smp.Measures.Count > 0)
+            {
+                <h3>@L("Замеры, см")</h3>
+                <div class="scroll">
+                    <table>
+                        <thead><tr><th>@L("Точка")</th><th class="num">@L("Табель")</th><th class="num">±</th><th class="num">@L("Факт")</th><th class="num">@L("Отклонение")</th></tr></thead>
+                        <tbody>
+                            @foreach (var m in smp.Measures)
+                            {
+                                var measure = m;
+                                <tr>
+                                    <td>@m.Name</td>
+                                    <td class="num">@DevFormat.Cm(m.Plan)</td>
+                                    <td class="num">@DevFormat.Number(m.Tolerance)</td>
+                                    <td class="num">
+                                        @if (data.CanEdit || data.CanRecord)
+                                        {
+                                            <input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 80px"
+                                                   value="@(_facts.GetValueOrDefault((sample.Id, measure.MeasureId))?.ToString("0.#", CultureInfo.InvariantCulture))"
+                                                   @onchange="e => _facts[(sample.Id, measure.MeasureId)] = decimal.TryParse((e.Value as string)?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : null"
+                                                   aria-label="@L("Замер {0}", measure.Name)" />
+                                        }
+                                        else
+                                        {
+                                            @DevFormat.Cm(m.Fact)
+                                        }
+                                    </td>
+                                    <td class="num @(m.OutOfTolerance ? "late-text" : null)">@(m.Deviation is { } dv ? (dv > 0 ? "+" : "") + DevFormat.Cm(dv) : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (data.CanEdit || data.CanRecord)
+                {
+                    <div class="actions"><button type="button" class="secondary" @onclick="() => SaveMeasuresAsync(sample)" disabled="@_busy">@L("Сохранить замеры")</button></div>
+                }
+            }
+            @if (data.CanEdit)
+            {
+                <form class="inline-form" @onsubmit="() => DecideAsync(sample)">
+                    <label>
+                        @L("Решение")
+                        <select @bind="_decision">
+                            @foreach (var st in Decisions)
+                            {
+                                <option value="@((byte)st)">@L(DevSample.StatusName(st))</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Что не так / комментарий") <input @bind="_decisionComment" maxlength="@DevSample.CommentMaxLength" /></label>
+                    <button type="submit" disabled="@_busy">@L("Записать решение")</button>
+                </form>
+            }
+        </div>
+    }
+}
+
+@code {
+    private static readonly DevSampleStatus[] Decisions = [DevSampleStatus.Accepted, DevSampleStatus.Rework, DevSampleStatus.Rejected];
+
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    private DevSamplesDto? _s;
+    private readonly Dictionary<(long, long), decimal?> _facts = [];
+
+    // D720: замеры, пришедшие с сервера; на сервер уходят только изменённые, чужие изменения не затираются.
+    private readonly Dictionary<(long, long), decimal?> _wasFacts = [];
+    private string _size = string.Empty;
+    private string _decision = ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture);
+    private string? _decisionComment;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+    private long? _resetSample;
+    private long? _yarnFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _s = await Gate.Run(() => Shop.SamplesAsync(ModelId));
+        // Несохранённые замеры других образцов остаются на экране; сохранённый образец показывает значения сервера.
+        var dirty = _facts.Where(kv => kv.Value != _wasFacts.GetValueOrDefault(kv.Key) && (_isError || kv.Key.Item1 != _resetSample)).ToList();
+        _facts.Clear();
+        _wasFacts.Clear();
+        foreach (var s in _s.Samples)
+        {
+            foreach (var m in s.Measures.Where(m => m.Fact is not null))
+            {
+                _facts[(s.Id, m.MeasureId)] = m.Fact;
+                _wasFacts[(s.Id, m.MeasureId)] = m.Fact;
+            }
+        }
+
+        foreach (var (k, v) in dirty)
+        {
+            _facts[k] = v;
+        }
+
+        _resetSample = null;
+    }
+
+    private Task CreateAsync() => RunAsync(() => Shop.CreateSampleAsync(ModelId, long.TryParse(_size, out var z) ? z : null), L("Образец создан."));
+
+    private async Task SaveMeasuresAsync(DevSampleDto s)
+    {
+        DevSaveResult? result = null;
+        var edits = s.Measures.Where(m => _facts.GetValueOrDefault((s.Id, m.MeasureId)) != _wasFacts.GetValueOrDefault((s.Id, m.MeasureId)))
+            .Select(m => new DevCellEdit(m.MeasureId, 0, 0, _wasFacts.GetValueOrDefault((s.Id, m.MeasureId)), _facts.GetValueOrDefault((s.Id, m.MeasureId))))
+            .ToList();
+        _resetSample = s.Id;
+        await RunAsync(async () => result = await Shop.SetSampleMeasuresAsync(s.Id, edits), L("Замеры сохранены."));
+        if (result is { Conflicts.Count: > 0 } r && !_isError)
+        {
+            _message = L("Сохранено значений: {0}. Не сохранено — уже изменил другой пользователь, показаны его значения: {1}.", r.Saved,
+                string.Join("; ", r.Conflicts));
+            _isError = true;
+        }
+    }
+
+    private Task DecideAsync(DevSampleDto s) => RunAsync(async () =>
+    {
+        await Shop.DecideSampleAsync(s.Id, (DevSampleStatus)byte.Parse(_decision, CultureInfo.InvariantCulture), _decisionComment, s.RowVersion);
+        _decisionComment = null;
+    }, L("Решение записано."));
+
+    private async Task RunAsync(Func<Task> action, string success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(action);
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

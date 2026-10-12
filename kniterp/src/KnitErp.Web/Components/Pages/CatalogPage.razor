@@ -8,6 +8,10 @@
 @inject VatRateService VatRates
 @inject NomenclatureService Nomenclature
 @inject CatalogSettingsService Settings
+@inject GroupDefaultsService GroupDefaults
+@inject BulkEditService Bulk
+@inject PackService Packs
+@inject NavigationManager Navigation
 
 <PageTitle>@L("Номенклатура") — knitERP</PageTitle>
 
@@ -31,7 +35,7 @@ else
             }
             @if (_list.CanEdit && _mode == Mode.None)
             {
-                <button type="button" @onclick="OpenCreate" disabled="@_busy">@L("Добавить позицию")</button>
+                <button type="button" @onclick="OpenCreateAsync" disabled="@_busy">@L("Добавить позицию")</button>
             }
         </div>
     </div>
@@ -55,7 +59,18 @@ else
                     {
                         <label>@L("Код (артикул)") <InputText @bind-Value="_form.Code" maxlength="40" required /></label>
                     }
-                    <label>@L("Наименование") <InputText @bind-Value="_form.Name" maxlength="300" required /></label>
+                    <label>@L("Наименование") <InputText @bind-Value="_form.Name" @bind-Value:after="CheckSimilarAsync" maxlength="300" required /></label>
+                    @if (_mode == Mode.Create && _similar.Count > 0)
+                    {
+                        @* D320: подсказка о похожих позициях — не запрет. *@
+                        <div class="hint warn" role="status" style="grid-column: 1 / -1">
+                            @L("Похожие позиции уже есть:")
+                            @foreach (var sim in _similar)
+                            {
+                                <a href="catalog/items/@sim.Id" target="_blank" rel="noopener">@sim.Code @sim.Name</a>@(" ")
+                            }
+                        </div>
+                    }
                     <label>
                         @L("Тип")
                         <InputSelect @bind-Value="_form.Type" @bind-Value:after="TypeChanged">
@@ -90,7 +105,7 @@ else
                     {
                         <label>
                             @(_settings.RequireGroup ? L("Группа (обязательна)") : L("Группа"))
-                            <InputSelect @bind-Value="_form.GroupId">
+                            <InputSelect @bind-Value="_form.GroupId" @bind-Value:after="ApplyGroupDefaultsAsync">
                                 <option value="">@L("без группы")</option>
                                 @foreach (var g in _groups)
                                 {
@@ -211,7 +226,7 @@ else
         }
     </nav>
     <div>
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form class="inline-form" @onsubmit="SearchAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Вид")
@@ -243,10 +258,91 @@ else
         <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
     </form>
 
+    @if (_selected.Count > 0 || _allByFilter)
+    {
+        @* D318: массовое изменение и этикетки для выбранных позиций. *@
+        <div class="panel bulk-bar">
+            <div class="actions">
+                <b>@(_allByFilter ? L("Выбраны все по отбору: {0}", _list.Total) : L("Выбрано: {0}", _selected.Count))</b>
+                @if (!_allByFilter && _list.Total > _selected.Count)
+                {
+                    <button type="button" class="link" @onclick="SelectAllByFilterAsync">@L("Выбрать все по отбору ({0})", _list.Total)</button>
+                }
+                <button type="button" class="link" @onclick="ClearSelection">@L("Снять выбор")</button>
+                <a class="button secondary" href="@SelectedLabelsLink" target="_blank" rel="noopener">@L("Этикетки для выбранных")</a>
+                @if (_allByFilter && _list.Total > LabelService.MaxItems)
+                {
+                    <span class="muted small">@L("Этикетки — для первых {0} позиций отбора.", LabelService.MaxItems)</span>
+                }
+                @if (_list.CanEdit)
+                {
+                    <button type="button" class="secondary" @onclick="() => _bulkOpen = !_bulkOpen">@L("Изменить выбранные")</button>
+                }
+            </div>
+            @if (_bulkOpen && _list.CanEdit)
+            {
+                <p class="muted small">@L("Отметьте поля, которые нужно изменить; остальные не меняются. Пустое значение при отметке — очистить поле.")</p>
+                <div class="grid">
+                    <label class="check"><input type="checkbox" @bind="_bulk.SetGroup" /> @L("Группа")</label>
+                    <select @bind="_bulkGroup" disabled="@(!_bulk.SetGroup)" aria-label="@L("Группа")">
+                        <option value="">@L("без группы")</option>
+                        @foreach (var g in _groups)
+                        {
+                            <option value="@g.Id">@g.Path</option>
+                        }
+                    </select>
+                    <label class="check"><input type="checkbox" @bind="_bulk.SetVat" /> @L("Ставка НДС")</label>
+                    <select @bind="_bulkVat" disabled="@(!_bulk.SetVat)" aria-label="@L("Ставка НДС")">
+                        <option value="">@L("не указана")</option>
+                        @foreach (var r in _vatRates)
+                        {
+                            <option value="@r.Id">@L(r.Name)</option>
+                        }
+                    </select>
+                    <label class="check"><input type="checkbox" @bind="_bulk.SetTnVed" /> @L("Код ТН ВЭД")</label>
+                    <input @bind="_bulk.TnVedCode" disabled="@(!_bulk.SetTnVed)" maxlength="10" inputmode="numeric" aria-label="@L("Код ТН ВЭД")" />
+                    <label class="check"><input type="checkbox" @bind="_bulk.SetCountry" /> @L("Страна (код ОКСМ)")</label>
+                    <div class="inline-form" style="margin: 0">
+                        <input @bind="_bulk.CountryCode" disabled="@(!_bulk.SetCountry)" maxlength="3" inputmode="numeric" placeholder="643" aria-label="@L("Страна (код ОКСМ)")" style="width: 5em" />
+                        <input @bind="_bulk.CountryName" disabled="@(!_bulk.SetCountry)" maxlength="100" placeholder="@L("Россия")" aria-label="@L("Страна — краткое наименование")" />
+                    </div>
+                    <label class="check"><input type="checkbox" @bind="_bulk.SetTracking" /> @L("Маркировка")</label>
+                    <select @bind="_bulk.Tracking" disabled="@(!_bulk.SetTracking)" aria-label="@L("Маркировка")">
+                        @foreach (var m in Marking.All)
+                        {
+                            <option value="@m">@(m == TrackingType.None ? L("без маркировки") : L(Marking.Name(m)))</option>
+                        }
+                    </select>
+                </div>
+                <div class="actions">
+                    <ConfirmButton Disabled="@(_busy || !_bulk.Any)" Question="@L("Изменить выбранные позиции? Изменения запишутся в журнал по каждой позиции.")"
+                                   OnConfirm="ApplyBulkAsync">@L("Применить")</ConfirmButton>
+                </div>
+            }
+            @if (_bulkResult is { } br)
+            {
+                <p role="status">@L("Изменено: {0}, без изменений: {1}, пропущено: {2}.", br.Changed, br.Unchanged, br.Skipped.Count)</p>
+                @if (br.Skipped.Count > 0)
+                {
+                    <details>
+                        <summary>@L("Пропущенные позиции")</summary>
+                        <ul class="small">
+                            @foreach (var sk in br.Skipped)
+                            {
+                                <li>@sk.Code @sk.Name — @SkipReason(sk.Reason)</li>
+                            }
+                        </ul>
+                    </details>
+                }
+            }
+        </div>
+    }
+
     <div class="scroll">
         <table>
             <thead>
                 <tr>
+                    <th class="select-col"><input type="checkbox" checked="@PageSelected" @onchange="TogglePage" aria-label="@L("Выбрать все на странице")" /></th>
                     <th>@L("Код")</th><th>@L("Наименование")</th><th class="opt">@L("Артикул")</th><th class="opt">@L("Тип")</th><th>@L("Ед.")</th><th class="opt">@L("НДС")</th>
                     @if (CurrentAccess.Has(Permissions.PriceView))
                     {
@@ -261,11 +357,12 @@ else
             <tbody>
                 @if (_list.Items.Count == 0)
                 {
-                    <tr><td colspan="9" class="muted">@L("Позиций не найдено.")</td></tr>
+                    <tr><td colspan="10" class="muted">@L("Позиций не найдено.")</td></tr>
                 }
                 @foreach (var i in _list.Items)
                 {
                     <tr class="@(i.IsArchived ? "archived" : null)">
+                        <td class="select-col"><input type="checkbox" checked="@(_allByFilter || _selected.Contains(i.Id))" @onchange="e => ToggleOne(i.Id, e)" aria-label="@L("Выбрать позицию")" /></td>
                         <td>@i.Code</td>
                         <td>@if (i.PhotoId is { } photo) { <img class="item-thumb" src="catalog/photos/@photo" alt="" loading="lazy" /> }@if (i.ParentItemId is not null) { <span class="variant-of" title="@L("Модификация")">↳ </span> }<a href="catalog/items/@i.Id">@i.Name</a><TagDots Tags="@_tagMap.GetValueOrDefault(i.Id)" /> @if (i.Modifications > 0) { <span class="tag">@L("модификаций: {0}", i.Modifications)</span> } @if (i.IsArchived) { <span class="tag">@L("архив")</span> }@if (i.Description is not null) { <div class="muted">@i.Description</div> }</td>
                         <td>@(i.Article ?? "—")</td>
@@ -412,13 +509,187 @@ else
 
     private const int PageSize = 100;
 
+    // D318: выбор позиций и массовое изменение.
+    private readonly HashSet<long> _selected = [];
+    private bool _allByFilter;
+    private bool _bulkOpen;
+    private BulkForm _bulk = new();
+    private string _bulkGroup = string.Empty;
+    private string _bulkVat = string.Empty;
+    private BulkEditResult? _bulkResult;
+
+    private sealed class BulkForm
+    {
+        public bool SetGroup { get; set; }
+        public bool SetVat { get; set; }
+        public bool SetTnVed { get; set; }
+        public string? TnVedCode { get; set; }
+        public bool SetCountry { get; set; }
+        public string? CountryCode { get; set; }
+        public string? CountryName { get; set; }
+        public bool SetTracking { get; set; }
+        public TrackingType Tracking { get; set; } = TrackingType.None;
+        public bool Any => SetGroup || SetVat || SetTnVed || SetCountry || SetTracking;
+    }
+
+    private bool PageSelected => _list is { Items.Count: > 0 } l && (_allByFilter || l.Items.All(i => _selected.Contains(i.Id)));
+
+    private void TogglePage(ChangeEventArgs e)
+    {
+        _allByFilter = false;
+        foreach (var i in _list!.Items)
+        {
+            if (e.Value is true) { _selected.Add(i.Id); } else { _selected.Remove(i.Id); }
+        }
+    }
+
+    private void ToggleOne(long id, ChangeEventArgs e)
+    {
+        if (_allByFilter)
+        {
+            // Из «всех по отбору» в явный выбор страницы без снятой позиции.
+            _allByFilter = false;
+            _selected.UnionWith(_list!.Items.Select(i => i.Id));
+        }
+
+        if (e.Value is true) { _selected.Add(id); } else { _selected.Remove(id); }
+    }
+
+    private string SkipReason(string reason) => reason switch
+    {
+        "в архиве" => L("в архиве"),
+        "ставка НДС обязательна" => L("ставка НДС обязательна"),
+        "услугу и комплект не маркируют" => L("услугу и комплект не маркируют"),
+        "модификация в группе основной позиции" => L("модификация в группе основной позиции"),
+        "не найдена" => L("не найдена"),
+        _ => reason,
+    };
+
+    private void ClearSelection()
+    {
+        _selected.Clear();
+        _allByFilter = false;
+        _bulkOpen = false;
+        _bulkResult = null;
+    }
+
+    // Ревью: «все по отбору» — этикетки для всех позиций отбора (до LabelService.MaxItems), а не только для текущей страницы.
+    private string SelectedLabelsLink => "catalog/labels/print?ids=" + string.Join(",", (_allByFilter ? _allIds : (IEnumerable<long>)_selected).Take(LabelService.MaxItems));
+
+    private IReadOnlyList<long> _allIds = [];
+
+    private Task SelectAllByFilterAsync() => RunAsync(async () =>
+    {
+        _allIds = await Catalog.ListIdsAsync(CurrentFilter(), LabelService.MaxItems);
+        _allByFilter = true;
+    }, null);
+
+    private ItemFilter CurrentFilter(int take = 500, int skip = 0)
+    {
+        ItemType? type = byte.TryParse(_typeFilter, out var t) ? (ItemType)t : null;
+        ItemKind? kind = byte.TryParse(_kindFilter, out var k) ? (ItemKind)k : null;
+        return new ItemFilter(type, _search, _includeArchived, take, _groupId, _tagId, kind, skip);
+    }
+
+    private Task ApplyBulkAsync() => RunAsync(async () =>
+    {
+        var ids = _allByFilter ? await Catalog.ListIdsAsync(CurrentFilter(), BulkEditService.MaxItems) : _selected.ToList();
+        _bulkResult = await Bulk.ApplyAsync(ids, new BulkItemChanges(
+            _bulk.SetGroup, long.TryParse(_bulkGroup, out var g) ? g : null, _bulk.SetVat, long.TryParse(_bulkVat, out var v) ? v : null,
+            _bulk.SetTnVed, _bulk.TnVedCode, _bulk.SetCountry, _bulk.CountryCode, _bulk.CountryName, _bulk.SetTracking, _bulk.Tracking));
+    }, L("Массовое изменение выполнено."));
+
     private string LabelsLink => "catalog/labels/print?ids=" + string.Join(",", _list!.Items.Where(i => !i.IsArchived).Select(i => i.Id));
     private int _page;
 
     /// <summary>Новый отбор — с первой страницы.</summary>
+    private IReadOnlyList<ItemDto> _similar = [];
+
+    /// <summary>D320: при вводе наименования новой позиции — подсказка о похожих.</summary>
+    private Task CheckSimilarAsync() => Background(async () =>
+    {
+        if (_mode == Mode.Create)
+        {
+            _similar = await Catalog.SimilarAsync(_form.Name);
+        }
+    });
+
+    /// <summary>
+    /// Фоновая подсказка формы (похожие, значения группы): не блокирует кнопки, но идёт строго после предыдущей — у вкладки один DbContext.
+    /// Действия (RunAsync) сначала дожидаются фоновых: быстрый клик «Сохранить» сразу после ввода не теряется.
+    /// </summary>
+    private Task _background = Task.CompletedTask;
+
+    private Task Background(Func<Task> work)
+    {
+        var previous = _background;
+        _background = Chain();
+        return _background;
+
+        async Task Chain()
+        {
+            try
+            {
+                await previous;
+            }
+            catch
+            {
+                // Ошибку предыдущей подсказки уже получил её вызов; цепочка дальше не блокируется.
+            }
+
+            try
+            {
+                await work();
+            }
+            catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+            {
+                _formError = UiErrors.Message(ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// D320: поиск. Отсканированный штрихкод позиции или упаковки (только цифры, 8–14 знаков, или точное совпадение) сразу открывает карточку.
+    /// </summary>
+    private async Task SearchAsync()
+    {
+        try
+        {
+            await _background;
+        }
+        catch
+        {
+            // см. RunAsync
+        }
+
+        var text = _search.Trim();
+        if (text.Length is >= 8 and <= 14 && text.All(char.IsAsciiDigit) && !_busy)
+        {
+            _busy = true;
+            ScanResultDto? hit;
+            try
+            {
+                hit = await Packs.ScanAsync(text);
+            }
+            finally
+            {
+                _busy = false;
+            }
+
+            if (hit is not null)
+            {
+                Navigation.NavigateTo($"catalog/items/{hit.ItemId}");
+                return;
+            }
+        }
+
+        await ReloadAsync();
+    }
+
     private Task ReloadAsync()
     {
         _page = 0;
+        ClearSelection(); // новый отбор — выбор сбрасывается, чтобы изменение не ушло на невидимые позиции
         return RunAsync(() => Task.CompletedTask, null);
     }
 
@@ -435,8 +706,44 @@ else
         return ReloadAsync();
     }
 
+    /// <summary>D317: выбрана группа — тип, единица и ставка НДС новой позиции берутся из значений по умолчанию группы.</summary>
+    private Task ApplyGroupDefaultsAsync() => Background(ApplyGroupDefaultsCoreAsync);
+
+    private async Task ApplyGroupDefaultsCoreAsync()
+    {
+        if (_mode != Mode.Create || _form.GroupId is not { } gid)
+        {
+            return;
+        }
+
+        try
+        {
+            var d = (await GroupDefaults.GetAsync(gid)).Effective;
+            if (d.Type is { } t && _settings.IsEnabled(t))
+            {
+                _form.Type = t;
+                TypeChanged();
+            }
+
+            _form.UnitId = d.UnitId ?? _form.UnitId;
+            _form.VatRateId = d.VatRateId ?? _form.VatRateId;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _formError = UiErrors.Message(ex);
+        }
+    }
+
+    /// <summary>Новая позиция в выбранной слева группе — сразу со значениями по умолчанию этой группы (D317).</summary>
+    private async Task OpenCreateAsync()
+    {
+        OpenCreate();
+        await ApplyGroupDefaultsAsync();
+    }
+
     private void OpenCreate()
     {
+        _similar = [];
         _flash = null;
         _flashIsError = false;
         _formError = null;
@@ -555,6 +862,15 @@ else
     /// <summary>Одна операция за раз, затем свежие данные: у вкладки один DbContext.</summary>
     private async Task RunAsync(Func<Task> action, string? success)
     {
+        try
+        {
+            await _background; // подсказки формы — до действия, не одновременно с ним
+        }
+        catch
+        {
+            // ошибка подсказки показана при её вызове; действие выполняется
+        }
+
         if (_busy)
         {
             return;

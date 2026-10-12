@@ -85,6 +85,7 @@ public static class AuditActions
     public const string UserBlocked = "access.user.blocked";
     public const string UserUnblocked = "access.user.unblocked";
     public const string InvitationIssued = "access.invitation.issued";
+    public const string InvitationEmailed = "access.invitation.emailed";
     public const string TwoFactorReset = "access.2fa.reset";
     public const string SignedIn = "auth.signed_in";
     public const string SignInFailed = "auth.sign_in.failed";
@@ -125,6 +126,11 @@ public static class AuditActions
     public const string PasswordChanged = "auth.password.changed";
     public const string BankStatementImported = "money.bank_statement.imported";
     public const string SessionsRevoked = "auth.sessions.revoked";
+
+    /// <summary>D123: повторное подтверждение опасного действия (step-up) — успех и неверный пароль или код.</summary>
+    public const string StepUpConfirmed = "auth.stepup.confirmed";
+    public const string StepUpFailed = "auth.stepup.failed";
+    public const string SessionRevoked = "auth.session.revoked";
     public const string PasswordResetIssued = "access.password_reset.issued";
     public const string EmergencyAccess = "access.emergency";
     public const string DepartmentCreated = "structure.department.created";
@@ -156,6 +162,14 @@ public static class AuditActions
 
     /// <summary>Печать документа сотрудника с его данными (D227).</summary>
     public const string AgreementPrinted = "hr.agreement.printed";
+
+    // D125: анкета сотрудника по ссылке — выдача, письмо, отправка, просмотр, принятие и отказ (без значений ПДн).
+    public const string EmployeeDataLinkIssued = "hr.employee_data.link_issued";
+    public const string EmployeeDataLinkEmailed = "hr.employee_data.link_emailed";
+    public const string EmployeeDataSubmitted = "hr.employee_data.submitted";
+    public const string EmployeeDataViewed = "hr.employee_data.viewed";
+    public const string EmployeeDataAccepted = "hr.employee_data.accepted";
+    public const string EmployeeDataRejected = "hr.employee_data.rejected";
     public const string HrOrderCreated = "hr.order.created";
     public const string HrOrderChanged = "hr.order.changed";
     public const string HrOrderPosted = "hr.order.posted";
@@ -246,6 +260,9 @@ public static class AuditActions
     public const string DevFileAdded = "dev.file.added";
     public const string DevFileViewed = "dev.file.viewed";
     public const string DevSettingsChanged = "dev.settings.changed";
+    public const string DevTechChanged = "dev.tech.changed";
+    public const string DevMachineNoted = "dev.machine.noted";
+    public const string DevSampleRecorded = "dev.sample.recorded";
     // CRM (D600–D699). Телефоны и почты — только маской (D612).
     public const string CrmLeadCreated = "crm.lead.created";
     public const string CrmLeadChanged = "crm.lead.changed";
@@ -260,4 +277,22 @@ public static class AuditActions
     public const string CrmContactCreated = "crm.contact.created";
     public const string CrmContactChanged = "crm.contact.changed";
     public const string CrmSettingsChanged = "crm.settings.changed";
+    public const string CrmDealWon = "crm.deal.won";
+    public const string CrmDealLost = "crm.deal.lost";
+    public const string CrmContactConsent = "crm.contact.consent";
+    public const string CrmContactErased = "crm.contact.erased";
+    public const string CrmExported = "crm.exported";
+    public const string CrmActivityCreated = "crm.activity.created";
+    public const string CrmActivityChanged = "crm.activity.changed";
+    public const string CrmActivityDone = "crm.activity.done";
+    public const string CrmActivityReopened = "crm.activity.reopened";
+    public const string CrmOfferCreated = "crm.offer.created";
+    public const string CrmEmailSent = "crm.email.sent";
+    public const string CrmMailingSent = "crm.mailing.sent";
+    public const string CrmUnsubscribed = "crm.contact.unsubscribed";
+    public const string CrmImported = "crm.imported";
+    public const string CrmPlanChanged = "crm.plan.changed";
+    public const string CrmMailingQueued = "crm.mailing.queued";
+    public const string CrmMailingScheduled = "crm.mailing.scheduled";
+    public const string CrmEmailReceived = "crm.email.received";
 }

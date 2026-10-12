@@ -1,3 +1,4 @@
+using KnitErp.Application.Authentication;
 using KnitErp.Application.Common;
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Audit;
@@ -19,8 +20,10 @@ public sealed record PermissionGroupDto(string Name, IReadOnlyList<PermissionIte
 /// Свои роли организации (D112). Смотреть — «Пользователи и роли: просмотр», менять — «изменение». Нельзя положить в роль право выше
 /// своего; роль с управлением пользователями — административная: её создаёт, меняет и выдаёт только Владелец. Изменение роли сразу
 /// действует на всех, у кого она есть: права читаются из базы на каждый запрос. Каждое изменение — в журнале аудита.
+/// D123: создать административную роль или изменить роль, которая до или после правки административная, — только после
+/// повторного подтверждения паролем (StepUpGuard).
 /// </summary>
-public sealed class RoleService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)
+public sealed class RoleService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, StepUpGuard stepUp)
 {
     public const int MaxCustomRoles = 50;
 
@@ -61,6 +64,11 @@ public sealed class RoleService(IKnitErpDbContext db, IAccessGuard guard, ICurre
         }
 
         await EnsureFreeNameAsync(ctx, role.Name, null, ct);
+        if (role.IsAdministrative)
+        {
+            stepUp.Demand(ctx); // D123
+        }
+
         await using var tx = await db.BeginTransactionAsync(ct);
         db.Roles.Add(role);
         await db.SaveChangesAsync(ct);
@@ -92,6 +100,13 @@ public sealed class RoleService(IKnitErpDbContext db, IAccessGuard guard, ICurre
         var role = (await LoadAsync(ctx, id, ct)).EnsureVersion(rowVersion);
         // Административная роль до или после правки — только Владелец.
         GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, role.IsAdministrative);
+        var administrativeAfter = permissionCodes.Any(Permissions.IsAdministrative);
+        GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, administrativeAfter);
+        if (role.IsAdministrative || administrativeAfter)
+        {
+            stepUp.Demand(ctx); // D123: до изменения сущности — отказ не оставляет правок в контексте вкладки
+        }
+
         var before = Describe(role);
         role.Update(name, description, permissionCodes);
         EnsureMayDefine(ctx, role);

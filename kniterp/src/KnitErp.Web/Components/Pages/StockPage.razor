@@ -43,6 +43,9 @@ else
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Код или наименование")" /></label>
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
         <a class="button secondary" href="@ExportHref" download data-enhance-nav="false" title="@L("Выгрузить с текущими фильтрами")">Excel</a>
+        @* D325: ценники по одной на позицию и этикетки по остатку — для показанных строк. *@
+        <LabelsButton Lines="@(_rows.Where(r => r.Quantity > 0).Select(r => r.ItemId).Distinct().Select(id => (id, 1m)))" Text="@L("Ценники")" />
+        <LabelsButton Lines="@(_rows.Where(r => r.Quantity > 0).Select(r => (r.ItemId, r.Quantity)))" Text="@L("Этикетки по остатку")" />
     </form>
 
     <div class="scroll">

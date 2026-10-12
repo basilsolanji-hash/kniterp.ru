@@ -1,0 +1,139 @@
+@page "/crm/tasks"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject CrmActivityService Activities
+
+<PageTitle>@L("Мои задачи CRM") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Мои задачи CRM")</h1>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    <div class="crm-kpi">
+        <div><b class="@(_data.Overdue.Count > 0 ? "warn-text" : null)">@_data.Overdue.Count</b><span>@L("просрочено")</span></div>
+        <div><b>@_data.Upcoming.Count</b><span>@L("на неделю вперёд")</span></div>
+        <div><b>@_data.DealsWithoutNextStep.Count</b><span>@L("сделок без следующего шага")</span></div>
+        <div><b>@_data.StaleLeads.Count</b><span>@L("лидов без действий")</span></div>
+    </div>
+
+    @TaskList(L("Просрочено"), _data.Overdue)
+    @TaskList(L("Ближайшие"), _data.Upcoming)
+
+    <h2>@L("Сделки без следующего шага")</h2>
+    @if (_data.DealsWithoutNextStep.Count == 0)
+    {
+        <p class="muted small">@L("У всех открытых сделок есть запланированный шаг.")</p>
+    }
+    else
+    {
+        <ul>
+            @foreach (var d in _data.DealsWithoutNextStep)
+            {
+                <li><a href="crm/deals/@d.Id">@d.Number @d.Title</a> <span class="muted">@d.Counterparty · <span class="stage stage-@d.StageColor">@d.Stage</span></span></li>
+            }
+        </ul>
+    }
+
+    <h2>@L("Лиды без действий")</h2>
+    @if (_data.StaleLeads.Count == 0)
+    {
+        <p class="muted small">@L("Все лиды в работе.")</p>
+    }
+    else
+    {
+        <ul>
+            @foreach (var l in _data.StaleLeads)
+            {
+                <li><a href="crm/leads/@l.Id">@l.Number @l.Title</a> <span class="muted">@(l.CompanyName ?? l.ContactName)</span></li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private CrmMyTasksDto? _data;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+
+    private RenderFragment TaskList(string title, IReadOnlyList<CrmActivityDto> items) => __builder =>
+    {
+        <h2>@title</h2>
+        @if (items.Count == 0)
+        {
+            <p class="muted small">@L("Нет задач.")</p>
+        }
+        else
+        {
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Срок")</th><th>@L("Задача")</th><th>@L("По объекту")</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var a in items)
+                        {
+                            <tr class="@(a.Overdue ? "late" : null)">
+                                <td>@(a.DueAtUtc is { } due ? TimeZones.ToLocal(due, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm") : "—")</td>
+                                <td>@CrmActivities.KindName(a.Kind): @a.Subject</td>
+                                <td>@if (a.Href is not null) { <a href="@a.Href">@a.TargetTitle</a> }</td>
+                                <td><button type="button" class="secondary" @onclick="() => CompleteAsync(a)" disabled="@_busy">@L("Выполнено")</button></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Activities.MyTasksAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task CompleteAsync(CrmActivityDto a)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        (_message, _isError) = (null, false);
+        try
+        {
+            await Activities.CompleteAsync(a.Id, null, a.RowVersion);
+            _message = L("Отмечено выполненным.");
+            _data = await Activities.MyTasksAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            (_message, _isError) = (UiErrors.Message(ex), true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

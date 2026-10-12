@@ -21,6 +21,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<UserAccount> Users => Set<UserAccount>();
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<TrustedDevice> TrustedDevices => Set<TrustedDevice>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<Characteristic> Characteristics => Set<Characteristic>();
     public DbSet<ItemCharacteristicValue> ItemCharacteristicValues => Set<ItemCharacteristicValue>();
     public DbSet<ItemPhoto> ItemPhotos => Set<ItemPhoto>();
@@ -32,6 +33,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<CatalogSettings> CatalogSettings => Set<CatalogSettings>();
     public DbSet<CatalogFeed> CatalogFeeds => Set<CatalogFeed>();
     public DbSet<LabelTemplate> LabelTemplates => Set<LabelTemplate>();
+    public DbSet<ItemGroupDefaults> ItemGroupDefaults => Set<ItemGroupDefaults>();
+    public DbSet<CharacteristicValueSet> CharacteristicValueSets => Set<CharacteristicValueSet>();
+    public DbSet<PriceRule> PriceRules => Set<PriceRule>();
     public DbSet<ExternalLink> ExternalLinks => Set<ExternalLink>();
     public DbSet<ExternalConnection> ExternalConnections => Set<ExternalConnection>();
     public DbSet<ExternalImportRun> ExternalImportRuns => Set<ExternalImportRun>();
@@ -124,6 +128,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.PayrollRun> PayrollRuns => Set<KnitErp.Domain.Hr.PayrollRun>();
     public DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines => Set<KnitErp.Domain.Hr.PayrollLine>();
     public DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings => Set<KnitErp.Domain.Hr.HrSettings>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeDataRequest> EmployeeDataRequests => Set<KnitErp.Domain.Hr.EmployeeDataRequest>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeDataSubmission> EmployeeDataSubmissions => Set<KnitErp.Domain.Hr.EmployeeDataSubmission>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeDataSubmissionFile> EmployeeDataSubmissionFiles => Set<KnitErp.Domain.Hr.EmployeeDataSubmissionFile>();
 
     // Модуль «Разработка» (D700–D799).
     public DbSet<KnitErp.Domain.Development.DevModel> DevModels => Set<KnitErp.Domain.Development.DevModel>();
@@ -133,6 +140,21 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevLookup> DevLookups => Set<KnitErp.Domain.Development.DevLookup>();
     public DbSet<KnitErp.Domain.Development.DevSettings> DevSettings => Set<KnitErp.Domain.Development.DevSettings>();
     public DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates => Set<KnitErp.Domain.Development.DevCategoryTemplate>();
+    public DbSet<KnitErp.Domain.Development.DevMachine> DevMachines => Set<KnitErp.Domain.Development.DevMachine>();
+    public DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes => Set<KnitErp.Domain.Development.DevMachineNote>();
+    public DbSet<KnitErp.Domain.Development.DevModelColor> DevModelColors => Set<KnitErp.Domain.Development.DevModelColor>();
+    public DbSet<KnitErp.Domain.Development.DevDetail> DevDetails => Set<KnitErp.Domain.Development.DevDetail>();
+    public DbSet<KnitErp.Domain.Development.DevThreading> DevThreading => Set<KnitErp.Domain.Development.DevThreading>();
+    public DbSet<KnitErp.Domain.Development.DevModelSize> DevModelSizes => Set<KnitErp.Domain.Development.DevModelSize>();
+    public DbSet<KnitErp.Domain.Development.DevDetailSize> DevDetailSizes => Set<KnitErp.Domain.Development.DevDetailSize>();
+    public DbSet<KnitErp.Domain.Development.DevMeasure> DevMeasures => Set<KnitErp.Domain.Development.DevMeasure>();
+    public DbSet<KnitErp.Domain.Development.DevMeasureValue> DevMeasureValues => Set<KnitErp.Domain.Development.DevMeasureValue>();
+    public DbSet<KnitErp.Domain.Development.DevSample> DevSamples => Set<KnitErp.Domain.Development.DevSample>();
+    public DbSet<KnitErp.Domain.Development.DevSampleDetail> DevSampleDetails => Set<KnitErp.Domain.Development.DevSampleDetail>();
+    public DbSet<KnitErp.Domain.Development.DevSampleColorShare> DevSampleColorShares => Set<KnitErp.Domain.Development.DevSampleColorShare>();
+    public DbSet<KnitErp.Domain.Development.DevSampleMeasure> DevSampleMeasures => Set<KnitErp.Domain.Development.DevSampleMeasure>();
+    public DbSet<KnitErp.Domain.Development.DevOperationType> DevOperationTypes => Set<KnitErp.Domain.Development.DevOperationType>();
+    public DbSet<KnitErp.Domain.Development.DevModelOperation> DevModelOperations => Set<KnitErp.Domain.Development.DevModelOperation>();
     // CRM (D600–D699).
     public DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines => Set<KnitErp.Domain.Crm.CrmPipeline>();
     public DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages => Set<KnitErp.Domain.Crm.CrmStage>();
@@ -145,6 +167,15 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements => Set<KnitErp.Domain.Sales.SalesAgreement>();
     public DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles => Set<KnitErp.Domain.Sales.CustomerSalesProfile>();
     public DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings => Set<KnitErp.Domain.Sales.SalesRoleSettings>();
+    public DbSet<KnitErp.Domain.Crm.CrmActivity> CrmActivities => Set<KnitErp.Domain.Crm.CrmActivity>();
+    public DbSet<KnitErp.Domain.Crm.CrmOffer> CrmOffers => Set<KnitErp.Domain.Crm.CrmOffer>();
+    public DbSet<KnitErp.Domain.Crm.CrmSettings> CrmSettings => Set<KnitErp.Domain.Crm.CrmSettings>();
+    public DbSet<KnitErp.Domain.Crm.CrmMessengerChannel> CrmMessengerChannels => Set<KnitErp.Domain.Crm.CrmMessengerChannel>();
+    public DbSet<KnitErp.Domain.Crm.CrmEmailTemplate> CrmEmailTemplates => Set<KnitErp.Domain.Crm.CrmEmailTemplate>();
+    public DbSet<KnitErp.Domain.Crm.CrmMailbox> CrmMailboxes => Set<KnitErp.Domain.Crm.CrmMailbox>();
+    public DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans => Set<KnitErp.Domain.Crm.CrmPlan>();
+    public DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings => Set<KnitErp.Domain.Crm.CrmMailing>();
+    public DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks => Set<KnitErp.Domain.Crm.CrmExternalLink>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountRule> SalesDiscountRules => Set<KnitErp.Domain.Sales.SalesDiscountRule>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountSettings> SalesDiscountSettings => Set<KnitErp.Domain.Sales.SalesDiscountSettings>();
     public DbSet<KnitErp.Domain.Sales.SalesCancelReason> SalesCancelReasons => Set<KnitErp.Domain.Sales.SalesCancelReason>();
@@ -159,6 +190,14 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
             : Database.BeginTransactionAsync(cancellationToken);
 
     public void DiscardChanges() => ChangeTracker.Clear();
+
+    public Task ReloadAsync(object entity, CancellationToken cancellationToken = default) => Entry(entity).ReloadAsync(cancellationToken);
+
+    public Task SavepointAsync(string name, CancellationToken cancellationToken = default) =>
+        (Database.CurrentTransaction ?? throw new InvalidOperationException("Точка сохранения действует только внутри транзакции.")).CreateSavepointAsync(name, cancellationToken);
+
+    public Task RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default) =>
+        (Database.CurrentTransaction ?? throw new InvalidOperationException("Точка сохранения действует только внутри транзакции.")).RollbackToSavepointAsync(name, cancellationToken);
 
     /// <summary>Участие во внешней транзакции: фиксация и откат — дело внешнего сценария.</summary>
     private sealed class JoinedTransaction(IDbContextTransaction outer) : IDbContextTransaction

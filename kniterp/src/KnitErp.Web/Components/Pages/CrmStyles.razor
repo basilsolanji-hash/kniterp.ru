@@ -3,6 +3,8 @@
     высоты касания; на телефоне 390 px колонки канбана идут одна под другой, без горизонтальной прокрутки страницы.
 *@
 <style>
+    /* fieldset по умолчанию не уже содержимого (min-width: min-content) — на 390 px форма вылезала за экран. */
+    fieldset { min-width: 0; }
     .crm-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: start; }
     .crm-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 120px; }
     .crm-col.drop { outline: 2px dashed var(--accent-line); }
@@ -28,7 +30,55 @@
     .crm-tabs { display: flex; gap: 4px; margin: 8px 0; }
     .crm-tabs button { font-weight: 400; background: var(--line); color: var(--text); }
     .crm-tabs button[aria-pressed=true] { background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; }
+    .crm-feed { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .crm-feed-item { display: grid; grid-template-columns: 120px 110px minmax(0, 1fr); gap: 4px 10px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+    .crm-feed-item.open { border-color: var(--accent-line); }
+    .crm-feed-item.overdue { border-color: var(--bad-line); background: var(--bad-bg-2); }
+    .crm-feed-when { font-size: 12px; color: var(--muted); }
+    .crm-feed-kind { font-size: 12px; color: var(--text-2); }
+    .crm-feed-body { min-width: 0; overflow-wrap: anywhere; }
+    .crm-feed-text { white-space: pre-wrap; font-size: 13px; margin-top: 2px; }
+    .crm-result { max-width: 220px; }
+    .crm-kpi { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin: 8px 0 16px; }
+    .crm-kpi div { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--surface-2); }
+    .crm-kpi b { display: block; font-size: 18px; }
+    .crm-kpi span { font-size: 12px; color: var(--muted); }
+    .crm-bar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; min-width: 60px; }
+    .crm-bar > i { display: block; height: 100%; background: var(--accent); }
+    .crm-chats { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 12px; align-items: start; }
+    .crm-chat-list { display: flex; flex-direction: column; gap: 4px; max-height: 70vh; overflow-y: auto; }
+    .crm-chat-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: var(--surface-2); color: var(--text); font-weight: 400; border: 1px solid var(--line); }
+    .crm-chat-item.current { border-color: var(--accent); }
+    .crm-chat-last { font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+    .crm-chat-view { border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-width: 0; }
+    .crm-chat-messages { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column-reverse; gap: 6px; max-height: 55vh; overflow-y: auto; }
+    .crm-chat-messages li { max-width: 80%; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; }
+    .crm-chat-messages li.out { align-self: flex-end; background: var(--accent-soft-2); }
+    .crm-chat-text { white-space: pre-wrap; }
+    .crm-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 20px; margin-top: 4px; }
+    .crm-main, .crm-side { min-width: 0; }
+    .crm-main > h2, .crm-side h2 { margin: 18px 0 8px; }
+    .crm-main > h2:first-child, .crm-side > .panel:first-child h2 { margin-top: 0; }
+    .crm-main > .actions, .crm-main > form, .crm-main > .scroll { margin-bottom: 8px; }
+    @@media (min-width: 1200px) {
+        .crm-layout { grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
+        .crm-side { position: sticky; top: 72px; max-height: calc(100vh - 88px); overflow-y: auto; padding-right: 2px; }
+        .crm-side .grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+        .crm-side .grid .wide { grid-column: 1 / -1; }
+    }
+    .crm-channel { display: inline-block; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 600; color: #fff; background: #6b7280; }
+    .crm-channel-telegram { background: #229ed9; }
+    .crm-channel-whatsapp { background: #1f9d55; }
+    .crm-channel-max { background: #6a4cff; }
+    .crm-messengers { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+    .crm-messenger { border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .crm-messenger form { display: flex; flex-direction: column; gap: 6px; }
+    .crm-messenger code { overflow-wrap: anywhere; }
+    .crm-chat-reply { display: flex; gap: 8px; align-items: flex-end; }
+    .crm-chat-reply textarea { flex: 1 1 auto; min-width: 0; }
     @@media (max-width: 599px) {
+        .crm-chats { grid-template-columns: minmax(0, 1fr); }
+        .crm-feed-item { grid-template-columns: 1fr; }
         .crm-board { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
         .crm-col { min-height: 0; }
         .crm-summary { grid-template-columns: 1fr 1fr; }

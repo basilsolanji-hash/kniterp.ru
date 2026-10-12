@@ -1,0 +1,250 @@
+@page "/crm/mailings"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject CrmMailingService Mailings
+@inject CrmEmailTemplateService Templates
+@inject KnitErp.Application.Tagging.TagService TagList
+
+<PageTitle>@L("Рассылки") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Рассылки")</h1>
+        <button type="button" class="secondary" @onclick="RefreshAsync" disabled="@_busy">@L("Обновить")</button>
+    </div>
+    <p class="muted small">@L("Письма уходят только контактам с согласием на рекламные рассылки (38-ФЗ) и почтой; в каждом письме — ссылка для отписки. Деловые письма клиенту отправляются из карточек.")</p>
+    @if (!Mailings.MailConfigured)
+    {
+        <div class="flash warn" role="status">@L("Почта сервера не настроена — обратитесь к администратору.")</div>
+    }
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <form class="panel" @onsubmit="SaveAsync" aria-label="@L("Новая рассылка")">
+        <h2>@(_edit is null ? L("Новая рассылка") : _edit.Status == CrmMailingStatus.Scheduled ? L("Запланирована: {0}", _edit.Subject) : L("Черновик: {0}", _edit.Subject))</h2>
+        <fieldset disabled="@(_edit?.Status == CrmMailingStatus.Scheduled)">
+            <div class="grid">
+                @if (_templates.Count > 0)
+                {
+                    <label>
+                        @L("Шаблон")
+                        <select @bind="_templateId" @bind:after="ApplyTemplate">
+                            <option value="">@L("без шаблона")</option>
+                            @foreach (var t in _templates)
+                            {
+                                <option value="@t.Id">@t.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+                <label>
+                    @L("Кому")
+                    <select @bind="_tag" @bind:after="CountAsync">
+                        <option value="">@L("Все с согласием")</option>
+                        @foreach (var t in _tags)
+                        {
+                            <option value="@t.Id">@L("с тегом «{0}»", t.Name)</option>
+                        }
+                    </select>
+                </label>
+                <label class="wide">@L("Тема") <input @bind="_subject" maxlength="@CrmMailing.SubjectMaxLength" required /></label>
+                <label class="wide">@L("Текст") <textarea rows="7" @bind="_text" maxlength="@CrmMailing.TextMaxLength" required></textarea></label>
+            </div>
+        </fieldset>
+        <p class="muted small">
+            @L("Переменные:") @foreach (var v in CrmEmailTemplate.Variables) { <code title="@L(v.Meaning)">{{@v.Name}}</code> @(" ") }
+            · @L("без {{Имя}} письмо начнётся с «Здравствуйте, имя!»")
+        </p>
+        <p class="muted small">@L("Получателей сейчас: {0}", _audience)</p>
+        <div class="actions">
+            @if (_edit?.Status == CrmMailingStatus.Scheduled)
+            {
+                <span class="tag warn">@L("уйдёт {0}", Local(_edit.ScheduledAtUtc))</span>
+                <button type="button" class="secondary" @onclick="UnscheduleAsync" disabled="@_busy">@L("Снять с расписания")</button>
+            }
+            else
+            {
+                <button type="submit" disabled="@_busy">@L("Сохранить черновик")</button>
+            }
+            @if (_edit is not null)
+            {
+                <ConfirmButton OnConfirm="SendAsync" Disabled="@(_busy || _audience == 0 || !Mailings.MailConfigured)" Question='@L("Отправить рассылку сейчас?")'>@L("Отправить сейчас")</ConfirmButton>
+                @if (_edit.Status == CrmMailingStatus.Draft)
+                {
+                    <label class="inline">@L("или в") <input type="datetime-local" @bind="_at" aria-label="@L("Время отправки")" /></label>
+                    <button type="button" class="secondary" @onclick="ScheduleAsync" disabled="@(_busy || _at is null || !Mailings.MailConfigured)">@L("Запланировать")</button>
+                }
+                <button type="button" class="secondary" @onclick="NewAsync" disabled="@_busy">@L("Новая")</button>
+            }
+        </div>
+    </form>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Тема")</th><th>@L("Статус")</th><th class="num">@L("Получателей")</th><th class="num">@L("Доставлено")</th><th>@L("Когда")</th></tr></thead>
+            <tbody>
+                @if (_rows.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">@L("Рассылок пока нет.")</td></tr>
+                }
+                @foreach (var m in _rows)
+                {
+                    <tr>
+                        <td>@if (m.Status is CrmMailingStatus.Draft or CrmMailingStatus.Scheduled) { <a href="javascript:void(0)" @onclick="() => OpenAsync(m.Id)">@m.Subject</a> } else { @m.Subject }</td>
+                        <td><span class="tag @StatusClass(m.Status)">@StatusName(m)</span></td>
+                        <td class="num">@(m.Recipients > 0 ? m.Recipients : "—")</td>
+                        <td class="num">@(m.Recipients > 0 ? m.Delivered : "—")</td>
+                        <td>@(m.SentAtUtc is { } s ? Local(s) : m.ScheduledAtUtc is { } at ? Local(at) : "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<CrmMailingRowDto>? _rows;
+    private IReadOnlyList<KnitErp.Application.Tagging.TagDto> _tags = [];
+    private IReadOnlyList<CrmEmailTemplateDto> _templates = [];
+    private CrmMailingDto? _edit;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+    private string? _subject;
+    private string? _text;
+    private string _tag = "";
+    private string _templateId = "";
+    private DateTime? _at;
+    private int _audience;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _rows = await Mailings.ListAsync();
+            _tags = await TagList.ListAsync();
+            _templates = await Templates.ListAsync();
+            _audience = await Mailings.AudienceCountAsync(null);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private string Local(DateTime? utc) => utc is { } u ? TimeZones.ToLocal(u, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm") : "—";
+
+    private static string StatusClass(CrmMailingStatus s) => s switch
+    {
+        CrmMailingStatus.Sent => "ok",
+        CrmMailingStatus.Sending or CrmMailingStatus.Scheduled => "warn",
+        _ => "",
+    };
+
+    private static string StatusName(CrmMailingRowDto m) => m.Status switch
+    {
+        CrmMailingStatus.Sent => L("отправлена"),
+        CrmMailingStatus.Scheduled => L("запланирована"),
+        CrmMailingStatus.Sending => L("отправляется: осталось {0}", m.Pending),
+        _ => L("черновик"),
+    };
+
+    /// <summary>Шаблон подставляет тему и текст с переменными — значения подставятся каждому получателю при отправке.</summary>
+    private void ApplyTemplate()
+    {
+        if (long.TryParse(_templateId, out var id) && _templates.FirstOrDefault(t => t.Id == id) is { } t)
+        {
+            (_subject, _text) = (t.Subject, t.Body);
+        }
+    }
+
+    private Task CountAsync() => RunAsync(async () => _audience = await Mailings.AudienceCountAsync(long.TryParse(_tag, out var t) ? t : null), null);
+
+    private Task OpenAsync(long id) => RunAsync(async () =>
+    {
+        _edit = await Mailings.GetAsync(id);
+        (_subject, _text, _tag, _audience, _templateId, _at) = (_edit.Subject, _edit.Text, _edit.TagId?.ToString() ?? "", _edit.Audience, "", null);
+    }, null);
+
+    private Task NewAsync() => RunAsync(async () =>
+    {
+        (_edit, _subject, _text, _tag, _templateId, _at) = (null, null, null, "", "", null);
+        _audience = await Mailings.AudienceCountAsync(null);
+    }, null);
+
+    private Task RefreshAsync() => RunAsync(() => Task.CompletedTask, null);
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var tag = long.TryParse(_tag, out var t) ? t : (long?)null;
+        if (_edit is null)
+        {
+            _edit = await Mailings.GetAsync(await Mailings.CreateAsync(_subject, _text, tag));
+        }
+        else
+        {
+            await Mailings.UpdateAsync(_edit.Id, _subject, _text, tag, _edit.RowVersion);
+            _edit = await Mailings.GetAsync(_edit.Id);
+        }
+    }, L("Черновик сохранён."));
+
+    private Task SendAsync() => RunAsync(async () =>
+    {
+        var count = await Mailings.SendAsync(_edit!.Id, _edit.RowVersion);
+        (_edit, _subject, _text, _templateId) = (null, null, null, "");
+        _message = L("Рассылка поставлена в очередь: {0} получателей. Письма уходят в течение нескольких минут.", count);
+    }, null);
+
+    private Task ScheduleAsync() => RunAsync(async () =>
+    {
+        await Mailings.ScheduleAsync(_edit!.Id, _at!.Value, _edit.RowVersion);
+        _edit = await Mailings.GetAsync(_edit.Id);
+    }, L("Рассылка запланирована."));
+
+    private Task UnscheduleAsync() => RunAsync(async () =>
+    {
+        await Mailings.UnscheduleAsync(_edit!.Id, _edit.RowVersion);
+        _edit = await Mailings.GetAsync(_edit.Id);
+    }, L("Рассылка снята с расписания — это снова черновик."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        (_message, _isError) = (null, false);
+        try
+        {
+            await action();
+            _message = success ?? _message;
+            _rows = await Mailings.ListAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            (_message, _isError) = (UiErrors.Message(ex), true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

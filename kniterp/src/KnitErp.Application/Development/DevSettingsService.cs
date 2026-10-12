@@ -184,6 +184,48 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
         }
     }
 
+    /// <summary>Настройки цеха и печати (D719): допуск факта к плану, разделы показателя заполнения, формат этикеток.</summary>
+    public async Task<DevShopSettingsDto> ShopSettingsAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        var s = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct) ?? DevSettings.Defaults(ctx.OrganizationId);
+        return new DevShopSettingsDto(s.FactTolerancePercent,
+            DevCompleteness.SectionNames.Select((n, i) => new DevSectionDto(n, (s.CompletenessSections & (1 << i)) != 0)).ToList(),
+            s.LabelWidthMm, s.LabelHeightMm, s.LabelsOnA4, ctx.Permissions.Has(Permissions.DevSettings));
+    }
+
+    public async Task SaveShopSettingsAsync(int factTolerancePercent, IReadOnlyCollection<string> sections, int labelWidthMm, int labelHeightMm, bool labelsOnA4,
+        CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
+        var org = ctx.OrganizationId;
+        var mask = DevCompleteness.SectionNames.Select((n, i) => sections.Contains(n) ? 1 << i : 0).Sum();
+        try
+        {
+            var settings = await db.DevSettings.SingleOrDefaultAsync(x => x.OrganizationId == org, ct);
+            var isNew = settings is null;
+            settings ??= DevSettings.Defaults(org);
+            var before = $"допуск {settings.FactTolerancePercent} %, разделов {BitCount(settings.CompletenessSections)}, этикетка "
+                         + (settings.LabelsOnA4 ? "A4" : $"{settings.LabelWidthMm}×{settings.LabelHeightMm} мм");
+            settings.SetShop(factTolerancePercent, mask, labelWidthMm, labelHeightMm, labelsOnA4);
+            if (isNew)
+            {
+                db.DevSettings.Add(settings);
+            }
+
+            Audit(ctx, AuditActions.DevSettingsChanged, null, before,
+                $"допуск {factTolerancePercent} %, разделов {BitCount(mask)}, этикетка " + (labelsOnA4 ? "A4" : $"{labelWidthMm}×{labelHeightMm} мм"), "Цех и печать");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    private static int BitCount(int mask) => System.Numerics.BitOperations.PopCount((uint)mask);
+
     public async Task SaveTemplateAsync(DevCategoryTemplateDto template, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);

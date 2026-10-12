@@ -8,6 +8,8 @@
 @inject EmployeeService Employees
 @inject PersonalDataService PersonalData
 @inject PersonnelOrderService Orders
+@inject EmployeeDataRequestService DataRequests
+@inject IJSRuntime JS
 
 <PageTitle>@(_employee?.FullName ?? L("Сотрудник")) — knitERP</PageTitle>
 
@@ -77,6 +79,115 @@ else
             @if (c.Missing.Count > 0)
             {
                 <p class="muted small">@L("Не хватает:") @string.Join(", ", c.Missing.Select(m => L(m)))</p>
+            }
+        </div>
+    }
+
+    @if (_dataStatus is { } ds)
+    {
+        @* D125: анкета сотрудника по ссылке — выдача ссылки и проверка присланного (в карточку — только после «Принять»). *@
+        <div class="panel invite-panel">
+            <h2>@L("Анкета сотрудника")</h2>
+            @if (ds.Pending > 0)
+            {
+                <p class="flash error" role="status">@L("Данные от сотрудника — проверить ({0})", ds.Pending)</p>
+                @if (ds.CanReview && _reviews is null)
+                {
+                    <button type="button" @onclick="ShowReviewsAsync" disabled="@_busy">@L("Показать анкету")</button>
+                    <p class="muted small">@L("Просмотр записывается в журнал аудита.")</p>
+                }
+            }
+            @if (ds.LinkExpiresAtUtc is { } linkUntil)
+            {
+                <p class="muted small">@L("Ссылка для заполнения действует до {0}.", TimeZones.ToLocal(linkUntil, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm"))</p>
+            }
+            @if (ds.LastRejectReason is { } rejectReason)
+            {
+                <p class="muted small">@L("Последняя анкета отклонена: {0}", rejectReason)</p>
+            }
+            @if (_reviews is { } reviews)
+            {
+                @foreach (var r in reviews)
+                {
+                    <h3>@L("Анкета от {0}", TimeZones.ToLocal(r.SubmittedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm"))</h3>
+                    @if (r.Fields.Count > 0)
+                    {
+                        <div class="scroll">
+                            <table class="compact data-compare">
+                                <thead><tr><th>@L("Поле")</th><th>@L("В карточке")</th><th>@L("Прислал сотрудник")</th></tr></thead>
+                                <tbody>
+                                    @foreach (var f in r.Fields)
+                                    {
+                                        <tr class="@(f.Differs ? "differs" : null)"><td>@L(f.Name)</td><td>@(f.Current ?? "—")</td><td>@f.Submitted</td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    @if (r.Files.Count > 0)
+                    {
+                        <ul>
+                            @foreach (var file in r.Files)
+                            {
+                                <li>@L(file.KindName): <a href="employees/data-files/@file.Id" download data-enhance-nav="false">@file.FileName</a> <span class="muted small">@(file.SizeBytes / 1024 + 1) @L("КБ")</span></li>
+                            }
+                        </ul>
+                    }
+                    <p class="muted small">
+                        @L("Согласие на обработку ПДн дано в анкете (редакция {0}), адрес отправки: {1}.", r.ConsentVersion, r.ClientAddress ?? "—")
+                        @if (r.ConsentWillBeRecorded)
+                        {
+                            @L("При принятии в карточке будет отмечено согласие от даты отправки.")
+                        }
+                    </p>
+                    @if (r.CanDecide)
+                    {
+                        <div class="actions">
+                            <button type="button" @onclick="() => AcceptDataAsync(r)" disabled="@_busy">@L("Принять")</button>
+                        </div>
+                        <div class="inline-form">
+                            <label>@L("Причина отказа") <input @bind="_rejectReason" maxlength="500" disabled="@_busy" /></label>
+                            <button type="button" class="secondary" @onclick="() => RejectDataAsync(r)" disabled="@_busy">@L("Отклонить")</button>
+                        </div>
+                    }
+                }
+            }
+            @if (ds.CanIssue && e.Status != EmploymentStatus.Dismissed)
+            {
+                <div class="actions">
+                    <button type="button" class="secondary" @onclick="IssueDataLinkAsync" disabled="@_busy">@L("Ссылка для заполнения данных")</button>
+                </div>
+                <p class="muted small">@L("Сотрудник откроет ссылку без входа и заполнит недостающие данные. Ссылка одноразовая и действует 4 часа; новая ссылка отменяет прежнюю.")</p>
+            }
+            @if (_dataLink is { } link)
+            {
+                var linkEnds = TimeZones.ToLocal(link.ExpiresAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+                @if (link.Sent == true)
+                {
+                    <p class="invite-sent">✓ @L("Письмо со ссылкой отправлено на {0}. Ссылка действует до {1}.", link.Email ?? "", linkEnds)</p>
+                }
+                else if (link.Sent == false)
+                {
+                    <p class="error" role="alert">@L("Письмо не отправлено. Передайте ссылку сами — кнопками ниже. Ссылка действует до {0}.", linkEnds)</p>
+                }
+                else if (link.MailAvailable)
+                {
+                    <p class="muted">@L("У сотрудника нет почты в карточке — передайте ссылку сами: «Поделиться» или «Копировать». Действует до {0}.", linkEnds)</p>
+                }
+                else
+                {
+                    <p class="muted">@L("Почта сервера не настроена — передайте ссылку сами: «Поделиться» (мессенджер на телефоне) или «Копировать». Ссылка личная, действует до {0}.", linkEnds)</p>
+                }
+                <label for="employee-data-link">@L("Ссылка")</label>
+                <input id="employee-data-link" readonly value="@link.Link" style="width: 100%" onfocus="this.select()" />
+                <div class="actions">
+                    <button type="button" @onclick="CopyDataLinkAsync">@(_copied ? L("Скопировано ✓") : L("Копировать ссылку"))</button>
+                    @if (_canShare)
+                    {
+                        <button type="button" class="secondary" @onclick="ShareDataLinkAsync">@L("Поделиться")</button>
+                    }
+                    <button type="button" class="secondary" @onclick="() => _dataLink = null">@L("Готово")</button>
+                </div>
             }
         </div>
     }
@@ -188,6 +299,7 @@ else
                         <label>@L("Адрес регистрации") <InputText @bind-Value="_form.RegistrationAddress" maxlength="500" /></label>
                         <label>@L("Фактический адрес") <InputText @bind-Value="_form.ActualAddress" maxlength="500" /></label>
                         <label>@L("Телефон") <InputText @bind-Value="_form.Phone" maxlength="20" inputmode="tel" /></label>
+                        <label>@L("Личная почта") <InputText @bind-Value="_form.PersonalEmail" type="email" maxlength="254" /></label>
                         <label>@L("Образование") <InputText @bind-Value="_form.Education" maxlength="500" /></label>
                         <label>@L("Профессия") <InputText @bind-Value="_form.Profession" maxlength="100" /></label>
                         <label>@L("Семейное положение") <InputText @bind-Value="_form.MaritalStatus" maxlength="100" /></label>
@@ -277,6 +389,12 @@ else
     private PersonalDataDto? _pd;
     private EmployeeCompleteness? _completeness;
     private IReadOnlyList<AgreementStatusDto>? _agreementStatus;
+    private EmployeeDataStatusDto? _dataStatus;
+    private IReadOnlyList<EmployeeDataReviewDto>? _reviews;
+    private EmployeeDataLinkDto? _dataLink;
+    private string? _rejectReason;
+    private bool _copied;
+    private bool _canShare;
     private EmployeeDocumentKind _documentKind = EmployeeDocumentKind.Passport;
     private IReadOnlyList<EmploymentRecordDto>? _history;
     private PersonalDataForm _form = new();
@@ -305,6 +423,75 @@ else
         catch (NotFoundException)
         {
             _notFound = true;
+        }
+    }
+
+    /// <summary>D125: новая ссылка анкеты (прежняя отменяется), письмо сотруднику — если почта настроена и адрес известен.</summary>
+    private Task IssueDataLinkAsync() => RunAsync(async () =>
+    {
+        _copied = false;
+        _dataLink = await DataRequests.IssueAsync(Id);
+        _message = L("Выдана ссылка для заполнения данных. Прежняя больше не действует.");
+        _dataStatus = await DataRequests.StatusAsync(Id);
+    }, atForm: false);
+
+    private Task ShowReviewsAsync() => RunAsync(async () => _reviews = await DataRequests.ReviewAsync(Id), atForm: false);
+
+    private Task AcceptDataAsync(EmployeeDataReviewDto review) => RunAsync(async () =>
+    {
+        await DataRequests.AcceptAsync(review.Id, review.RowVersion);
+        _message = L("Анкета принята: данные перенесены в карточку.");
+        await AfterReviewAsync();
+    }, atForm: false);
+
+    private Task RejectDataAsync(EmployeeDataReviewDto review) => RunAsync(async () =>
+    {
+        await DataRequests.RejectAsync(review.Id, _rejectReason, review.RowVersion);
+        _message = L("Анкета отклонена.");
+        await AfterReviewAsync();
+    }, atForm: false);
+
+    private async Task AfterReviewAsync()
+    {
+        _rejectReason = null;
+        _reviews = null;
+        _employee = await Employees.GetAsync(Id);
+        if (_pd is not null)
+        {
+            await ReloadPersonalDataAsync();
+        }
+        else
+        {
+            _summary = await PersonalData.SummaryAsync(Id);
+            await LoadCompletenessAsync();
+        }
+    }
+
+    private async Task CopyDataLinkAsync()
+    {
+        if (_dataLink is not null)
+        {
+            _copied = await JS.InvokeAsync<bool>("kniterp.copy", _dataLink.Link);
+        }
+    }
+
+    private async Task ShareDataLinkAsync()
+    {
+        if (_dataLink is not null)
+        {
+            await JS.InvokeAsync<bool>("kniterp.share", "knitERP", L("Ссылка для заполнения ваших данных (личная, не пересылайте):"), _dataLink.Link);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _canShare = await JS.InvokeAsync<bool>("kniterp.canShare");
+            if (_canShare)
+            {
+                StateHasChanged();
+            }
         }
     }
 
@@ -383,10 +570,11 @@ else
     {
         _completeness = _summary!.CanViewPersonalData || CurrentAccess.Has(Permissions.EmployeeEdit) ? await PersonalData.CompletenessAsync(Id) : null;
         _agreementStatus = _summary!.CanViewPersonalData || CurrentAccess.Has(Permissions.EmployeeEdit) ? await Agreements.StatusAsync(Id) : null;
+        _dataStatus = await DataRequests.StatusAsync(Id); // D125: null — блок не для этой роли
     }
 
     /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
-    private async Task RunAsync(Func<Task> action)
+    private async Task RunAsync(Func<Task> action, bool atForm = true)
     {
         if (_busy)
         {
@@ -404,7 +592,7 @@ else
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {
             // Ошибка формы ПДн — у формы, остальные — сообщением вверху.
-            if (_pd is not null)
+            if (_pd is not null && atForm)
             {
                 _formError = UiErrors.Message(ex);
             }
@@ -448,6 +636,7 @@ else
         public string? Profession { get; set; }
         public string? MaritalStatus { get; set; }
         public string? FamilyMembers { get; set; }
+        public string? PersonalEmail { get; set; }
 
         public static PersonalDataForm From(PersonalDataValues v) => new()
         {
@@ -455,10 +644,10 @@ else
             PassportIssuer = v.PassportIssuer, PassportIssuedOn = v.PassportIssuedOn, PassportDivisionCode = v.PassportDivisionCode,
             Snils = v.Snils is null ? null : PersonIds.FormatSnils(v.Snils), Inn = v.Inn, RegistrationAddress = v.RegistrationAddress,
             ActualAddress = v.ActualAddress, Phone = v.Phone, Education = v.Education, Profession = v.Profession,
-            MaritalStatus = v.MaritalStatus, FamilyMembers = v.FamilyMembers,
+            MaritalStatus = v.MaritalStatus, FamilyMembers = v.FamilyMembers, PersonalEmail = v.PersonalEmail,
         };
 
         public PersonalDataValues ToValues() => new(Gender, BirthPlace, Citizenship, PassportNumber, PassportIssuer, PassportIssuedOn,
-            PassportDivisionCode, Snils, Inn, RegistrationAddress, ActualAddress, Phone, Education, Profession, MaritalStatus, FamilyMembers);
+            PassportDivisionCode, Snils, Inn, RegistrationAddress, ActualAddress, Phone, Education, Profession, MaritalStatus, FamilyMembers, PersonalEmail);
     }
 }

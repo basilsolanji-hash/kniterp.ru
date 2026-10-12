@@ -81,6 +81,8 @@ public sealed class WebAppProcess : IAsyncDisposable
         info.Environment["ASPNETCORE_URLS"] = BaseUrl;
         info.Environment["ConnectionStrings__KnitErp"] = connectionString;
         info.Environment["Webhooks__Disabled"] = "true";
+        // D125: ссылки для сотрудников строятся только от адреса сервера из настроек — в тестах это адрес запущенного приложения.
+        info.Environment["App__PublicUrl"] = BaseUrl.TrimEnd('/');
         info.Environment["Kestrel__Certificates__Default__Path"] = certificate;
         info.Environment["Kestrel__Certificates__Default__Password"] = certificatePassword;
         _app = Process.Start(info) ?? throw new InvalidOperationException("Не удалось запустить KnitErp.Web.");

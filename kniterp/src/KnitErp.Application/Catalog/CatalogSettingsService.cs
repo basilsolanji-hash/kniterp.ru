@@ -55,7 +55,7 @@ public sealed class CatalogSettingsService(IKnitErpDbContext db, IAccessGuard gu
     public async Task SaveAsync(CatalogSettingsCommand cmd, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
-        var s = await db.CatalogSettings.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
+        var s = await ItemCodesService.FreshSettingsAsync(db, ctx.OrganizationId, ct);
         if (s is null)
         {
             s = CatalogSettings.Default(ctx.OrganizationId);
@@ -80,14 +80,22 @@ public sealed class CatalogSettingsService(IKnitErpDbContext db, IAccessGuard gu
 
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CatalogChanged, nameof(CatalogSettings),
             ctx.OrganizationId.ToString(), before, Describe(s), "Настройки каталога", currentUser.CorrelationId));
-        await db.SaveOrConflictAsync(ct);
+        try
+        {
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // конфликт не оставляет изменённые настройки в контексте вкладки
+            throw;
+        }
     }
 
     /// <summary>D315: автоматические штрихкоды и артикулы — отдельным сохранением (своя форма на вкладке «Общие»).</summary>
     public async Task SaveCodesAsync(CatalogCodesCommand cmd, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
-        var s = await db.CatalogSettings.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
+        var s = await ItemCodesService.FreshSettingsAsync(db, ctx.OrganizationId, ct);
         if (s is null)
         {
             s = CatalogSettings.Default(ctx.OrganizationId);
@@ -112,7 +120,15 @@ public sealed class CatalogSettingsService(IKnitErpDbContext db, IAccessGuard gu
 
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CatalogChanged, nameof(CatalogSettings),
             ctx.OrganizationId.ToString(), before, DescribeCodes(s), "Автоматические штрихкоды и артикулы", currentUser.CorrelationId));
-        await db.SaveOrConflictAsync(ct);
+        try
+        {
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // конфликт не оставляет изменённые настройки в контексте вкладки
+            throw;
+        }
     }
 
     private static string DescribeCodes(CatalogSettings s) =>
