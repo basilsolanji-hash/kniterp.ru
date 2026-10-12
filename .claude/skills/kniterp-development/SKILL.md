@@ -70,6 +70,9 @@ description: Модуль «Разработка» knitERP (D700–D799) — м�
 - Телефон 390 px: таблицы — внутри `.scroll`, вкладки — `.dev-tabs` (перенос), колонки доски — одна под другой.
 
 ## Тесты
+- Приёмка ТЗ §14 — `DevE2ETests.Acceptance_model_from_idea_to_production`: вся цепочка через интерфейс до позиции каталога и
+  черновика техкарты. Пряжу заводит `HrAppFixture.CreateYarnAsync`; в списках пряжи и станков подпись длиннее названия
+  («код — название») — выбирать `SelectContainingAsync`.
 - Модульные: `tests/KnitErp.UnitTests/DevModelRulesTests.cs`, `DevTechRulesTests.cs`.
 - Интеграционные: `DevModelTests`, `DevAutomationTests`, `DevTechTests` (свои `_innSeed` 970–973 млн).
 - Сквозные: `tests/KnitErp.E2ETests/DevE2ETests.cs` (фикстура `HrAppFixture`, ошибки JS собираются в `RunAsync`).
