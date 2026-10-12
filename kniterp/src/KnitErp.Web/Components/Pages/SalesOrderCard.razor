@@ -8,6 +8,7 @@
 @inject KnitErp.Application.Finance.MoneyService Money
 @inject SalesStageService StageList
 @inject CustomerInvoiceService Invoices
+@inject SalesOrderDocumentsService OrderDocuments
 @inject NavigationManager Navigation
 
 <PageTitle>@(_order?.Number ?? L("Заказ покупателя")) — knitERP</PageTitle>
@@ -471,6 +472,7 @@ else
             <ConfirmButton Class="secondary" OnConfirm="CancelAsync" Disabled="@_busy" Question='@L("Отменить заказ?")'>@L("Отменить заказ")</ConfirmButton>
         }
     </div>
+    <SalesOrderDocumentsPanel Data="_documents" OnChanged="LoadAsync" />
 
     @if (_order.Documents.Count > 0)
     {
@@ -684,6 +686,7 @@ else
         () => Sales.SetOrderStageAsync(Id, long.TryParse(e.Value?.ToString(), out var s) ? s : null, _order!.RowVersion), L("Этап заказа изменён."));
 
     private KnitErp.Application.Warehousing.SalesOrderBatchesDto? _lots;
+    private SalesOrderDocumentsDto? _documents; // D1122–D1125
 
     private async Task LoadAsync()
     {
@@ -698,6 +701,7 @@ else
         _lots = _order.Documents.Count > 0 ? await BatchService.ForSalesOrderAsync(Id) : null;
         _invoiceId = _order.CanSeePrices ? await Invoices.FindForOrderAsync(Id) : null;
         _advances = _order.CanEdit && _order.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Closed ? await Sales.AvailableAdvancesAsync(Id) : 0;
+        _documents = await OrderDocuments.PanelAsync(Id); // D1122–D1125: документы и письма клиенту
     }
 
     /// <summary>Счёт по заказу и сразу его карточка: там печать.</summary>

@@ -162,6 +162,7 @@ public sealed class CustomerInvoiceService(IKnitErpDbContext db, IAccessGuard gu
         Audit(ctx, AuditActions.CustomerInvoiceIssued, invoice.Id, null, $"{invoice.Total:0.00}", $"{number} по заказу {order.Number}");
         await db.SaveChangesAsync(ct);
         await StageAutomation.ApplyAsync(db, ctx, [orderId], clock.UtcNow, currentUser.CorrelationId, ct);
+        await SalesMailOutbox.OnInvoiceIssuedAsync(db, ctx, invoice.Id, clock.UtcNow, ct); // D1124: письмо со счётом — в той же транзакции
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return invoice.Id;

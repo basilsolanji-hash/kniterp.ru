@@ -177,6 +177,15 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements { get; }
     DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles { get; }
     DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings { get; }
+    // D1120–D1125 (продажи): оформление документов, письма клиенту, связанные документы.
+    DbSet<KnitErp.Domain.Sales.SalesDocumentImage> SalesDocumentImages { get; }
+    DbSet<KnitErp.Domain.Sales.SalesDocumentSettings> SalesDocumentSettings { get; }
+    DbSet<KnitErp.Domain.Sales.SalesMailTemplate> SalesMailTemplates { get; }
+    DbSet<KnitErp.Domain.Sales.SalesMailStage> SalesMailStages { get; }
+    DbSet<KnitErp.Domain.Sales.CustomerMailSettings> CustomerMailSettings { get; }
+    DbSet<KnitErp.Domain.Sales.SalesMailMessage> SalesMailMessages { get; }
+    DbSet<KnitErp.Domain.Sales.SalesMailAttachment> SalesMailAttachments { get; }
+    DbSet<KnitErp.Domain.Sales.SalesDocumentLink> SalesDocumentLinks { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

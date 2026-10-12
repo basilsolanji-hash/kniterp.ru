@@ -272,6 +272,7 @@
         new("settings", "Настройки",
         [
             new("organization", "Организация", a => a.Has(Permissions.OrganizationView)),
+            new("sales-documents-settings", "Документы и письма продаж", a => a.Has(Permissions.SalesView)), // D1120
             new("launch", "Готовность к запуску", a => a.Has(Permissions.OrganizationEdit)),
             new("settings/production", "Производство", a => a.Has(Permissions.OrganizationView)),
             new("hr/settings", "Кадры и заработок", a => a.Has(Permissions.OrganizationEdit) || a.Has(Permissions.PayrollCalculate)),

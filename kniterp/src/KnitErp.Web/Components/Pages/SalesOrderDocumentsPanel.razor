@@ -1,0 +1,323 @@
+@*
+    D1122–D1125: документы заказа покупателя — печать и отправка клиенту, журнал писем, связанные документы (учётные и ручные).
+    Встроен в SalesOrderCard: данные грузит карточка (одна строка в её LoadAsync) и передаёт параметром; сервисы вызываются только
+    по нажатию кнопок, после действия карточка перечитывает заказ (OnChanged).
+*@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesOrderDocumentsService Documents
+@inject SalesService Sales
+
+@if (Data is { } d)
+{
+    <h2 style="margin-top: 20px">@L("Документы и письма клиенту")</h2>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (d.Printables.Count > 0)
+    {
+        <div class="sx-doc-print">
+            @foreach (var p in d.Printables)
+            {
+                <span class="sx-doc-chip">
+                    @L(p.DocumentName) @p.Number
+                    <a href="@p.PrintHref" target="_blank" rel="noopener">@L("Печать")</a>
+                    <a href="sales-documents/@DocumentPath(p.Document)/@(p.Id).pdf" download data-enhance-nav="false">PDF</a>
+                </span>
+            }
+        </div>
+    }
+
+    @if (d.CanSend)
+    {
+        @if (!d.MailConfigured)
+        {
+            <p class="muted small">@L("Почта сервера не настроена: письма встают в очередь со статусом «Не отправлено».")</p>
+        }
+        else if (d.CustomerEmail is null)
+        {
+            <p class="muted small">@L("У покупателя не указана почта для документов — укажите её в форме письма или на вкладке «Почта для документов» карточки контрагента.")</p>
+        }
+        else if (d.CustomerNoAutoSend)
+        {
+            <p class="muted small">@L("Покупателю письма автоматически не отправляются (настройка в карточке контрагента).")</p>
+        }
+
+        <SalesSendMail OrderId="d.OrderId" Document="SalesMailDocument.Order" OnSent="OnChanged" />
+    }
+
+    @if (d.Mails.Count > 0)
+    {
+        <h3 class="sx-sub-head">@L("Журнал писем")</h3>
+        <table class="sx-table compact">
+            <thead><tr><th>@L("Когда")</th><th>@L("Письмо")</th><th>@L("Кому")</th><th>@L("Статус")</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var m in d.Mails)
+                {
+                    <tr>
+                        <td data-label="@L("Когда")">@TimeZones.ToLocal(m.SentAtUtc ?? m.CreatedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</td>
+                        <td data-label="@L("Письмо")">
+                            @L(m.KindName)@(m.IsAuto ? " · " + L("автоматически") : "") <span class="sx-sub">@m.Subject</span>
+                            @if (m.Attachments.Length > 0)
+                            {
+                                <span class="sx-sub">@L("Вложения:") @m.Attachments</span>
+                            }
+                        </td>
+                        <td data-label="@L("Кому")" class="sx-wrap">@m.Recipients <span class="sx-sub">@m.CreatedBy</span></td>
+                        <td data-label="@L("Статус")">
+                            <span class="tag @(m.Status == SalesMailStatus.Sent ? "ok" : m.Status == SalesMailStatus.Failed ? "bad" : "")">@L(m.StatusName)</span>
+                            @if (m.LastError is not null && m.Status != SalesMailStatus.Sent)
+                            {
+                                <span class="sx-sub">@m.LastError</span>
+                            }
+                        </td>
+                        <td class="sx-row-actions">
+                            @if (d.CanLink && m.Status == SalesMailStatus.Failed)
+                            {
+                                <button type="button" class="secondary" @onclick="() => RetryAsync(m)" disabled="@_busy">@L("Повторить")</button>
+                            }
+                            @if (d.CanLink && m.Status is SalesMailStatus.Queued or SalesMailStatus.Failed)
+                            {
+                                <button type="button" class="secondary" @onclick="() => CancelAsync(m)" disabled="@_busy">@L("Отменить")</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h3 class="sx-sub-head">@L("Связанные документы")</h3>
+    @if (d.Links.Count == 0)
+    {
+        <p class="muted small">@L("Связанных документов пока нет.")</p>
+    }
+    else
+    {
+        <table class="sx-table compact">
+            <thead><tr><th>@L("Документ")</th><th>@L("Дата")</th><th>@L("Сведения")</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var l in d.Links)
+                {
+                    <tr>
+                        <td data-label="@L("Документ")">
+                            @L(l.KindName)
+                            @if (l.Hidden)
+                            {
+                                <span class="sx-sub">@L("нет права на просмотр")</span>
+                            }
+                            else if (l.Href is not null)
+                            {
+                                <a href="@l.Href">@l.Number</a>
+                            }
+                            else
+                            {
+                                @l.Number
+                            }
+                            @if (l.Manual)
+                            {
+                                <span class="sx-line-flag">@L("вручную")</span>
+                            }
+                        </td>
+                        <td data-label="@L("Дата")">@l.Date?.ToString("dd.MM.yyyy")</td>
+                        <td data-label="@L("Сведения")" class="sx-wrap">
+                            @if (l.SubKind is not null)
+                            {
+                                @L(l.SubKind)@(l.State is null ? "" : ", ")
+                            }
+                            @if (l.State is not null)
+                            {
+                                @L(l.State)
+                            }
+                            @if (l.Party is not null)
+                            {
+                                <span class="sx-sub">@l.Party</span>
+                            }
+                            @if (l.Amount is { } amount)
+                            {
+                                <span class="sx-sub">@(l.AllocationId is null ? "" : L("разнесено") + " ")@Amounts.Format(amount)</span>
+                            }
+                            @if (l.Comment is not null)
+                            {
+                                <span class="sx-sub">@l.Comment</span>
+                            }
+                        </td>
+                        <td class="sx-row-actions">
+                            @if (d.CanLink && l.Manual && l.LinkId is { } linkId)
+                            {
+                                <ConfirmButton Class="secondary" Disabled="@_busy" Question='@L("Отвязать документ от заказа?")'
+                                               OnConfirm="() => UnlinkAsync(linkId, l.LinkRowVersion!)">@L("Отвязать")</ConfirmButton>
+                            }
+                            else if (d.CanLink && l.AllocationId is { } allocationId)
+                            {
+                                <ConfirmButton Class="secondary" Disabled="@_busy" Question='@L("Снять разнесение оплаты с заказа? Сумма станет авансом покупателя.")'
+                                               OnConfirm="() => RemoveAllocationAsync(allocationId, l.AllocationRowVersion!)">@L("Снять разнесение")</ConfirmButton>
+                            }
+                            else if (!l.Manual)
+                            {
+                                <span class="sx-sub" title="@HintText(l.Hint)">@L("учётная связь")</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @if (d.CanLink)
+    {
+        <form class="sx-form" @onsubmit="SearchAsync">
+            <div class="sx-legend">@L("Связать документ")</div>
+            <label>
+                @L("Вид документа")
+                <select @bind="_kind">
+                    @foreach (var k in SalesDocumentLink.ManualKinds)
+                    {
+                        <option value="@k">@L(SalesDocumentLink.KindName(k))</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Номер") <input @bind="_search" maxlength="30" placeholder="@L("часть номера")" /></label>
+            <label class="w2">@L("Комментарий") <input @bind="_comment" maxlength="@SalesDocumentLink.CommentMaxLength" /></label>
+            <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button></div>
+        </form>
+        @if (_candidates is { } found)
+        {
+            @if (found.Count == 0)
+            {
+                <p class="muted small">@L("Ничего не найдено.")</p>
+            }
+            else
+            {
+                <table class="sx-table compact">
+                    <tbody>
+                        @foreach (var c in found)
+                        {
+                            <tr>
+                                <td data-label="@L("Номер")">@c.Number</td>
+                                <td data-label="@L("Дата")">@c.Date?.ToString("dd.MM.yyyy")</td>
+                                <td data-label="@L("Сведения")" class="sx-wrap">@(c.Info is not null && _kind == SalesLinkKind.StockDocument ? L(c.Info) : c.Info)</td>
+                                <td class="sx-row-actions">
+                                    <button type="button" @onclick="() => LinkAsync(c.Id)" disabled="@_busy">@L("Связать")</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+    }
+
+    <style>
+        .sx-doc-print { display: flex; flex-wrap: wrap; gap: 6px 10px; margin: 4px 0 8px; }
+        .sx-doc-chip { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; border: 1px solid var(--line); border-radius: 8px;
+            padding: 3px 8px; font-size: 13px; }
+        .sx-sub-head { font-size: 14px; margin: 14px 0 4px; }
+        .sx-table td.sx-wrap { overflow-wrap: anywhere; }
+    </style>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [Parameter]
+    public SalesOrderDocumentsDto? Data { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private SalesLinkKind _kind = SalesLinkKind.SalesOrder;
+    private string? _search;
+    private string? _comment;
+    private IReadOnlyList<SalesLinkCandidateDto>? _candidates;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    private static string DocumentPath(SalesMailDocument d) => d switch
+    {
+        SalesMailDocument.Invoice => "invoice",
+        SalesMailDocument.Upd => "upd",
+        _ => "order",
+    };
+
+    private string HintText(SalesLinkHint hint) => hint switch
+    {
+        SalesLinkHint.StockDocument => L("Связь задана в самом складском документе: отмените черновик или сторнируйте проведённый."),
+        SalesLinkHint.Invoice => L("Счёт выставлен по заказу — отменить его можно в карточке счёта."),
+        SalesLinkHint.Production => L("Связь задана в производственном заказе."),
+        SalesLinkHint.Crm => L("Сделку и её заказы ведёт CRM."),
+        _ => string.Empty,
+    };
+
+    private async Task SearchAsync()
+    {
+        if (_busy || Data is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            _candidates = await Documents.SearchAsync(Data.OrderId, _kind, _search);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task RetryAsync(SalesMailRowDto m) => RunAsync(() => Documents.RetryMailAsync(m.Id, m.RowVersion), L("Письмо снова в очереди."));
+
+    private Task CancelAsync(SalesMailRowDto m) => RunAsync(() => Documents.CancelMailAsync(m.Id, m.RowVersion), L("Письмо отменено."));
+
+    private Task UnlinkAsync(long linkId, byte[] rowVersion) => RunAsync(() => Documents.UnlinkAsync(linkId, rowVersion), L("Документ отвязан."));
+
+    private Task RemoveAllocationAsync(long allocationId, byte[] rowVersion) =>
+        RunAsync(() => Sales.RemovePaymentAllocationAsync(allocationId, rowVersion), L("Разнесение снято."));
+
+    private Task LinkAsync(long documentId) => RunAsync(async () =>
+    {
+        await Documents.LinkAsync(Data!.OrderId, _kind, documentId, _comment);
+        _candidates = null;
+        _comment = null;
+    }, L("Документ связан с заказом."));
+
+    private async Task RunAsync(Func<Task> action, string done)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _message = done;
+            _isError = false;
+            _busy = false;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

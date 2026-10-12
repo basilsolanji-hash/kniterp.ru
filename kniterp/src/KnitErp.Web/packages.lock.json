@@ -221,6 +221,14 @@
           "System.Security.Cryptography.Pkcs": "10.0.0"
         }
       },
+      "PDFsharp": {
+        "type": "Transitive",
+        "resolved": "6.2.4",
+        "contentHash": "GhTr9F1uOYXHCIEOB5PXIgqn5a8WLsJL2m0eewTA0IvY1j6N4HGXHKKmEyB90/N6vrjmYamf41V9zbmdW2HY3g==",
+        "dependencies": {
+          "System.Security.Cryptography.Pkcs": "8.0.1"
+        }
+      },
       "RBush": {
         "type": "Transitive",
         "resolved": "4.0.0",
@@ -294,7 +302,9 @@
           "KnitErp.Application": "[1.0.0, )",
           "MailKit": "[4.18.1, )",
           "Microsoft.AspNetCore.DataProtection.EntityFrameworkCore": "[10.0.12, )",
-          "Microsoft.EntityFrameworkCore.SqlServer": "[10.0.12, )"
+          "Microsoft.EntityFrameworkCore.SqlServer": "[10.0.12, )",
+          "PDFsharp-MigraDoc": "[6.2.4, )",
+          "QRCoder": "[1.6.0, )"
         }
       },
       "Anthropic": {
@@ -355,6 +365,16 @@
         "dependencies": {
           "Microsoft.Data.SqlClient": "6.1.6",
           "Microsoft.EntityFrameworkCore.Relational": "10.0.12"
+        }
+      },
+      "PDFsharp-MigraDoc": {
+        "type": "CentralTransitive",
+        "requested": "[6.2.4, )",
+        "resolved": "6.2.4",
+        "contentHash": "ZlRUJaAAo4K2oMt1v02GTeGOHIOoOvcH1e1WYMpunCG1MK8jd4EBrbzSHoYSN7yOfKWFtOIUfzvmKhRGPsyWQQ==",
+        "dependencies": {
+          "PDFsharp": "6.2.4",
+          "System.Security.Cryptography.Pkcs": "8.0.1"
         }
       }
     }

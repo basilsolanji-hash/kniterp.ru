@@ -44,6 +44,15 @@ public sealed class FakeEmailSender : IEmailSender
         return Task.FromResult(true);
     }
 
+    /// <summary>D1123: письма с вложениями (документы продаж).</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<EmailMessage> SentMessages { get; } = new();
+
+    public Task<bool> SendAsync(EmailMessage message, CancellationToken ct = default)
+    {
+        SentMessages.Enqueue(message);
+        return Task.FromResult(true);
+    }
+
     /// <summary>Письмо уходит в фоне — ждём его не дольше 5 секунд.</summary>
     public async Task<(string To, string Subject, string Text)?> WaitForAsync(string to)
     {
@@ -220,8 +229,15 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Finance.BankStatementService(db, guard, user, Clock,
                 new KnitErp.Application.Sales.SalesService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock)),
                 new KnitErp.Application.Purchasing.PurchaseService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock))),
-            new KnitErp.Application.Sales.SalesAgreementService(db, guard, user, Clock));
+            new KnitErp.Application.Sales.SalesAgreementService(db, guard, user, Clock),
+            new KnitErp.Application.Sales.SalesDocumentSettingsService(db, guard, user, Clock, Mail),
+            new KnitErp.Application.Sales.SalesDocumentPrintService(db, guard),
+            new KnitErp.Application.Sales.SalesOrderDocumentsService(db, guard, user, Clock, Mail),
+            new KnitErp.Application.Sales.SalesMailDispatcher(db, Mail, PdfRenderer, Clock));
     }
+
+    /// <summary>D1123: PDF документов продаж — настоящий (PDFsharp/MigraDoc), без сети и системных шрифтов.</summary>
+    public static readonly KnitErp.Application.Sales.ISalesPdfRenderer PdfRenderer = new KnitErp.Infrastructure.Documents.SalesPdfRenderer();
 
     public static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
 
@@ -333,7 +349,11 @@ public sealed record Services(
     KnitErp.Application.Catalog.LabelService Labels,
     AccountSecurityService Account,
     KnitErp.Application.Finance.BankStatementService BankStatements,
-    KnitErp.Application.Sales.SalesAgreementService Agreements) : IAsyncDisposable
+    KnitErp.Application.Sales.SalesAgreementService Agreements,
+    KnitErp.Application.Sales.SalesDocumentSettingsService DocumentSettings,
+    KnitErp.Application.Sales.SalesDocumentPrintService DocumentPrint,
+    KnitErp.Application.Sales.SalesOrderDocumentsService OrderDocuments,
+    KnitErp.Application.Sales.SalesMailDispatcher MailDispatcher) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

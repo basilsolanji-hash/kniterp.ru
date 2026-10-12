@@ -10,6 +10,9 @@
     <!-- Официальный SDK Anthropic: ИИ-помощник (включается ключом в настройках, по умолчанию выключен). -->
     <PackageReference Include="Anthropic" />
     <PackageReference Include="MailKit" />
+    <!-- D1123 (продажи): PDF счёта, УПД и заказа для писем клиенту; QR оплаты по ГОСТ Р 56042 в PDF. -->
+    <PackageReference Include="PDFsharp-MigraDoc" />
+    <PackageReference Include="QRCoder" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <!-- Ключи защиты cookie хранятся в базе, зашифрованные мастер-ключом. -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
@@ -21,5 +24,9 @@
     </PackageReference>
     <!-- Design тянет через MSBuild уязвимую 9.0.0 (GHSA-23rf-6693-g89p и др.): закрепляем исправленную. -->
     <PackageReference Include="System.Security.Cryptography.Xml" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- D1123: шрифт DejaVu Sans (свободная лицензия Bitstream Vera / DejaVu) — кириллица в PDF без системных шрифтов. -->
+    <EmbeddedResource Include="Documents\Fonts\*.ttf" />
   </ItemGroup>
 </Project>

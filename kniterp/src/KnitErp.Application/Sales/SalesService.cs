@@ -544,6 +544,7 @@ public sealed partial class SalesService(
         var before = order.StageId is { } old && stages.TryGetValue(old, out var o) ? o.Name : null;
         order.SetStage(stageId);
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, before ?? "—", name ?? "—", $"{order.Number}: этап");
+        await SalesMailOutbox.OnStageChangedAsync(db, ctx, id, stageId, clock.UtcNow, ct); // D1124: письмо о статусе — тем же сохранением
         await db.SaveOrConflictAsync(ct);
     }
 
@@ -683,6 +684,7 @@ public sealed partial class SalesService(
         await StageAutomation.ApplyAsync(db, ctx, [id], clock.UtcNow, currentUser.CorrelationId, ct);
         // D607 (сессия CRM): заказ из сделки подтверждён — сделка «Выиграна», в той же транзакции.
         await Crm.CrmDealService.OnOrderConfirmedAsync(db, ctx, id, clock.UtcNow, currentUser.CorrelationId, ct);
+        await SalesMailOutbox.OnOrderConfirmedAsync(db, ctx, id, clock.UtcNow, ct); // D1124: письмо «заказ оформлен» — в той же транзакции
         await db.SaveChangesAsync(ct);
 
         // D117: модули (CRM — «сделка выиграна») — в той же транзакции.

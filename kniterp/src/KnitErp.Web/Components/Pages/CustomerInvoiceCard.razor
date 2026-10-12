@@ -34,7 +34,13 @@ else
             }
         </h1>
         <a class="button" href="print/invoice/@_invoice.Id" target="_blank" rel="noopener">@L("Печать")</a>
+        <a class="button secondary" href="sales-documents/invoice/@(_invoice.Id).pdf" download data-enhance-nav="false">PDF</a>
     </div>
+    @if (issued && _invoice.CanEdit)
+    {
+        @* D1122: отправка счёта клиенту — письмо в очередь, журнал писем — в карточке заказа. *@
+        <SalesSendMail OrderId="_invoice.OrderId" Document="KnitErp.Domain.Sales.SalesMailDocument.Invoice" DocumentId="_invoice.Id" Primary="true" />
+    }
 
     @if (_message is not null)
     {

@@ -145,6 +145,15 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements => Set<KnitErp.Domain.Sales.SalesAgreement>();
     public DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles => Set<KnitErp.Domain.Sales.CustomerSalesProfile>();
     public DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings => Set<KnitErp.Domain.Sales.SalesRoleSettings>();
+    // D1120–D1125 (продажи): оформление документов, письма клиенту, связанные документы.
+    public DbSet<KnitErp.Domain.Sales.SalesDocumentImage> SalesDocumentImages => Set<KnitErp.Domain.Sales.SalesDocumentImage>();
+    public DbSet<KnitErp.Domain.Sales.SalesDocumentSettings> SalesDocumentSettings => Set<KnitErp.Domain.Sales.SalesDocumentSettings>();
+    public DbSet<KnitErp.Domain.Sales.SalesMailTemplate> SalesMailTemplates => Set<KnitErp.Domain.Sales.SalesMailTemplate>();
+    public DbSet<KnitErp.Domain.Sales.SalesMailStage> SalesMailStages => Set<KnitErp.Domain.Sales.SalesMailStage>();
+    public DbSet<KnitErp.Domain.Sales.CustomerMailSettings> CustomerMailSettings => Set<KnitErp.Domain.Sales.CustomerMailSettings>();
+    public DbSet<KnitErp.Domain.Sales.SalesMailMessage> SalesMailMessages => Set<KnitErp.Domain.Sales.SalesMailMessage>();
+    public DbSet<KnitErp.Domain.Sales.SalesMailAttachment> SalesMailAttachments => Set<KnitErp.Domain.Sales.SalesMailAttachment>();
+    public DbSet<KnitErp.Domain.Sales.SalesDocumentLink> SalesDocumentLinks => Set<KnitErp.Domain.Sales.SalesDocumentLink>();
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней

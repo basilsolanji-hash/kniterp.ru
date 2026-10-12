@@ -36,6 +36,8 @@ public static class DependencyInjection
         // Служебная почта (D81): «Забыли пароль». Без настроек — недоступна, вход по ссылке от администратора.
         services.AddSingleton(email ?? new EmailOptions(null, null, null, null, null));
         services.AddSingleton<IEmailSender, Email.SmtpEmailSender>();
+        // D1123 (продажи): PDF счёта, УПД и заказа для писем клиенту.
+        services.AddSingleton<KnitErp.Application.Sales.ISalesPdfRenderer, Documents.SalesPdfRenderer>();
         return services;
     }
 

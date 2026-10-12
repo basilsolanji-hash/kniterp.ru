@@ -29,13 +29,42 @@ public sealed class SmtpEmailSender(EmailOptions options, ILogger<SmtpEmailSende
             return false;
         }
 
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress("knitERP", From!));
+        message.Subject = subject;
+        message.Body = new TextPart("plain") { Text = text };
+        return await DeliverAsync(message, to, subject, ct);
+    }
+
+    /// <summary>D1123 (сессия «Продажи»): письмо клиенту с PDF-вложениями; имя отправителя — организации, адрес — ящика системы.</summary>
+    public async Task<bool> SendAsync(EmailMessage email, CancellationToken ct = default)
+    {
+        if (!IsConfigured)
+        {
+            return false;
+        }
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(string.IsNullOrWhiteSpace(email.SenderName) ? "knitERP" : email.SenderName, From!));
+        message.Subject = email.Subject;
+        var body = new BodyBuilder { TextBody = email.Text };
+        foreach (var a in email.Attachments)
+        {
+            body.Attachments.Add(a.FileName, a.Content, ContentType.Parse(a.ContentType));
+        }
+
+        message.Body = body.ToMessageBody();
+        return await DeliverAsync(message, email.To, email.Subject, ct);
+    }
+
+    private async Task<bool> DeliverAsync(MimeMessage message, string to, string subject, CancellationToken ct)
+    {
         try
         {
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress("knitERP", From!));
-            message.To.Add(MailboxAddress.Parse(to));
-            message.Subject = subject;
-            message.Body = new TextPart("plain") { Text = text };
+            foreach (var address in to.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                message.To.Add(MailboxAddress.Parse(address));
+            }
 
             if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
             {

@@ -1,0 +1,102 @@
+@*
+    D1124: вкладка «Почта для документов» карточки контрагента (подключается через ModuleUi): куда отправлять заказ, счёт, УПД и письма
+    о статусе заказа и запрет автоматической отправки. Открывается по нажатию вкладки, когда страница свободна.
+*@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesOrderDocumentsService Documents
+
+<SalesStyles />
+
+@if (_denied is not null)
+{
+    <p class="muted">@_denied</p>
+}
+else if (_settings is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span></div>
+    }
+
+    <p class="sx-lead">@L("На эти адреса уходят документы продаж — вручную из заказа и счёта и автоматически по настройкам «Документы и письма продаж».")</p>
+    @if (_settings.CanEdit)
+    {
+        <form class="sx-form" @onsubmit="SaveAsync">
+            <label class="w2">
+                @L("Почта (до 5 адресов через запятую)")
+                <input type="text" inputmode="email" @bind="_email" maxlength="@SalesMailMessage.RecipientsMaxLength" placeholder="buh@example.org" />
+            </label>
+            <label class="inline w2"><input type="checkbox" @bind="_noAuto" /> @L("Не отправлять автоматически")</label>
+            <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+        </form>
+    }
+    else
+    {
+        <div class="sx-kv">
+            <div><span>@L("Почта")</span><span>@(_settings.Email ?? "—")</span></div>
+            <div><span>@L("Автоматическая отправка")</span><span>@(_settings.NoAutoSend ? L("не отправлять") : L("по настройкам"))</span></div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public long CounterpartyId { get; set; }
+
+    private CustomerMailSettingsDto? _settings;
+    private string? _email;
+    private bool _noAuto;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _settings = await Documents.CustomerMailAsync(CounterpartyId);
+        (_email, _noAuto) = (_settings.Email, _settings.NoAutoSend);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy || _settings is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Documents.SetCustomerMailAsync(CounterpartyId, _email, _noAuto, _settings.RowVersion);
+            _message = L("Почта для документов сохранена.");
+            _isError = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
