@@ -66,6 +66,16 @@ public sealed class PrintService(IKnitErpDbContext db, IAccessGuard guard)
             AmountInWords.Format(invoice.Total, org.CurrencyCode), org.CurrencyCode, invoice.Status == CustomerInvoiceStatus.Cancelled);
     }
 
+    /// <summary>D1140 (сессия «Продажи»): XML УПД (формат ФНС 5.03) по проведённой отгрузке — для загрузки в оператора ЭДО.</summary>
+    public async Task<UpdXmlFile> UpdXmlAsync(long stockDocumentId, IReadOnlyDictionary<int, IReadOnlyList<string>>? markingCodes, DateTime nowUtc,
+        CancellationToken ct = default)
+    {
+        var upd = await UpdAsync(stockDocumentId, ct);
+        var ctx = await DemandAsync(ct);
+        var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
+        return UpdXml.Build(upd, TimeZoneInfo.ConvertTimeBySystemTimeZoneId(nowUtc, tz), Guid.NewGuid(), markingCodes);
+    }
+
     public async Task<UpdPrintDto> UpdAsync(long stockDocumentId, CancellationToken ct = default)
     {
         var ctx = await DemandAsync(ct);

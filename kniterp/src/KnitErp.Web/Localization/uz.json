@@ -5490,5 +5490,10 @@
   "превышение лимита на {0}": "limitdan {0} ga oshish",
   "просрочена оплата {0} (до {1} дн.)": "{0} toʻlov muddati oʻtgan ({1} kungacha)",
   "разрешено руководителем": "rahbar ruxsat bergan",
-  "соглашение {0}": "kelishuv {0}"
+  "соглашение {0}": "kelishuv {0}",
+  "Выберите причину отмены.": "Bekor qilish sababini tanlang.",
+  "XML УПД (формат ФНС 5.03) для загрузки в оператора ЭДО": "EHA operatoriga yuklash uchun XML UPD (FNS 5.03 formati)",
+  "XML для ЭДО": "EHA uchun XML",
+  "Для УПД в ЭДО нужны ИНН продавца и покупателя — заполните реквизиты.": "EHAdagi UPD uchun sotuvchi va xaridorning STIRi kerak — rekvizitlarni toʻldiring.",
+  "Отгрузка сторнирована — УПД для ЭДО не формируется.": "Joʻnatish storno qilingan — EHA uchun UPD shakllantirilmaydi."
 }

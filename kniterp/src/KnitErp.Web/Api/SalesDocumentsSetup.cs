@@ -21,6 +21,31 @@ public static class SalesDocumentsSetup
             typeof(KnitErp.Web.Components.Pages.SalesCustomerMailTab), KnitErp.Domain.Access.Permissions.SalesView);
     }
 
+    /// <summary>D1140: XML УПД для оператора ЭДО — по проведённой отгрузке, права печатной формы; вложение в windows-1251.</summary>
+    public static void MapUpdXml(this WebApplication app) =>
+        app.MapGet("/sales-documents/upd/{id:long}.xml", async (long id, KnitErp.Application.Printing.PrintService print, IClock clock, HttpContext http,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var file = await print.UpdXmlAsync(id, null, clock.UtcNow, ct);
+                http.Response.Headers.CacheControl = "no-store";
+                return Results.File(file.Content, "application/xml", file.FileName);
+            }
+            catch (AccessDeniedException)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            catch (NotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (KnitErp.Domain.Common.BusinessRuleException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
+            }
+        });
+
     /// <summary>PDF заказа, счёта или УПД — те же права и организация, что у печатной формы; отдаётся вложением.</summary>
     public static void MapSalesDocuments(this WebApplication app) =>
         app.MapGet("/sales-documents/{document}/{id:long}.pdf", async (string document, long id, SalesOrderDocumentsService documents,

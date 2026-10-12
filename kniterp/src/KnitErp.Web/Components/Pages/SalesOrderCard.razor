@@ -154,6 +154,10 @@ else
                     }
                 </dd>
             }
+            @if (_order.CancelReason is not null)
+            {
+                <dt>@L("Причина отмены")</dt><dd>@_order.CancelReason</dd>
+            }
             @if (_order.PriceOverrideReason is not null)
             {
                 <dt>@L("Цена ниже допустимой")</dt><dd>@_order.PriceOverrideReason</dd>
@@ -500,7 +504,7 @@ else
         }
         @if (_order.CanEdit && _order.Status is SalesOrderStatus.Draft or SalesOrderStatus.Confirmed)
         {
-            <ConfirmButton Class="secondary" OnConfirm="CancelAsync" Disabled="@_busy" Question='@L("Отменить заказ?")'>@L("Отменить заказ")</ConfirmButton>
+            <button type="button" class="secondary" @onclick="OpenCancelAsync" disabled="@_busy">@L("Отменить заказ")</button>
         }
         @if (_order.CanEdit && _order.Lines.Count > 0)
         {
@@ -508,6 +512,25 @@ else
             <button type="button" class="secondary" @onclick="RepeatAsync" disabled="@_busy">@L("Создать по образцу")</button>
         }
     </div>
+    @if (_cancelReasons is not null)
+    {
+        @* D1137: отмена с причиной из справочника. *@
+        <form class="inline-form sx-cancel" @onsubmit="CancelAsync">
+            <label>
+                @L("Причина отмены")
+                <select @bind="_cancelReason" required>
+                    <option value="">@L("— выберите —")</option>
+                    @foreach (var r in _cancelReasons)
+                    {
+                        <option value="@r.Id">@r.Name</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Пояснение") <input @bind="_cancelComment" maxlength="@SalesOrder.CommentMaxLength" size="36" /></label>
+            <button type="submit" class="danger" disabled="@_busy">@L("Отменить заказ")</button>
+            <button type="button" class="secondary" @onclick="() => _cancelReasons = null" disabled="@_busy">@L("Не отменять")</button>
+        </form>
+    }
     <SalesOrderDocumentsPanel Data="_documents" OnChanged="LoadAsync" />
 
     @if (_order.Documents.Count > 0)
@@ -524,7 +547,7 @@ else
                         <td>
                             @if (_order.CanSeePrices && d.Kind == StockOperationKind.Shipment && d.Status == StockDocumentStatus.Posted)
                             {
-                                <a href="print/upd/@d.Id" target="_blank" rel="noopener">@L("УПД")</a>
+                                <span><a href="print/upd/@d.Id" target="_blank" rel="noopener">@L("УПД")</a> · <a href="sales-documents/upd/@(d.Id).xml" download data-enhance-nav="false" title="@L("XML УПД (формат ФНС 5.03) для загрузки в оператора ЭДО")">@L("XML для ЭДО")</a></span>
                             }
                         </td>
                     </tr>
@@ -977,7 +1000,22 @@ else
 
     private Task ReopenAsync() => RunAsync(() => Sales.ReopenOrderAsync(Id, _order!.RowVersion), L("Заказ снова в работе."));
 
-    private Task CancelAsync() => RunAsync(() => Sales.CancelOrderAsync(Id, _order!.RowVersion), L("Заказ отменён."));
+    private IReadOnlyList<SalesCancelReasonDto>? _cancelReasons;
+    private string _cancelReason = string.Empty;
+    private string? _cancelComment;
+
+    private Task OpenCancelAsync() => RunAsync(async () => _cancelReasons = await Sales.CancelReasonsAsync(), null);
+
+    private Task CancelAsync() => RunAsync(async () =>
+    {
+        if (!long.TryParse(_cancelReason, out var reason))
+        {
+            throw new BusinessRuleException("sales.cancel_reason.required", L("Выберите причину отмены."));
+        }
+
+        await Sales.CancelOrderAsync(Id, reason, _cancelComment, _order!.RowVersion);
+        _cancelReasons = null;
+    }, L("Заказ отменён."));
 
     private Task ShipmentAsync() => GoAsync(() => Sales.CreateShipmentAsync(Id));
 

@@ -533,6 +533,7 @@ app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.A
 });
 
 KnitErp.Web.Api.SalesDocumentsSetup.MapSalesDocuments(app); // D1123 (продажи): PDF заказа, счёта и УПД
+KnitErp.Web.Api.SalesDocumentsSetup.MapUpdXml(app); // D1140 (продажи): XML УПД для ЭДО
 
 // Файл модели разработки (D705): право, своя организация и журнал скачивания — в сервисе; всегда вложением и без угадывания типа.
 app.MapGet("/dev/files/{id:long}", async (long id, string? inline, KnitErp.Application.Development.DevModelService models, HttpContext http, CancellationToken ct) =>
