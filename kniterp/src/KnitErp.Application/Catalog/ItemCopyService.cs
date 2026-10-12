@@ -41,8 +41,13 @@ public sealed class ItemCopyService(
                 item.SetTrade(src.Trade with { Gtin = null });
             }
 
-            var prices = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == org && p.ItemId == sourceId)
-                .ToDictionaryAsync(p => p.PriceTypeId, p => (decimal?)p.Price, ct);
+            // Ревью: цены копируются только тому, кто их видит, и только действующих видов (архивный вид раньше отменял всю копию).
+            var prices = ctx.Permissions.Has(Permissions.PriceView)
+                ? await (from p in db.ItemPrices.AsNoTracking()
+                         join t in db.PriceTypes.AsNoTracking() on p.PriceTypeId equals t.Id
+                         where p.OrganizationId == org && p.ItemId == sourceId && !t.IsArchived
+                         select new { p.PriceTypeId, p.Price }).ToDictionaryAsync(p => p.PriceTypeId, p => (decimal?)p.Price, ct)
+                : [];
             await db.SaveChangesAsync(ct);
             if (prices.Count > 0)
             {

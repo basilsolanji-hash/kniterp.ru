@@ -294,6 +294,9 @@
             .card-flow > .card-sec > h2:first-child { margin-top: 12px !important; }
         }
         .card-sec { min-width: 0; }
+        /* Поле выбора файла не шире экрана (на 390 px подпись «Загрузить строки из Excel» с полем давала прокрутку вбок). */
+        input[type=file] { max-width: 100%; min-width: 0; }
+        label.inline:has(> input[type=file]) { flex-wrap: wrap; max-width: 100%; min-width: 0; }
         @@media (min-width: 1400px) { dl.facts { max-width: none; grid-template-columns: repeat(3, max-content minmax(0, 1fr)); } }
 
         /* Компактный вид (замечание пользователя: «всё очень крупно, нет фокуса на данных»): мелкий шрифт и отступы,

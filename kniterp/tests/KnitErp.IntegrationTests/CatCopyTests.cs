@@ -60,6 +60,52 @@ public sealed class CatCopyTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         Assert.Empty(await s.Catalog.SimilarAsync("Варежки"));
     }
 
+    [SqlFact]
+    public async Task Copy_skips_archived_price_types_and_prices_hidden_from_user()
+    {
+        // Ревью: архивный вид цены у образца и пользователь без права «Цены и суммы» больше не отменяют копию.
+        var org = await CreateOrgAsync();
+        long hat;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+            var retail = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.IsDefault).Id;
+            var old = await s.Nomenclature.CreatePriceTypeAsync("Старая", true);
+            hat = await s.Catalog.CreateItemAsync(new ItemCommand("Ш-1", "Шапка", ItemType.Finished, piece, null));
+            await s.Nomenclature.SetPricesAsync(hat, new Dictionary<long, decimal?> { [retail] = 900, [old] = 800 });
+            var oldType = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.Id == old);
+            await s.Nomenclature.SetPriceTypeArchivedAsync(old, true, oldType.RowVersion);
+
+            var copy = await s.Copies.CopyAsync(hat, "Ш-2", null);
+            Assert.Equal([900m], (await s.Nomenclature.GetItemAsync(copy)).Prices.Where(p => p.Price is not null).Select(p => p.Price!.Value));
+        }
+
+        long keeper;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            keeper = (await s.Access.InviteAsync(new KnitErp.Application.Access.InviteUserCommand($"sk-{Guid.NewGuid():N}@test.local", "Кладовщик",
+                KnitErp.Domain.Access.SystemRoles.SeniorStorekeeper, null))).UserId;
+        }
+
+        await using (var db = host.NewDb())
+        {
+            (await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.Users, u => u.Id == keeper)).Activate();
+            await db.SaveChangesAsync();
+        }
+
+        await using (var k = host.As(keeper, org.OrganizationId))
+        {
+            var copy = await k.Copies.CopyAsync(hat, "Ш-3", null);
+            Assert.True(copy > 0);
+        }
+
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            Assert.All((await s.Nomenclature.GetItemAsync((await s.Catalog.ListItemsAsync(new ItemFilter(Search: "Ш-3"))).Items.Single().Id)).Prices,
+                p => Assert.Null(p.Price)); // цен кладовщик не видел — и не скопировал
+        }
+    }
+
     private async Task<CreatedOrganization> CreateOrgAsync()
     {
         int[] w = [2, 4, 10, 3, 5, 9, 4, 6, 8];

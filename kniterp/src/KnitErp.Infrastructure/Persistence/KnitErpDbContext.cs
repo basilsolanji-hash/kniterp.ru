@@ -177,6 +177,12 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
 
     public Task ReloadAsync(object entity, CancellationToken cancellationToken = default) => Entry(entity).ReloadAsync(cancellationToken);
 
+    public Task SavepointAsync(string name, CancellationToken cancellationToken = default) =>
+        (Database.CurrentTransaction ?? throw new InvalidOperationException("Точка сохранения действует только внутри транзакции.")).CreateSavepointAsync(name, cancellationToken);
+
+    public Task RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default) =>
+        (Database.CurrentTransaction ?? throw new InvalidOperationException("Точка сохранения действует только внутри транзакции.")).RollbackToSavepointAsync(name, cancellationToken);
+
     /// <summary>Участие во внешней транзакции: фиксация и откат — дело внешнего сценария.</summary>
     private sealed class JoinedTransaction(IDbContextTransaction outer) : IDbContextTransaction
     {

@@ -67,7 +67,41 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
     public async Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default) =>
         await GetAsync<List<MsPriceType>>(token, MoySkladEntities.PriceTypes, null, ct);
 
-    private async Task<T> GetAsync<T>(string token, string entity, string? query, CancellationToken ct)
+    public async Task<IReadOnlyList<MsRow>> UpdatePricesAsync(string token, string entity, IReadOnlyList<MsPriceUpdate> updates, CancellationToken ct = default)
+    {
+        if (!MoySkladEntities.Writable.Contains(entity))
+        {
+            throw new ArgumentException($"В «{entity}» knitERP не записывает.", nameof(entity));
+        }
+
+        if (updates.Count is 0 or > MoySkladEntities.MaxBatch)
+        {
+            throw new ArgumentException($"За раз — от 1 до {MoySkladEntities.MaxBatch} объектов.", nameof(updates));
+        }
+
+        var type = entity[(entity.LastIndexOf('/') + 1)..];
+        object Meta(string path, string metaType) => new { href = MoySkladEntities.BaseUrl + path, type = metaType, mediaType = "application/json" };
+        var body = updates.Select(u =>
+        {
+            if (!MoySkladEntities.IsSafeId(u.Id) || u.SalePrices.Any(p => !MoySkladEntities.IsSafeId(p.PriceTypeId)))
+            {
+                throw new ArgumentException("Недопустимый id объекта МойСклад.", nameof(updates));
+            }
+
+            return new Dictionary<string, object?>
+            {
+                ["meta"] = Meta($"{entity}/{u.Id}", type),
+                ["salePrices"] = u.SalePrices.Select(p => new { value = p.Value, priceType = new { meta = Meta($"{MoySkladEntities.PriceTypes}/{p.PriceTypeId}", "pricetype") } }),
+                ["buyPrice"] = u.BuyPrice is { } buy ? new { value = buy } : null,
+            }.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value);
+        }).ToList();
+        var json = JsonSerializer.Serialize(body, MoySkladIds.Json);
+        return await SendAsync<List<MsRow>>(token, entity, null, HttpMethod.Post, json, ct);
+    }
+
+    private Task<T> GetAsync<T>(string token, string entity, string? query, CancellationToken ct) => SendAsync<T>(token, entity, query, HttpMethod.Get, null, ct);
+
+    private async Task<T> SendAsync<T>(string token, string entity, string? query, HttpMethod method, string? json, CancellationToken ct)
     {
         if (!MoySkladEntities.Allowed.Contains(entity))
         {
@@ -82,8 +116,12 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
             try
             {
                 await ThrottleAsync(ct);
-                using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+                using var request = new HttpRequestMessage(method, uri);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                if (json is not null)
+                {
+                    request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                }
                 response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             }
             catch (HttpRequestException) when (attempt < MaxAttempts)

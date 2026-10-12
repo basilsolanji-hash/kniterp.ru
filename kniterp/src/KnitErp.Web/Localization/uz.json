@@ -4978,5 +4978,15 @@
   "Ссылка недействительна: срок истёк, анкета уже отправлена или выдана новая ссылка. Попросите кадровика прислать новую.": "Havola yaroqsiz: muddati tugagan, anketa allaqachon yuborilgan yoki yangi havola berilgan. Kadrlar xodimidan yangisini yuborishni so‘rang.",
   "У сотрудника нет почты в карточке — передайте ссылку сами: «Поделиться» или «Копировать». Действует до {0}.": "Xodimning kartochkasida pochta yo‘q — havolani o‘zingiz bering: «Ulashish» yoki «Nusxalash». {0} gacha amal qiladi.",
   "Укажите причину отказа — её увидит кадровик в карточке.": "Rad etish sababini ko‘rsating — uni kadrlar xodimi kartochkada ko‘radi.",
-  "Файл анкеты": "Anketa fayli"
+  "Файл анкеты": "Anketa fayli",
+  "Количество компонента {0} не делится на единицу позиции (знаков после запятой: {1}) — состав комплекта не изменён.": "{0} komponent miqdori pozitsiya birligiga mos kelmaydi (verguldan keyingi belgilar: {1}) — to‘plam tarkibi o‘zgartirilmadi.",
+  "Выгрузить цены ({0})": "Narxlarni yuklash ({0})",
+  "Выгрузка цен в МойСклад": "Narxlarni MoySkladga yuklash",
+  "МойСклад не принял цены: {0}. Отправлено {1}; повторите — уже отправленные не изменятся.": "MoySklad narxlarni qabul qilmadi: {0}. Yuborildi {1}; qaytaring — yuborilganlari o‘zgarmaydi.",
+  "Отличаются цены {0} из {1} связанных позиций: {2}{3}": "{1} ta bog‘langan pozitsiyadan {0} tasining narxi farq qiladi: {2}{3}",
+  "Отправить в МойСклад цены {0} позиций?": "{0} ta pozitsiya narxini MoySkladga yuborasizmi?",
+  "Отправлено в МойСклад: {0} из {1} проверенных.": "MoySkladga yuborildi: tekshirilgan {1} tadan {0} ta.",
+  "Проверить цены": "Narxlarni tekshirish",
+  "Цены продажи видов, связанных при загрузке, и закупочная цена позиций, связанных с МойСклад. Отправляются только отличающиеся; прочие поля МойСклад не меняются, цена, которой нет в knitERP, остаётся как была.": "Yuklashda bog‘langan turlarning sotuv narxlari va MoySklad bilan bog‘langan pozitsiyalarning xarid narxi. Faqat farq qiladiganlari yuboriladi; MoySkladning boshqa maydonlari o‘zgarmaydi, knitERPda yo‘q narx avvalgidek qoladi.",
+  "Цены совпадают с МойСклад (проверено: {0}).": "Narxlar MoySklad bilan mos (tekshirildi: {0})."
 }
