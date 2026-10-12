@@ -183,19 +183,27 @@ else
         <h2>@L("Сверка остатков с МойСклад")</h2>
         <div class="panel">
             <p class="muted small">@L("Остатки связанных позиций: сумма по действующим складам knitERP и отчёт «Остатки» МойСклад по всем складам. Только чтение — ничего не меняется ни там, ни здесь.")</p>
-            <div class="actions"><button type="button" class="secondary" @onclick="StockCompareAsync" disabled="@(_busy || Active is not null)">@L("Сверить остатки")</button></div>
+            <div class="actions">
+                <label class="check"><input type="checkbox" @bind="_stockPerWarehouse" disabled="@_busy" /> @L("По складам (склады с одинаковым названием)")</label>
+                <button type="button" class="secondary" @onclick="StockCompareAsync" disabled="@(_busy || Active is not null)">@L("Сверить остатки")</button>
+            </div>
             @if (_stock is { } st)
             {
+                @if (st.Unmatched is { Count: > 0 } unmatched)
+                {
+                    <p class="muted small">@L("Склады без пары с тем же названием — не сравнивались: {0}. Переименуйте склад в одной из систем, чтобы сверить его.", string.Join("; ", unmatched))</p>
+                }
                 <p role="status">@(st.Different == 0 ? L("Остатки совпадают (позиций: {0}).", st.Compared) : L("Расходятся остатки {0} из {1} позиций.", st.Different, st.Compared))</p>
                 @if (st.Differences.Count > 0)
                 {
                     <div class="scroll">
                         <table class="compact">
-                            <thead><tr><th>@L("Код")</th><th>@L("Наименование")</th><th class="num">knitERP</th><th class="num">@L("МойСклад")</th><th class="num">@L("Разница")</th></tr></thead>
+                            <thead><tr>@if (st.Differences.Any(d => d.Warehouse is not null)) { <th>@L("Склад")</th> }<th>@L("Код")</th><th>@L("Наименование")</th><th class="num">knitERP</th><th class="num">@L("МойСклад")</th><th class="num">@L("Разница")</th></tr></thead>
                             <tbody>
                                 @foreach (var d in st.Differences)
                                 {
                                     <tr>
+                                        @if (d.Warehouse is not null) { <td>@d.Warehouse</td> }
                                         <td><a href="catalog/items/@d.ItemId">@d.Code</a></td>
                                         <td>@d.Name</td>
                                         <td class="num">@Quantities.Format(d.KnitErp)</td>
@@ -380,7 +388,9 @@ else
     private IReadOnlyList<MoySkladProbeDto>? _probe;
     private StockCompareDto? _stock;
 
-    private Task StockCompareAsync() => RunAsync(async () => _stock = await Import.StockCompareAsync(), null);
+    private bool _stockPerWarehouse;
+
+    private Task StockCompareAsync() => RunAsync(async () => _stock = await Import.StockCompareAsync(_stockPerWarehouse), null);
 
     private Task ProbeAsync(string? token) => RunAsync(async () => _probe = await Import.ProbeAsync(token), null);
 

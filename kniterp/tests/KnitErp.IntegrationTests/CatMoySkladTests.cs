@@ -89,6 +89,15 @@ public sealed class FakeMoySkladClient : IMoySkladClient
         return Task.FromResult(new MsPage<MsRow>(new MsMeta(null, null, Stock.Count, limit, offset), Stock.Skip(offset).Take(limit).ToList()));
     }
 
+    /// <summary>Отчёт «Остатки по складам» (D336).</summary>
+    public List<MsRow> StockByStore { get; } = [];
+
+    public Task<MsPage<MsRow>> StockByStoreAsync(string token, int offset, int limit, CancellationToken ct = default)
+    {
+        Assert.Equal(Token, token);
+        return Task.FromResult(new MsPage<MsRow>(new MsMeta(null, null, StockByStore.Count, limit, offset), StockByStore.Skip(offset).Take(limit).ToList()));
+    }
+
     /// <summary>Отправленные изменения цен (D327) — и применены к строкам, как сделал бы МойСклад.</summary>
     public List<(string Entity, MsPriceUpdate Update)> PriceUpdates { get; } = [];
 
@@ -541,6 +550,14 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         Assert.Equal(1, result.Different);
         Assert.True(result.Compared >= 3); // шапка, шарф, модификация
         Assert.Empty(fake.PriceUpdates);
+
+        // D336: по складам — «Склад» knitERP и « склад » МойСклад (регистр и пробелы не важны); «Цех» без пары — в списке.
+        var storeHref = new MsMeta("https://api.moysklad.ru/api/remap/1.2/entity/store/s-1", "store", null, null, null);
+        fake.StockByStore.Add(R("entity/product", "p-hat", 0) with { StockByStore = [new MsStoreStock(storeHref, " склад ", 4), new MsStoreStock(storeHref, "Цех", 7)] });
+        var perStore = await ms.StockCompareAsync(perWarehouse: true);
+        var byStore = perStore.Differences.Single();
+        Assert.Equal(("Склад", 5m, 4m), (byStore.Warehouse, byStore.KnitErp, byStore.MoySklad));
+        Assert.Equal(["МойСклад: Цех"], perStore.Unmatched);
     }
 
     [SqlFact]

@@ -2988,5 +2988,9 @@
   "МойСклад отклонил цены {0} позиций (удалены или в архиве в МойСклад?) — запустите проверку цен ещё раз.": "MoySklad {0} ta pozitsiya narxini rad etdi (MoySkladda o‘chirilgan yoki arxivdami?) — narxlarni qayta tekshiring.",
   "Поле «{0}»: ссылка слишком длинная — не больше {1} символов после кодирования.": "«{0}» maydoni: havola juda uzun — kodlashdan keyin {1} belgidan oshmasligi kerak.",
   "Своих справочников — не больше {0}: «{1}» не создан.": "O‘z ma’lumotnomalaringiz — {0} tadan oshmaydi: «{1}» yaratilmadi.",
-  "Справочник «{0}» подключён к характеристике модификаций — сначала смените её тип или уберите в архив.": "«{0}» ma’lumotnomasi modifikatsiyalar xususiyatiga ulangan — avval uning turini o‘zgartiring yoki arxivga yuboring."
+  "Справочник «{0}» подключён к характеристике модификаций — сначала смените её тип или уберите в архив.": "«{0}» ma’lumotnomasi modifikatsiyalar xususiyatiga ulangan — avval uning turini o‘zgartiring yoki arxivga yuboring.",
+  "Найти контрагента": "Kontragentni topish",
+  "Найти по названию или ИНН": "Nomi yoki STIR bo‘yicha topish",
+  "По складам (склады с одинаковым названием)": "Omborlar bo‘yicha (nomi bir xil omborlar)",
+  "Склады без пары с тем же названием — не сравнивались: {0}. Переименуйте склад в одной из систем, чтобы сверить его.": "Nomi bir xil jufti yo‘q omborlar solishtirilmadi: {0}. Solishtirish uchun tizimlardan birida ombor nomini o‘zgartiring."
 }

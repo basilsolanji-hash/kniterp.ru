@@ -21,6 +21,7 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
     public const long MaxResponseBytes = 32L * 1024 * 1024;
     public const int MaxAttempts = 4;
     public const string AcceptHeader = "application/json;charset=utf-8";
+    public const string ContentTypeHeader = "application/json";
     private const int WindowRequests = 45;
     private static readonly TimeSpan Window = TimeSpan.FromSeconds(3);
     private static readonly SemaphoreSlim Parallel = new(5, 5);
@@ -68,7 +69,10 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
     }
 
     public Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default) =>
-        GetAsync<MsPage<MsRow>>(token, MoySkladEntities.StockAll, $"offset={Math.Max(0, offset)}&limit={Math.Clamp(limit, 1, 1000)}&stockMode=all", ct);
+        GetAsync<MsPage<MsRow>>(token, MoySkladEntities.StockAll, $"offset={Math.Max(0, offset)}&limit={Math.Clamp(limit, 1, 1000)}", ct);
+
+    public Task<MsPage<MsRow>> StockByStoreAsync(string token, int offset, int limit, CancellationToken ct = default) =>
+        GetAsync<MsPage<MsRow>>(token, MoySkladEntities.StockByStore, $"offset={Math.Max(0, offset)}&limit={Math.Clamp(limit, 1, 1000)}", ct);
 
     public async Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default) =>
         await GetAsync<List<MsPriceType>>(token, MoySkladEntities.PriceTypes, null, ct);
@@ -126,7 +130,10 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 if (json is not null)
                 {
-                    request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                    // D336: тип тела — дословно «application/json» (JSON всегда UTF-8): StringContent дописал бы «; charset=utf-8» с пробелом,
+                    // а МойСклад сверяет заголовки дословно (так было с Accept, ошибка 1062).
+                    request.Content = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(json));
+                    request.Content.Headers.TryAddWithoutValidation("Content-Type", ContentTypeHeader);
                 }
                 response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             }
@@ -240,6 +247,7 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
         MoySkladEntities.Variant => "модификации",
         MoySkladEntities.PriceTypes => "виды цен",
         MoySkladEntities.StockAll => "остатки",
+        MoySkladEntities.StockByStore => "остатки по складам",
         _ => entity,
     };
 

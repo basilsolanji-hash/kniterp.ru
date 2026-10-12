@@ -53,6 +53,9 @@ public sealed class CatMoySkladHttpTests
         Assert.Contains("\"href\":\"https://api.moysklad.ru/api/remap/1.2/entity/product/0a1b2c3d-0000-0000-0000-000000000001\"", body);
         Assert.Contains("context/companysettings/pricetype/pt-1", body);
         Assert.DoesNotContain("buyPrice", body); // не меняем — не отправляем
+        // D336: тип тела и Accept — дословно, как ждёт МойСклад.
+        Assert.Equal("application/json", request.Content!.Headers.NonValidated["Content-Type"].ToString());
+        Assert.Equal("application/json;charset=utf-8", request.Headers.NonValidated["Accept"].ToString());
 
         await Assert.ThrowsAsync<ArgumentException>(() => client.UpdatePricesAsync(Token, MoySkladEntities.Product,
             [new MsPriceUpdate("../../entity/organization", [], 1m)]));

@@ -163,20 +163,29 @@ else
                             </label>
                             break;
                         case CustomFieldType.Counterparty:
+                            @* D336: поиск по названию или ИНН — список не ограничен первыми 2000; выбранный виден всегда. *@
                             <label>
                                 @field.Name
                                 <select value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)">
                                     <option value="">—</option>
-                                    @foreach (var cp in _counterparties)
-                                    {
-                                        <option value="@cp.Id">@cp.Name</option>
-                                    }
                                     @if (field.Value is not null && field.Display is not null && _counterparties.All(x => x.Id.ToString() != field.Value))
                                     {
-                                        @* Список — до 2000 действующих: выбранный может быть в архиве или за пределом списка. *@
                                         <option value="@field.Value">@field.Display</option>
                                     }
+                                    @foreach (var cp in _counterparties)
+                                    {
+                                        <option value="@cp.Id">@cp.Name@(cp.Inn is null ? "" : $" · {cp.Inn}")</option>
+                                    }
                                 </select>
+                                @if (editable)
+                                {
+                                    <span class="inline-form" style="margin: 4px 0 0">
+                                        @* form="…" без такой формы: Enter в поиске не отправляет форму сведений (не сохраняет карточку). *@
+                                        <input @bind="_counterpartySearch" @bind:event="oninput" form="counterparty-search" placeholder="@L("Найти по названию или ИНН")"
+                                               aria-label="@L("Найти контрагента")" size="18" @onkeydown='e => e.Key == "Enter" ? SearchCounterpartiesAsync() : Task.CompletedTask' />
+                                        <button type="button" class="secondary" @onclick="SearchCounterpartiesAsync" disabled="@_busy">@L("Найти")</button>
+                                    </span>
+                                }
                             </label>
                             break;
                         case CustomFieldType.Date:
@@ -860,6 +869,33 @@ else
     }
     private Dictionary<long, string?> _values = [];
     private IReadOnlyList<CounterpartyDto> _counterparties = [];
+    private string? _counterpartySearch;
+    private const int CounterpartyOptions = 50;
+
+    /// <summary>D336: контрагенты для поля «Контрагент» — по поиску, первые 50 (у вкладки один DbContext — через RunAsync).</summary>
+    private async Task SearchCounterpartiesAsync()
+    {
+        // Без RunAsync: он перечитывает карточку (и сбросил бы найденное, и несохранённые правки формы).
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _counterparties = (await CounterpartyList.ListAsync(new CounterpartyFilter(Search: _counterpartySearch))).Counterparties.Take(CounterpartyOptions).ToList();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     /// <summary>D328: значение из справочника или «Да/Нет» — добавить к списку значений характеристики.</summary>
     private void AppendValue(long characteristicId, ChangeEventArgs e)
@@ -953,7 +989,7 @@ else
         _entries = await Nomenclature.EntriesByCatalogAsync();
         // D328: контрагенты — только если есть поле такого типа.
         _counterparties = _item.CustomFields.Any(f => f.Type == CustomFieldType.Counterparty && !f.IsArchived)
-            ? (await CounterpartyList.ListAsync(new CounterpartyFilter())).Counterparties
+            ? (await CounterpartyList.ListAsync(new CounterpartyFilter())).Counterparties.Take(CounterpartyOptions).ToList()
             : [];
         var d = _item.Details;
         static string? N(decimal? v) => v is { } x ? Amounts.Input(x) : null;
