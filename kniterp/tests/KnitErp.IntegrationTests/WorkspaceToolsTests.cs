@@ -125,7 +125,8 @@ public sealed class WorkspaceToolsTests(SqlTestHost host) : IClassFixture<SqlTes
             var docs = (await s.Search.SearchAsync("ПТ-0000")).Where(h => h.Kind == SearchHitKind.Document).ToList();
             Assert.Equal("Поступление ПТ-000001", docs.Single().Title);
             Assert.DoesNotContain(docs, h => h.Href == $"stock-documents/{shopDoc}");
-            Assert.Contains(await s.Search.SearchAsync("сторно"), h => h.Kind == SearchHitKind.Help && h.HelpId == "documents");
+            // D910: справка в быстром поиске — статья о документах или готовый ответ базы знаний о сторно.
+            Assert.Contains(await s.Search.SearchAsync("сторно"), h => h.Kind == SearchHitKind.Help && (h.HelpId == "documents" || h.HelpId == "qa-stock-0006"));
             Assert.Empty(await s.Search.SearchAsync("П"));
         }
     }

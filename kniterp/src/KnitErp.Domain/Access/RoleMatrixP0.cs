@@ -144,6 +144,18 @@ public static class RoleMatrixP0
         (Permissions.CrmAll,                  [Full, None, None, None, None, None, None, None]),
         (Permissions.CrmSettings,             [Full, Full, None, None, None, None, None, None]),
         (Permissions.CrmExport,               [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmLeadsCreate,          [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmMailing,              [Full, None, None, None, None, None, None, None]),
+        // Допущение D1100 (продажи): обходы ограничений цены и кредита — Владелец; соглашения и скидки — Владелец, Администратор
+        // и Бухгалтер (договорные условия); отчёты продаж — кто видит продажи и цены; план — Владелец; коды маркировки сканируют
+        // кладовщики своих складов. Менеджер и руководитель продаж — CrmRoleMatrix.
+        (Permissions.SalesPriceOverride,      [Full, None, None, None, None, None, None, None]),
+        (Permissions.SalesCreditOverride,     [Full, None, None, None, None, None, None, None]),
+        (Permissions.SalesAgreementEdit,      [Full, Full, None, None, None, Full, None, None]),
+        (Permissions.SalesDiscountEdit,       [Full, Full, None, None, None, Full, None, None]),
+        (Permissions.SalesReportView,         [Full, Full, None, None, None, Full, Full, None]),
+        (Permissions.SalesPlanEdit,           [Full, None, None, None, None, None, None, None]),
+        (Permissions.SalesMarkingEdit,        [Full, None, None, Scoped, Scoped, None, None, None]),
         // Допущение D310: МойСклад подключают Владелец и Администратор (ТЗ каталога, этап 4).
         (Permissions.MoySkladManage,          [Full, Full, None, None, None, None, None, None]),
     ];
@@ -252,6 +264,8 @@ public static class CrmRoleMatrix
         [Permissions.SalesEdit] = Full,
         [Permissions.PriceView] = Full,
         [Permissions.CatalogView] = Full,
+        // D1100: свои отчёты продаж (выручка, дебиторка своих клиентов).
+        [Permissions.SalesReportView] = Full,
     };
 
     public static readonly IReadOnlyDictionary<string, PermissionLevel> SalesHead = new Dictionary<string, PermissionLevel>(StringComparer.Ordinal)
@@ -261,10 +275,19 @@ public static class CrmRoleMatrix
         [Permissions.CrmAll] = Full,
         [Permissions.CrmSettings] = Full,
         [Permissions.CrmExport] = Full,
+        [Permissions.CrmLeadsCreate] = Full,
+        [Permissions.CrmMailing] = Full,
         [Permissions.SalesView] = Full,
         [Permissions.SalesEdit] = Full,
         [Permissions.PriceView] = Full,
         [Permissions.CatalogView] = Full,
+        // D1100: руководитель продаж разрешает обходы, ведёт соглашения, скидки, план и отчёты.
+        [Permissions.SalesPriceOverride] = Full,
+        [Permissions.SalesCreditOverride] = Full,
+        [Permissions.SalesAgreementEdit] = Full,
+        [Permissions.SalesDiscountEdit] = Full,
+        [Permissions.SalesReportView] = Full,
+        [Permissions.SalesPlanEdit] = Full,
     };
 
     public static IReadOnlyDictionary<string, PermissionLevel>? Of(string roleCode) => roleCode switch

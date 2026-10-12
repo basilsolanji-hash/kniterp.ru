@@ -1,0 +1,159 @@
+@page "/crm/chats"
+@using KnitErp.Application.Crm
+@inject CrmMessengerService Messenger
+
+<PageTitle>@L("Чаты с клиентами") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_chats is null || _status is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Чаты с клиентами")</h1>
+        <button type="button" class="secondary" @onclick="RefreshAsync" disabled="@_busy">@L("Обновить")</button>
+    </div>
+    @if (!_status.Connected)
+    {
+        <div class="flash warn" role="status">
+            <span>@L("MAX не подключён: клиенты не смогут писать фабрике. Подключите бота организации в «Настройках CRM».")</span>
+            <a class="button secondary" href="crm/settings#max">@L("Настройки CRM")</a>
+        </div>
+    }
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+
+    <div class="crm-chats">
+        <nav class="crm-chat-list" aria-label="@L("Диалоги")">
+            @if (_chats.Count == 0)
+            {
+                <p class="muted small">@L("Диалогов пока нет. Когда клиент напишет в MAX, диалог появится здесь, а лид — в списке лидов.")</p>
+            }
+            @foreach (var c in _chats)
+            {
+                <button type="button" class="crm-chat-item @(c.Peer == _peer ? "current" : null)" @onclick="() => OpenAsync(c)" aria-current="@(c.Peer == _peer ? "true" : null)">
+                    <b>@c.Client</b> @if (c.AwaitingReply) { <span class="tag warn">@L("ждёт ответа")</span> }
+                    <span class="muted small">@c.Channel · @TimeZones.ToLocal(c.LastAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM HH:mm")</span>
+                    <span class="crm-chat-last">@c.LastText</span>
+                </button>
+            }
+        </nav>
+        <section class="crm-chat-view" aria-label="@L("Переписка")">
+            @if (_current is null)
+            {
+                <p class="muted">@L("Выберите диалог слева.")</p>
+            }
+            else
+            {
+                <div class="crm-chat-head"><b>@_current.Client</b> <a class="small" href="@_current.Href">@L("Карточка")</a></div>
+                <ol class="crm-chat-messages">
+                    @foreach (var m in _messages)
+                    {
+                        <li class="@(m.Incoming ? "in" : "out")">
+                            <div class="crm-chat-text">@m.Text</div>
+                            <div class="muted small">@(m.Author ?? _current.Client) · @TimeZones.ToLocal(m.AtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</div>
+                        </li>
+                    }
+                </ol>
+                @if (CurrentAccess.Has(Permissions.CrmEdit))
+                {
+                    <form class="crm-chat-reply" @onsubmit="SendAsync">
+                        <textarea rows="2" @bind="_text" aria-label="@L("Сообщение клиенту")" placeholder="@L("Сообщение клиенту")" maxlength="4000"></textarea>
+                        <button type="submit" disabled="@(_busy || !_status.Connected)">@L("Отправить")</button>
+                    </form>
+                }
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "peer")]
+    public string? PeerQuery { get; set; }
+
+    private IReadOnlyList<CrmChatDto>? _chats;
+    private IReadOnlyList<CrmChatMessageDto> _messages = [];
+    private CrmChatDto? _current;
+    private CrmMaxStatusDto? _status;
+    private string? _peer;
+    private string? _text;
+    private string? _denied;
+    private string? _error;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _status = await Messenger.StatusAsync();
+            _chats = await Messenger.ChatsAsync();
+            if ((_chats.FirstOrDefault(c => c.Peer == PeerQuery) ?? _chats.FirstOrDefault()) is { } first)
+            {
+                await LoadAsync(first);
+            }
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync(CrmChatDto chat)
+    {
+        (_current, _peer) = (chat, chat.Peer);
+        _messages = await Messenger.MessagesAsync(chat.Peer);
+    }
+
+    private Task OpenAsync(CrmChatDto chat) => RunAsync(() => LoadAsync(chat));
+
+    private Task RefreshAsync() => RunAsync(async () =>
+    {
+        _chats = await Messenger.ChatsAsync();
+        if (_chats.FirstOrDefault(c => c.Peer == _peer) is { } current)
+        {
+            await LoadAsync(current);
+        }
+    });
+
+    private Task SendAsync() => RunAsync(async () =>
+    {
+        await Messenger.ReplyToPeerAsync(_peer!, _text);
+        _text = null;
+        _chats = await Messenger.ChatsAsync();
+        await LoadAsync(_chats.First(c => c.Peer == _peer));
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

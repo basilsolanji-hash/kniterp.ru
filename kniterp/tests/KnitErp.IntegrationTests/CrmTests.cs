@@ -95,7 +95,7 @@ public sealed class CrmTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await crm.Sales.ConfirmOrderAsync(orderId, order.RowVersion);
             deal = await crm.Deals.GetAsync(dealId);
             Assert.Equal((CrmDealOutcome.Won, 100, "Выиграна"), (deal.Outcome, deal.Probability, deal.Stages.Single(s => s.Id == deal.StageId).Name));
-            Assert.Equal(3, deal.History.Count);
+            Assert.Equal(4, deal.History.Count); // создана, КП отправлено, «Согласование» по созданному заказу (Б2), выиграна
             Assert.NotNull(deal.ClosedAtUtc);
             Assert.Equal("crm.deal.closed", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 crm.Deals.SetProbabilityAsync(dealId, 50, deal.RowVersion))).Code);

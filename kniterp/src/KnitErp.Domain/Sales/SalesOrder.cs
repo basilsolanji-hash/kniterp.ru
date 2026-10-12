@@ -78,6 +78,15 @@ public sealed class SalesOrder
     /// </summary>
     public long? CrmDealId { get; private set; }
 
+    /// <summary>D1101: соглашение с покупателем, по которому подставлены цена и скидка; null — без соглашения.</summary>
+    public long? AgreementId { get; private set; }
+
+    /// <summary>D1104: причина подтверждения с ценой ниже допустимой (право «Продажи: цена ниже минимальной»).</summary>
+    public string? PriceOverrideReason { get; private set; }
+
+    public long? PriceOverrideByUserId { get; private set; }
+    public DateTime? PriceOverrideAtUtc { get; private set; }
+
     public string? Comment { get; private set; }
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -230,6 +239,24 @@ public sealed class SalesOrder
         }
 
         StageId = stageId;
+    }
+
+    public const int OverrideReasonMaxLength = 500;
+
+    /// <summary>D1101: соглашение заказа — меняется только в черновике (цены подтверждённого заказа зафиксированы).</summary>
+    public void SetAgreement(long? agreementId)
+    {
+        EnsureDraft();
+        AgreementId = agreementId;
+    }
+
+    /// <summary>D1104: разрешение подтвердить заказ с ценой ниже допустимой — с причиной; пишется перед подтверждением.</summary>
+    public void ApprovePriceOverride(long userId, string? reason, DateTime nowUtc)
+    {
+        EnsureDraft();
+        PriceOverrideReason = DomainText.Require(reason, OverrideReasonMaxLength, "Причина цены ниже допустимой");
+        PriceOverrideByUserId = userId;
+        PriceOverrideAtUtc = nowUtc;
     }
 
     public void Confirm(long userId, DateTime nowUtc)

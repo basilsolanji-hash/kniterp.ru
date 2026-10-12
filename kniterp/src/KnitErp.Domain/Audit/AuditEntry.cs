@@ -215,6 +215,11 @@ public static class AuditActions
     public const string SalesOrderChanged = "sales.order.changed";
     public const string SalesOrderConfirmed = "sales.order.confirmed";
     public const string SalesOrderCancelled = "sales.order.cancelled";
+    public const string SalesAgreementCreated = "sales.agreement.created";
+    public const string SalesAgreementChanged = "sales.agreement.changed";
+    public const string SalesCustomerProfileChanged = "sales.customer_profile.changed";
+    public const string SalesRoleSettingsChanged = "sales.role_settings.changed";
+    public const string SalesPriceOverride = "sales.price.override";
     public const string CustomerPaymentCreated = "sales.payment.created";
     public const string CustomerPaymentCancelled = "sales.payment.cancelled";
     public const string CustomerInvoiceIssued = "sales.invoice.issued";
@@ -256,4 +261,19 @@ public static class AuditActions
     public const string CrmContactCreated = "crm.contact.created";
     public const string CrmContactChanged = "crm.contact.changed";
     public const string CrmSettingsChanged = "crm.settings.changed";
+    public const string CrmDealWon = "crm.deal.won";
+    public const string CrmDealLost = "crm.deal.lost";
+    public const string CrmContactConsent = "crm.contact.consent";
+    public const string CrmContactErased = "crm.contact.erased";
+    public const string CrmExported = "crm.exported";
+    public const string CrmActivityCreated = "crm.activity.created";
+    public const string CrmActivityChanged = "crm.activity.changed";
+    public const string CrmActivityDone = "crm.activity.done";
+    public const string CrmActivityReopened = "crm.activity.reopened";
+    public const string CrmOfferCreated = "crm.offer.created";
+    public const string CrmEmailSent = "crm.email.sent";
+    public const string CrmMailingSent = "crm.mailing.sent";
+    public const string CrmUnsubscribed = "crm.contact.unsubscribed";
+    public const string CrmImported = "crm.imported";
+    public const string CrmPlanChanged = "crm.plan.changed";
 }

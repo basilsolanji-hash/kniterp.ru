@@ -11,6 +11,46 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.AddColumn<int>(
+                name: "CompletenessSections",
+                schema: "kniterp",
+                table: "dev_settings",
+                type: "int",
+                nullable: false,
+                defaultValue: 1023);
+
+            migrationBuilder.AddColumn<int>(
+                name: "FactTolerancePercent",
+                schema: "kniterp",
+                table: "dev_settings",
+                type: "int",
+                nullable: false,
+                defaultValue: 10);
+
+            migrationBuilder.AddColumn<int>(
+                name: "LabelHeightMm",
+                schema: "kniterp",
+                table: "dev_settings",
+                type: "int",
+                nullable: false,
+                defaultValue: 40);
+
+            migrationBuilder.AddColumn<int>(
+                name: "LabelWidthMm",
+                schema: "kniterp",
+                table: "dev_settings",
+                type: "int",
+                nullable: false,
+                defaultValue: 58);
+
+            migrationBuilder.AddColumn<bool>(
+                name: "LabelsOnA4",
+                schema: "kniterp",
+                table: "dev_settings",
+                type: "bit",
+                nullable: false,
+                defaultValue: false);
+
             migrationBuilder.AddColumn<long>(
                 name: "MainSketchFileId",
                 schema: "kniterp",
@@ -687,6 +727,24 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
+            migrationBuilder.AddCheckConstraint(
+                name: "ck_dev_settings_label",
+                schema: "kniterp",
+                table: "dev_settings",
+                sql: "[LabelWidthMm] BETWEEN 20 AND 150 AND [LabelHeightMm] BETWEEN 20 AND 150");
+
+            migrationBuilder.AddCheckConstraint(
+                name: "ck_dev_settings_sections",
+                schema: "kniterp",
+                table: "dev_settings",
+                sql: "[CompletenessSections] BETWEEN 1 AND 1023");
+
+            migrationBuilder.AddCheckConstraint(
+                name: "ck_dev_settings_tolerance",
+                schema: "kniterp",
+                table: "dev_settings",
+                sql: "[FactTolerancePercent] BETWEEN 1 AND 100");
+
             migrationBuilder.CreateIndex(
                 name: "IX_dev_models_OrganizationId_MainSketchFileId",
                 schema: "kniterp",
@@ -1019,6 +1077,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 name: "dev_model_sizes",
                 schema: "kniterp");
 
+            migrationBuilder.DropCheckConstraint(
+                name: "ck_dev_settings_label",
+                schema: "kniterp",
+                table: "dev_settings");
+
+            migrationBuilder.DropCheckConstraint(
+                name: "ck_dev_settings_sections",
+                schema: "kniterp",
+                table: "dev_settings");
+
+            migrationBuilder.DropCheckConstraint(
+                name: "ck_dev_settings_tolerance",
+                schema: "kniterp",
+                table: "dev_settings");
+
             migrationBuilder.DropIndex(
                 name: "IX_dev_models_OrganizationId_MainSketchFileId",
                 schema: "kniterp",
@@ -1038,6 +1111,31 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 name: "IX_dev_files_OrganizationId_DetailId",
                 schema: "kniterp",
                 table: "dev_files");
+
+            migrationBuilder.DropColumn(
+                name: "CompletenessSections",
+                schema: "kniterp",
+                table: "dev_settings");
+
+            migrationBuilder.DropColumn(
+                name: "FactTolerancePercent",
+                schema: "kniterp",
+                table: "dev_settings");
+
+            migrationBuilder.DropColumn(
+                name: "LabelHeightMm",
+                schema: "kniterp",
+                table: "dev_settings");
+
+            migrationBuilder.DropColumn(
+                name: "LabelWidthMm",
+                schema: "kniterp",
+                table: "dev_settings");
+
+            migrationBuilder.DropColumn(
+                name: "LabelsOnA4",
+                schema: "kniterp",
+                table: "dev_settings");
 
             migrationBuilder.DropColumn(
                 name: "MainSketchFileId",

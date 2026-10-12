@@ -197,6 +197,27 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Факт записан");
         await Assertions.Expect(page.Locator("table").Last).ToContainTextAsync("3 мин 12 с");
         await AssertNoHorizontalScrollAsync(page, "техкарта с фактом");
+        // D719: в техкарте вязания — только блоки дессинатора (операции и размеры — во вкладках модели); обсуждение детали — здесь же.
+        await Assertions.Expect(page.Locator(".ks-tech")).Not.ToContainTextAsync("Технологические операции");
+        await page.GetByPlaceholder("Написать комментарий…").FillAsync("нитеводитель 6 заедает");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отправить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.Locator("#discussion")).ToContainTextAsync("нитеводитель 6 заедает");
+
+        // Этикетка детали: открывается из техкарты, штрихкод Code 128 нарисован.
+        var detailId = techUrl[(techUrl.LastIndexOf('/') + 1)..];
+        await page.GotoAsync($"print/dev/label?kind=detail&id={detailId}&copies=2");
+        await Assertions.Expect(page.Locator(".dev-label")).ToHaveCountAsync(2);
+        await Assertions.Expect(page.Locator(".dev-label svg").First).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".dev-label").First).ToContainTextAsync("-D" + detailId);
+
+        // Широкий экран: заправка и общая информация — рядом, без пустого поля справа.
+        await page.SetViewportSizeAsync(1440, 900);
+        await page.GotoAsync(techUrl);
+        await Ready(page);
+        var feed = await page.Locator(".ks-tech .kt-main").BoundingBoxAsync();
+        var info = await page.Locator(".ks-tech .kt-info").BoundingBoxAsync();
+        Assert.True(info!.X > feed!.X + feed.Width - 1, "общая информация должна стоять справа от заправки");
+        await page.SetViewportSizeAsync(390, 844);
         await page.GotoAsync("dev/machines");
         await Ready(page);
         await AssertNoHorizontalScrollAsync(page, "станки");

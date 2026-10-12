@@ -135,4 +135,27 @@ public sealed class DevTechRulesTests
         var sketch = DevFile.Create(1, 2, DevFileKind.Sketch, "s.png", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 1, null, Now, 3);
         Assert.Equal("dev.file.program", Assert.Throws<BusinessRuleException>(() => sketch.AttachProgram(5, 6, "x")).Code);
     }
+
+    [Fact]
+    public void Shop_settings_tolerance_sections_and_label_size()
+    {
+        // D719: допуск факта к плану настраивается; граница — включительно (ровно +10 % ещё не отклонение).
+        Assert.False(DevSettings.OverPlan(110m, 100m, 10));
+        Assert.True(DevSettings.OverPlan(110.1m, 100m, 10));
+        Assert.False(DevSettings.OverPlan(null, 100m, 10));
+        Assert.False(DevSettings.OverPlan(5m, 0m, 10));
+
+        var c = DevCompleteness.From(true, false, false, true, false, false, false, false, false, false).Only(0b11001);
+        Assert.Equal(new[] { "Задание", "Детали", "Заправка" }, c.Sections.Select(x => x.Section));
+        Assert.Equal((2, 3, 67), (c.Done, c.Total, c.Percent));
+
+        var s = DevSettings.Defaults(1);
+        Assert.Equal((10, DevCompleteness.AllSections, 58, 40, false), (s.FactTolerancePercent, s.CompletenessSections, s.LabelWidthMm, s.LabelHeightMm, s.LabelsOnA4));
+        Assert.Throws<BusinessRuleException>(() => s.SetShop(0, 1, 58, 40, false));
+        Assert.Throws<BusinessRuleException>(() => s.SetShop(10, 0, 58, 40, false));
+        Assert.Throws<BusinessRuleException>(() => s.SetShop(10, 1 << 10, 58, 40, false));
+        Assert.Throws<BusinessRuleException>(() => s.SetShop(10, 1, 58, 200, false));
+        s.SetShop(20, 3, 43, 25, true);
+        Assert.Equal((20, 3, 43, 25, true), (s.FactTolerancePercent, s.CompletenessSections, s.LabelWidthMm, s.LabelHeightMm, s.LabelsOnA4));
+    }
 }

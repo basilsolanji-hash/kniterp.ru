@@ -243,6 +243,68 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         }
     }
 
+    /// <summary>D719: этикетки модели, детали и образца; обсуждение детали и станка цехом; настройки цеха и печати; изоляция организаций.</summary>
+    [SqlFact]
+    public async Task Labels_discussions_and_shop_settings()
+    {
+        DevObjects.Register();
+        var a = await CreateOrganizationAsync();
+        var b = await CreateOrganizationAsync();
+        long model, detail, machine, sample;
+        await using (var k = As(a.OwnerUserId, a.OrganizationId))
+        {
+            machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №5", DevMachineBrand.Stoll, "CMS 530", 7, 8, null, null, null));
+            model = await k.Models.CreateAsync(Header("Шарф"));
+            detail = await k.Tech.AddDetailAsync(model, "Полотно", 2);
+            await k.Shop.SetSizeGridAsync(model, ["S", "M"], null);
+            sample = await k.Shop.CreateSampleAsync(model, (await k.Shop.SizesAsync(model)).Sizes[1].Id);
+
+            var m = await k.Tech.LabelAsync(DevLabelKind.Model, model);
+            Assert.StartsWith("M-", m.Code); // номер «М-…» латиницей — его кодирует Code 128
+            Assert.All(m.Code, c => Assert.InRange(c, '!', '~'));
+            var d = await k.Tech.LabelAsync(DevLabelKind.Detail, detail);
+            Assert.Equal($"{m.Code}-D{detail}", d.Code);
+            Assert.Contains(d.Lines, l => l.Key == "Количество" && l.Value == "2");
+            var s = await k.Tech.LabelAsync(DevLabelKind.Sample, sample);
+            Assert.EndsWith("-S1", s.Code);
+            Assert.Contains(s.Lines, l => l.Key == "Размер" && l.Value == "M");
+            Assert.Equal((58, 40, false), (s.WidthMm, s.HeightMm, s.OnA4));
+
+            // Настройки: допуск 15 %, в показателе — только «Детали» и «Заправка», этикетка 43 × 25.
+            Assert.Equal("dev.settings.sections", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Settings.SaveShopSettingsAsync(10, [], 58, 40, false))).Code);
+            Assert.Equal("dev.settings.label", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Settings.SaveShopSettingsAsync(10, ["Детали"], 5, 40, false))).Code);
+            await k.Settings.SaveShopSettingsAsync(15, ["Детали", "Заправка"], 43, 25, false);
+            var c = await k.Tech.CompletenessAsync(model);
+            Assert.Equal((1, 2), (c.Done, c.Total)); // деталь есть, заправки нет
+            Assert.Equal(15, (await k.Tech.TechCardAsync(detail)).FactTolerancePercent);
+            Assert.Equal(15, (await k.Shop.SamplesAsync(model)).FactTolerancePercent);
+            Assert.Equal((43, 25), ((await k.Tech.LabelAsync(DevLabelKind.Detail, detail)).WidthMm, (await k.Tech.LabelAsync(DevLabelKind.Detail, detail)).HeightMm));
+        }
+
+        // Начальник цеха: этикетка детали и образца — да, модели — нет (нет права разработки); обсуждение детали и станка — да.
+        var worker = await InviteActiveAsync(a, SystemRoles.DepartmentHead);
+        await using (var k = As(worker, a.OrganizationId))
+        {
+            Assert.Equal("Полотно", (await k.Tech.LabelAsync(DevLabelKind.Detail, detail)).Title.Split(" · ")[1]);
+            await k.All.Discussions.AddAsync(KnitErp.Domain.Tagging.TaggedEntity.DevDetail, detail, "нитеводитель 6 заедает", null);
+            await k.All.Discussions.AddAsync(KnitErp.Domain.Tagging.TaggedEntity.DevMachine, machine, "перенёс на новое место", null);
+            Assert.Single((await k.All.Discussions.ThreadAsync(KnitErp.Domain.Tagging.TaggedEntity.DevDetail, detail)).Comments);
+            await Assert.ThrowsAnyAsync<Exception>(() => k.Settings.SaveShopSettingsAsync(10, ["Детали"], 58, 40, false));
+        }
+
+        // Чужая организация: ни этикеток, ни обсуждений.
+        await using (var k = As(b.OwnerUserId, b.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Tech.LabelAsync(DevLabelKind.Detail, detail));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Tech.LabelAsync(DevLabelKind.Sample, sample));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Tech.LabelAsync(DevLabelKind.Model, model));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.All.Discussions.ThreadAsync(KnitErp.Domain.Tagging.TaggedEntity.DevDetail, detail));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.All.Discussions.AddAsync(KnitErp.Domain.Tagging.TaggedEntity.DevMachine, machine, "чужой", null));
+        }
+    }
+
     private async Task<CreatedOrganization> CreateOrganizationAsync()
     {
         var inn = NextValidInn();

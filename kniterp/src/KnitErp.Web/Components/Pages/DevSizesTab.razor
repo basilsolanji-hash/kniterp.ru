@@ -47,7 +47,7 @@ else
                                 @foreach (var z in s.Sizes)
                                 {
                                     var size = z.Id;
-                                    <td class="num"><input type="number" min="1" step="1" inputmode="numeric" style="max-width: 80px" value="@_perBox.GetValueOrDefault(size)"
+                                    <td class="num"><input type="number" min="1" step="1" inputmode="numeric" style="max-width: 64px" value="@_perBox.GetValueOrDefault(size)"
                                                            @onchange="e => _perBox[size] = int.TryParse(e.Value as string, out var n) ? n : null" aria-label="@L("Штук в коробке, размер {0}", z.Name)" /></td>
                                 }
                             </tr>
@@ -63,7 +63,7 @@ else
                 </div>
             </div>
 
-            <div class="panel">
+            <div class="panel wide">
                 <h2>@L("Размеры деталей, см")</h2>
                 @if (s.Details.Count == 0)
                 {
@@ -85,7 +85,7 @@ else
                                         @foreach (var z in s.Sizes)
                                         {
                                             var size = z.Id;
-                                            <td class="num"><input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 80px"
+                                            <td class="num"><input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 64px"
                                                                    value="@Cell(_detail, (detail.DetailId, size, param))"
                                                                    @onchange="e => SetCell(_detail, (detail.DetailId, size, param), e.Value)"
                                                                    aria-label="@L("{0}, {1}, размер {2}", detail.DetailName, p.Value, z.Name)" /></td>
@@ -102,7 +102,7 @@ else
                 }
             </div>
 
-            <div class="panel">
+            <div class="panel wide">
                 <h2>@L("Табель мер, см")</h2>
                 @if (s.Measures.Count > 0)
                 {
@@ -120,7 +120,7 @@ else
                                         @foreach (var z in s.Sizes)
                                         {
                                             var size = z.Id;
-                                            <td class="num"><input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 80px"
+                                            <td class="num"><input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 64px"
                                                                    value="@Cell(_measure, (measure.Id, size, 0))" @onchange="e => SetCell(_measure, (measure.Id, size, 0), e.Value)"
                                                                    aria-label="@L("{0}, размер {1}", measure.Name, z.Name)" /></td>
                                         }

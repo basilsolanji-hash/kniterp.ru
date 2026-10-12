@@ -72,12 +72,21 @@ public static class DependencyInjection
         services.AddScoped<Sales.SalesService>();
         services.AddScoped<Sales.CustomerInvoiceService>();
         services.AddScoped<Sales.SalesStageService>();
+        services.AddScoped<Sales.SalesAgreementService>();
         services.AddScoped<Sales.SalesSettingsService>();
         // CRM (D600–D699).
         services.AddScoped<Crm.CrmSettingsService>();
         services.AddScoped<Crm.CrmLeadService>();
         services.AddScoped<Crm.CrmDealService>();
         services.AddScoped<Crm.CrmContactService>();
+        services.AddScoped<Crm.CrmActivityService>();
+        services.AddScoped<Crm.CrmOfferService>();
+        services.AddScoped<Crm.CrmReportService>();
+        services.AddScoped<Crm.CrmIntakeService>();
+        services.AddScoped<Crm.CrmMailingService>();
+        services.AddScoped<Crm.CrmImportService>();
+        services.AddScoped<Crm.CrmMessengerService>();
+        services.AddScoped<Crm.ICrmDashboardSource, Crm.CrmDashboardSource>(); // ТЗ CRM §6: блок главного экрана подключает база
         services.AddScoped<Organizations.LegalEntityService>();
         services.AddScoped<Catalog.NomenclatureService>();
         services.AddScoped<Catalog.ModificationService>();

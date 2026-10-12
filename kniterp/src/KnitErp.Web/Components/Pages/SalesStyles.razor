@@ -1,0 +1,52 @@
+@*
+    Стили модуля «Продажи» (D1100–D1199): плотная сетка полей формы (подписи над полями, ровные колонки, без пустых площадей),
+    ключ–значение для сводок, плашки предупреждений в строках. Компактно по общим правилам (D114); на телефоне 390 px — одна колонка,
+    без горизонтальной прокрутки страницы.
+*@
+<style>
+    .sx-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 4px; }
+    .sx-head h1 { margin: 0; flex: 1 1 auto; }
+    .sx-head .sx-tools { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 10px; }
+    .sx-lead { margin: 2px 0 10px; color: var(--muted); font-size: 13px; max-width: 120ch; }
+    .sx-form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 14px; align-items: end; }
+    .sx-form > label { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: var(--text-2); font-size: 12px; }
+    .sx-form > label > input, .sx-form > label > select { width: 100%; min-width: 0; box-sizing: border-box; }
+    .sx-form > .w2 { grid-column: span 2; }
+    .sx-form > .w4 { grid-column: 1 / -1; }
+    .sx-form > label.inline { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+    .sx-form > .sx-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+    .sx-form .sx-hint { font-size: 11px; color: var(--muted-2); }
+    .sx-legend { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em;
+        border-bottom: 1px solid var(--line); padding-bottom: 2px; margin-top: 4px; }
+    .sx-kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 16px; margin: 6px 0 10px; }
+    .sx-kv > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+    .sx-kv > div > span:first-child { font-size: 11px; color: var(--muted); }
+    .sx-kv > div > span:last-child { font-weight: 500; }
+    .sx-issues { border: 1px solid color-mix(in srgb, var(--warn-text) 45%, transparent); background: var(--warn-bg); color: var(--warn-text);
+        border-radius: 8px; padding: 6px 10px; margin: 8px 0; font-size: 13px; }
+    .sx-issues ul { margin: 2px 0 0; padding-left: 18px; }
+    .sx-issues form { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; margin-top: 6px; }
+    .sx-issues form label { display: flex; flex-direction: column; gap: 3px; flex: 1 1 260px; font-size: 12px; color: var(--text-2); }
+    .sx-price-hint { font-size: 11px; color: var(--muted); align-self: center; }
+    .sx-table td.num, .sx-table th.num { text-align: right; white-space: nowrap; }
+    .sx-table td .sx-sub { display: block; font-size: 11px; color: var(--muted); }
+    .sx-table tr.sx-selected > td { background: var(--accent-soft-2); }
+    .sx-table td.sx-row-actions { white-space: nowrap; text-align: right; }
+    .sx-table td.sx-row-actions button { padding: 2px 8px; }
+    .sx-table input, .sx-table select { min-width: 0; width: 100%; box-sizing: border-box; }
+    .sx-history { margin: 4px 0 0; padding: 0; list-style: none; font-size: 12px; }
+    .sx-history li { padding: 3px 0; border-bottom: 1px dashed var(--line); overflow-wrap: anywhere; }
+    .sx-history li b { font-weight: 600; }
+    .sx-line-flag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-text); margin-left: 4px; }
+    @@media (max-width: 1200px) { .sx-form { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @@media (max-width: 899px) {
+        .sx-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .sx-form > .w2 { grid-column: 1 / -1; }
+    }
+    @@media (max-width: 560px) {
+        .sx-form { grid-template-columns: minmax(0, 1fr); }
+        .sx-head .sx-tools { width: 100%; }
+        .sx-head .sx-tools > * { flex: 1 1 100%; }
+        .sx-table td.sx-row-actions { text-align: left; white-space: normal; }
+    }
+</style>

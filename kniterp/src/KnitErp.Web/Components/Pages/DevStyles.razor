@@ -60,6 +60,7 @@
     /* Без пустых полей (D719): панели — сеткой на всю ширину, факты карточки — плитками, формы в строку слева, матрицы размеров — по содержимому. */
     .dev-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 16px; align-items: start; margin: 16px 0; }
     .dev-panels > .panel { margin: 0; min-width: 0; }
+    .dev-panels > .panel.wide { grid-column: 1 / -1; }
     dl.dev-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 8px; max-width: none; }
     dl.dev-facts > div { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 0; }
     dl.dev-facts > div.wide { grid-column: span 2; }
@@ -69,8 +70,8 @@
     ul.dev-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 8px; }
     .dev-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 4px 12px; }
     table.dev-matrix { width: auto; }
-    table.dev-matrix th, table.dev-matrix td { padding-right: 16px; }
-    table.dev-matrix th:first-child { min-width: 160px; }
+    table.dev-matrix th, table.dev-matrix td { padding-right: 10px; }
+    table.dev-matrix th:first-child { min-width: 120px; }
     @@media (min-width: 600px) {
         .panel form.inline-form { flex-direction: row; align-items: flex-end; }
     }

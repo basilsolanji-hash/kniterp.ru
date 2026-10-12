@@ -143,7 +143,13 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmLeadStatus>().Select(KnitErp.Domain.Crm.CrmLead.StatusName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmDealOutcome>().Select(KnitErp.Domain.Crm.CrmDeal.OutcomeName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmReferenceKind>().Select(KnitErp.Domain.Crm.CrmReference.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Crm.CrmProcessingBasis>().Select(KnitErp.Domain.Crm.CrmContact.BasisName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Application.Crm.CrmImportKind>().Select(KnitErp.Application.Crm.CrmImportService.KindName));
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.Select(c => c.Name));
+        // Продажи (D1100–D1199): кому адресовано соглашение, видимость заказов роли, источник цены строки.
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesAgreementScope>().Select(KnitErp.Domain.Sales.SalesAgreement.ScopeName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesOrderVisibility>().Select(KnitErp.Domain.Sales.SalesRoleSettings.VisibilityName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Application.Sales.PriceSource>().Select(KnitErp.Application.Sales.PriceQuoteDto.SourceName));
         keys.UnionWith(["без НДС", "ещё не действует", "Без роли", "Вся организация"]);
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.SelectMany(c => KnitErp.Domain.Catalog.VatRate.DefaultsFor(1, c.Code)).Select(r => r.Name));
         var labels = File.ReadAllText(Path.Combine(WebDir, "Components", "Shared", "Labels.cs"));
