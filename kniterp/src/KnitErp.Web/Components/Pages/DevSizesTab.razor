@@ -1,0 +1,310 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevShopService Shop
+
+@*
+    Размеры (D713) — экран конструктора: размерная сетка (образцы 1, 2, 3… или 42–52), размеры деталей по размерам (длина с машины, после ВТО,
+    ширина), упаковка (штук в коробке, короб), табель мер с допуском и градацией от базового размера.
+*@
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+@if (_s is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var s = _s;
+    <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !s.CanEdit)">
+        <div class="dev-panels">
+        <div class="panel">
+            <h2>@L("Размерная сетка")</h2>
+            <div class="inline-form">
+                <label>@L("Размеры через запятую") <input @bind="_grid" placeholder="1, 2, 3, 4" /></label>
+                <label>@L("Базовый размер") <input @bind="_base" style="max-width: 90px" /></label>
+                @if (s.CanEdit)
+                {
+                    <button type="button" @onclick="SaveGridAsync" disabled="@_busy">@L("Сохранить сетку")</button>
+                }
+            </div>
+            <p class="muted small">@L("Базовый размер — от него считается градация табеля мер. Пусто — средний размер сетки.")</p>
+        </div>
+
+        @if (s.Sizes.Count > 0)
+        {
+            <div class="panel">
+                <h2>@L("Упаковка")</h2>
+                <div class="scroll">
+                    <table class="dev-matrix">
+                        <thead><tr><th>@L("Размер")</th>@foreach (var z in s.Sizes) { <th class="num">@z.Name</th> }</tr></thead>
+                        <tbody>
+                            <tr>
+                                <td>@L("Штук в коробке")</td>
+                                @foreach (var z in s.Sizes)
+                                {
+                                    var size = z.Id;
+                                    <td class="num"><input type="number" min="1" step="1" inputmode="numeric" style="max-width: 64px" value="@_perBox.GetValueOrDefault(size)"
+                                                           @onchange="e => _perBox[size] = int.TryParse(e.Value as string, out var n) ? n : null" aria-label="@L("Штук в коробке, размер {0}", z.Name)" /></td>
+                                }
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="inline-form">
+                    <label>@L("Размер короба") <input @bind="_packBox" maxlength="60" placeholder="40 × 30 × 30 см" /></label>
+                    @if (s.CanEdit)
+                    {
+                        <button type="button" @onclick="SavePackingAsync" disabled="@_busy">@L("Сохранить упаковку")</button>
+                    }
+                </div>
+            </div>
+
+            <div class="panel wide">
+                <h2>@L("Размеры деталей, см")</h2>
+                @if (s.Details.Count == 0)
+                {
+                    <p class="muted">@L("Сначала добавьте детали на вкладке «Детали и заправка».")</p>
+                }
+                @foreach (var d in s.Details)
+                {
+                    var detail = d;
+                    <h3>@d.DetailName</h3>
+                    <div class="scroll">
+                        <table class="dev-matrix">
+                            <thead><tr><th>@L("Параметр")</th>@foreach (var z in s.Sizes) { <th class="num">@z.Name@(z.IsBase ? " *" : "")</th> }</tr></thead>
+                            <tbody>
+                                @foreach (var p in Params)
+                                {
+                                    var param = p.Key;
+                                    <tr>
+                                        <td>@p.Value</td>
+                                        @foreach (var z in s.Sizes)
+                                        {
+                                            var size = z.Id;
+                                            <td class="num"><input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 64px"
+                                                                   value="@Cell(_detail, (detail.DetailId, size, param))"
+                                                                   @onchange="e => SetCell(_detail, (detail.DetailId, size, param), e.Value)"
+                                                                   aria-label="@L("{0}, {1}, размер {2}", detail.DetailName, p.Value, z.Name)" /></td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                @if (s.CanEdit && s.Details.Count > 0)
+                {
+                    <div class="actions"><button type="button" @onclick="SaveDetailSizesAsync" disabled="@_busy">@L("Сохранить размеры деталей")</button></div>
+                }
+            </div>
+
+            <div class="panel wide">
+                <h2>@L("Табель мер, см")</h2>
+                @if (s.Measures.Count > 0)
+                {
+                    <div class="scroll">
+                        <table class="dev-matrix">
+                            <thead><tr><th>@L("Точка измерения")</th><th class="num">±</th><th class="num opt">@L("Шаг")</th>@foreach (var z in s.Sizes) { <th class="num">@z.Name@(z.IsBase ? " *" : "")</th> }<th></th></tr></thead>
+                            <tbody>
+                                @foreach (var m in s.Measures)
+                                {
+                                    var measure = m;
+                                    <tr>
+                                        <td>@m.Name</td>
+                                        <td class="num">@DevFormat.Number(m.Tolerance)</td>
+                                        <td class="num">@DevFormat.Number(m.Step)</td>
+                                        @foreach (var z in s.Sizes)
+                                        {
+                                            var size = z.Id;
+                                            <td class="num"><input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 64px"
+                                                                   value="@Cell(_measure, (measure.Id, size, 0))" @onchange="e => SetCell(_measure, (measure.Id, size, 0), e.Value)"
+                                                                   aria-label="@L("{0}, размер {1}", measure.Name, z.Name)" /></td>
+                                        }
+                                        <td>@if (s.CanEdit) { <button type="button" class="secondary" @onclick="() => RemoveMeasureAsync(measure)" disabled="@_busy">@L("Убрать")</button> }</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (s.CanEdit)
+                    {
+                        <div class="actions">
+                            <button type="button" @onclick="SaveMeasuresAsync" disabled="@_busy">@L("Сохранить табель мер")</button>
+                            <button type="button" class="secondary" @onclick="() => GradeAsync(false)" disabled="@_busy">@L("Заполнить пустые по градации")</button>
+                            <button type="button" class="secondary" @onclick="() => GradeAsync(true)" disabled="@_busy">@L("Пересчитать все по градации")</button>
+                        </div>
+                        <p class="muted small">@L("Градация: значение базового размера (*) ± шаг на каждый размер. Сначала сохраните значения базового размера.")</p>
+                    }
+                }
+                @if (s.CanEdit)
+                {
+                    <form class="inline-form" @onsubmit="AddMeasureAsync">
+                        <label>@L("Точка измерения") <input @bind="_mName" list="dev-measure-points" maxlength="@DevMeasure.NameMaxLength" placeholder="@L("Длина изделия")" required /></label>
+                        <datalist id="dev-measure-points">
+                            @foreach (var p in s.MeasurePointSuggestions)
+                            {
+                                <option value="@p"></option>
+                            }
+                        </datalist>
+                        <label>@L("Допуск ±, см") <input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_mTol" /></label>
+                        <label>@L("Шаг градации, см") <input type="number" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_mStep" /></label>
+                        <button type="submit" disabled="@_busy">@L("Добавить точку")</button>
+                    </form>
+                }
+            </div>
+        }
+        </div>
+    </fieldset>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    private DevSizesDto? _s;
+    private readonly Dictionary<(long, long, int), decimal?> _detail = [];
+    private readonly Dictionary<(long, long, int), decimal?> _measure = [];
+    private readonly Dictionary<long, int?> _perBox = [];
+    private string? _grid;
+    private string? _base;
+    private string? _packBox;
+    private string? _mName;
+    private decimal _mTol = 1;
+    private decimal? _mStep;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    private static IReadOnlyList<KeyValuePair<int, string>> Params =>
+        [new(0, L("Длина с машины")), new(1, L("Длина после ВТО")), new(2, L("Ширина"))];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _s = await Gate.Run(() => Shop.SizesAsync(ModelId));
+        _grid = string.Join(", ", _s.Sizes.Select(z => z.Name));
+        _base = _s.Sizes.FirstOrDefault(z => z.IsBase)?.Name;
+        _packBox = _s.PackBox;
+        _detail.Clear();
+        foreach (var d in _s.Details)
+        {
+            foreach (var (size, v) in d.Values)
+            {
+                _detail[(d.DetailId, size, 0)] = v.OffMachine;
+                _detail[(d.DetailId, size, 1)] = v.AfterSteam;
+                _detail[(d.DetailId, size, 2)] = v.Width;
+            }
+        }
+
+        _measure.Clear();
+        foreach (var m in _s.Measures)
+        {
+            foreach (var (size, v) in m.Values)
+            {
+                _measure[(m.Id, size, 0)] = v;
+            }
+        }
+
+        _perBox.Clear();
+        foreach (var z in _s.Sizes)
+        {
+            _perBox[z.Id] = z.PerBox;
+        }
+    }
+
+    private static string Cell(Dictionary<(long, long, int), decimal?> d, (long, long, int) key) =>
+        d.GetValueOrDefault(key)?.ToString("0.#", CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private static void SetCell(Dictionary<(long, long, int), decimal?> d, (long, long, int) key, object? value) =>
+        d[key] = decimal.TryParse((value as string)?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private Task SaveGridAsync() => RunAsync(() => Shop.SetSizeGridAsync(ModelId, Expand(_grid), _base), L("Размерная сетка сохранена."));
+
+    /// <summary>«1, 2, 3» как есть; «42-52» — через 2 (российская размерная сетка одежды).</summary>
+    private static IReadOnlyList<string> Expand(string? grid)
+    {
+        var text = (grid ?? string.Empty).Trim();
+        var range = System.Text.RegularExpressions.Regex.Match(text, @"^(\d+)\s*[-–]\s*(\d+)$");
+        if (range.Success && int.TryParse(range.Groups[1].Value, out var a) && int.TryParse(range.Groups[2].Value, out var b) && b > a && b - a <= 40)
+        {
+            var step = (b - a) % 2 == 0 && a >= 20 ? 2 : 1;
+            return Enumerable.Range(0, (b - a) / step + 1).Select(i => (a + i * step).ToString(CultureInfo.InvariantCulture)).ToList();
+        }
+
+        return text.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries).ToList();
+    }
+
+    private Task SaveDetailSizesAsync() => RunAsync(() => Shop.SetDetailSizesAsync(ModelId, _s!.Details.SelectMany(d => _s.Sizes.Select(z =>
+        (d.DetailId, z.Id, _detail.GetValueOrDefault((d.DetailId, z.Id, 0)), _detail.GetValueOrDefault((d.DetailId, z.Id, 1)),
+            _detail.GetValueOrDefault((d.DetailId, z.Id, 2))))).ToList()), L("Размеры деталей сохранены."));
+
+    private Task SavePackingAsync() => RunAsync(() => Shop.SetPackingAsync(ModelId, new Dictionary<long, int?>(_perBox), _packBox), L("Упаковка сохранена."));
+
+    private Task SaveMeasuresAsync() => RunAsync(() => Shop.SetMeasureValuesAsync(ModelId, _s!.Measures.SelectMany(m => _s.Sizes.Select(z =>
+        (m.Id, z.Id, _measure.GetValueOrDefault((m.Id, z.Id, 0))))).ToList()), L("Табель мер сохранён."));
+
+    private async Task GradeAsync(bool overwrite)
+    {
+        var filled = 0;
+        await RunAsync(async () => filled = await Shop.GradeAsync(ModelId, overwrite), null);
+        if (!_isError)
+        {
+            _message = L("Заполнено по градации: {0}.", filled);
+        }
+    }
+
+    private Task AddMeasureAsync() => RunAsync(async () =>
+    {
+        await Shop.AddMeasureAsync(ModelId, _mName, _mTol, _mStep);
+        _mName = null;
+        _mStep = null;
+    }, L("Точка добавлена."));
+
+    private Task RemoveMeasureAsync(DevMeasureDto m) => RunAsync(() => Shop.RemoveMeasureAsync(m.Id), L("Точка убрана."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(action);
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

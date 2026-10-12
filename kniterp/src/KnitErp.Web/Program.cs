@@ -162,6 +162,7 @@ if (!string.IsNullOrWhiteSpace(proxyNetwork))
 }
 
 builder.Services.AddScoped<KnitErp.Web.Exports.ReportExports>();
+builder.Services.AddScoped<KnitErp.Web.Components.Pages.DevGate>(); // D718: очередь запросов разработки в вкладке
 builder.Services.AddHealthChecks().AddCheck<KnitErp.Web.Security.DatabaseHealthCheck>("database");
 
 // Ключи cookie и антиподделки — в базе, зашифрованные мастер-ключом: сессии переживают перезапуск и несколько серверов,
@@ -529,14 +530,17 @@ app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.A
 });
 
 // Файл модели разработки (D705): право, своя организация и журнал скачивания — в сервисе; всегда вложением и без угадывания типа.
-app.MapGet("/dev/files/{id:long}", async (long id, KnitErp.Application.Development.DevModelService models, HttpContext http, CancellationToken ct) =>
+app.MapGet("/dev/files/{id:long}", async (long id, string? inline, KnitErp.Application.Development.DevModelService models, HttpContext http, CancellationToken ct) =>
 {
     try
     {
-        var (fileName, contentType, content) = await models.GetFileAsync(id, ct);
+        // ?inline=1 — превью картинки на карточке (без журнала, без имени файла); иначе — скачивание вложением с записью в журнал.
+        var preview = inline is "1" or "true";
+        var (fileName, contentType, content) = await models.GetFileAsync(id, preview, ct);
         http.Response.Headers.CacheControl = "private, no-store";
         http.Response.Headers.XContentTypeOptions = "nosniff";
-        return Results.File(content, contentType, fileName);
+        http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+        return preview ? Results.File(content, contentType) : Results.File(content, contentType, fileName);
     }
     catch (AccessDeniedException)
     {

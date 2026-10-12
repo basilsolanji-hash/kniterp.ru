@@ -177,6 +177,9 @@ public static class AuditLabels
         [AuditActions.DevFileAdded] = "Загружен файл модели",
         [AuditActions.DevFileViewed] = "Скачан файл модели",
         [AuditActions.DevSettingsChanged] = "Изменены настройки разработки",
+        [AuditActions.DevTechChanged] = "Изменена техдокументация модели",
+        [AuditActions.DevMachineNoted] = "Комментарий к станку",
+        [AuditActions.DevSampleRecorded] = "Факт образца",
     };
 
     public static string Action(string code) => Actions.TryGetValue(code, out var label) ? label : code;

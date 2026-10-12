@@ -1,0 +1,85 @@
+@page "/dev/tech"
+@using KnitErp.Application.Development
+@inject DevTechService Tech
+
+@* Техкарты вязания (D717): список для цеха — найти модель по номеру или названию и открыть техкарту детали с телефона. *@
+<PageTitle>@L("Техкарты вязания") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <h1>@L("Техкарты вязания")</h1>
+    <form class="inline-form" @onsubmit="SearchAsync">
+        <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер модели, деталь или станок")" inputmode="search" /></label>
+        <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
+    </form>
+    @if (_rows.Count == 0)
+    {
+        <p class="muted">@L("Техкарт пока нет: дессинатор заполняет их в деталях модели.")</p>
+    }
+    else
+    {
+        <ul class="dev-tasks dev-tiles">
+            @foreach (var r in _rows)
+            {
+                <li>
+                    <a href="dev/tech/@r.DetailId"><b>@r.ModelNumber</b> @r.ModelName — @r.DetailName</a>
+                    <div class="muted small">
+                        @(r.MachineName ?? L("станок не выбран")) · @L(r.StageName)
+                        @if (r.ThreadingRows == 0) { <span class="tag warn">@L("нет заправки")</span> }
+                        @if (!r.HasProgram) { <span class="tag">@L("нет программы")</span> }
+                    </div>
+                    <div class="actions" style="margin: 6px 0 0">
+                        <a class="button secondary" href="print/dev/tech/@r.DetailId" target="_blank" rel="noopener">@L("Печать")</a>
+                        <DevLabelLink Kind="detail" Id="r.DetailId" />
+                    </div>
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    private IReadOnlyList<DevTechCardRowDto>? _rows;
+    private string? _denied;
+    private string _search = string.Empty;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _rows = await Tech.TechCardsAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _rows = await Tech.TechCardsAsync(_search);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

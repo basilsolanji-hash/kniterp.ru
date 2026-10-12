@@ -1,0 +1,139 @@
+@page "/print/dev/label"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using KnitErp.Web.Components.Shared
+@inject DevTechService Tech
+
+@*
+    Этикетки модуля «Разработка» (D719): модель, деталь (пачка в цеху), образец (бирка к связанному образцу). Рулон (размер — в настройках разработки, по умолчанию 58 × 40 мм) — по этикетке
+    на страницу; лист A4 — сетка 3 × 8 по 70 × 37 мм. Штрихкод Code 128 с номером модели латиницей; печатается по-русски (D68).
+    Параметры — в адресе: ссылку можно сохранить и повторить.
+*@
+<PageTitle>@(_label?.Title ?? "Этикетка") — knitERP</PageTitle>
+@if (A4)
+{
+    <style>
+        @@media print { @@page { size: A4 portrait; margin: 0; } }
+        .dev-label-sheet { display: grid; grid-template-columns: repeat(3, 70mm); grid-auto-rows: 37mm; width: 210mm; margin: 0 auto; padding-top: 0.5mm;
+                           justify-content: center; background: #fff; }
+        .dev-label { width: 70mm; height: 37mm; }
+    </style>
+}
+else
+{
+    <style>
+        @@media print { @@page { size: @(W)mm @(H)mm; margin: 0; } .dev-label-sheet { display: block; padding: 0; } .dev-label { break-after: page; } }
+        .dev-label-sheet { display: flex; flex-wrap: wrap; gap: 4mm; padding: 4mm; }
+        .dev-label { width: @(W)mm; height: @(H)mm; }
+    </style>
+}
+<style>
+    .dev-label { box-sizing: border-box; padding: 2mm 2.5mm; background: #fff; color: #000; font: 7.5pt/1.2 Arial, sans-serif; overflow: hidden;
+                 display: flex; flex-direction: column; gap: 0.3mm; outline: 1px dashed #bbb; }
+    .dev-label .t { font-size: 10pt; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dev-label .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dev-label .l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dev-label .l b { font-weight: 400; color: #444; }
+    .dev-label .bars { margin-top: auto; text-align: center; }
+    .dev-label .code { font-family: monospace; font-size: 7pt; text-align: center; }
+    @@media print { .dev-label { outline: 0; } }
+</style>
+
+<form class="print-bar" method="get" action="print/dev/label">
+    <button type="button" data-print>@L("Печать")</button>
+    <input type="hidden" name="kind" value="@Kind" />
+    <input type="hidden" name="id" value="@Id" />
+    <label>@L("Копий") <input type="number" name="copies" min="1" max="@MaxCopies" value="@CopiesValue" style="width: 4em" /></label>
+    <label>
+        @L("Формат")
+        <select name="format">
+            <option value="roll" selected="@(!A4)">@L("Рулон {0} × {1} мм", W, H)</option>
+            <option value="a4" selected="@A4">@L("Лист A4, 3 × 8")</option>
+        </select>
+    </label>
+    <button type="submit">@L("Обновить")</button>
+    @if (_label is not null)
+    {
+        <a href="@_label.Back">@L("← Назад")</a>
+    }
+</form>
+
+@if (_error is not null)
+{
+    <div class="sheet"><p>@_error</p></div>
+}
+else if (_label is { } x)
+{
+    <div class="dev-label-sheet">
+        @for (var i = 0; i < CopiesValue; i++)
+        {
+            <div class="dev-label">
+                <div class="t">@x.Title</div>
+                <div class="s">@x.Subtitle</div>
+                @foreach (var line in x.Lines)
+                {
+                    <div class="l"><b>@line.Key:</b> @line.Value</div>
+                }
+                @if (x.Code.Length > 0)
+                {
+                    <div class="bars"><Barcode128 Value="@x.Code" Height="9mm" /></div>
+                    <div class="code">@x.Code</div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private const int MaxCopies = 100;
+
+    [SupplyParameterFromQuery(Name = "kind")]
+    public string? Kind { get; set; }
+
+    [SupplyParameterFromQuery(Name = "id")]
+    public long? Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "copies")]
+    public int? Copies { get; set; }
+
+    [SupplyParameterFromQuery(Name = "format")]
+    public string? Format { get; set; }
+
+    private DevLabelDto? _label;
+    private string? _error;
+
+    // Формат по умолчанию — из настроек разработки (D719); в адресе можно выбрать другой.
+    private bool A4 => Format is null ? _label?.OnA4 == true : string.Equals(Format, "a4", StringComparison.OrdinalIgnoreCase);
+
+    private int W => _label?.WidthMm ?? DevSettings.DefaultLabelWidth;
+
+    private int H => _label?.HeightMm ?? DevSettings.DefaultLabelHeight;
+
+    private int CopiesValue => Math.Clamp(Copies ?? 1, 1, MaxCopies);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var kind = Kind?.ToLowerInvariant() switch
+        {
+            "model" => DevLabelKind.Model,
+            "detail" => DevLabelKind.Detail,
+            "sample" => DevLabelKind.Sample,
+            _ => (DevLabelKind?)null,
+        };
+        if (kind is null || Id is not { } id)
+        {
+            _error = L("Не указано, что печатать.");
+            return;
+        }
+
+        try
+        {
+            _label = await Tech.LabelAsync(kind.Value, id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

@@ -1,0 +1,17 @@
+@* Кнопка «Этикетка» (D719) — на каждом экране модуля, где есть модель, деталь или образец; открывает печать в новой вкладке. *@
+<a class="button secondary @Class" href="print/dev/label?kind=@Kind&id=@Id" target="_blank" rel="noopener" title="@L("Печать этикетки")">@(Text ?? L("Этикетка"))</a>
+
+@code {
+    /// <summary>model, detail или sample.</summary>
+    [Parameter, EditorRequired]
+    public string Kind { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public long Id { get; set; }
+
+    [Parameter]
+    public string? Text { get; set; }
+
+    [Parameter]
+    public string? Class { get; set; }
+}

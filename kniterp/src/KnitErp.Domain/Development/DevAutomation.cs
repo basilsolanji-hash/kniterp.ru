@@ -25,7 +25,26 @@ public sealed class DevSettings
     /// <summary>Загрузка программы машины или рисунка переводит модель на следующую стадию.</summary>
     public bool AutoAdvance { get; private set; } = true;
 
+    /// <summary>Допуск факта образца к плану, %: время или вес больше плана на столько — красным (D719).</summary>
+    public int FactTolerancePercent { get; private set; } = DefaultTolerance;
+
+    /// <summary>Какие разделы входят в показатель заполнения: бит i — раздел <see cref="DevCompleteness.SectionNames"/>[i] (D719).</summary>
+    public int CompletenessSections { get; private set; } = DevCompleteness.AllSections;
+
+    /// <summary>Этикетка модуля на рулоне, мм; или лист A4 3 × 8 (D719).</summary>
+    public int LabelWidthMm { get; private set; } = DefaultLabelWidth;
+
+    public int LabelHeightMm { get; private set; } = DefaultLabelHeight;
+
+    public bool LabelsOnA4 { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
+
+    public const int DefaultTolerance = 10;
+    public const int DefaultLabelWidth = 58;
+    public const int DefaultLabelHeight = 40;
+    public const int MinLabelMm = 20;
+    public const int MaxLabelMm = 150;
 
     /// <summary>Значения по умолчанию, пока организация ничего не сохраняла.</summary>
     public static DevSettings Defaults(long organizationId) => new() { OrganizationId = organizationId };
@@ -49,6 +68,35 @@ public sealed class DevSettings
         AutoLaunchDate = autoLaunchDate;
         AutoAdvance = autoAdvance;
     }
+
+    /// <summary>Настройки цеха и печати (D719): допуск факта, разделы показателя заполнения, формат этикеток.</summary>
+    public void SetShop(int factTolerancePercent, int completenessSections, int labelWidthMm, int labelHeightMm, bool labelsOnA4)
+    {
+        if (factTolerancePercent is < 1 or > 100)
+        {
+            throw new BusinessRuleException("dev.settings.tolerance", "Допуск факта к плану — от 1 до 100 %.");
+        }
+
+        if ((completenessSections & DevCompleteness.AllSections) == 0 || (completenessSections & ~DevCompleteness.AllSections) != 0)
+        {
+            throw new BusinessRuleException("dev.settings.sections", "В показатель заполнения должен входить хотя бы один раздел.");
+        }
+
+        if (labelWidthMm is < MinLabelMm or > MaxLabelMm || labelHeightMm is < MinLabelMm or > MaxLabelMm)
+        {
+            throw new BusinessRuleException("dev.settings.label", $"Размер этикетки — от {MinLabelMm} до {MaxLabelMm} мм.");
+        }
+
+        FactTolerancePercent = factTolerancePercent;
+        CompletenessSections = completenessSections;
+        LabelWidthMm = labelWidthMm;
+        LabelHeightMm = labelHeightMm;
+        LabelsOnA4 = labelsOnA4;
+    }
+
+    /// <summary>Факт больше плана сверх допуска.</summary>
+    public static bool OverPlan(decimal? fact, decimal? plan, int tolerancePercent) =>
+        fact is { } f && plan is { } p && p > 0 && f > p * (100 + tolerancePercent) / 100m;
 }
 
 /// <summary>Шаблон задания по категории изделия (D790): что подставить в новую модель этой категории.</summary>

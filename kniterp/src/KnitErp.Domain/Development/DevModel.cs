@@ -126,6 +126,13 @@ public sealed class DevModel
 
     public DateTime CreatedAtUtc { get; private set; }
     public long CreatedByUserId { get; private set; }
+
+    /// <summary>Размер короба упаковки («40 × 30 × 30 см») — для техкарты (D713).</summary>
+    public string? PackBox { get; private set; }
+
+    /// <summary>Закреплённый дизайнером эскиз (файл модели вида «Эскиз»), D712.</summary>
+    public long? MainSketchFileId { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
 
     public static string CategoryName(DevCategory category) => category switch
@@ -211,6 +218,19 @@ public sealed class DevModel
     {
         EnsureEditable();
         return Diff(BriefSnapshot, () => ApplyBrief(brief));
+    }
+
+    public void SetPackBox(string? packBox)
+    {
+        EnsureEditable();
+        PackBox = DomainText.Optional(packBox, 60, "Размер короба");
+    }
+
+    /// <summary>Закрепить эскиз (файл проверяет сервис: свой, вида «Эскиз», картинка) или снять закрепление.</summary>
+    public void PinSketch(long? fileId)
+    {
+        EnsureEditable();
+        MainSketchFileId = fileId;
     }
 
     /// <summary>Смена стадии; правило перехода проверяет <see cref="DevStages.CheckMove"/>.</summary>

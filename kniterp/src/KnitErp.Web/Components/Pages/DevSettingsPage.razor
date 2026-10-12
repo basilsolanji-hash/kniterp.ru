@@ -2,6 +2,7 @@
 @using KnitErp.Application.Development
 @using KnitErp.Domain.Development
 @inject DevSettingsService Settings
+@inject DevShopService Shop
 
 <PageTitle>@L("Настройки разработки") — knitERP</PageTitle>
 <DevStyles />
@@ -94,6 +95,73 @@ else
                 </div>
             </form>
         </div>
+    }
+
+    <DevShopSettingsBlock />
+
+    <h2>@L("Технологические операции")</h2>
+    <p class="muted">@L("Справочник технолога: операция, единица, норма времени, расценка и этап производства (вязание, сборка, ВТО, контроль качества, упаковка).")</p>
+    @if (_ops is not null)
+    {
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Операция")</th><th>@L("Ед.")</th><th class="num">@L("Норма, мин")</th>@if (CurrentAccess.Has(Permissions.DevCostView)) { <th class="num">@L("Расценка")</th> }<th>@L("Этап производства")</th><th>@L("Состояние")</th>@if (_canEdit) { <th></th> }</tr></thead>
+                <tbody>
+                    @if (_ops.Count == 0)
+                    {
+                        <tr><td colspan="7" class="muted">@L("Записей пока нет.")</td></tr>
+                    }
+                    @foreach (var o in _ops)
+                    {
+                        var op = o;
+                        <tr>
+                            <td>@o.Name</td>
+                            <td>@o.Unit</td>
+                            <td class="num">@DevFormat.Number(o.NormMinutes)</td>
+                            @if (CurrentAccess.Has(Permissions.DevCostView)) { <td class="num">@Amounts.Format(o.Price)</td> }
+                            <td>@(o.ProductionStage is { } st ? L(StageName(st)) : "—")</td>
+                            <td>@(o.IsArchived ? L("в архиве") : L("действует"))</td>
+                            @if (_canEdit)
+                            {
+                                <td class="row-actions">
+                                    <button type="button" class="secondary" @onclick="() => EditOp(op)" disabled="@_busy">@L("Изменить")</button>
+                                    <button type="button" class="secondary" @onclick="() => ArchiveOpAsync(op)" disabled="@_busy">@(o.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_canEdit)
+        {
+            <form class="inline-form" @onsubmit="SaveOpAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                    <label>@L("Операция") <input @bind="_opName" maxlength="@DevOperationType.NameMaxLength" placeholder="@L("Убрать боковые нитки")" required /></label>
+                    <label>@L("Ед.") <input @bind="_opUnit" maxlength="@DevOperationType.UnitMaxLength" style="max-width: 70px" /></label>
+                    <label>@L("Норма, мин") <input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_opNorm" /></label>
+                    @if (CurrentAccess.Has(Permissions.DevCostView))
+                    {
+                        <label>@L("Расценка") <input type="number" min="0" step="0.01" inputmode="decimal" style="max-width: 100px" @bind="_opPrice" /></label>
+                    }
+                    <label>
+                        @L("Этап производства")
+                        <select @bind="_opStage">
+                            <option value="">—</option>
+                            @for (byte st = 1; st <= 5; st++)
+                            {
+                                <option value="@st">@L(StageName(st))</option>
+                            }
+                        </select>
+                    </label>
+                    <button type="submit" disabled="@_busy">@(_opEdit is null ? L("Добавить операцию") : L("Сохранить операцию"))</button>
+                    @if (_opEdit is not null)
+                    {
+                        <button type="button" class="secondary" @onclick="ResetOp">@L("Отмена")</button>
+                    }
+                </fieldset>
+            </form>
+        }
     }
 
     <h2>@L("Стадии")</h2>
@@ -210,6 +278,58 @@ else
     private bool _autoLaunch;
     private bool _autoAdvance;
     private TemplateForm? _template;
+    private IReadOnlyList<DevOperationTypeDto>? _ops;
+    private DevOperationTypeDto? _opEdit;
+    private string? _opName;
+    private string? _opUnit = "шт";
+    private decimal? _opNorm;
+    private decimal? _opPrice;
+    private string _opStage = string.Empty;
+
+    /// <summary>Этапы производства 1–5 — те же коды, что у производства и расценок «Сотрудников» (D401).</summary>
+    private static string StageName(byte stage) => KnitErp.Domain.Production.ProductionFlow.StageName((KnitErp.Domain.Production.ProductionStage)stage);
+
+    private void EditOp(DevOperationTypeDto o)
+    {
+        _opEdit = o;
+        _opName = o.Name;
+        _opUnit = o.Unit;
+        _opNorm = o.NormMinutes;
+        _opPrice = o.Price;
+        _opStage = o.ProductionStage?.ToString() ?? string.Empty;
+    }
+
+    private void ResetOp()
+    {
+        _opEdit = null;
+        _opName = null;
+        _opUnit = "шт";
+        _opNorm = null;
+        _opPrice = null;
+        _opStage = string.Empty;
+    }
+
+    private Task SaveOpAsync() => RunAsync(async () =>
+    {
+        var values = new DevOperationValues(_opName, _opUnit, _opPrice, _opNorm, byte.TryParse(_opStage, out var st) ? st : null);
+        if (_opEdit is { } e)
+        {
+            await Shop.UpdateOperationTypeAsync(e.Id, values, e.RowVersion);
+        }
+        else
+        {
+            await Shop.AddOperationTypeAsync(values);
+        }
+
+        ResetOp();
+        _ops = await Shop.OperationTypesAsync(includeArchived: true);
+    }, L("Сохранено."));
+
+    private Task ArchiveOpAsync(DevOperationTypeDto o) => RunAsync(async () =>
+    {
+        await Shop.SetOperationTypeArchivedAsync(o.Id, !o.IsArchived, o.RowVersion);
+        _ops = await Shop.OperationTypesAsync(includeArchived: true);
+    }, L("Сохранено."));
 
     private sealed class TemplateForm(DevCategoryTemplateDto t)
     {
@@ -255,6 +375,7 @@ else
         {
             await LoadStagesAsync();
             await LoadAutomationAsync();
+            _ops = await Shop.OperationTypesAsync(includeArchived: true);
             _lookups = await Settings.LookupsAsync(_kind, includeArchived: true);
         }
         catch (AccessDeniedException ex)

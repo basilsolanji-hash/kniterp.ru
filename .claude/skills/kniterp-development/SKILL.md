@@ -1,0 +1,59 @@
+---
+name: kniterp-development
+description: Модуль «Разработка» knitERP (D700–D799) — модели, стадии, задание, файлы, станки и программы, техзадание дессинатора (заправка нитеводителей), детали, размеры, образцы цеха, технологические операции, автоматизация. Где код, какие правила держать, как тестировать и снимать скриншоты экранов. Использовать перед любой правкой в kniterp/src/**/Development*, страниц Dev*.razor и при слиянии ветки разработки с базой.
+---
+
+# Модуль «Разработка» knitERP
+
+Общая сборка и тесты — skill `kniterp-tests`, порядок сдачи — `kniterp-stage`, переводы — `kniterp-translations`. Здесь — только разработка.
+ТЗ — `kniterp/docs/tz/development.md`, автоматизация — `docs/tz/development-automation.md`, сообщения сессиям — `docs/sessions/development.md`.
+
+## Где что лежит
+- Домен: `src/KnitErp.Domain/Development/` — `DevModel` (карточка, задание, стадии), `DevStages` (переходы, D703), `DevFile` (файлы, сигнатуры),
+  `DevLookup` (справочники), `DevAutomation` (настройки, шаблоны, правила D790–D798), `DevRoleMatrix` (роли отдела), `DevTech*` (станки,
+  детали, заправка, размеры, образцы, операции).
+- Сценарии: `src/KnitErp.Application/Development/` — `DevModelService`, `DevSettingsService`, `DevExchangeService` (Excel),
+  `DevNotifications` (колокольчик), `DevTechService` (техзадание, станки, программы), `DevShopService` (образцы цеха).
+- EF: только `src/KnitErp.Infrastructure/Persistence/DevConfigurations.cs`. Миграции — префикс `Dev…`.
+- Страницы: `src/KnitErp.Web/Components/Pages/Dev*.razor`, общие стили — `DevStyles.razor`, техкарта вязания — `DevTechCardPage.razor` (`/dev/tech/{detailId}`).
+- Файлы и Excel наружу — `Program.cs` (`/dev/files/{id}`, `/dev/models.xlsx`, `/dev/models-template.xlsx`).
+
+## Правила, которые нельзя ломать
+- Права: `dev.view` смотреть; `dev.edit` модель, задание, детали, размеры, операции; `dev.pattern` рисунок, заправка, программы;
+  `dev.sample` факт образца в цеху; `dev.approve` «Утверждено» и уход с него; `dev.cost.view` суммы (цены операций, целевая себестоимость);
+  `dev.settings` справочники, станки, стадии, автоматизация. Каждая проверка — в сервисе (`guard.DemandAsync`), кнопка — не защита.
+- Чужая организация → `NotFoundException`. Внешние ключи на объекты организации — составные `(OrganizationId, Id)`.
+- Только вставка (триггер + `HasTrigger`): история стадий, файлы, журнал станка. Справочники и станки — архив, не удаление.
+- Сценарий упал после изменения отслеживаемой сущности — `db.DiscardChanges()` (у вкладки Blazor один DbContext).
+- Суммы в журнал аудита не пишем — только «задана/изменена».
+- CHECK тегов и обсуждений не трогать: база держит 1…99 (D118). `TaggedEntity` модуля — 40–49.
+- Миграцию создавать только после `git merge origin/claude/fervent-volta-3pn88r` (иначе на сервере она применится позже чужой).
+- Превью картинок (`/dev/files/{id}?inline=1`) журнал не пишет; скачивание — пишет (D799).
+
+- Несколько компонентов страницы ходят в базу только через `DevGate.Run(...)` (одна очередь на вкладку, D718) — иначе
+  «A second operation was started» и обрыв сеанса при быстрых кликах. Новый блок/вкладка — `@inject DevGate Gate`.
+- Экран без пустых полей (D719): факты — `dl.dev-facts` с `div` на пару, панели — `.dev-panels` (широкая — `.panel.wide`),
+  списки — `ul.dev-tiles`, матрицы размеров — `table.dev-matrix`. Проверять скриншотом 1440 px.
+- Этикетка — `<DevLabelLink Kind="model|detail|sample" Id="…" />`; печать — `PrintDevLabelPage`, данные — `DevTechService.LabelAsync`.
+- Настраиваемое — в `DevSettings` (допуск факта, разделы показателя, этикетки) и справочниках; новые «магические числа» не зашивать.
+
+## Частые ошибки
+- Карточка, открытая тем же компонентом с другим `Id` («Создать похожую»), сохраняет поля прошлой модели — сбрасывать состояние
+  в `OnParametersSetAsync` при смене `Id`.
+- `L(переменная)` тест переводов не видит — названия домена регистрировать в `TranslationCoverageTests` (блок «Разработка»).
+- `Assert.Equal([..], ...)` с выражением коллекции не компилируется — `new[] { ... }`.
+- Телефон 390 px: таблицы — внутри `.scroll`, вкладки — `.dev-tabs` (перенос), колонки доски — одна под другой.
+
+## Тесты
+- Модульные: `tests/KnitErp.UnitTests/DevModelRulesTests.cs`, `DevTechRulesTests.cs`.
+- Интеграционные: `DevModelTests`, `DevAutomationTests`, `DevTechTests` (свои `_innSeed` 970–973 млн).
+- Сквозные: `tests/KnitErp.E2ETests/DevE2ETests.cs` (фикстура `HrAppFixture`, ошибки JS собираются в `RunAsync`).
+- Запуск только модуля: `--filter "FullyQualifiedName~Dev"`.
+
+## Скриншоты экранов для владельца
+```bash
+cd kniterp && source <scratchpad>/sqlenv   # KNITERP_TEST_SQL
+export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers KNITERP_SCREENSHOTS=<scratchpad>/shots
+dotnet build KnitErp.slnx && dotnet test tests/KnitErp.E2ETests --no-build --filter "FullyQualifiedName~DevScreenshotTests"
+```
+PNG появятся в `$KNITERP_SCREENSHOTS` (1440 px и 390 px); без переменной тест ничего не делает. Отправить — `SendUserFile`.

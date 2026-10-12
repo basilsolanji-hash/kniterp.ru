@@ -74,7 +74,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         var name = $"Шапка «Телефон {Stamp}»";
         await CreateModelAsync(page, name);
         await AssertNoHorizontalScrollAsync(page, "карточка");
-        foreach (var tab in new[] { "Задание", "Рисунок", "Образцы", "Файлы", "Обсуждение" })
+        foreach (var tab in new[] { "Задание", "Детали и заправка", "Размеры", "Образцы", "Операции", "Файлы", "Обсуждение" })
         {
             await page.GetByRole(AriaRole.Tab, new() { NameRegex = new Regex($"^{tab}") }).ClickAsync();
             await AssertNoHorizontalScrollAsync(page, tab);
@@ -133,6 +133,94 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("(копия)");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Идея");
         await Assertions.Expect(page.Locator("dl.facts").Last).ToContainTextAsync("100% хлопок");
+    });
+
+    [SqlFact]
+    public Task Dessinator_threading_and_shop_tech_card_on_phone() => RunAsync("dev-tech", false, async page =>
+    {
+        // Станок в справочнике.
+        await page.GotoAsync("dev/machines");
+        await Ready(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить станок", Exact = true }).ClickAsync();
+        await page.GetByLabel("Название").FillAsync($"STOLL №{Stamp}");
+        await page.GetByLabel("Нитеводителей").FillAsync("8");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Сохранено");
+
+        // Модель, палитра дизайнера и деталь.
+        await CreateModelAsync(page, $"Подвяз «Полоски {Stamp}»");
+        var modelUrl = page.Url;
+        await page.GetByLabel("Обозначение").FillAsync("Основной");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить цвет", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Палитра сохранена");
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Детали и заправка" }).ClickAsync();
+        await page.GetByLabel("Новая деталь").FillAsync("Подвяз");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить деталь", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Деталь добавлена");
+
+        // Техзадание дессинатора: станок, время, заправка нитеводителя 5 с обеих сторон.
+        await page.GetByRole(AriaRole.Link, new() { Name = "Подвяз", Exact = true }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/dev/details/\d+$"));
+        await Ready(page);
+        await page.GetByLabel("Станок").SelectOptionAsync(new SelectOptionValue { Label = $"STOLL №{Stamp} · E7 · 8 нитевод." });
+        await page.GetByLabel("Время вязания, мин").FillAsync("3");
+        await page.GetByLabel("Важные комментарии для цеха").FillAsync("Если хлопок 20/1 — 4 конца");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Сохранено");
+        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Нитеводитель 5, слева" }).CheckAsync();
+        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Нитеводитель 5, справа" }).CheckAsync();
+        await page.Locator(".dev-slot").Filter(new() { HasText = "Нитеводитель 5, слева" }).GetByLabel("Цвет / нить").SelectOptionAsync(new SelectOptionValue { Label = "Основной" });
+        await page.Locator(".dev-slot").Filter(new() { HasText = "Нитеводитель 5, справа" }).GetByLabel("Цвет / нить").SelectOptionAsync(new SelectOptionValue { Label = "Основной" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить заправку", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Заправка сохранена");
+        var techUrl = page.Url.Replace("/dev/details/", "/dev/tech/");
+
+        // Образец для цеха — на вкладке «Образцы».
+        await page.GotoAsync(modelUrl);
+        await Ready(page);
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Образцы" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Новый образец", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Образец создан");
+
+        // Техкарта на телефоне: без горизонтальной прокрутки, заправка видна, факт записывается.
+        await page.SetViewportSizeAsync(390, 844);
+        await page.GotoAsync(techUrl);
+        await Ready(page);
+        await Assertions.Expect(page.Locator(".ks-tech .kt-row")).ToHaveCountAsync(8);
+        await Assertions.Expect(page.Locator(".ks-tech")).ToContainTextAsync("Основной");
+        await Assertions.Expect(page.Locator(".ks-tech")).ToContainTextAsync("3 мин");
+        await AssertNoHorizontalScrollAsync(page, "техкарта");
+        await page.GetByLabel("Время вязания, мин").Last.FillAsync("3.2");
+        await page.GetByLabel("Вес детали, г").Last.FillAsync("101");
+        await page.GetByLabel("Доля цвета Основной").FillAsync("100");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Записать факт", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Факт записан");
+        await Assertions.Expect(page.Locator("table").Last).ToContainTextAsync("3 мин 12 с");
+        await AssertNoHorizontalScrollAsync(page, "техкарта с фактом");
+        // D719: в техкарте вязания — только блоки дессинатора (операции и размеры — во вкладках модели); обсуждение детали — здесь же.
+        await Assertions.Expect(page.Locator(".ks-tech")).Not.ToContainTextAsync("Технологические операции");
+        await page.GetByPlaceholder("Написать комментарий…").FillAsync("нитеводитель 6 заедает");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Отправить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.Locator("#discussion")).ToContainTextAsync("нитеводитель 6 заедает");
+
+        // Этикетка детали: открывается из техкарты, штрихкод Code 128 нарисован.
+        var detailId = techUrl[(techUrl.LastIndexOf('/') + 1)..];
+        await page.GotoAsync($"print/dev/label?kind=detail&id={detailId}&copies=2");
+        await Assertions.Expect(page.Locator(".dev-label")).ToHaveCountAsync(2);
+        await Assertions.Expect(page.Locator(".dev-label svg").First).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".dev-label").First).ToContainTextAsync("-D" + detailId);
+
+        // Широкий экран: заправка и общая информация — рядом, без пустого поля справа.
+        await page.SetViewportSizeAsync(1440, 900);
+        await page.GotoAsync(techUrl);
+        await Ready(page);
+        var feed = await page.Locator(".ks-tech .kt-main").BoundingBoxAsync();
+        var info = await page.Locator(".ks-tech .kt-info").BoundingBoxAsync();
+        Assert.True(info!.X > feed!.X + feed.Width - 1, "общая информация должна стоять справа от заправки");
+        await page.SetViewportSizeAsync(390, 844);
+        await page.GotoAsync("dev/machines");
+        await Ready(page);
+        await AssertNoHorizontalScrollAsync(page, "станки");
     });
 
     private static async Task CreateModelAsync(IPage page, string name)

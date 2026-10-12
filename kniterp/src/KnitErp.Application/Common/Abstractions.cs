@@ -180,6 +180,21 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Development.DevLookup> DevLookups { get; }
     DbSet<KnitErp.Domain.Development.DevSettings> DevSettings { get; }
     DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates { get; }
+    DbSet<KnitErp.Domain.Development.DevMachine> DevMachines { get; }
+    DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes { get; }
+    DbSet<KnitErp.Domain.Development.DevModelColor> DevModelColors { get; }
+    DbSet<KnitErp.Domain.Development.DevDetail> DevDetails { get; }
+    DbSet<KnitErp.Domain.Development.DevThreading> DevThreading { get; }
+    DbSet<KnitErp.Domain.Development.DevModelSize> DevModelSizes { get; }
+    DbSet<KnitErp.Domain.Development.DevDetailSize> DevDetailSizes { get; }
+    DbSet<KnitErp.Domain.Development.DevMeasure> DevMeasures { get; }
+    DbSet<KnitErp.Domain.Development.DevMeasureValue> DevMeasureValues { get; }
+    DbSet<KnitErp.Domain.Development.DevSample> DevSamples { get; }
+    DbSet<KnitErp.Domain.Development.DevSampleDetail> DevSampleDetails { get; }
+    DbSet<KnitErp.Domain.Development.DevSampleColorShare> DevSampleColorShares { get; }
+    DbSet<KnitErp.Domain.Development.DevSampleMeasure> DevSampleMeasures { get; }
+    DbSet<KnitErp.Domain.Development.DevOperationType> DevOperationTypes { get; }
+    DbSet<KnitErp.Domain.Development.DevModelOperation> DevModelOperations { get; }
     // CRM (D600–D699).
     DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines { get; }
     DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages { get; }

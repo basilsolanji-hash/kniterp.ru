@@ -140,6 +140,21 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevLookup> DevLookups => Set<KnitErp.Domain.Development.DevLookup>();
     public DbSet<KnitErp.Domain.Development.DevSettings> DevSettings => Set<KnitErp.Domain.Development.DevSettings>();
     public DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates => Set<KnitErp.Domain.Development.DevCategoryTemplate>();
+    public DbSet<KnitErp.Domain.Development.DevMachine> DevMachines => Set<KnitErp.Domain.Development.DevMachine>();
+    public DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes => Set<KnitErp.Domain.Development.DevMachineNote>();
+    public DbSet<KnitErp.Domain.Development.DevModelColor> DevModelColors => Set<KnitErp.Domain.Development.DevModelColor>();
+    public DbSet<KnitErp.Domain.Development.DevDetail> DevDetails => Set<KnitErp.Domain.Development.DevDetail>();
+    public DbSet<KnitErp.Domain.Development.DevThreading> DevThreading => Set<KnitErp.Domain.Development.DevThreading>();
+    public DbSet<KnitErp.Domain.Development.DevModelSize> DevModelSizes => Set<KnitErp.Domain.Development.DevModelSize>();
+    public DbSet<KnitErp.Domain.Development.DevDetailSize> DevDetailSizes => Set<KnitErp.Domain.Development.DevDetailSize>();
+    public DbSet<KnitErp.Domain.Development.DevMeasure> DevMeasures => Set<KnitErp.Domain.Development.DevMeasure>();
+    public DbSet<KnitErp.Domain.Development.DevMeasureValue> DevMeasureValues => Set<KnitErp.Domain.Development.DevMeasureValue>();
+    public DbSet<KnitErp.Domain.Development.DevSample> DevSamples => Set<KnitErp.Domain.Development.DevSample>();
+    public DbSet<KnitErp.Domain.Development.DevSampleDetail> DevSampleDetails => Set<KnitErp.Domain.Development.DevSampleDetail>();
+    public DbSet<KnitErp.Domain.Development.DevSampleColorShare> DevSampleColorShares => Set<KnitErp.Domain.Development.DevSampleColorShare>();
+    public DbSet<KnitErp.Domain.Development.DevSampleMeasure> DevSampleMeasures => Set<KnitErp.Domain.Development.DevSampleMeasure>();
+    public DbSet<KnitErp.Domain.Development.DevOperationType> DevOperationTypes => Set<KnitErp.Domain.Development.DevOperationType>();
+    public DbSet<KnitErp.Domain.Development.DevModelOperation> DevModelOperations => Set<KnitErp.Domain.Development.DevModelOperation>();
     // CRM (D600–D699).
     public DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines => Set<KnitErp.Domain.Crm.CrmPipeline>();
     public DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages => Set<KnitErp.Domain.Crm.CrmStage>();

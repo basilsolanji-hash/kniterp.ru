@@ -137,7 +137,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
                 users.GetValueOrDefault(f.UploadedByUserId) ?? "—")).ToList(),
             targets, next, canEdit && !DevStages.IsFinal(m.Stage), canApprove,
             DevModel.IsLate(m.Stage, m.PlannedLaunch, today), DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), clock.UtcNow),
-            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false });
+            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false }, m.MainSketchFileId);
     }
 
     /// <summary>
@@ -321,6 +321,16 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
     public async Task<long> AddFileAsync(long modelId, DevFileKind kind, string? fileName, byte[] content, string? comment, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        return await AddFileCoreAsync(ctx, modelId, kind, fileName, content, comment, null, ct);
+    }
+
+    /// <summary>
+    /// Загрузка файла после проверки права вызывающим: версия под блокировкой модели, журнал, автопереход стадии (D795).
+    /// <paramref name="configure"/> — привязка до вставки (программа детали к станку, D711); <paramref name="afterSave"/> — в той же транзакции.
+    /// </summary>
+    internal async Task<long> AddFileCoreAsync(AccessContext ctx, long modelId, DevFileKind kind, string? fileName, byte[] content, string? comment,
+        Action<DevFile>? configure, CancellationToken ct, Func<DevFile, Task>? afterSave = null)
+    {
         var model = await db.DevModels.AsNoTracking().Where(m => m.Id == modelId && m.OrganizationId == ctx.OrganizationId)
                         .Select(m => new { m.Id, m.Number, m.Stage }).SingleOrDefaultAsync(ct)
                     ?? throw new NotFoundException("Модель");
@@ -338,8 +348,14 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
                 .Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId && f.Kind == kind && f.FileName == name)
                 .MaxAsync(f => (int?)f.Version, ct) ?? 0;
             var file = DevFile.Create(ctx.OrganizationId, modelId, kind, name, content, last + 1, comment, clock.UtcNow, ctx.UserId);
+            configure?.Invoke(file);
             db.DevFiles.Add(file);
             await db.SaveOrConflictAsync(ct);
+            if (afterSave is not null)
+            {
+                await afterSave(file);
+            }
+
             Audit(ctx, AuditActions.DevFileAdded, modelId, null, $"{DevFile.KindName(kind)}: {file.FileName}, версия {file.Version}, {file.SizeBytes / 1024 + 1} КБ",
                 model.Number);
             await AutoAdvanceAsync(ctx, modelId, kind, ct);
@@ -381,12 +397,20 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         Audit(ctx, AuditActions.DevStageChanged, modelId, DevStages.Name(before), DevStages.Name(to), $"{model.Number}: автоматически");
     }
 
-    /// <summary>Содержимое файла — только своей организации и с правом просмотра; скачивание пишется в журнал.</summary>
-    public async Task<(string FileName, string ContentType, byte[] Content)> GetFileAsync(long fileId, CancellationToken ct = default)
+    /// <summary>
+    /// Содержимое файла — только своей организации и с правом просмотра. Скачивание пишется в журнал; превью картинки на карточке
+    /// (<paramref name="preview"/>) — нет, иначе каждое открытие карточки засоряло бы журнал (D799). Превью отдаётся только для картинок.
+    /// </summary>
+    public async Task<(string FileName, string ContentType, byte[] Content)> GetFileAsync(long fileId, bool preview = false, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevView, ct);
         var file = await db.DevFiles.AsNoTracking().SingleOrDefaultAsync(f => f.Id == fileId && f.OrganizationId == ctx.OrganizationId, ct)
                    ?? throw new NotFoundException("Файл");
+        if (preview)
+        {
+            return file.IsImage ? (file.FileName, file.ContentType, file.Content) : throw new NotFoundException("Файл");
+        }
+
         Audit(ctx, AuditActions.DevFileViewed, file.ModelId, null, $"{file.FileName}, версия {file.Version}", null);
         await db.SaveChangesAsync(ct);
         return (file.FileName, file.ContentType, file.Content);
