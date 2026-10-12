@@ -189,9 +189,6 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans { get; }
     DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings { get; }
     DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks { get; }
-    DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements { get; }
-    DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles { get; }
-    DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings { get; }
     DbSet<KnitErp.Domain.Sales.SalesDiscountRule> SalesDiscountRules { get; }
     DbSet<KnitErp.Domain.Sales.SalesDiscountSettings> SalesDiscountSettings { get; }
 

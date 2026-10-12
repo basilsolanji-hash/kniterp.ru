@@ -166,8 +166,6 @@ public static class Permissions
         [SalesReportView] = "Продажи: отчёты и дебиторская задолженность",
         [SalesPlanEdit] = "Продажи: план продаж",
         [SalesMarkingEdit] = "Продажи: коды маркировки в отгрузке",
-        [CrmLeadsCreate] = "CRM: приём заявок и звонков через API",
-        [CrmMailing] = "CRM: рассылки клиентам",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;
