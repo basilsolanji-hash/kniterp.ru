@@ -286,7 +286,7 @@ else
             break;
 
         case Tab.Fields:
-            <p class="muted">@L("Свои поля карточки номенклатуры: текст, число, дата, флажок или значение из своего справочника. Например «Состав», «Тонина, Nm», «Цвет».")</p>
+            <p class="muted">@L("Свои поля карточки номенклатуры: текст, многострочный текст, число, дата, флажок, ссылка, значение из своего справочника или контрагент. Например «Состав», «Тонина, Nm», «Уход», «Страница у поставщика», «Производитель».")</p>
             @if (CanEdit)
             {
                 <form class="inline-form" @onsubmit="CreateFieldAsync">
@@ -603,18 +603,41 @@ else
             <p class="muted">@L("Характеристики модификаций: «Цвет», «Размер», «Рост». Значения вводятся у позиции при создании модификаций. Не больше {0}.", Characteristic.MaxCharacteristics)</p>
             @if (CanEdit)
             {
-                <form class="inline-form" @onsubmit='() => Run(async () => { await Modifications.CreateCharacteristicAsync(_name); _name = null; }, L("Характеристика добавлена."))'>
+                <form class="inline-form" @onsubmit='() => Run(async () => { await Modifications.CreateCharacteristicAsync(_name, _charType, CharCatalog(_charType, _charCatalog)); _name = null; }, L("Характеристика добавлена."))'>
                     <label>@L("Название") <input @bind="_name" maxlength="@Characteristic.NameMaxLength" required placeholder="@L("Размер")" /></label>
+                    @* D328: тип значений — что можно ввести у модификации. *@
+                    <label>
+                        @L("Значения")
+                        <select @bind="_charType">
+                            @foreach (var t in Enum.GetValues<CharacteristicType>())
+                            {
+                                <option value="@t">@CharTypeName(t)</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_charType == CharacteristicType.Catalog)
+                    {
+                        <label>
+                            @L("Справочник")
+                            <select @bind="_charCatalog">
+                                <option value="">@L("— выберите —")</option>
+                                @foreach (var cat in _catalogs!.Where(x => !x.IsArchived))
+                                {
+                                    <option value="@cat.Id">@cat.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
                     <button type="submit" disabled="@_busy">@L("Добавить")</button>
                 </form>
             }
             <div class="scroll">
                 <table class="compact">
-                    <thead><tr><th>@L("Характеристика")</th><th class="num">@L("Модификаций")</th>@if (CanEdit) { <th></th> }</tr></thead>
+                    <thead><tr><th>@L("Характеристика")</th><th>@L("Значения")</th><th class="num">@L("Модификаций")</th>@if (CanEdit) { <th></th> }</tr></thead>
                     <tbody>
                         @if (_characteristics.Count == 0)
                         {
-                            <tr><td colspan="3" class="muted">@L("Характеристик пока нет.")</td></tr>
+                            <tr><td colspan="4" class="muted">@L("Характеристик пока нет.")</td></tr>
                         }
                         @foreach (var c in _characteristics)
                         {
@@ -622,22 +645,41 @@ else
                                 @if (_editId == c.Id && _tab == Tab.Characteristics)
                                 {
                                     <td><input @bind="_editName" maxlength="@Characteristic.NameMaxLength" aria-label="@L("Название")" /></td>
+                                    <td>
+                                        <select @bind="_editCharType" aria-label="@L("Значения")">
+                                            @foreach (var t in Enum.GetValues<CharacteristicType>())
+                                            {
+                                                <option value="@t">@CharTypeName(t)</option>
+                                            }
+                                        </select>
+                                        @if (_editCharType == CharacteristicType.Catalog)
+                                        {
+                                            <select @bind="_editCharCatalog" aria-label="@L("Справочник")">
+                                                <option value="">@L("— выберите —")</option>
+                                                @foreach (var cat in _catalogs!.Where(x => !x.IsArchived))
+                                                {
+                                                    <option value="@cat.Id">@cat.Name</option>
+                                                }
+                                            </select>
+                                        }
+                                    </td>
                                     <td class="num">@c.Used</td>
                                     <td>
-                                        <button type="button" @onclick='() => Run(async () => { await Modifications.RenameCharacteristicAsync(c.Id, _editName, c.RowVersion); _editId = null; }, L("Сохранено."))' disabled="@_busy">@L("Сохранить")</button>
+                                        <button type="button" @onclick='() => Run(() => SaveCharacteristicAsync(c), L("Сохранено."))' disabled="@_busy">@L("Сохранить")</button>
                                         <button type="button" class="secondary" @onclick="() => _editId = null">@L("Отмена")</button>
                                     </td>
                                 }
                                 else
                                 {
                                     <td>@c.Name @if (c.IsArchived) { <span class="tag">@L("архив")</span> }</td>
+                                    <td>@CharTypeName(c.Type)@if (c.Type == CharacteristicType.Catalog) { <span class="muted"> · @(_catalogs?.FirstOrDefault(x => x.Id == c.CatalogId)?.Name)</span> }</td>
                                     <td class="num">@c.Used</td>
                                     @if (CanEdit)
                                     {
                                         <td>
                                             @if (!c.IsArchived)
                                             {
-                                                <button type="button" class="secondary" @onclick="() => { _editId = c.Id; _editName = c.Name; }" disabled="@_busy">@L("Изменить")</button>
+                                                <button type="button" class="secondary" @onclick="() => { _editId = c.Id; _editName = c.Name; _editCharType = c.Type; _editCharCatalog = c.CatalogId?.ToString(); }" disabled="@_busy">@L("Изменить")</button>
                                                 <ConfirmButton Class="secondary" OnConfirm='() => Run(() => Modifications.SetCharacteristicArchivedAsync(c.Id, true, c.RowVersion), L("«{0}» в архиве.", c.Name))' Disabled="@_busy" Question='@L("Отправить в архив?")'>@L("В архив")</ConfirmButton>
                                             }
                                             else
@@ -741,6 +783,40 @@ else
     private string _parent = string.Empty;
     private bool _withVat = true;
     private CustomFieldType _fieldType = CustomFieldType.Text;
+    private CharacteristicType _charType = CharacteristicType.Text;
+    private string? _charCatalog;
+    private CharacteristicType _editCharType = CharacteristicType.Text;
+    private string? _editCharCatalog;
+
+    private static long? CharCatalog(CharacteristicType type, string? catalog) =>
+        type == CharacteristicType.Catalog && long.TryParse(catalog, out var id) ? id : null;
+
+    private string CharTypeName(CharacteristicType type) => type switch
+    {
+        CharacteristicType.Number => L("Число"),
+        CharacteristicType.Flag => L("Да/нет"),
+        CharacteristicType.Catalog => L("Справочник"),
+        _ => L("Текст"),
+    };
+
+    /// <summary>Название и тип — двумя действиями сервиса, по очереди (у вкладки один DbContext); тип — только если изменился.</summary>
+    private async Task SaveCharacteristicAsync(CharacteristicDto c)
+    {
+        var rowVersion = c.RowVersion;
+        if (_editName != c.Name)
+        {
+            await Modifications.RenameCharacteristicAsync(c.Id, _editName, rowVersion);
+            rowVersion = (await Modifications.CharacteristicsAsync(true)).Single(x => x.Id == c.Id).RowVersion;
+        }
+
+        var catalog = CharCatalog(_editCharType, _editCharCatalog);
+        if (_editCharType != c.Type || catalog != c.CatalogId)
+        {
+            await Modifications.SetCharacteristicTypeAsync(c.Id, _editCharType, catalog, rowVersion);
+        }
+
+        _editId = null;
+    }
     private string _fieldCatalog = string.Empty;
     private long? _editId;
     private string? _editName;
@@ -858,6 +934,9 @@ else
         CustomFieldType.Date => L("Дата"),
         CustomFieldType.Flag => L("Флажок"),
         CustomFieldType.Catalog => L("Справочник"),
+        CustomFieldType.LongText => L("Многострочный текст"),
+        CustomFieldType.Link => L("Ссылка"),
+        CustomFieldType.Counterparty => L("Контрагент"),
         _ => L("Текст"),
     };
 

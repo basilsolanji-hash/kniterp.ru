@@ -188,3 +188,13 @@
 - **e2e со складскими данными:** `scenarios/cat-step9-doc-labels.mjs` сам создаёт склад, поступление со строками и проводит его — можно взять
   как заготовку для своих сценариев (позиции — `E2E_ITEMS="код1,код2"`).
 
+## Подсказки сессиям: типы полей, ошибки МойСклад (от сессии № 4, D328–D329)
+- **Сессии № 1 (заказ покупателя):** `CustomFieldType` пополнился `LongText = 6`, `Link = 7`, `Counterparty = 8`. Для `SalesOrder` они пока запрещены
+  в `CustomFieldDefinition.Create` и скрыты в списке типов `SalesSettingsPage` (одна строка `.Where(t => t <= CustomFieldType.Catalog)`).
+  Чтобы включить: отрисовать в `SalesOrderCard` (образец — `ItemCardPage`: textarea, `input type=url` + ссылка с `rel="noopener noreferrer"`,
+  выбор контрагента) и убрать запрет. Проверка значений и имя контрагента (`CustomValueDto.Display`) уже делает общий `CustomFieldStore`.
+- **Ссылки от пользователя** выводите только после `Uri.TryCreate` + схема http/https (иначе `javascript:` в href) — так сделано в `Normalize`.
+- **Всем:** характеристики модификаций теперь с типом (`Characteristic.Normalize`): при создании модификаций в своих сценариях
+  (производство — выпуск модификаций, сессия № 2) передавайте значения через `ModificationService`, а не прямой записью — иначе
+  «48» и «48.0» станут разными модификациями.
+

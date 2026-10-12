@@ -134,6 +134,19 @@ internal sealed class CustomFieldStore(IKnitErpDbContext db, ICurrentUser curren
                 continue;
             }
 
+            // D328: контрагент — своей организации и не в архиве.
+            if (value is not null && field.Type == CustomFieldType.Counterparty)
+            {
+                var counterpartyId = long.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+                var counterparty = await db.Counterparties.AsNoTracking()
+                                       .SingleOrDefaultAsync(c => c.Id == counterpartyId && c.OrganizationId == ctx.OrganizationId, ct)
+                                   ?? throw new NotFoundException("Контрагент");
+                if (counterparty.IsArchived)
+                {
+                    throw new BusinessRuleException("catalog.archived", $"«{counterparty.Name}» в архиве.");
+                }
+            }
+
             if (value is not null && field.Type == CustomFieldType.Catalog)
             {
                 var entryId = long.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
@@ -177,11 +190,19 @@ internal sealed class CustomFieldStore(IKnitErpDbContext db, ICurrentUser curren
         var entryIds = fields.Where(f => f.Type == CustomFieldType.Catalog && values.ContainsKey(f.Id))
             .Select(f => long.Parse(values[f.Id], System.Globalization.CultureInfo.InvariantCulture)).ToList();
         var entries = await db.UserCatalogEntries.AsNoTracking().Where(e => entryIds.Contains(e.Id)).ToDictionaryAsync(e => e.Id, ct);
+        var counterpartyIds = fields.Where(f => f.Type == CustomFieldType.Counterparty && values.ContainsKey(f.Id))
+            .Select(f => long.Parse(values[f.Id], System.Globalization.CultureInfo.InvariantCulture)).ToList();
+        var counterparties = await db.Counterparties.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId && counterpartyIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         return fields.Where(f => !f.IsArchived || values.ContainsKey(f.Id)).Select(f =>
         {
             var value = values.GetValueOrDefault(f.Id);
-            string? display = f.Type == CustomFieldType.Catalog && value is not null
-                && entries.TryGetValue(long.Parse(value, System.Globalization.CultureInfo.InvariantCulture), out var e) ? e.Display : null;
+            string? display = value is null ? null : f.Type switch
+            {
+                CustomFieldType.Catalog when entries.TryGetValue(long.Parse(value, System.Globalization.CultureInfo.InvariantCulture), out var e) => e.Display,
+                CustomFieldType.Counterparty when counterparties.TryGetValue(long.Parse(value, System.Globalization.CultureInfo.InvariantCulture), out var name) => name,
+                _ => null,
+            };
             return new CustomValueDto(f.Id, f.Name, f.Type, f.IsArchived, value, f.CatalogId, display);
         }).ToList();
     }

@@ -3,12 +3,30 @@ using KnitErp.Domain.Common;
 
 namespace KnitErp.Domain.Catalog;
 
+/// <summary>D328: тип значений характеристики — что можно ввести у модификации.</summary>
+public enum CharacteristicType : byte
+{
+    Text = 1,
+
+    /// <summary>Число («48», «0.5»): хранится с точкой, без лишних нулей — «48,0» и «48» одна модификация.</summary>
+    Number = 2,
+
+    /// <summary>Да или нет («С капюшоном»).</summary>
+    Flag = 3,
+
+    /// <summary>Запись своего справочника («Цвет» из справочника цветов): хранится её название.</summary>
+    Catalog = 4,
+}
+
 /// <summary>
-/// Характеристика модификаций (D82), как в МойСклад: «Цвет», «Размер», «Рост». Значения не справочник — вводятся текстом
-/// у модификации («красный», «48»), чтобы не заводить отдельный список для каждого размера. Не удаляется — архивируется.
+/// Характеристика модификаций (D82), как в МойСклад: «Цвет», «Размер», «Рост». Значения вводятся у модификации («красный», «48»);
+/// D328 — с типом: текст, число, да/нет или запись своего справочника (тогда другое значение не примется). Не удаляется — архивируется.
 /// </summary>
 public sealed class Characteristic
 {
+    public const string Yes = "Да";
+    public const string No = "Нет";
+
     public const int NameMaxLength = 60;
     public const int MaxCharacteristics = 20;
 
@@ -23,8 +41,63 @@ public sealed class Characteristic
     public bool IsArchived { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
-    public static Characteristic Create(long organizationId, string? name, int sortOrder) =>
-        new() { OrganizationId = organizationId, Name = DomainText.Require(name, NameMaxLength, "Название характеристики"), SortOrder = sortOrder };
+    public CharacteristicType Type { get; private set; } = CharacteristicType.Text;
+
+    /// <summary>Свой справочник для типа «Справочник».</summary>
+    public long? CatalogId { get; private set; }
+
+    public static Characteristic Create(long organizationId, string? name, int sortOrder, CharacteristicType type = CharacteristicType.Text,
+        long? catalogId = null)
+    {
+        var c = new Characteristic { OrganizationId = organizationId, Name = DomainText.Require(name, NameMaxLength, "Название характеристики"), SortOrder = sortOrder };
+        c.SetType(type, catalogId);
+        return c;
+    }
+
+    public void SetType(CharacteristicType type, long? catalogId)
+    {
+        if (!Enum.IsDefined(type))
+        {
+            throw new BusinessRuleException("catalog.characteristic.type", "Тип характеристики — текст, число, да/нет или справочник.");
+        }
+
+        if ((type == CharacteristicType.Catalog) != (catalogId is not null))
+        {
+            throw new BusinessRuleException("catalog.characteristic.catalog", "Для характеристики «Справочник» выберите свой справочник.");
+        }
+
+        Type = type;
+        CatalogId = catalogId;
+    }
+
+    /// <summary>
+    /// Значение по типу: число — с точкой без лишних нулей, да/нет — «Да»/«Нет», справочник — название записи как в справочнике
+    /// (catalogNames — действующие записи; для других типов не нужен). Неверное — понятная ошибка с названием характеристики.
+    /// </summary>
+    public string Normalize(string? value, IReadOnlyCollection<string>? catalogNames = null)
+    {
+        var text = Variants.CleanValue(value);
+        switch (Type)
+        {
+            case CharacteristicType.Number:
+                var raw = text.Replace(" ", string.Empty, StringComparison.Ordinal).Replace(',', '.');
+                return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
+                    ? number.ToString("0.######", CultureInfo.InvariantCulture)
+                    : throw new BusinessRuleException("catalog.characteristic.number", $"«{Name}»: «{text}» — не число.");
+            case CharacteristicType.Flag:
+                return text.ToLowerInvariant() switch
+                {
+                    "да" or "yes" or "true" or "1" or "+" => Yes,
+                    "нет" or "no" or "false" or "0" or "-" => No,
+                    _ => throw new BusinessRuleException("catalog.characteristic.flag", $"«{Name}»: укажите «Да» или «Нет»."),
+                };
+            case CharacteristicType.Catalog:
+                return catalogNames?.FirstOrDefault(n => string.Equals(n, text, StringComparison.OrdinalIgnoreCase))
+                       ?? throw new BusinessRuleException("catalog.characteristic.not_in_catalog", $"«{Name}»: «{text}» нет в справочнике — добавьте запись или выберите из списка.");
+            default:
+                return text;
+        }
+    }
 
     public void Rename(string? name) => Name = DomainText.Require(name, NameMaxLength, "Название характеристики");
 

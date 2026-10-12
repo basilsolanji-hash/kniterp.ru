@@ -62,6 +62,21 @@ public sealed class CatMoySkladHttpTests
     }
 
     [Fact]
+    public async Task Error_400_shows_section_and_moysklad_error_text_and_accept_header_is_documented_value()
+    {
+        var (client, handler) = Create((_, _) => Json("""{"errors":[{"error":"Неверное значение заголовка 'Accept'\nподробности","code":1062}]}""", HttpStatusCode.BadRequest));
+        var ex = await Assert.ThrowsAsync<MoySkladException>(() => client.ListAsync(Token, MoySkladEntities.Product, 0, 1000));
+        Assert.Equal(400, ex.Status);
+        Assert.Equal("товары: ответ 400 (код 1062: Неверное значение заголовка 'Accept'подробности)", ex.Message);
+        Assert.DoesNotContain(Token, ex.Message);
+        Assert.Equal("application/json; charset=utf-8", handler.Requests.Single().Headers.Accept.ToString());
+
+        // Тело не JSON — только раздел и код ответа.
+        var (plain, _) = Create((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("<html>bad</html>") });
+        Assert.Equal("проверка доступа: ответ 400", (await Assert.ThrowsAsync<MoySkladException>(() => plain.CheckAsync(Token))).Message);
+    }
+
+    [Fact]
     public async Task Fixed_address_token_in_header_and_retry_after_on_429()
     {
         var (client, handler) = Create((_, n) =>

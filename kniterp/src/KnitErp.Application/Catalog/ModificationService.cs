@@ -8,7 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.Application.Catalog;
 
-public sealed record CharacteristicDto(long Id, string Name, bool IsArchived, int Used, byte[] RowVersion);
+/// <summary>Характеристика; D328 — тип, свой справочник и варианты для выбора (записи справочника или «Да»/«Нет»).</summary>
+public sealed record CharacteristicDto(long Id, string Name, bool IsArchived, int Used, byte[] RowVersion,
+    CharacteristicType Type = CharacteristicType.Text, long? CatalogId = null, IReadOnlyList<string>? Options = null);
 
 public sealed record VariantValueDto(long CharacteristicId, string Characteristic, string Value);
 
@@ -40,12 +42,23 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
         var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
         var used = await db.ItemCharacteristicValues.AsNoTracking().Where(v => v.OrganizationId == ctx.OrganizationId)
             .GroupBy(v => v.CharacteristicId).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
-        return (await db.Characteristics.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId && (includeArchived || !c.IsArchived))
-                .OrderBy(c => c.IsArchived).ThenBy(c => c.SortOrder).ThenBy(c => c.Id).ToListAsync(ct))
-            .Select(c => new CharacteristicDto(c.Id, c.Name, c.IsArchived, used.GetValueOrDefault(c.Id), c.RowVersion)).ToList();
+        var list = await db.Characteristics.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId && (includeArchived || !c.IsArchived))
+            .OrderBy(c => c.IsArchived).ThenBy(c => c.SortOrder).ThenBy(c => c.Id).ToListAsync(ct);
+        var names = await CatalogNamesAsync(ctx.OrganizationId, list, ct);
+        return list.Select(c => new CharacteristicDto(c.Id, c.Name, c.IsArchived, used.GetValueOrDefault(c.Id), c.RowVersion, c.Type, c.CatalogId,
+            c.Type switch
+            {
+                CharacteristicType.Flag => [Characteristic.Yes, Characteristic.No],
+                CharacteristicType.Catalog => names.GetValueOrDefault(c.CatalogId!.Value) ?? [],
+                _ => null,
+            })).ToList();
     }
 
-    public async Task<long> CreateCharacteristicAsync(string? name, CancellationToken ct = default)
+    public async Task<long> CreateCharacteristicAsync(string? name, CancellationToken ct = default) =>
+        await CreateCharacteristicAsync(name, CharacteristicType.Text, null, ct);
+
+    /// <summary>D328: характеристика с типом значений (число, да/нет, запись своего справочника).</summary>
+    public async Task<long> CreateCharacteristicAsync(string? name, CharacteristicType type, long? catalogId, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         var existing = await db.Characteristics.Where(c => c.OrganizationId == ctx.OrganizationId).ToListAsync(ct);
@@ -54,7 +67,8 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
             throw new BusinessRuleException("catalog.characteristic.too_many", $"Характеристик — не больше {Characteristic.MaxCharacteristics}.");
         }
 
-        var characteristic = Characteristic.Create(ctx.OrganizationId, name, existing.Count == 0 ? 1 : existing.Max(c => c.SortOrder) + 1);
+        await RequireCatalogAsync(ctx.OrganizationId, catalogId, ct);
+        var characteristic = Characteristic.Create(ctx.OrganizationId, name, existing.Count == 0 ? 1 : existing.Max(c => c.SortOrder) + 1, type, catalogId);
         EnsureUnique(existing, characteristic.Name, null);
         db.Characteristics.Add(characteristic);
         await using var tx = await db.BeginTransactionAsync(ct);
@@ -73,6 +87,82 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
         EnsureUnique(await db.Characteristics.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId).ToListAsync(ct), characteristic.Name, id);
         Audit(ctx, AuditActions.CatalogChanged, nameof(Characteristic), id, before, characteristic.Name, "Характеристика модификаций");
         await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>
+    /// D328: сменить тип значений. Уже введённые у модификаций значения должны подходить новому типу в точности (иначе — список
+    /// неподходящих: исправьте их в модификациях или выберите другой тип): так ключи модификаций не меняются.
+    /// </summary>
+    public async Task SetCharacteristicTypeAsync(long id, CharacteristicType type, long? catalogId, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, characteristic) = await LoadCharacteristicAsync(id, rowVersion, ct);
+        try
+        {
+            await RequireCatalogAsync(ctx.OrganizationId, catalogId, ct);
+            var before = $"{CharacteristicTypeName(characteristic.Type)}";
+            characteristic.SetType(type, catalogId);
+            var names = (await CatalogNamesAsync(ctx.OrganizationId, [characteristic], ct)).GetValueOrDefault(catalogId ?? 0);
+            var bad = new List<string>();
+            foreach (var value in await db.ItemCharacteristicValues.AsNoTracking().Where(v => v.OrganizationId == ctx.OrganizationId && v.CharacteristicId == id)
+                         .Select(v => v.Value).Distinct().ToListAsync(ct))
+            {
+                try
+                {
+                    if (characteristic.Normalize(value, names) != value)
+                    {
+                        bad.Add(value);
+                    }
+                }
+                catch (BusinessRuleException)
+                {
+                    bad.Add(value);
+                }
+            }
+
+            if (bad.Count > 0)
+            {
+                throw new BusinessRuleException("catalog.characteristic.values_mismatch",
+                    $"У модификаций уже есть значения «{characteristic.Name}», не подходящие новому типу: {string.Join(", ", bad.Take(5))}{(bad.Count > 5 ? " …" : "")}. Исправьте их или выберите другой тип.");
+            }
+
+            Audit(ctx, AuditActions.CatalogChanged, nameof(Characteristic), id, before, CharacteristicTypeName(type), $"Тип характеристики «{characteristic.Name}»");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    public static string CharacteristicTypeName(CharacteristicType type) => type switch
+    {
+        CharacteristicType.Number => "Число",
+        CharacteristicType.Flag => "Да/нет",
+        CharacteristicType.Catalog => "Справочник",
+        _ => "Текст",
+    };
+
+    private async Task RequireCatalogAsync(long org, long? catalogId, CancellationToken ct)
+    {
+        if (catalogId is { } cid && !await db.UserCatalogs.AnyAsync(c => c.Id == cid && c.OrganizationId == org && !c.IsArchived, ct))
+        {
+            throw new NotFoundException("Справочник");
+        }
+    }
+
+    /// <summary>Названия действующих записей своих справочников характеристик типа «Справочник».</summary>
+    private async Task<Dictionary<long, IReadOnlyList<string>>> CatalogNamesAsync(long org, IEnumerable<Characteristic> characteristics, CancellationToken ct)
+    {
+        var ids = characteristics.Where(c => c.CatalogId is not null).Select(c => c.CatalogId!.Value).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        return (await db.UserCatalogEntries.AsNoTracking().Where(e => e.OrganizationId == org && ids.Contains(e.CatalogId) && !e.IsArchived)
+                .OrderBy(e => e.Name).Select(e => new { e.CatalogId, e.Name }).ToListAsync(ct))
+            .GroupBy(e => e.CatalogId).ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(e => e.Name).ToList());
     }
 
     /// <summary>Характеристика в архив: у существующих модификаций значения остаются, для новых её не выбрать.</summary>
@@ -129,6 +219,7 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
         var parent = await db.Items.AsNoTracking().SingleOrDefaultAsync(i => i.Id == parentId && i.OrganizationId == ctx.OrganizationId, ct)
                      ?? throw new NotFoundException("Номенклатура");
         var characteristics = await db.Characteristics.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(c => c.Id, ct);
+        var catalogNames = await CatalogNamesAsync(ctx.OrganizationId, characteristics.Values, ct);
         var lists = new Dictionary<long, IReadOnlyList<string>>();
         foreach (var (id, text) in axes)
         {
@@ -140,7 +231,8 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
                 throw new BusinessRuleException("catalog.archived", $"Характеристика «{c.Name}» в архиве.");
             }
 
-            lists[id] = values;
+            // D328: значения по типу характеристики («48,0» → «48», «да» → «Да», запись справочника — как в справочнике).
+            lists[id] = values.Select(v => c.Normalize(v, catalogNames.GetValueOrDefault(c.CatalogId ?? 0))).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
         var matrix = Variants.Matrix(lists);
@@ -212,11 +304,12 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
                    ?? throw new NotFoundException("Номенклатура");
         item.EnsureVersion(item.RowVersion, rowVersion);
         var characteristics = await db.Characteristics.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(c => c.Id, ct);
+        var catalogNames = await CatalogNamesAsync(ctx.OrganizationId, characteristics.Values, ct);
         var clean = new Dictionary<long, string>();
         foreach (var (id, value) in values.Where(v => !string.IsNullOrWhiteSpace(v.Value)))
         {
-            _ = characteristics.GetValueOrDefault(id) ?? throw new NotFoundException("Характеристика");
-            clean[id] = Variants.CleanValue(value);
+            var c = characteristics.GetValueOrDefault(id) ?? throw new NotFoundException("Характеристика");
+            clean[id] = c.Normalize(value, catalogNames.GetValueOrDefault(c.CatalogId ?? 0)); // D328
         }
 
         var key = Variants.Key(clean);
