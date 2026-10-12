@@ -1,5 +1,6 @@
 @* Справочный центр: подсказка по текущему экрану, поиск, статьи по разделам («Первые шаги» — обучение). Статьи — на языке пользователя. *@
 @inject IUiText UiText
+@using KnitErp.Application.Workspace.Knowledge
 
 <form class="tool-form" @onsubmit="() => { }" role="search">
     <label>@L("Поиск по справке") <input @bind="_query" @bind:event="oninput" placeholder="@L("Например: сторно, инвентаризация")" /></label>
@@ -15,22 +16,22 @@
         {
             <p>@L(p)</p>
         }
-        @if (IndustryKnowledge.Find(_article.Id) is { } kb)
+        @if (KnowledgeSearch.Find(_article.Id) is { } kb)
         {
-            @* D116: у отраслевой статьи — источники и дата проверки. *@
-            <p class="muted small">@L("Источники: {0}. Проверено: {1}.", string.Join("; ", kb.Sources), kb.Reviewed)</p>
+            @* D116, D900: экраны для кнопки «Открыть»; у отраслевой статьи и ответа — источники и дата проверки. *@
+            <KnowledgeAnswerView Doc="kb" Context="Context" ShowText="false" />
         }
     </article>
 }
 else if (_query.Trim().Length >= 3)
 {
-    var found = HelpCenter.Search(_query, 8, UiText);
+    var found = HelpCenter.Search(_query, 8, UiText, Context.Route);
     @if (found.Count == 0)
     {
         <p class="muted">@L("Ничего не найдено. Спросите") <button type="button" class="link" @onclick="() => Context.OpenTool(ToolCatalog.Assistant, null)">@L("ИИ-помощника")</button>
             @L("или создайте обращение в") <button type="button" class="link" @onclick="() => Context.OpenTool(ToolCatalog.Support, null)">@L("поддержку")</button>.</p>
     }
-    <ul class="plain link-list">
+    <ul class="plain link-list help-results">
         @foreach (var a in found)
         {
             <li><button type="button" class="link" @onclick="() => _article = a">@L(a.Title)</button> <span class="muted">@L(a.Category)</span></li>
@@ -51,7 +52,7 @@ else
             <button type="button" class="link" @onclick="() => _article = current">@L("Читать полностью")</button>
         </div>
     }
-    @foreach (var group in HelpCenter.All.GroupBy(a => a.Category))
+    @foreach (var group in KnowledgeSearch.Docs.Where(d => d.Kind != KnowledgeKind.Answer).Select(d => d.Article).GroupBy(a => a.Category))
     {
         <h3>@(group.Key == "Первые шаги" ? L("Обучение: первые шаги") : L(group.Key))</h3>
         <ul class="plain link-list">
@@ -61,6 +62,27 @@ else
             }
         </ul>
     }
+    @* D901: готовые ответы — по разделам базы; вопросы раздела показываются по нажатию, чтобы панель не грузила тысячи строк. *@
+    <h3>@L("Вопросы и ответы")</h3>
+    <ul class="plain link-list kb-sections">
+        @foreach (var part in KnowledgeAnswers.All.GroupBy(a => a.Section))
+        {
+            var open = _section == part.Key;
+            <li>
+                <button type="button" class="link" aria-expanded="@(open ? "true" : "false")" @onclick="() => _section = open ? null : part.Key">@L(part.Key)</button>
+                <span class="muted">@part.Count()</span>
+                @if (open)
+                {
+                    <ul class="plain link-list">
+                        @foreach (var a in part)
+                        {
+                            <li><button type="button" class="link" @onclick="() => _article = a.ToArticle()">@L(a.Question)</button></li>
+                        }
+                    </ul>
+                }
+            </li>
+        }
+    </ul>
 }
 
 @code {
@@ -74,6 +96,7 @@ else
     private string _query = string.Empty;
     private HelpArticle? _article;
     private string? _shownId;
+    private string? _section;
 
     protected override void OnParametersSet()
     {
