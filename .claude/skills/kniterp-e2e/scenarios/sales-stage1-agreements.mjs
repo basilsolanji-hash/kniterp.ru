@@ -90,7 +90,7 @@ await page.locator('label:has-text("Покупатель") select').selectOption
 await page.locator('label:has-text("Склад отгрузки") select').selectOption({ label: 'Склад ГП ' + sfx });
 await page.getByRole('button', { name: 'Создать черновик' }).click();
 await page.waitForURL(/sales-orders\/\d+/); await ready(page);
-if (!(await plainText(page.locator('dl.facts'))).includes('Опт 2026 ' + sfx)) throw new Error('в заказе нет соглашения');
+if (!(await plainText(page.locator('dl.facts').first())).includes('Опт 2026 ' + sfx)) throw new Error('в заказе нет соглашения');
 const item = page.locator('label:has-text("Позиция") input');
 await item.fill('СВ-' + sfx); await item.blur();
 await page.waitForSelector('.sx-price-hint');
@@ -114,7 +114,7 @@ await shot('s1-05-order-price-issue');
 await page.locator('.sx-issues label:has-text("Причина") input').fill('Распродажа остатков, согласовано');
 await page.getByRole('button', { name: 'Подтвердить с ценой ниже допустимой' }).click();
 await page.waitForSelector('text=причина записана в журнал');
-if (!(await plainText(page.locator('dl.facts'))).includes('Распродажа остатков')) throw new Error('причина не видна в заказе');
+if (!(await plainText(page.locator('dl.facts').first())).includes('Распродажа остатков')) throw new Error('причина не видна в заказе');
 await shot('s1-06-order-confirmed-override');
 ok('подтверждение с причиной, причина видна в заказе');
 const orderUrl = page.url();
