@@ -1,0 +1,148 @@
+@*
+    D123: окно повторного подтверждения опасного действия. Страница выполняет действие через RunAsync: если сервер ответил
+    «auth.stepup.required», окно спрашивает пароль (и код из приложения при 2FA), сервер ставит отметку на 10 минут, действие
+    повторяется. Отметку проверяет и хранит сервер (StepUpGuard) — окно её только запрашивает. Enter — подтвердить, Esc — отмена.
+*@
+@implements IDisposable
+@inject StepUpService StepUpConfirm
+
+@if (_open)
+{
+    <style>
+        .stepup-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .stepup-backdrop .stepup { width: min(420px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; margin: 0; box-sizing: border-box; }
+        .stepup h2 { margin: 0 0 8px; font-size: 18px; }
+        .stepup form { display: flex; flex-direction: column; gap: 10px; }
+        .stepup input { width: 100%; box-sizing: border-box; }
+        .stepup .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    </style>
+    <div class="stepup-backdrop" @onkeydown="KeyDownAsync">
+        <div class="panel stepup" role="dialog" aria-modal="true" aria-labelledby="stepup-title" aria-describedby="stepup-hint">
+            <form @onsubmit="SubmitAsync">
+                <h2 id="stepup-title">@L("Подтвердите паролем или кодом")</h2>
+                <p id="stepup-hint" class="muted small">
+                    @(_twoFactor
+                        ? L("Действие меняет доступ к организации. Введите текущий пароль и код из приложения — подтверждение действует 10 минут.")
+                        : L("Действие меняет доступ к организации. Введите текущий пароль — подтверждение действует 10 минут."))
+                </p>
+                @if (_error is not null)
+                {
+                    <div class="error" role="alert">@_error</div>
+                }
+                <label>@L("Текущий пароль") <input @ref="_first" type="password" autocomplete="current-password" @bind="_password" required maxlength="128" /></label>
+                @if (_twoFactor)
+                {
+                    <label>@L("Код из приложения") <input inputmode="numeric" autocomplete="one-time-code" maxlength="6" @bind="_code" required /></label>
+                }
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Подтвердить")</button>
+                    <button type="button" class="secondary" @onclick="Cancel" disabled="@_busy">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _open;
+    private bool _busy;
+    private bool _twoFactor;
+    private bool _focus;
+    private string? _password;
+    private string? _code;
+    private string? _error;
+    private ElementReference _first;
+    private TaskCompletionSource<bool>? _pending;
+
+    /// <summary>
+    /// Выполняет действие; если сервер требует повторного подтверждения — показывает окно и после подтверждения повторяет действие
+    /// один раз. Отмена — BusinessRuleException «auth.stepup.cancelled», страница показывает её как обычную ошибку.
+    /// </summary>
+    public async Task RunAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+            return;
+        }
+        catch (BusinessRuleException ex) when (ex.Code == StepUp.RequiredCode)
+        {
+            // Ниже — окно подтверждения.
+        }
+
+        if (!await AskAsync())
+        {
+            throw StepUp.Cancelled();
+        }
+
+        await action();
+    }
+
+    private async Task<bool> AskAsync()
+    {
+        _twoFactor = await StepUpConfirm.TwoFactorRequiredAsync();
+        (_password, _code, _error, _busy) = (null, null, null, false);
+        _pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _open = true;
+        _focus = true;
+        StateHasChanged();
+        return await _pending.Task;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focus && _open)
+        {
+            _focus = false;
+            await _first.FocusAsync();
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await StepUpConfirm.ConfirmAsync(_password, _code);
+            Close(true);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+            (_password, _code) = (null, null);
+            _focus = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task KeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !_busy)
+        {
+            Cancel();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void Cancel() => Close(false);
+
+    private void Close(bool confirmed)
+    {
+        (_open, _password, _code, _error) = (false, null, null, null);
+        var pending = _pending;
+        _pending = null;
+        pending?.TrySetResult(confirmed);
+    }
+
+    public void Dispose() => _pending?.TrySetResult(false);
+}

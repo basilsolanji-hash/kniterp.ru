@@ -32,7 +32,9 @@ public sealed record IntegrationOptionsDto(IReadOnlyList<(string Code, string Ti
 /// организации (Владелец, Администратор). Права токена — только из своих и не из запрещённых для API; адрес вебхука — только
 /// HTTPS и не во внутреннюю сеть (защита от SSRF; при отправке адрес проверяется ещё раз — после разрешения имени).
 /// </summary>
-public sealed class IntegrationService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IntegrationSettings settings)
+/// D123: выпуск и отзыв токена API — только после повторного подтверждения паролем (StepUpGuard).
+public sealed class IntegrationService(
+    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IntegrationSettings settings, KnitErp.Application.Authentication.StepUpGuard stepUp)
 {
     public const int MaxTokens = 50;
     public const int MaxWebhooks = 20;
@@ -78,6 +80,7 @@ public sealed class IntegrationService(IKnitErpDbContext db, IAccessGuard guard,
         }
 
         var (token, secret) = ApiToken.Issue(ctx.OrganizationId, name, permissions, ctx.UserId, clock.UtcNow, days);
+        stepUp.Demand(ctx); // D123
         db.ApiTokens.Add(token);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.ApiTokenIssued, nameof(ApiToken), token.Id, null, $"{token.Name} ({token.Prefix}…)",
@@ -95,6 +98,7 @@ public sealed class IntegrationService(IKnitErpDbContext db, IAccessGuard guard,
         var ctx = await guard.DemandAsync(Permissions.OrganizationEdit, ct);
         var token = await db.ApiTokens.SingleOrDefaultAsync(t => t.Id == id && t.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Токен");
+        stepUp.Demand(ctx); // D123
         token.Revoke(ctx.UserId, clock.UtcNow);
         Audit(ctx, AuditActions.ApiTokenRevoked, nameof(ApiToken), id, "действует", "отозван", $"{token.Name} ({token.Prefix}…)");
         await db.SaveOrConflictAsync(ct);

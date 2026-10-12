@@ -63,36 +63,10 @@ public sealed class AccountSecurityService(
         return tokens;
     }
 
-    private async Task<UserAccount> ConfirmIdentityAsync(string? password, string? code, CancellationToken ct)
-    {
-        var userId = currentUser.UserId ?? throw new NotFoundException("Пользователь");
-        var user = await db.Users.SingleOrDefaultAsync(u => u.Id == userId && u.Status == UserStatus.Active, ct)
-                   ?? throw new NotFoundException("Пользователь");
-        var now = clock.UtcNow;
-        if (user.IsLockedOut(now))
-        {
-            throw new BusinessRuleException("auth.locked", "Вход временно заблокирован после неудачных попыток. Попробуйте позже.");
-        }
-
-        var passwordOk = user.PasswordHash is not null
-                         && hasher.VerifyHashedPassword(user, user.PasswordHash, password ?? string.Empty) != PasswordVerificationResult.Failed;
-        var codeOk = !user.TwoFactorEnabled || user.VerifyTotp(code, now);
-        if (passwordOk && codeOk)
-        {
-            return user;
-        }
-
-        user.RegisterFailedSignIn(now);
-        await SecurityEvents.AuditAsync(db, currentUser, clock, user, AuditActions.SignInFailed,
-            passwordOk ? "неверный код 2FA при подтверждении действия" : "неверный пароль при подтверждении действия", ct);
-        await db.SaveChangesAsync(ct);
-        if (user.TwoFactorEnabled)
-        {
-            throw new BusinessRuleException("auth.confirm.failed", "Неверный текущий пароль или код из приложения.");
-        }
-
-        throw new BusinessRuleException("auth.confirm.failed", "Неверный текущий пароль.");
-    }
+    /// <summary>Проверка пароля и кода — общая с повторным подтверждением D123 (IdentityConfirmation), поведение прежнее.</summary>
+    private Task<UserAccount> ConfirmIdentityAsync(string? password, string? code, CancellationToken ct) =>
+        IdentityConfirmation.ConfirmAsync(db, hasher, currentUser, clock, password, code,
+            AuditActions.SignInFailed, "неверный пароль при подтверждении действия", "неверный код 2FA при подтверждении действия", ct);
 
     private async Task RevokeDevicesAsync(long userId, CancellationToken ct)
     {

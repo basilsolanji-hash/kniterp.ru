@@ -5,6 +5,7 @@
     D112: права пользователя — что у него есть и откуда (роль, особое право, запрет), особые права и запреты со сроком и причиной.
     Запрет сильнее любого разрешения. Права проверяет сервер; эта панель только показывает и передаёт команды.
 *@
+<StepUpDialog @ref="_stepUp" />
 <section class="panel user-rights" aria-label="@L("Права пользователя")">
     <div class="page-head">
         <h2>@L("Права: {0}", _rights?.Name ?? "…")</h2>
@@ -97,6 +98,8 @@
 </section>
 
 @code {
+    private StepUpDialog? _stepUp;
+
     [Parameter, EditorRequired]
     public long UserId { get; set; }
 
@@ -140,7 +143,7 @@
         _isError = false;
         try
         {
-            await action();
+            await (_stepUp?.RunAsync(action) ?? action()); // D123: повторное подтверждение опасных действий
             _rights = await Access.UserRightsAsync(UserId);
             _message = success;
         }

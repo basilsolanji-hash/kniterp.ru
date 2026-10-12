@@ -7,6 +7,11 @@
     <EmbeddedResource Include="Workspace\Knowledge\*.json" />
   </ItemGroup>
   <ItemGroup>
+    <!-- D123: тесты выдают отметку повторного подтверждения напрямую (StepUpState.Grant), в приложении — только через пароль. -->
+    <InternalsVisibleTo Include="KnitErp.IntegrationTests" />
+    <InternalsVisibleTo Include="KnitErp.UnitTests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\KnitErp.Domain\KnitErp.Domain.csproj" />
   </ItemGroup>
   <ItemGroup>

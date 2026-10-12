@@ -1,3 +1,4 @@
+using KnitErp.Application.Authentication;
 using KnitErp.Application.Common;
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Audit;
@@ -100,8 +101,13 @@ public sealed record RoleColumnDto(long RoleId, string Code, string Name);
 
 public sealed record MatrixRowDto(string PermissionCode, string Label, IReadOnlyList<PermissionLevel> Levels);
 
-/// <summary>Пользователи, роли и назначения прав организации (ТЗ §4.6–4.14).</summary>
-public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)
+/// <summary>
+/// Пользователи, роли и назначения прав организации (ТЗ §4.6–4.14).
+/// D123: опасные действия — выдача и снятие административной роли (в том числе Владельца), особые права управления
+/// пользователями, блокировка и разблокировка, сброс 2FA и ссылка смены пароля — только после повторного подтверждения
+/// паролем (StepUpGuard). Проверка идёт после прав и правил: без права — отказ, а не окно подтверждения.
+/// </summary>
+public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, StepUpGuard stepUp)
 {
     public async Task<IReadOnlyList<UserRowDto>> ListUsersAsync(CancellationToken ct = default)
     {
@@ -297,6 +303,10 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         var role = await FindRoleAsync(ctx, cmd.RoleCode, ct);
         await EnsureMayGrantRoleAsync(ctx, role, cmd.Reason, ct);
         var scopeName = await ResolveScopeAsync(ctx, cmd.DepartmentId, cmd.WarehouseId, ct);
+        if (role.IsAdministrative)
+        {
+            stepUp.Demand(ctx); // D123
+        }
 
         Employee? employee = null;
         if (cmd.EmployeeId is { } employeeId)
@@ -378,6 +388,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
 
         GrantPolicy.EnsureReason(required: true, reason);
         await EnsureAccountActionAllowedAsync(ctx, userId, ct);
+        stepUp.Demand(ctx); // D123
 
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         var token = user.IssuePasswordResetToken(clock.UtcNow, SignInPolicy.AdminPasswordResetLifetime);
@@ -401,6 +412,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
 
         GrantPolicy.EnsureReason(required: true, reason);
         await EnsureAccountActionAllowedAsync(ctx, userId, ct);
+        stepUp.Demand(ctx); // D123
 
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
         user.ResetTwoFactor();
@@ -446,6 +458,11 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             GrantPolicy.EnsureOwnerRemains(owners);
         }
 
+        if (touchesAdmin)
+        {
+            stepUp.Demand(ctx); // D123: выдача и снятие Владельца и Администратора
+        }
+
         foreach (var a in current)
         {
             a.Revoke(ctx.UserId, now);
@@ -466,7 +483,15 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
     /// <summary>Блокировка состава ролей организации до конца транзакции.</summary>
     private static string AccessLock(long organizationId) => $"kniterp.access.{organizationId}";
 
-    public async Task BlockAsync(long userId, string? reason, CancellationToken ct = default)
+    public Task BlockAsync(long userId, string? reason, CancellationToken ct = default) => BlockCoreAsync(userId, reason, dismissal: false, ct);
+
+    /// <summary>
+    /// D123: блокировка уволенного в приказе или при увольнении из карточки. Это отнимает доступ, поэтому повторное подтверждение
+    /// нужно, только если увольняют Владельца или Администратора; прямая блокировка (BlockAsync) подтверждается всегда.
+    /// </summary>
+    internal Task BlockOnDismissalAsync(long userId, string? reason, CancellationToken ct) => BlockCoreAsync(userId, reason, dismissal: true, ct);
+
+    private async Task BlockCoreAsync(long userId, string? reason, bool dismissal, CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
@@ -484,6 +509,11 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             GrantPolicy.EnsureOwnerRemains(await CountActiveOwnersAsync(ctx.OrganizationId, excludeUserId: userId, ct));
         }
 
+        if (!dismissal || await IsAdministratorHereAsync(ctx, userId, ct))
+        {
+            stepUp.Demand(ctx); // D123
+        }
+
         var now = clock.UtcNow;
         member.Block(ctx.UserId, now);
         var user = await db.Users.SingleAsync(u => u.Id == userId, ct);
@@ -499,6 +529,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         var member = await RequireMemberAsync(ctx, userId, ct);
         // Аудит 11.10.2026 (D109): разблокировать Владельца или Администратора может только Владелец — как и заблокировать.
         GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, await IsAdministratorHereAsync(ctx, userId, ct));
+        stepUp.Demand(ctx); // D123
         member.Unblock();
         db.AuditEntries.Add(Audit(ctx, AuditActions.UserUnblocked, userId, "заблокирован", "активен", reason));
         await db.SaveChangesAsync(ct);
@@ -581,6 +612,11 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         }
 
         var assignment = RoleAssignment.ForPermission(ctx.OrganizationId, userId, permissionCode, deny, ctx.UserId, now, reason, until);
+        if (Permissions.IsAdministrative(permissionCode))
+        {
+            stepUp.Demand(ctx); // D123: разрешение или запрет управления пользователями
+        }
+
         db.RoleAssignments.Add(assignment);
         // Права читаются из базы на каждый запрос — действуют сразу, без выхода пользователя из программы.
         db.AuditEntries.Add(Audit(ctx, deny ? AuditActions.PermissionDenied : AuditActions.PermissionGranted, userId, null,
@@ -608,6 +644,11 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         if (a.IsDeny)
         {
             GrantPolicy.EnsureNoEscalation(ctx.Permissions, [(a.PermissionCode!, PermissionLevel.Full)]);
+        }
+
+        if (Permissions.IsAdministrative(a.PermissionCode!))
+        {
+            stepUp.Demand(ctx); // D123
         }
 
         a.Revoke(ctx.UserId, clock.UtcNow);

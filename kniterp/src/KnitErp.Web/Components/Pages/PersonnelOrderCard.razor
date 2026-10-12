@@ -5,6 +5,7 @@
 @inject PersonnelOrderService Orders
 
 <PageTitle>@(_order is null ? L("Кадровый приказ") : L("Приказ № {0}", _order.Number)) — knitERP</PageTitle>
+<StepUpDialog @ref="_stepUp" />
 
 @if (_denied is not null)
 {
@@ -93,6 +94,8 @@ else
 }
 
 @code {
+    private StepUpDialog? _stepUp;
+
     [Parameter]
     public long Id { get; set; }
 
@@ -171,7 +174,7 @@ else
         _message = null;
         try
         {
-            await action();
+            await (_stepUp?.RunAsync(action) ?? action()); // D123: повторное подтверждение опасных действий
             _isError = false;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))

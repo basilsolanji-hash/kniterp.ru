@@ -4667,5 +4667,12 @@
   "сумма в работе": "ishdagi summa",
   "факт / план месяца": "fakt / oy rejasi",
   "черновик": "qoralama",
-  "← К сделке": "← Bitimga"
+  "← К сделке": "← Bitimga",
+  "Действие меняет доступ к организации. Введите текущий пароль и код из приложения — подтверждение действует 10 минут.": "Amal tashkilotga kirish huquqini o‘zgartiradi. Joriy parolni va ilovadagi kodni kiriting — tasdiq 10 daqiqa amal qiladi.",
+  "Действие меняет доступ к организации. Введите текущий пароль — подтверждение действует 10 минут.": "Amal tashkilotga kirish huquqini o‘zgartiradi. Joriy parolni kiriting — tasdiq 10 daqiqa amal qiladi.",
+  "Действие не выполнено: подтверждение отменено.": "Amal bajarilmadi: tasdiqlash bekor qilindi.",
+  "Действие подтверждено паролем": "Amal parol bilan tasdiqlandi",
+  "Неверный пароль при подтверждении действия": "Amalni tasdiqlashda parol noto‘g‘ri",
+  "Подтвердите действие паролем или кодом из приложения.": "Amalni parol yoki ilovadagi kod bilan tasdiqlang.",
+  "Подтвердите паролем или кодом": "Parol yoki kod bilan tasdiqlang"
 }

@@ -125,6 +125,10 @@ public static class AuditActions
     public const string PasswordChanged = "auth.password.changed";
     public const string BankStatementImported = "money.bank_statement.imported";
     public const string SessionsRevoked = "auth.sessions.revoked";
+
+    /// <summary>D123: повторное подтверждение опасного действия (step-up) — успех и неверный пароль или код.</summary>
+    public const string StepUpConfirmed = "auth.stepup.confirmed";
+    public const string StepUpFailed = "auth.stepup.failed";
     public const string PasswordResetIssued = "access.password_reset.issued";
     public const string EmergencyAccess = "access.emergency";
     public const string DepartmentCreated = "structure.department.created";
