@@ -277,17 +277,24 @@ public sealed class CrmLeadService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var stage = await FirstStageAsync(ctx, cmd.PipelineId, ct);
         var (counterparty, counterpartyCreated) = await CounterpartyForAsync(ctx, lead, cmd.CounterpartyId, ct);
 
-        var contact = await db.CrmContacts.Where(c => c.OrganizationId == ctx.OrganizationId && !c.IsArchived
-                                                      && ((lead.Phone != null && c.Phone == lead.Phone) || (lead.Email != null && c.Email == lead.Email)))
-            .OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
+        // D128: тот же телефон или почта ищутся только среди контактов, видимых пользователю (CrmAccess.Contacts): иначе новая сделка
+        // привязала бы чужой контакт и открыла бы его менеджеру. Совпадение только с невидимым — новый контакт и отметка в журнале
+        // без подробностей о чужом.
+        var sameContact = (IQueryable<CrmContact> q) => q.Where(c => !c.IsArchived
+                                                                     && ((lead.Phone != null && c.Phone == lead.Phone) || (lead.Email != null && c.Email == lead.Email)));
+        var contact = await sameContact(CrmAccess.Contacts(db, ctx)).OrderBy(c => c.Id).FirstOrDefaultAsync(ct);
         var contactCreated = contact is null;
         if (contact is null)
         {
+            var hiddenDuplicate = !CrmAccess.SeesAll(ctx)
+                                  && await sameContact(db.CrmContacts.Where(c => c.OrganizationId == ctx.OrganizationId)).AnyAsync(ct);
             contact = CrmContact.Create(ctx.OrganizationId, new CrmContactValues(lead.ContactName, null, counterparty.Id, lead.Phone, lead.Email, lead.Messenger,
                 $"Из лида {lead.Number}", lead.ResponsibleUserId), ctx.UserId, clock.UtcNow);
             db.CrmContacts.Add(contact);
             await db.SaveChangesAsync(ct);
-            Audit(ctx, AuditActions.CrmContactCreated, contact.Id, null, contact.Describe(), $"квалификация {lead.Number}", nameof(CrmContact));
+            Audit(ctx, AuditActions.CrmContactCreated, contact.Id, null, contact.Describe(),
+                hiddenDuplicate ? $"квалификация {lead.Number}; возможный дубль у другого ответственного" : $"квалификация {lead.Number}",
+                nameof(CrmContact));
         }
 
         var amounts = ctx.Permissions.Has(Permissions.PriceView);

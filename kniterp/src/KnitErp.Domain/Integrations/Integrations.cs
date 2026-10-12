@@ -269,6 +269,18 @@ public sealed class WebhookDelivery
         NextAttemptAtUtc = nowUtc + Backoff[Attempts - 1];
     }
 
+    /// <summary>
+    /// D128: доставка не отправляется и не повторяется — создатель подписки заблокирован или лишился прав на событие.
+    /// Статус «не доставлено» с причиной виден в списке доставок.
+    /// </summary>
+    public void Skip(string reason, DateTime nowUtc)
+    {
+        Status = WebhookDeliveryStatus.Failed;
+        LastStatusCode = null;
+        LastError = reason.Length > ErrorMaxLength ? reason[..ErrorMaxLength] : reason;
+        NextAttemptAtUtc = nowUtc;
+    }
+
     /// <summary>Подпись: HMAC-SHA256 от «метка_времени.тело» секретом подписки, в hex. Получатель проверяет её и свежесть метки.</summary>
     public static string Sign(string secret, long timestamp, string body) =>
         Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes($"{timestamp}.{body}"))).ToLowerInvariant();
@@ -334,4 +346,39 @@ public static class WebhookEvents
     public static IReadOnlyList<(string Event, string Title)> All => ByAuditAction.Values.OrderBy(v => v.Event, StringComparer.Ordinal).ToList();
 
     public static bool IsKnown(string eventType) => ByAuditAction.Values.Any(v => v.Event == eventType);
+
+    /// <summary>
+    /// D128: права, без которых на событие нельзя подписаться и без которых создателю подписки события не отправляются: просмотр
+    /// модуля события, а для денежных событий — ещё «Цены и суммы». «ping» прав не требует.
+    /// </summary>
+    public static IReadOnlyList<string> RequiredPermissions(string eventType) => eventType switch
+    {
+        Ping => [],
+        "customer_payment.created" => [Access.Permissions.SalesView, Access.Permissions.PriceView],
+        "supplier_payment.created" => [Access.Permissions.PurchaseView, Access.Permissions.PriceView],
+        "money_operation.created" or "expense_report.approved" => [Access.Permissions.PriceView],
+        _ when eventType.StartsWith("sales_order.", StringComparison.Ordinal) => [Access.Permissions.SalesView],
+        _ when eventType.StartsWith("purchase_order.", StringComparison.Ordinal) => [Access.Permissions.PurchaseView],
+        _ when eventType.StartsWith("stock_", StringComparison.Ordinal) => [Access.Permissions.WarehouseReportView],
+        _ when eventType.StartsWith("crm.", StringComparison.Ordinal) => [Access.Permissions.CrmView],
+        // Новое событие без явного правила — только тому, кто видит всё, что видит Владелец: безопасный отказ по умолчанию.
+        _ => [Access.Permissions.AdminGrant],
+    };
+
+    /// <summary>
+    /// D128: краткое описание в теле события — без сумм. У денежных событий в журнале «номер: сумма» или «номер: контрагент» —
+    /// остаётся только номер документа (часть до двоеточия); сами данные получатель берёт через API со своими правами.
+    /// </summary>
+    public static string? SafeSummary(string eventType, string? reason)
+    {
+        if (reason is null)
+        {
+            return null;
+        }
+
+        return eventType is "sales_order.confirmed" or "purchase_order.confirmed" or "expense_report.approved" or "customer_payment.created"
+            or "supplier_payment.created" or "money_operation.created"
+            ? reason.Split(':', 2)[0].Trim()
+            : reason;
+    }
 }

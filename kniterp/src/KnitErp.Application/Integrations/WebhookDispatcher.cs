@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KnitErp.Application.Access;
 using KnitErp.Application.Common;
+using KnitErp.Domain.Access;
 using KnitErp.Domain.Integrations;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,6 +21,9 @@ public interface IWebhookSender
 /// позиции подписки; идентификатор события детерминирован (подписка + запись журнала), повторная постановка дубля не создаёт.
 /// Шаг 2 — отправить подошедшие доставки: подпись HMAC-SHA256, при ошибке — повтор с паузой (WebhookDelivery.Backoff).
 /// Порядок: Sequence — номер записи журнала, получатель упорядочивает по нему и отбрасывает дубли по X-KnitErp-Delivery.
+/// D128: событие уходит, только пока создатель подписки — активный участник организации с правами на это событие
+/// (WebhookEvents.RequiredPermissions); иначе доставка сразу получает статус «не доставлено» с причиной и не отправляется.
+/// В теле события нет сумм (WebhookEvents.SafeSummary).
 /// </summary>
 public sealed class WebhookDispatcher(IKnitErpDbContext db, IWebhookSender sender, IClock clock)
 {
@@ -34,6 +39,7 @@ public sealed class WebhookDispatcher(IKnitErpDbContext db, IWebhookSender sende
         var actions = WebhookEvents.ByAuditAction.Keys.ToList();
         var now = clock.UtcNow;
         var added = 0;
+        var rights = new CreatorRights(db, clock);
         foreach (var w in subscriptions)
         {
             var entries = await db.AuditEntries.AsNoTracking()
@@ -56,8 +62,15 @@ public sealed class WebhookDispatcher(IKnitErpDbContext db, IWebhookSender sende
                 }
 
                 var eventId = EventId(w.Id, a.Id);
-                db.WebhookDeliveries.Add(WebhookDelivery.Create(w.OrganizationId, w.Id, eventId, type, a.Id,
-                    Payload(eventId, type, a.Id, a.OccurredAtUtc, a.EntityType, a.EntityId, a.Reason), now));
+                var delivery = WebhookDelivery.Create(w.OrganizationId, w.Id, eventId, type, a.Id,
+                    Payload(eventId, type, a.Id, a.OccurredAtUtc, a.EntityType, a.EntityId, WebhookEvents.SafeSummary(type, a.Reason)), now);
+                db.WebhookDeliveries.Add(delivery);
+                if (await rights.DenialAsync(w, type, ct) is { } denial)
+                {
+                    delivery.Skip(denial, now);
+                    continue;
+                }
+
                 added++;
             }
 
@@ -84,12 +97,21 @@ public sealed class WebhookDispatcher(IKnitErpDbContext db, IWebhookSender sende
         var ids = due.Select(d => d.SubscriptionId).Distinct().ToList();
         var subscriptions = await db.WebhookSubscriptions.AsNoTracking().Where(w => ids.Contains(w.Id)).ToDictionaryAsync(w => w.Id, ct);
         var ok = 0;
+        var rights = new CreatorRights(db, clock);
         foreach (var d in due)
         {
             var w = subscriptions[d.SubscriptionId];
             if (!w.IsActive)
             {
                 d.FailedAttempt(null, "Подписка выключена.", clock.UtcNow);
+                continue;
+            }
+
+            // D128: создатель мог быть заблокирован или лишиться прав после постановки события в доставку.
+            if (await rights.DenialAsync(w, d.EventType, ct) is { } denial)
+            {
+                d.Skip(denial, clock.UtcNow);
+                await db.SaveChangesAsync(ct);
                 continue;
             }
 
@@ -129,6 +151,47 @@ public sealed class WebhookDispatcher(IKnitErpDbContext db, IWebhookSender sende
             occurredAt = DateTime.SpecifyKind(occurredAtUtc, DateTimeKind.Utc),
             data = entity is null ? null : new { entity, id = entityId, summary },
         });
+
+    /// <summary>Права создателя подписки — читаются из базы один раз на подписку за проход (блокировка и отзыв действуют сразу).</summary>
+    private sealed class CreatorRights(IKnitErpDbContext db, IClock clock)
+    {
+        private readonly Dictionary<(long User, long Organization), EffectivePermissionSet> _cache = new();
+
+        /// <summary>Причина не отправлять событие или null, если отправлять можно.</summary>
+        public async Task<string?> DenialAsync(WebhookSubscription w, string eventType, CancellationToken ct)
+        {
+            var key = (w.CreatedByUserId, w.OrganizationId);
+            if (!_cache.TryGetValue(key, out var set))
+            {
+                // LoadAsync даёт пустые права заблокированному пользователю или участнику; текущий пользователь здесь не нужен.
+                set = await new AccessGuard(db, NoUser.Instance, clock).LoadAsync(w.CreatedByUserId, w.OrganizationId, ct);
+                _cache[key] = set;
+            }
+
+            if (!set.GrantedCodes.Any())
+            {
+                return "Не отправлено: создатель подписки заблокирован или не состоит в организации.";
+            }
+
+            return WebhookEvents.RequiredPermissions(eventType).FirstOrDefault(p => !set.Has(p)) is { } missing
+                ? $"Не отправлено: у создателя подписки нет права «{Permissions.Describe(missing)}»."
+                : null;
+        }
+    }
+
+    private sealed class NoUser : ICurrentUser
+    {
+        public static readonly NoUser Instance = new();
+
+        public long? UserId => null;
+        public long? OrganizationId => null;
+        public string? CorrelationId => null;
+        public string? ClientAddress => null;
+        public string? UserAgent => null;
+        public Guid? SessionId => null;
+        public IReadOnlyCollection<string>? ApiScope => null;
+        public long? ApiTokenId => null;
+    }
 
     /// <summary>Детерминированный идентификатор события: одна запись журнала даёт подписке ровно одно событие.</summary>
     public static Guid EventId(long subscriptionId, long auditId)

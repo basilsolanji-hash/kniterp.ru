@@ -136,6 +136,163 @@ public sealed class AccessCoreTests(SqlTestHost host) : IClassFixture<SqlTestHos
         Assert.Equal(org.OwnerUserId, entry.ActorUserId);
     }
 
+    /// <summary>
+    /// D128 (аудит 12.10.2026): выдающий со своей областью (склад) не выдаёт право на всю организацию и на чужой склад, не создаёт
+    /// роль выше своего уровня, не выдаёт особое право «Д» и не меняет свою роль; Владелец может всё.
+    /// </summary>
+    [SqlFact]
+    public async Task Scoped_grantor_cannot_grant_outside_own_scope_or_change_own_role()
+    {
+        var org = await CreateOrganizationAsync();
+        long w1, w2, scopedRole, reportsRole;
+        string scopedCode, reportsCode;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            w1 = await s.Warehouses.CreateWarehouseAsync("Склад 1", null);
+            w2 = await s.Warehouses.CreateWarehouseAsync("Склад 2", null);
+            scopedRole = await s.Roles.CreateAsync("Управляющий складом", null,
+                [Permissions.UserManage, Permissions.UserView, Permissions.WarehouseReportView]);
+            reportsRole = await s.Roles.CreateAsync("Отчёты склада", null, [Permissions.WarehouseReportView]);
+            scopedCode = (await s.Db.Roles.AsNoTracking().SingleAsync(r => r.Id == scopedRole)).Code;
+            reportsCode = (await s.Db.Roles.AsNoTracking().SingleAsync(r => r.Id == reportsRole)).Code;
+        }
+
+        var grantor = await InviteActiveAsync(org, scopedCode, "Управляющий складом 1", warehouseId: w1);
+
+        long colleague;
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            // Своя область — склад 1: на всю организацию и на склад 2 выдать нельзя.
+            Assert.Equal("access.escalation.scope", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.InviteAsync(new InviteUserCommand("wide@test.local", "Вся организация", reportsCode, null)))).Code);
+            Assert.Equal("access.escalation.scope", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.InviteAsync(new InviteUserCommand("other@test.local", "Чужой склад", reportsCode, null, WarehouseId: w2)))).Code);
+            colleague = (await s.Access.InviteAsync(new InviteUserCommand("own@test.local", "Свой склад", reportsCode, null, WarehouseId: w1))).UserId;
+        }
+
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            // Смена роли с расширением области — тоже отказ.
+            Assert.Equal("access.escalation.scope", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.ChangeRoleAsync(new ChangeRoleCommand(colleague, reportsCode, null, WarehouseId: w2)))).Code);
+        }
+
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            // Своя роль даёт «Д» на всю организацию — выше своего «О».
+            Assert.Equal("access.escalation.scope", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Roles.CreateAsync("Отчёты всех складов", null, [Permissions.WarehouseReportView]))).Code);
+        }
+
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            // Особое право — «Д» на всю организацию.
+            Assert.Equal("access.escalation.scope", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.GrantIndividualAsync(colleague, Permissions.WarehouseReportView, false, null, "тест"))).Code);
+        }
+
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            // Свою роль и область не меняют даже в пределах своей области.
+            Assert.Equal("access.role.self", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.ChangeRoleAsync(new ChangeRoleCommand(grantor, reportsCode, null, WarehouseId: w1)))).Code);
+        }
+
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            // Владелец может всё: склад 2, вся организация, особое право.
+            await s.Access.ChangeRoleAsync(new ChangeRoleCommand(colleague, reportsCode, null, WarehouseId: w2));
+        }
+
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            await s.Access.ChangeRoleAsync(new ChangeRoleCommand(colleague, reportsCode, null));
+            await s.Access.GrantIndividualAsync(colleague, Permissions.WarehouseReportView, false, null, "тест");
+        }
+
+        await using var db = host.NewDb();
+        Assert.Equal(1, await db.RoleAssignments.CountAsync(a => a.OrganizationId == org.OrganizationId && a.UserId == colleague
+                                                              && a.RoleId == reportsRole && a.RevokedAtUtc == null && a.WarehouseId == null));
+    }
+
+    /// <summary>D128: область подразделения включает вложенные — в дочернее можно, в соседнее нельзя.</summary>
+    [SqlFact]
+    public async Task Department_scoped_grantor_grants_only_inside_own_subtree()
+    {
+        var org = await CreateOrganizationAsync();
+        long shop, sewing, office;
+        string grantorRole, viewRole;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            shop = await s.Structure.CreateDepartmentAsync("Цех", null);
+            sewing = await s.Structure.CreateDepartmentAsync("Швейный участок", shop);
+            office = await s.Structure.CreateDepartmentAsync("Офис", null);
+            var g = await s.Roles.CreateAsync("Начальник цеха (кадры)", null, [Permissions.UserManage, Permissions.UserView, Permissions.DepartmentView]);
+            var v = await s.Roles.CreateAsync("Структура", null, [Permissions.DepartmentView]);
+            grantorRole = (await s.Db.Roles.AsNoTracking().SingleAsync(r => r.Id == g)).Code;
+            viewRole = (await s.Db.Roles.AsNoTracking().SingleAsync(r => r.Id == v)).Code;
+        }
+
+        var grantor = await InviteActiveAsync(org, grantorRole, "Начальник цеха", departmentId: shop);
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            await s.Access.InviteAsync(new InviteUserCommand("sewing@test.local", "Мастер участка", viewRole, null, DepartmentId: sewing));
+        }
+
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            Assert.Equal("access.escalation.scope", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.InviteAsync(new InviteUserCommand("office@test.local", "Офис", viewRole, null, DepartmentId: office)))).Code);
+        }
+    }
+
+    /// <summary>D128: право «Ч» (только чтение) не даёт выдать то же право с изменением («Д») ни ролью, ни особым правом.</summary>
+    [SqlFact]
+    public async Task Read_only_grantor_cannot_grant_full_level()
+    {
+        var org = await CreateOrganizationAsync();
+        string grantorRole, salesRole;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            var g = await s.Roles.CreateAsync("Кадровик продаж", null, [Permissions.UserManage, Permissions.UserView, Permissions.SalesView]);
+            var v = await s.Roles.CreateAsync("Продажи", null, [Permissions.SalesView]);
+            grantorRole = (await s.Db.Roles.AsNoTracking().SingleAsync(r => r.Id == g)).Code;
+            salesRole = (await s.Db.Roles.AsNoTracking().SingleAsync(r => r.Id == v)).Code;
+        }
+
+        await using (var db = host.NewDb())
+        {
+            // Уровень «Ч» в своей роли задаётся только настройкой организации — здесь напрямую.
+            var role = await db.Roles.Include(r => r.Permissions).SingleAsync(r => r.Code == grantorRole);
+            role.Toggle(Permissions.SalesView, PermissionLevel.ReadOnly, false);
+            await db.SaveChangesAsync();
+            role.Toggle(Permissions.SalesView, PermissionLevel.ReadOnly, true);
+            await db.SaveChangesAsync();
+        }
+
+        var grantor = await InviteActiveAsync(org, grantorRole, "Только чтение");
+        var target = await InviteActiveAsync(org, SystemRoles.Employee, "Сотрудник");
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            Assert.Equal("access.escalation", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.InviteAsync(new InviteUserCommand("sales@test.local", "Продажи", salesRole, null)))).Code);
+        }
+
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            Assert.Equal("access.escalation", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Access.GrantIndividualAsync(target, Permissions.SalesView, false, null, "тест"))).Code);
+        }
+
+        await using (var s = host.As(grantor, org.OrganizationId))
+        {
+            Assert.Equal("access.escalation", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Roles.CreateAsync("Продажи 2", null, [Permissions.SalesView]))).Code);
+            var options = await s.Access.ListGrantableRolesAsync();
+            Assert.False(options.Single(o => o.Code == salesRole).Allowed);
+        }
+    }
+
     [SqlFact]
     public async Task Blocked_user_loses_access_on_next_request()
     {
@@ -230,14 +387,15 @@ public sealed class AccessCoreTests(SqlTestHost host) : IClassFixture<SqlTestHos
     }
 
     /// <summary>Приглашение от имени владельца и активация без входа — для тестов прав, не самого входа.</summary>
-    private async Task<long> InviteActiveAsync(CreatedOrganization org, string roleCode, string? name = null)
+    private async Task<long> InviteActiveAsync(CreatedOrganization org, string roleCode, string? name = null, long? warehouseId = null,
+        long? departmentId = null)
     {
         long id;
         await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
         {
             id = (await s.Access.InviteAsync(new InviteUserCommand(
                 $"{roleCode}-{Guid.NewGuid():N}@test.local", name ?? SystemRoles.NameOf(roleCode), roleCode,
-                SystemRoles.IsAdministrative(roleCode) ? "Тест" : null))).UserId;
+                "Тест", DepartmentId: departmentId, WarehouseId: warehouseId))).UserId;
         }
 
         await using var db = host.NewDb();

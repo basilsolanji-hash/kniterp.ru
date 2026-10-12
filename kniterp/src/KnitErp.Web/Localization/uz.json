@@ -5614,5 +5614,9 @@
   "Перезагрузить": "Qayta yuklash",
   "Произошла ошибка, страница перестала отвечать. Введённые и не сохранённые данные могли не сохраниться.": "Xatolik yuz berdi, sahifa javob bermayapti. Kiritilgan va saqlanmagan ma’lumotlar saqlanmagan bo‘lishi mumkin.",
   "Что уже сделано, чтобы фабрика работала в программе. Пункты проверяются по данным; последние два — вручную, по чек-листу администратора сервера.": "Fabrika dasturda ishlashi uchun nimalar qilindi. Bandlar ma’lumotlar bo‘yicha tekshiriladi; oxirgi ikkitasi — qo‘lda, server administratorining ro‘yxati bo‘yicha.",
-  "Фильтры": "Filtrlar"
+  "Фильтры": "Filtrlar",
+  "Нельзя выдать право за пределами своей области: «{0}».": "Oʻz sohangizdan tashqarida huquq berib boʻlmaydi: «{0}».",
+  "Нельзя выдать право на всю организацию: «{0}» у вас только в своей области.": "Butun tashkilotga huquq berib boʻlmaydi: «{0}» sizda faqat oʻz sohangizda.",
+  "Нельзя подписаться на событие «{0}»: нет права «{1}».": "«{0}» hodisasiga obuna boʻlib boʻlmaydi: «{1}» huquqi yoʻq.",
+  "Свою роль меняет другой администратор или Владелец.": "Oʻz rolingizni boshqa administrator yoki Ega oʻzgartiradi."
 }
