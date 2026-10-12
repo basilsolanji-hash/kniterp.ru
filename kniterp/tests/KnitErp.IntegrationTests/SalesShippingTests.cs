@@ -78,10 +78,10 @@ public sealed class SalesShippingTests(SqlTestHost host) : IClassFixture<SqlTest
             Assert.Equal(PickListStatus.Cancelled, (await s.Sales.GetPickListAsync(next)).Status);
         }
 
-        // Кладовщик чужого склада задание не видит и отметить не может; другая организация — 404.
+        // Кладовщик чужого склада видит задание (продажи он смотрит), но отметить сборку не может; другая организация — 404.
         await using (var x = host.As(f.Stranger, f.Org.OrganizationId))
         {
-            await Assert.ThrowsAsync<NotFoundException>(() => x.Sales.GetPickListAsync(list));
+            Assert.False((await x.Sales.GetPickListAsync(list)).CanPick);
             await Assert.ThrowsAsync<NotFoundException>(() => x.Sales.PickAllAsync(list, [0, 0, 0, 0, 0, 0, 0, 1]));
         }
 
@@ -171,10 +171,10 @@ public sealed class SalesShippingTests(SqlTestHost host) : IClassFixture<SqlTest
         Assert.Equal((ReturnQuality.Quarantine, 3m), (panel.Lines.Single(l => l.ItemId == f.Sweater).Quality, panel.Lines.Single(l => l.ItemId == f.Sweater).DefectQuantity));
 
         await s.Documents.PostAsync(ret, (await s.Documents.GetAsync(ret)).RowVersion);
-        // Свитеры: вернули 4, годных 1 — на складе 1, в карантине 3. Шапки: вернули 5, 2 списаны — на складе 3.
+        // Свитеры: вернули 4, годных 1 — на складе 1, в карантине 3. Шапки: было 10, отгрузили 5, вернули 5, 2 списаны — на складе 8.
         Assert.Equal(1m, await BalanceAsync(f, f.Store, f.Sweater));
         Assert.Equal(3m, await BalanceAsync(f, f.Quarantine, f.Sweater));
-        Assert.Equal(3m, await BalanceAsync(f, f.Store, f.Hat));
+        Assert.Equal(8m, await BalanceAsync(f, f.Store, f.Hat));
         Assert.Equal(0m, await BalanceAsync(f, f.Quarantine, f.Hat));
         panel = (await s.Sales.StockDocumentPanelAsync(ret)).Return!;
         Assert.NotNull(panel.TransferDocumentId);
@@ -287,7 +287,7 @@ public sealed class SalesShippingTests(SqlTestHost host) : IClassFixture<SqlTest
         {
             Assert.Equal("sales.marking.gtin_mismatch", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Sales.ScanMarkingCodeAsync(ship, Code(OtherGtin, "AAAAAAAAAAAAA")))).Code);
-            Assert.Equal("sales.marking.format", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Sales.ScanMarkingCodeAsync(ship, "4601234567886")))).Code);
+            Assert.Equal("sales.marking.format", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Sales.ScanMarkingCodeAsync(ship, "4601234567886"))).Code);
             Assert.Equal("СВ-М", await k.Sales.ScanMarkingCodeAsync(ship, "]d2" + Code(Gtin, "SER0000000001") + "\u001d91EE10\u001d92abc"));
             Assert.Equal("sales.marking.duplicate", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Sales.ScanMarkingCodeAsync(ship, Code(Gtin, "SER0000000001")))).Code);

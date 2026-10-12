@@ -93,29 +93,17 @@ internal static class SalesShippingHooks
     }
 
     /// <summary>
-    /// Сторно: отгрузки — её коды освобождаются; возврата — освобождённые им коды снова проданы. Возврат с оформленным браком
-    /// сторнируется только после сторно перемещения в карантин и списания — иначе брак остался бы списанным дважды.
+    /// Перед сторно (D1159, D1153): отгрузку заказа, по которому уже проведён возврат, не сторнируют — исправление отдельным документом;
+    /// возврат с оформленным браком сторнируется только после сторно перемещения в карантин и списания.
     /// </summary>
-    public static async Task AfterReverseAsync(IKnitErpDbContext db, AccessContext ctx, StockDocument doc, DateTime nowUtc, CancellationToken ct)
+    public static async Task BeforeReverseAsync(IKnitErpDbContext db, AccessContext ctx, StockDocument doc, CancellationToken ct)
     {
-        if (doc.Kind == StockOperationKind.Shipment)
+        if (doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } orderId
+            && await db.StockDocuments.AnyAsync(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId == orderId
+                                                     && d.Kind == StockOperationKind.CustomerReturn && d.Status == StockDocumentStatus.Posted, ct))
         {
-            // D1159: по заказу уже есть проведённый возврат — исправление отгрузки только отдельным документом (возвратом), не сторно.
-            if (doc.SalesOrderId is { } orderId && await db.StockDocuments.AnyAsync(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId == orderId
-                    && d.Kind == StockOperationKind.CustomerReturn && d.Status == StockDocumentStatus.Posted, ct))
-            {
-                throw new BusinessRuleException("sales.shipment.reverse_after_return",
-                    "По заказу уже оформлен возврат от покупателя — сторно отгрузки запрещено. Исправляйте отдельным документом возврата.");
-            }
-
-            foreach (var code in await db.SalesMarkingCodes.Where(c => c.OrganizationId == ctx.OrganizationId && c.StockDocumentId == doc.Id && c.IsSold)
-                         .ToListAsync(ct))
-            {
-                code.Release(doc.Id, nowUtc);
-            }
-
-            await db.SaveChangesAsync(ct);
-            return;
+            throw new BusinessRuleException("sales.shipment.reverse_after_return",
+                "По заказу уже оформлен возврат от покупателя — сторно отгрузки запрещено. Исправляйте отдельным документом возврата.");
         }
 
         if (doc.Kind != StockOperationKind.CustomerReturn)
@@ -130,6 +118,27 @@ internal static class SalesShippingHooks
         {
             throw new BusinessRuleException("sales.return.defects_posted",
                 "По возврату оформлен брак — сначала сторнируйте перемещение в карантин и списание брака, затем сам возврат.");
+        }
+    }
+
+    /// <summary>Сторно: отгрузки — её коды освобождаются; возврата — освобождённые им коды снова проданы.</summary>
+    public static async Task AfterReverseAsync(IKnitErpDbContext db, AccessContext ctx, StockDocument doc, DateTime nowUtc, CancellationToken ct)
+    {
+        if (doc.Kind == StockOperationKind.Shipment)
+        {
+            foreach (var code in await db.SalesMarkingCodes.Where(c => c.OrganizationId == ctx.OrganizationId && c.StockDocumentId == doc.Id && c.IsSold)
+                         .ToListAsync(ct))
+            {
+                code.Release(doc.Id, nowUtc);
+            }
+
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        if (doc.Kind != StockOperationKind.CustomerReturn)
+        {
+            return;
         }
 
         foreach (var code in await db.SalesMarkingCodes.Where(c => c.OrganizationId == ctx.OrganizationId && c.ReleasedByDocumentId == doc.Id && !c.IsSold)

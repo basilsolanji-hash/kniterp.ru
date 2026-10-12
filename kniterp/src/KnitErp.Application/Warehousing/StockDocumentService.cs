@@ -468,6 +468,7 @@ public sealed class StockDocumentService(
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.DocumentDate, ct);
+        await KnitErp.Application.Sales.SalesShippingHooks.BeforeReverseAsync(db, ctx, doc, ct); // D1153, D1159 (сессия «Продажи»)
         var batchMoves = doc.Status == StockDocumentStatus.Posted ? await StockBatchLedger.PlanReverseAsync(db, ctx, doc, ct) : [];
         doc.Reverse(ctx.UserId, reason, clock.UtcNow);
 
