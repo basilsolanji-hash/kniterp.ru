@@ -1,6 +1,10 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Playwright;
 
+// Каждый класс тестов поднимает свой сервер приложения и браузер; по умолчанию xUnit гоняет столько классов, сколько ядер (4 в CI
+// и в среде разработки) — сервер не успевает, и при полном прогоне падает случайный тест. Два класса одновременно — без таких сбоев.
+[assembly: Xunit.CollectionBehavior(MaxParallelThreads = 2)]
+
 namespace KnitErp.E2ETests;
 
 /// <summary>

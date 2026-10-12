@@ -397,7 +397,7 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
             await worker.SetViewportSizeAsync(390, 844);
             await worker.GotoAsync(link);
             await Expect(worker.GetByRole(AriaRole.Heading, new() { Name = "Анкета сотрудника" })).ToBeVisibleAsync();
-            await Expect(worker.GetByText("Петрова Анна Сергеевна")).ToBeVisibleAsync();
+            await Expect(worker.GetByText("Петрова Анна Сергеевна").First).ToBeVisibleAsync();
             Assert.True(await NoHorizontalScrollAsync(worker), "Горизонтальная прокрутка на анкете");
             await worker.GetByLabel("СНИЛС", new() { Exact = true }).FillAsync("112-233-445 95");
             await worker.GetByLabel("Телефон").FillAsync("+7 900 000-00-09");
