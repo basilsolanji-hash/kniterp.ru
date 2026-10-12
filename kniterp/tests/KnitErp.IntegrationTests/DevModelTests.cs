@@ -26,6 +26,13 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         return (new DevModelService(all.Db, guard, user, host.Clock), new DevSettingsService(all.Db, guard, user, host.Clock), all);
     }
 
+    private async Task<int> SaveCostAsync(long userId, long organizationId, long modelId)
+    {
+        await using var all = host.As(userId, organizationId);
+        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = host.ClientAddress };
+        return await new DevCostService(all.Db, new AccessGuard(all.Db, user, host.Clock), user, host.Clock).SaveAsync(modelId, new DevCostScenario());
+    }
+
     private static DevModelHeader Header(string name = "Свитер «Северный»", long? collection = null, long? customer = null, bool hasPattern = true,
         DateOnly? launch = null, IReadOnlyDictionary<DevRole, long?>? assignees = null) =>
         new(name, collection, DevCategory.Sweater, DevAudience.Women, false, hasPattern, customer, null, launch ?? new DateOnly(2026, 12, 15),
@@ -191,6 +198,11 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await using var __ = s;
             var m = await models.GetAsync(id);
             Assert.Equal((900m, 2500m, "уточнено технологом"), (m.Brief.TargetCost!.Value, m.Brief.TargetPrice!.Value, m.Brief.Description!));
+            // D746: без сохранённого расчёта себестоимости утвердить нельзя.
+            Assert.Equal("dev.approve.cost", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                models.MoveAsync(id, DevStage.Approved, "образец принят", m.RowVersion))).Code);
+            await SaveCostAsync(chief, org.OrganizationId, id);
+            m = await models.GetAsync(id);
             await models.MoveAsync(id, DevStage.Approved, "образец принят", m.RowVersion);
             m = await models.GetAsync(id);
             Assert.Equal(DevStage.Approved, m.Stage);

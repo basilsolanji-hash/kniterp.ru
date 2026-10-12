@@ -69,7 +69,8 @@ public sealed record DevCompletenessDto(IReadOnlyList<DevSectionDto> Sections, i
 public sealed record DevSectionDto(string Name, bool Done);
 
 /// <summary>Условия расчёта себестоимости (D740, D742): видит `dev.cost.view`, меняет ещё и `dev.settings`.</summary>
-public sealed record DevCostSettingsDto(decimal YarnWastePercent, decimal OverheadPercent, decimal? LaborRatePerMinute, decimal MarkupPercent, bool CanEdit);
+public sealed record DevCostSettingsDto(decimal YarnWastePercent, decimal OverheadPercent, decimal? LaborRatePerMinute, decimal MarkupPercent, bool CanEdit,
+    bool RequireCostForApproval = true, decimal? MinMarginPercent = null);
 
 /// <summary>
 /// Изменённая ячейка таблицы (D720): строка (деталь, точка, размер для упаковки), столбец (размер; 0 — нет), поле (0 — длина с машины или

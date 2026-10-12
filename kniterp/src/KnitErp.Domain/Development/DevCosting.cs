@@ -218,3 +218,25 @@ public sealed class DevCostLine
     public decimal UnitPrice { get; private set; }
     public decimal Amount { get; private set; }
 }
+
+/// <summary>
+/// Правило утверждения (D746): без сохранённого расчёта — нельзя (если так настроено); маржа последней версии ниже порога — только
+/// с обоснованием в комментарии к переходу. Возвращает причину отказа или null.
+/// </summary>
+public static class DevApprovalRules
+{
+    public static string? Check(bool requireCost, decimal? minMarginPercent, bool hasRun, decimal? lastMarginPercent, string? comment)
+    {
+        if (requireCost && !hasRun)
+        {
+            return "Перед утверждением сохраните расчёт себестоимости (вкладка «Себестоимость»).";
+        }
+
+        if (hasRun && minMarginPercent is { } min && (lastMarginPercent ?? decimal.MinValue) < min && string.IsNullOrWhiteSpace(comment))
+        {
+            return $"Маржа последнего расчёта ниже порога {min:0.##} % — укажите обоснование в комментарии к переходу.";
+        }
+
+        return null;
+    }
+}

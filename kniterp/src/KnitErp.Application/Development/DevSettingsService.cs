@@ -228,12 +228,13 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
     {
         var ctx = await guard.DemandAsync(Permissions.DevCostView, ct);
         var s = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct) ?? DevSettings.Defaults(ctx.OrganizationId);
-        return new DevCostSettingsDto(s.YarnWastePercent, s.OverheadPercent, s.LaborRatePerMinute, s.MarkupPercent, ctx.Permissions.Has(Permissions.DevSettings));
+        return new DevCostSettingsDto(s.YarnWastePercent, s.OverheadPercent, s.LaborRatePerMinute, s.MarkupPercent, ctx.Permissions.Has(Permissions.DevSettings),
+            s.RequireCostForApproval, s.MinMarginPercent);
     }
 
     /// <summary>Условия расчёта себестоимости; в журнал — что изменены, без сумм ставки.</summary>
     public async Task SaveCostSettingsAsync(decimal yarnWastePercent, decimal overheadPercent, decimal? laborRatePerMinute, decimal markupPercent,
-        CancellationToken ct = default)
+        bool requireCostForApproval = true, decimal? minMarginPercent = null, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
         await guard.DemandAsync(Permissions.DevCostView, ct);
@@ -243,7 +244,7 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
             var settings = await db.DevSettings.SingleOrDefaultAsync(x => x.OrganizationId == org, ct);
             var isNew = settings is null;
             settings ??= DevSettings.Defaults(org);
-            settings.SetCosting(yarnWastePercent, overheadPercent, laborRatePerMinute, markupPercent);
+            settings.SetCosting(yarnWastePercent, overheadPercent, laborRatePerMinute, markupPercent, requireCostForApproval, minMarginPercent);
             if (isNew)
             {
                 db.DevSettings.Add(settings);

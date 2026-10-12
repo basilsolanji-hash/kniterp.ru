@@ -426,7 +426,13 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             Assert.Equal(doc, (await k.Yarn.PreviewAsync(sample)).DocumentId);
 
             // Утвердили — передали: новая позиция, черновик техкарты с нормами и маршрутом, модель «Передано в производство».
-            await k.Models.MoveAsync(model, DevStage.Approved, null, (await k.Models.GetAsync(model)).RowVersion);
+            // D746: порог маржи 20 % — расчёт с нулевыми ценами (маржа 0) утверждается только с обоснованием.
+            await k.Settings.SaveCostSettingsAsync(0, 0, null, 0, true, 20m);
+            await k.Costs.SaveAsync(model, new DevCostScenario());
+            var rv = (await k.Models.GetAsync(model)).RowVersion;
+            Assert.Contains("ниже порога", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Models.MoveAsync(model, DevStage.Approved, null, rv))).Message);
+            await k.Models.MoveAsync(model, DevStage.Approved, "образец для выставки, маржа не важна", (await k.Models.GetAsync(model)).RowVersion);
             p = await k.Handoff.PreviewAsync(model);
             Assert.True(p.CanHandOff, p.Refusal);
             Assert.Null(p.SuggestedSizes); // сетки нет — и размерного ряда в задании нет

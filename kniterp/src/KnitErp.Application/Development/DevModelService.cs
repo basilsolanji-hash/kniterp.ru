@@ -290,6 +290,11 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         {
             var plan = await DevStagePlan.LoadAsync(db, ctx.OrganizationId, ct);
             var before = m.Stage;
+            if (to == DevStage.Approved)
+            {
+                await EnsureApprovableAsync(ctx, m, comment, ct);
+            }
+
             db.DevModelStages.Add(m.MoveTo(to, ctx.Permissions.Has(Permissions.DevApprove), plan.IsEnabled, comment, clock.UtcNow, ctx.UserId));
             Audit(ctx, AuditActions.DevStageChanged, id, DevStages.Name(before), DevStages.Name(to), m.Number);
         }, ct);
@@ -569,6 +574,20 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
     }
 
     /// <summary>Изменение модели: право, своя организация, версия строки, журнал; при отказе изменения забываются (один DbContext вкладки).</summary>
+    /// <summary>D746: утверждение — с сохранённым расчётом себестоимости; маржа ниже порога — с обоснованием.</summary>
+    private async Task EnsureApprovableAsync(AccessContext ctx, DevModel m, string? comment, CancellationToken ct)
+    {
+        var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct)
+                       ?? DevSettings.Defaults(ctx.OrganizationId);
+        var last = await db.DevCostRuns.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId && r.ModelId == m.Id)
+            .OrderByDescending(r => r.Version).Select(r => new { r.Price, r.Margin }).FirstOrDefaultAsync(ct);
+        var marginPercent = last is null || last.Price == 0 ? (decimal?)null : last.Margin * 100m / last.Price;
+        if (DevApprovalRules.Check(settings.RequireCostForApproval, settings.MinMarginPercent, last is not null, marginPercent, comment) is { } refusal)
+        {
+            throw new BusinessRuleException("dev.approve.cost", refusal);
+        }
+    }
+
     private async Task EditAsync(long id, byte[] rowVersion, string permission, Func<AccessContext, DevModel, Task> change, CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(permission, ct);

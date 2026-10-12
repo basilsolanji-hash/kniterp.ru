@@ -120,6 +120,7 @@ else
                             <option value="@((byte)s)">@L(DevStages.Name(s))</option>
                         }
                     </select>
+                    <input @bind="_moveComment" maxlength="@DevModel.ReasonMaxLength" placeholder="@L("комментарий к переходу")" aria-label="@L("Комментарий к переходу")" />
                     <button type="button" class="secondary" @onclick="MoveToSelectedAsync" disabled="@(_busy || _target.Length == 0)">@L("Перевести")</button>
                 </label>
             }
@@ -503,12 +504,19 @@ else
 
     private Task PinAsync(long fileId) => RunAsync(() => Tech.PinSketchAsync(Id, fileId, _model!.RowVersion), L("Эскиз закреплён."));
 
-    private Task MoveAsync(DevStage to) => RunAsync(() => Models.MoveAsync(Id, to, null, _model!.RowVersion), L("Стадия изменена."));
+    private Task MoveAsync(DevStage to) => RunAsync(async () =>
+    {
+        await Models.MoveAsync(Id, to, _moveComment, _model!.RowVersion);
+        _moveComment = null;
+    }, L("Стадия изменена."));
+
+    private string? _moveComment;
 
     private Task MoveToSelectedAsync() => byte.TryParse(_target, out var s)
         ? RunAsync(async () =>
         {
-            await Models.MoveAsync(Id, (DevStage)s, null, _model!.RowVersion);
+            await Models.MoveAsync(Id, (DevStage)s, _moveComment, _model!.RowVersion);
+            _moveComment = null;
             _target = string.Empty;
         }, L("Стадия изменена."))
         : Task.CompletedTask;
