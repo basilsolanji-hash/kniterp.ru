@@ -1,0 +1,240 @@
+@page "/reports/receivables"
+@using KnitErp.Application.Sales
+@inject SalesService Sales
+
+<PageTitle>@L("Дебиторская задолженность") — knitERP</PageTitle>
+<SalesStyles />
+<style>
+    .rcv-table td.num, .rcv-table th.num { text-align: right; white-space: nowrap; }
+    .rcv-table tr.rcv-group > td { background: var(--accent-soft-2); font-weight: 600; }
+    .rcv-table tr.rcv-sub > td { font-weight: 600; border-bottom: 2px solid var(--line); }
+    .rcv-table td.rcv-late { color: var(--warn-text); }
+    .rcv-table td.rcv-actions { white-space: nowrap; text-align: right; }
+    .rcv-table td.rcv-actions a, .rcv-table td.rcv-actions button { margin-left: 6px; }
+    .rcv-letter { margin: 8px 0; }
+    .rcv-letter textarea { width: 100%; box-sizing: border-box; min-height: 220px; font: inherit; font-size: 13px; }
+    .rcv-letter .rcv-letter-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    @@media (max-width: 899px) { .rcv-table .opt { display: none; } }
+    @@media (max-width: 560px) { .rcv-table td.rcv-actions { white-space: normal; text-align: left; } }
+</style>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_report is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Дебиторская задолженность")</h1>
+        <div class="sx-tools">
+            <a class="button secondary" href="@ExportHref" download data-enhance-nav="false" title="@L("Выгрузить с текущими фильтрами")">Excel</a>
+        </div>
+    </div>
+    <p class="sx-lead">@L("Долг покупателя — отгружено и возвращено по ценам заказов с НДС минус оплаты. Оплаты и возвраты гасят самые старые отгрузки; срок оплаты — дата отгрузки плюс отсрочка из соглашения или договора заказа (без отсрочки — в день отгрузки). Менеджер — закреплённый в условиях продаж покупателя, иначе ответственный последнего заказа.")</p>
+    @if (_report.OwnOnly)
+    {
+        <p class="muted">@L("Показаны только ваши покупатели — так настроено для вашей роли.")</p>
+    }
+
+    <form class="sx-form" @onsubmit="ReloadAsync">
+        <label>@L("На дату") <input type="date" @bind="_asOf" /></label>
+        <label>
+            @L("Менеджер")
+            <select @bind="_manager">
+                <option value="">@L("Все")</option>
+                @foreach (var m in _report.Managers)
+                {
+                    <option value="@m.Id">@m.Name</option>
+                }
+                <option value="0">@L("Без менеджера")</option>
+            </select>
+        </label>
+        <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button></div>
+    </form>
+
+    @if (_message is not null)
+    {
+        <div class="flash error" role="alert"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    @if (_letter is not null)
+    {
+        <section class="panel rcv-letter" aria-label="@L("Текст письма покупателю")">
+            <h2 style="margin: 0 0 6px">@L("Письмо покупателю: {0}", _letterCustomer ?? "")</h2>
+            <p class="muted">@L("Скопируйте текст в свою почту — из системы письма не отправляются.")</p>
+            <textarea readonly aria-label="@L("Текст письма")">@_letter</textarea>
+            <div class="rcv-letter-actions">
+                <button type="button" @onclick="CopyAsync">@(_copied ? L("Скопировано") : L("Копировать"))</button>
+                <button type="button" class="secondary" @onclick="() => _letter = null">@L("Закрыть")</button>
+            </div>
+        </section>
+    }
+
+    <div class="scroll">
+        <table class="rcv-table">
+            <thead>
+                <tr>
+                    <th>@L("Покупатель")</th>
+                    <th class="num">@L("Долг")</th>
+                    <th class="num">@L("Не просрочено")</th>
+                    <th class="num opt">@L("1–30 дней")</th>
+                    <th class="num opt">@L("31–60 дней")</th>
+                    <th class="num opt">@L("61–90 дней")</th>
+                    <th class="num opt">@L("Более 90 дней")</th>
+                    <th class="num">@L("Просрочено")</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_report.Groups.Count == 0)
+                {
+                    <tr><td colspan="9" class="muted">@L("Долгов покупателей нет.")</td></tr>
+                }
+                @foreach (var g in _report.Groups)
+                {
+                    <tr class="rcv-group"><td colspan="9">@(g.Manager ?? L("Без менеджера"))</td></tr>
+                    @foreach (var r in g.Rows)
+                    {
+                        <tr>
+                            <td>@r.Customer@if (r.OverdueDays > 0) {<span class="sx-line-flag">@L("до {0} дн.", r.OverdueDays)</span>}</td>
+                            <td class="num"><b>@Amounts.Format(r.Debt)</b></td>
+                            <td class="num">@Amounts.Format(r.NotDue)</td>
+                            <td class="num opt">@Cell(r.Days1To30)</td>
+                            <td class="num opt">@Cell(r.Days31To60)</td>
+                            <td class="num opt">@Cell(r.Days61To90)</td>
+                            <td class="num opt">@Cell(r.Over90)</td>
+                            <td class="@(r.Overdue > 0 ? "num rcv-late" : "num")">@Amounts.Format(r.Overdue)</td>
+                            <td class="rcv-actions">
+                                <a href="settlement-statement?counterparty=@r.CustomerId">@L("Акт сверки")</a>
+                                <button type="button" class="link" @onclick="() => LetterAsync(r)" disabled="@_busy">@L("Текст письма")</button>
+                            </td>
+                        </tr>
+                    }
+                    <tr class="rcv-sub">
+                        <td>@L("Итого по менеджеру")</td>
+                        <td class="num">@Amounts.Format(g.Debt)</td>
+                        <td class="num">@Amounts.Format(g.NotDue)</td>
+                        <td class="num opt">@Amounts.Format(g.Days1To30)</td>
+                        <td class="num opt">@Amounts.Format(g.Days31To60)</td>
+                        <td class="num opt">@Amounts.Format(g.Days61To90)</td>
+                        <td class="num opt">@Amounts.Format(g.Over90)</td>
+                        <td class="num">@Amounts.Format(g.Overdue)</td>
+                        <td></td>
+                    </tr>
+                }
+            </tbody>
+            @if (_report.Groups.Count > 0)
+            {
+                <tfoot>
+                    <tr>
+                        <td><b>@L("Итого")</b></td>
+                        <td class="num"><b>@Amounts.Format(_report.Groups.Sum(g => g.Debt))</b></td>
+                        <td class="num">@Amounts.Format(_report.Groups.Sum(g => g.NotDue))</td>
+                        <td class="num opt">@Amounts.Format(_report.Groups.Sum(g => g.Days1To30))</td>
+                        <td class="num opt">@Amounts.Format(_report.Groups.Sum(g => g.Days31To60))</td>
+                        <td class="num opt">@Amounts.Format(_report.Groups.Sum(g => g.Days61To90))</td>
+                        <td class="num opt">@Amounts.Format(_report.Groups.Sum(g => g.Over90))</td>
+                        <td class="num"><b>@Amounts.Format(_report.Groups.Sum(g => g.Overdue))</b></td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            }
+        </table>
+    </div>
+}
+
+@code {
+    private ReceivablesReportDto? _report;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private DateTime? _asOf;
+    private string _manager = string.Empty;
+    private string? _letter;
+    private string? _letterCustomer;
+    private bool _copied;
+
+    [Inject]
+    private IJSRuntime JS { get; set; } = default!;
+
+    private ReceivablesFilter Filter =>
+        new(_asOf is { } d ? DateOnly.FromDateTime(d) : null, long.TryParse(_manager, out var m) ? m : null);
+
+    private string ExportHref => KnitErp.Web.Exports.ExportLink.Build("reports/receivables.xlsx",
+        ("asOf", KnitErp.Web.Exports.ExportLink.Date(_asOf)), ("manager", _manager));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _report = await Sales.ReceivablesAsync(Filter);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private static string Cell(decimal value) => value == 0 ? "" : Amounts.Format(value);
+
+    private async Task ReloadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            _report = await Sales.ReceivablesAsync(Filter);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>D1113: шаблон письма о долге — только для копирования.</summary>
+    private async Task LetterAsync(ReceivablesRowDto row)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _copied = false;
+        try
+        {
+            _letter = await Sales.OverdueLetterAsync(row.CustomerId, _report?.AsOf);
+            _letterCustomer = row.Customer;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        if (_letter is not null)
+        {
+            _copied = await JS.InvokeAsync<bool>("kniterp.copy", _letter);
+        }
+    }
+}

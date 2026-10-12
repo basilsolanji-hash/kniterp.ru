@@ -1,0 +1,51 @@
+@*
+    D1114: блок главного экрана «Просроченная дебиторка» (подключается ModuleUi.AddDashboardBlock в Program.cs). Данные — своим
+    коротким контекстом (SalesReceivables.DashboardAsync), не контекстом вкладки главного экрана. Без права «Продажи: отчёты» или
+    «Цены и суммы», а также без долгов — блок ничего не выводит.
+*@
+@using KnitErp.Application.Sales
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+
+@if (_data is { Debt: > 0 } d)
+{
+    <section class="dash-box span-4" aria-label="@L("Просроченная дебиторка")">
+        <h2><a href="reports/receivables">@L("Просроченная дебиторка")</a></h2>
+        <div class="mini-stats">
+            <a href="reports/receivables"><b class="@(d.Overdue > 0 ? "warn-text" : "")">@Amounts.Format(d.Overdue)</b><span>@L("Просрочено")</span></a>
+            <a href="reports/receivables"><b>@Amounts.Format(d.Debt)</b><span>@L("Весь долг покупателей")</span></a>
+            <a href="reports/receivables"><b>@d.Customers</b><span>@L("Покупателей с просрочкой")</span></a>
+        </div>
+        @if (d.Top.Count > 0)
+        {
+            <table class="compact">
+                <tbody>
+                    @foreach (var r in d.Top)
+                    {
+                        <tr>
+                            <td>@r.Customer <span class="muted">@L("до {0} дн.", r.OverdueDays)</span></td>
+                            <td class="num warn-text">@Amounts.Format(r.Overdue)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </section>
+}
+
+@code {
+    private SalesOverdueSummaryDto? _data;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await SalesReceivables.DashboardAsync(Factory, CurrentUser, Clock, default);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _data = null; // блок модуля не мешает главному экрану: нет доступа или данных — его просто нет
+        }
+    }
+}

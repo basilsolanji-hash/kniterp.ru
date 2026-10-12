@@ -412,6 +412,7 @@ public sealed class StockDocumentService(
             await EnsureReturnWithinShippedAsync(ctx, doc, salesOrderId, ct);
         }
 
+        await KnitErp.Application.Sales.SalesCredit.EnsureShipmentAsync(db, ctx, doc, clock.UtcNow, ct); // D1105 (сессия «Продажи»)
         var batchMoves = await StockBatchLedger.PlanPostAsync(db, ctx, doc, ct);
         doc.Post(ctx.UserId, requiresComment, clock.UtcNow);
         await WriteMovementsAsync(ctx, doc, doc.MovementDeltas(), StockSource.StockDocument, ct);

@@ -236,6 +236,7 @@ public static class AuditActions
     public const string SalesPriceOverride = "sales.price.override";
     public const string SalesDiscountChanged = "sales.discount.changed";
     public const string SalesDiscountsReapplied = "sales.discount.reapplied";
+    public const string SalesCreditOverride = "sales.credit.override";
     public const string CustomerPaymentCreated = "sales.payment.created";
     public const string CustomerPaymentCancelled = "sales.payment.cancelled";
     public const string CustomerInvoiceIssued = "sales.invoice.issued";

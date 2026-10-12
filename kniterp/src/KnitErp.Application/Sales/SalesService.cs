@@ -695,6 +695,7 @@ public sealed partial class SalesService(
             Audit(ctx, AuditActions.SalesPriceOverride, nameof(SalesOrder), id, list, order.PriceOverrideReason, order.Number);
         }
 
+        await EnsureCreditOnConfirmAsync(ctx, order, ct); // D1105: кредитный лимит и просрочка — после проверки цен D1104
         order.Confirm(ctx.UserId, clock.UtcNow);
         Audit(ctx, AuditActions.SalesOrderConfirmed, nameof(SalesOrder), id, "Черновик", "Подтверждён", $"{order.Number}: {order.Total:0.00}");
         await using var tx = await db.BeginTransactionAsync(ct);

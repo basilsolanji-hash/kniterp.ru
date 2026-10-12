@@ -155,6 +155,7 @@ public static class AuditLabels
         [AuditActions.SalesPriceOverride] = "Цена ниже допустимой разрешена",
         [AuditActions.SalesDiscountChanged] = "Скидки и акции изменены",
         [AuditActions.SalesDiscountsReapplied] = "Скидки подтверждённого заказа пересчитаны",
+        [AuditActions.SalesCreditOverride] = "Отгрузка сверх кредитного лимита разрешена",
         [AuditActions.CustomerPaymentCreated] = "Оплата от покупателя",
         [AuditActions.CustomerPaymentCancelled] = "Оплата от покупателя отменена",
         [AuditActions.CustomerInvoiceIssued] = "Выставлен счёт покупателю",

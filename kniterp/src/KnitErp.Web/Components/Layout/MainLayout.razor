@@ -153,6 +153,7 @@
             new("vat-invoices/issued", "Счета-фактуры выданные", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/profitability", "Прибыльность", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/sales-by-item", "Товары и реализации", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+            new("reports/receivables", "Дебиторская задолженность", a => a.Has(Permissions.SalesReportView) && a.Has(Permissions.PriceView)),
             Soon("sales-funnel", "Воронка продаж"),
             Soon("unit-economics", "Юнит-экономика"),
             new("sales-order-stages", "Этапы заказов", a => a.Has(Permissions.SalesView)),

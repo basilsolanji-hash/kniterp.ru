@@ -1,0 +1,111 @@
+@*
+    D1105, D1111: кредитный контроль в карточке заказа — лимит и откуда он, долг покупателя, просрочка, «превышение на N» и форма
+    разрешения (право «Продажи: отгрузка сверх кредитного лимита и при просрочке», причина обязательна). Данные грузит карточка
+    (SalesService.GetCreditAsync в своём LoadAsync) и передаёт параметром; здесь сервис вызывается только по кнопке, затем OnChanged.
+*@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesService Sales
+
+@if (Credit is { } c && (c.Check.Limit is not null || c.Check.Overdue > 0 || c.Approval is not null))
+{
+    <style>
+        .scp { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 8px 0; }
+        .scp.scp-bad { border-color: color-mix(in srgb, var(--warn-text) 45%, transparent); background: var(--warn-bg); }
+        .scp-title { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-weight: 600; font-size: 13px; }
+        .scp-title .scp-state { font-weight: 500; color: var(--warn-text); }
+        .scp-title .scp-ok { font-weight: 500; color: var(--muted); }
+        .scp .sx-kv { margin: 4px 0 4px; }
+        .scp-approval { font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+        .scp form { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; margin-top: 6px; }
+        .scp form label { display: flex; flex-direction: column; gap: 3px; flex: 1 1 260px; min-width: 0; font-size: 12px; color: var(--text-2); }
+        .scp form input { width: 100%; box-sizing: border-box; }
+    </style>
+    <section class="@(c.Blocked ? "scp scp-bad" : "scp")" aria-label="@L("Кредитный контроль")" role="@(c.Blocked ? "alert" : null)">
+        <div class="scp-title">
+            <span>@L("Кредитный контроль")</span>
+            @if (c.Blocked && c.Check.OverLimit)
+            {
+                <span class="scp-state">@L("превышение лимита на {0}", Amounts.Format(c.Check.Excess))</span>
+            }
+            @if (c.Blocked && c.Check.Overdue > 0)
+            {
+                <span class="scp-state">@L("просрочена оплата {0} (до {1} дн.)", Amounts.Format(c.Check.Overdue), c.Check.OverdueDays)</span>
+            }
+            @if (!c.Blocked)
+            {
+                <span class="scp-ok">@(c.Covered ? L("разрешено руководителем") : L("в пределах условий"))</span>
+            }
+        </div>
+        <div class="sx-kv">
+            <div><span>@L("Кредитный лимит")</span><span>@Amounts.Format(c.Check.Limit)@(c.Check.LimitDocument is { } doc ? " · " + (c.Check.LimitFromContract ? L("договор № {0}", doc) : L("соглашение {0}", doc)) : "")</span></div>
+            <div><span>@L("Отсрочка оплаты")</span><span>@(c.Check.PaymentDays is { } d ? L("{0} дн.", d) : L("нет"))</span></div>
+            <div><span>@L("Долг покупателя")</span><span>@Amounts.Format(c.Check.Debt)</span></div>
+            <div><span>@L("К проверке по заказу")</span><span>@Amounts.Format(c.Check.Amount)</span></div>
+            <div><span>@L("Просрочено (с отсрочкой)")</span><span>@Amounts.Format(c.Check.Overdue)</span></div>
+        </div>
+        @if (c.Approval is { } a)
+        {
+            <p class="scp-approval">@L("Разрешение: {0}, {1}, на сумму {2} — «{3}»", a.By, Local(a.AtUtc), Amounts.Format(a.Amount), a.Reason)</p>
+        }
+        @if (c.CanApprove)
+        {
+            <form @onsubmit="ApproveAsync">
+                <label>@L("Причина разрешения") <input @bind="_reason" maxlength="@SalesCreditApproval.ReasonMaxLength" required placeholder="@L("Гарантийное письмо, оплата до пятницы")" /></label>
+                <button type="submit" disabled="@_busy">@L("Разрешить сверх лимита и при просрочке")</button>
+            </form>
+        }
+        @if (_error is not null)
+        {
+            <div class="flash error" role="alert">@_error</div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long OrderId { get; set; }
+
+    [Parameter]
+    public SalesCreditDto? Credit { get; set; }
+
+    [Parameter, EditorRequired]
+    public byte[] RowVersion { get; set; } = [];
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private string? _reason;
+    private string? _error;
+    private bool _busy;
+
+    private async Task ApproveAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Sales.ApproveCreditAsync(OrderId, _reason, RowVersion);
+            _reason = null;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+}
