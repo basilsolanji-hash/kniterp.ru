@@ -63,6 +63,14 @@ public sealed record MsRow
 
 public sealed record MsPriceType(string Id, string? Name, string? ExternalCode);
 
+/// <summary>
+/// D327: новые цены одного объекта МойСклад — все цены продажи (текущие из МойСклад с заменой связанных видов: так неважно, обнуляет ли
+/// МойСклад непереданные виды) и закупочная (null — не менять). Значения — в копейках, как в API.
+/// </summary>
+public sealed record MsPriceUpdate(string Id, IReadOnlyList<MsPriceValue> SalePrices, decimal? BuyPrice);
+
+public sealed record MsPriceValue(string PriceTypeId, decimal Value);
+
 public static class MoySkladIds
 {
     public static string? FromHref(string? href)
@@ -109,6 +117,9 @@ public interface IMoySkladClient
     Task<MsPage<MsRow>> ListAsync(string token, string entity, int offset, int limit, string? expand = null, CancellationToken ct = default);
 
     Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default);
+
+    /// <summary>D327: массовое изменение цен (POST entity/… массивом, до 1000 объектов). Возвращает изменённые объекты (id, updated).</summary>
+    Task<IReadOnlyList<MsRow>> UpdatePricesAsync(string token, string entity, IReadOnlyList<MsPriceUpdate> updates, CancellationToken ct = default);
 }
 
 public static class MoySkladEntities
@@ -123,6 +134,14 @@ public static class MoySkladEntities
     public const string Bundle = "entity/bundle";
     public const string Variant = "entity/variant";
     public const string PriceTypes = "context/companysettings/pricetype";
+
+    /// <summary>Сущности, в которые knitERP может записывать (только цены, D327).</summary>
+    public static readonly IReadOnlySet<string> Writable = new HashSet<string>(StringComparer.Ordinal) { Product, Service, Bundle, Variant };
+
+    public const int MaxBatch = 1000;
+
+    /// <summary>Id объекта МойСклад — UUID (буквы, цифры, дефис): в адрес meta.href ничего иного не подставляется.</summary>
+    public static bool IsSafeId(string? id) => id is { Length: > 0 and <= 64 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
 
     public static readonly IReadOnlySet<string> Allowed =
         new HashSet<string>(StringComparer.Ordinal) { Organization, Uom, Country, Folder, Product, Service, Bundle, Variant, PriceTypes };
