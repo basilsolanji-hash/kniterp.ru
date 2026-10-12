@@ -593,21 +593,45 @@ else
     private IReadOnlyList<ItemDto> _similar = [];
 
     /// <summary>D320: при вводе наименования новой позиции — подсказка о похожих.</summary>
-    private async Task CheckSimilarAsync()
+    private Task CheckSimilarAsync() => Background(async () =>
     {
-        if (_mode != Mode.Create || _busy)
-        {
-            return;
-        }
-
-        _busy = true;
-        try
+        if (_mode == Mode.Create)
         {
             _similar = await Catalog.SimilarAsync(_form.Name);
         }
-        finally
+    });
+
+    /// <summary>
+    /// Фоновая подсказка формы (похожие, значения группы): не блокирует кнопки, но идёт строго после предыдущей — у вкладки один DbContext.
+    /// Действия (RunAsync) сначала дожидаются фоновых: быстрый клик «Сохранить» сразу после ввода не теряется.
+    /// </summary>
+    private Task _background = Task.CompletedTask;
+
+    private Task Background(Func<Task> work)
+    {
+        var previous = _background;
+        _background = Chain();
+        return _background;
+
+        async Task Chain()
         {
-            _busy = false;
+            try
+            {
+                await previous;
+            }
+            catch
+            {
+                // Ошибку предыдущей подсказки уже получил её вызов; цепочка дальше не блокируется.
+            }
+
+            try
+            {
+                await work();
+            }
+            catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+            {
+                _formError = UiErrors.Message(ex);
+            }
         }
     }
 
@@ -616,6 +640,15 @@ else
     /// </summary>
     private async Task SearchAsync()
     {
+        try
+        {
+            await _background;
+        }
+        catch
+        {
+            // см. RunAsync
+        }
+
         var text = _search.Trim();
         if (text.Length is >= 8 and <= 14 && text.All(char.IsAsciiDigit) && !_busy)
         {
@@ -661,14 +694,15 @@ else
     }
 
     /// <summary>D317: выбрана группа — тип, единица и ставка НДС новой позиции берутся из значений по умолчанию группы.</summary>
-    private async Task ApplyGroupDefaultsAsync()
+    private Task ApplyGroupDefaultsAsync() => Background(ApplyGroupDefaultsCoreAsync);
+
+    private async Task ApplyGroupDefaultsCoreAsync()
     {
-        if (_mode != Mode.Create || _form.GroupId is not { } gid || _busy)
+        if (_mode != Mode.Create || _form.GroupId is not { } gid)
         {
             return;
         }
 
-        _busy = true;
         try
         {
             var d = (await GroupDefaults.GetAsync(gid)).Effective;
@@ -684,10 +718,6 @@ else
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {
             _formError = UiErrors.Message(ex);
-        }
-        finally
-        {
-            _busy = false;
         }
     }
 
@@ -819,6 +849,15 @@ else
     /// <summary>Одна операция за раз, затем свежие данные: у вкладки один DbContext.</summary>
     private async Task RunAsync(Func<Task> action, string? success)
     {
+        try
+        {
+            await _background; // подсказки формы — до действия, не одновременно с ним
+        }
+        catch
+        {
+            // ошибка подсказки показана при её вызове; действие выполняется
+        }
+
         if (_busy)
         {
             return;

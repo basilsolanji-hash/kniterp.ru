@@ -216,6 +216,7 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             }
         }
 
+        var purchaseBefore = item.PurchasePrice;
         foreach (var c in item.SetDetails(details))
         {
             Audit(ctx, AuditActions.CatalogChanged, nameof(Item), id, c.Before, c.After, c.Field);
@@ -227,7 +228,14 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             Audit(ctx, AuditActions.CatalogChanged, nameof(Item), id, null, string.Join("; ", fieldChanges), "Дополнительные поля");
         }
 
+        await using var tx = await db.BeginTransactionAsync(ct);
         await db.SaveOrConflictAsync(ct);
+        if (item.PurchasePrice != purchaseBefore)
+        {
+            await AutoPrices.ApplyAsync(db, ctx.OrganizationId, [id], ctx.UserId, clock.UtcNow, ct); // D322: автоцены от новой закупочной
+        }
+
+        await tx.CommitAsync(ct);
     }
 
     /// <summary>Штрихкод: тип по виду кода, если не указан; уникален в организации.</summary>

@@ -13,6 +13,7 @@
 @inject CatalogSettingsService CatalogSettings
 @inject ItemCodesService Codes
 @inject ItemCopyService Copies
+@inject ValueSetService ValueSets
 @inject NavigationManager Nav
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
@@ -642,11 +643,26 @@ else
                     @foreach (var c in active)
                     {
                         var id = c.Id;
-                        <label>@c.Name <input value="@_axes.GetValueOrDefault(id)" @onchange="e => _axes[id] = e.Value?.ToString()" placeholder="@L("через запятую")" size="18" /></label>
+                        <label>
+                            @c.Name <input value="@_axes.GetValueOrDefault(id)" @onchange="e => _axes[id] = e.Value?.ToString()" placeholder="@L("через запятую или 42-56/2")" size="18" />
+                            @if (_valueSets.Where(v => v.CharacteristicId == id).ToList() is { Count: > 0 } sets)
+                            {
+                                @* D321: набор значений — подставить одним выбором. *@
+                                <select aria-label="@L("Набор значений")" @onchange="e => ApplySet(id, e)">
+                                    <option value="">@L("из набора…")</option>
+                                    @foreach (var vs in sets)
+                                    {
+                                        <option value="@vs.Id">@vs.Name</option>
+                                    }
+                                </select>
+                            }
+                        </label>
                     }
                     <button type="submit" disabled="@_busy">@L("Создать модификации")</button>
                 </form>
-                <p class="muted small">@L("Например, Цвет «красный, синий» и Размер «46, 48, 50» — 6 модификаций. Уже созданные сочетания пропускаются; цены копируются с этой позиции.")</p>
+                <p class="muted small">@L("Например, Цвет «красный, синий» и Размер «46, 48, 50» — 6 модификаций. Уже созданные сочетания пропускаются; цены копируются с этой позиции.")
+                    @L("Диапазон с шагом: «42-56/2». Свои наборы — в")
+                    <a href="catalog/settings?tab=Characteristics">@L("Характеристики")</a>.</p>
             }
         }
     }
@@ -747,6 +763,7 @@ else
         PriceChangeSource.Import => L("загрузка из Excel"),
         PriceChangeSource.External => L("внешняя система"),
         PriceChangeSource.Modification => L("создание модификации"),
+        PriceChangeSource.Rule => L("автоцена по правилу"),
         _ => L("вручную"),
     };
 
@@ -762,6 +779,15 @@ else
     private IReadOnlyList<ItemPhotoDto> _photos = [];
     private IReadOnlyList<CharacteristicDto> _characteristics = [];
     private Dictionary<long, string?> _axes = [];
+    private IReadOnlyList<ValueSetDto> _valueSets = [];
+
+    private void ApplySet(long characteristicId, ChangeEventArgs e)
+    {
+        if (long.TryParse(e.Value?.ToString(), out var setId) && _valueSets.FirstOrDefault(v => v.Id == setId) is { } set)
+        {
+            _axes[characteristicId] = string.Join(", ", set.Values);
+        }
+    }
     private Dictionary<long, string?> _values = [];
     private IReadOnlyList<ItemGroupDto> _groups = [];
     private IReadOnlyDictionary<long, IReadOnlyList<UserCatalogEntryDto>> _entries = new Dictionary<long, IReadOnlyList<UserCatalogEntryDto>>();
@@ -841,6 +867,7 @@ else
     {
         _item = await Nomenclature.GetItemAsync(Id);
         _settings = await CatalogSettings.GetAsync();
+        _valueSets = await ValueSets.ListAsync();
         _groups = await Nomenclature.GroupsAsync();
         _entries = await Nomenclature.EntriesByCatalogAsync();
         var d = _item.Details;

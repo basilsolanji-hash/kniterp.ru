@@ -406,6 +406,9 @@ public sealed partial class ItemExchangeService(
         Audit(ctx, AuditActions.CatalogImported, "ItemImport", null, null,
             $"строк {plan.Total}: создано {created.Count}, обновлено {updated}, без изменений {plan.Unchanged}", null);
         await db.SaveOrConflictAsync(ct);
+        // D322: автоцены по правилам — для позиций, у которых файл задал закупочную цену.
+        var withPurchase = touched.Where(t => parsed[t.Row.RowNumber].Details?.PurchasePrice is not null).Select(t => t.Item.Id).ToList();
+        await AutoPrices.ApplyAsync(db, ctx.OrganizationId, withPurchase, ctx.UserId, clock.UtcNow, ct);
         await tx.CommitAsync(ct);
         return new ItemImportResult(created.Count, updated) { Bundles = bundlesChanged };
     }

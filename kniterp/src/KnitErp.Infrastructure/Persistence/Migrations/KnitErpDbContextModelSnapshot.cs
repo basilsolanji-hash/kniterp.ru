@@ -713,6 +713,49 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("characteristics", "kniterp");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CharacteristicValueSet", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("CharacteristicId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("ValuesText")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CharacteristicId");
+
+                    b.HasIndex("OrganizationId", "CharacteristicId")
+                        .HasDatabaseName("ix_characteristic_value_sets_org_char");
+
+                    b.ToTable("characteristic_value_sets", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.Counterparty", b =>
                 {
                     b.Property<long>("Id")
@@ -1548,7 +1591,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_item_price_history_prices", "([OldPrice] IS NULL OR [OldPrice] >= 0) AND ([NewPrice] IS NULL OR [NewPrice] >= 0)");
 
-                            t.HasCheckConstraint("ck_item_price_history_source", "[Source] IN (1, 2, 3, 4, 5)");
+                            t.HasCheckConstraint("ck_item_price_history_source", "[Source] IN (1, 2, 3, 4, 5, 6)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -1774,10 +1817,58 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasTrigger("tr_price_revaluations_immutable");
 
-                            t.HasCheckConstraint("ck_price_revaluations_mode", "[Mode] IN (1, 2) AND [Rounding] IN (0, 1, 2, 3) AND [Items] >= 0");
+                            t.HasCheckConstraint("ck_price_revaluations_mode", "[Mode] IN (1, 2) AND [Rounding] IN (0, 1, 2, 3, 4, 5) AND [Items] >= 0");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.PriceRule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Factor")
+                        .HasColumnType("decimal(9,4)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PriceTypeId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Rounding")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("PriceTypeId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_price_rules_price_type");
+
+                    b.ToTable("price_rules", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_price_rules_factor", "[Factor] > 0 AND [Factor] <= 100");
+
+                            t.HasCheckConstraint("ck_price_rules_rounding", "[Rounding] IN (0, 1, 2, 3, 4, 5)");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.PriceType", b =>
@@ -5585,6 +5676,22 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.CharacteristicValueSet", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.Characteristic", null)
+                        .WithMany()
+                        .HasForeignKey("CharacteristicId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_characteristic_value_sets_characteristic");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.Counterparty", b =>
                 {
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
@@ -5883,6 +5990,22 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_price_revaluations_type");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.PriceRule", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.PriceType", null)
+                        .WithMany()
+                        .HasForeignKey("PriceTypeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_price_rules_price_type");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.PriceType", b =>
