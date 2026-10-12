@@ -41,6 +41,9 @@
     .sx-history li { padding: 3px 0; border-bottom: 1px dashed var(--line); overflow-wrap: anywhere; }
     .sx-history li b { font-weight: 600; }
     .sx-discount-src { display: block; font-size: 11px; color: var(--muted); white-space: normal; max-width: 240px; margin-left: auto; text-align: right; }
+    /* Строка инструментов строк заказа и резерв — рядом, без пустой полосы. */
+    form.sx-inline-row { display: inline-flex; flex-wrap: wrap; margin-right: 16px; vertical-align: bottom; }
+    form.sx-inline-row + label.reserve-toggle { display: inline-flex; vertical-align: bottom; margin-bottom: 14px; }
     .sx-line-flag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--warn-bg); color: var(--warn-text); margin-left: 4px; }
     @@media (max-width: 1200px) { form.sx-form, .panel form.sx-form { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @@media (max-width: 899px) {

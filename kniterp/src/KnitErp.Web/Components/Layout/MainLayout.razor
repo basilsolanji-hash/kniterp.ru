@@ -154,6 +154,7 @@
             new("vat-invoices/issued", "Счета-фактуры выданные", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/profitability", "Прибыльность", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/sales-by-item", "Товары и реализации", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+            new("reports/receivables", "Дебиторская задолженность", a => a.Has(Permissions.SalesReportView) && a.Has(Permissions.PriceView)),
             Soon("sales-funnel", "Воронка продаж"),
             Soon("unit-economics", "Юнит-экономика"),
             new("sales-order-stages", "Этапы заказов", a => a.Has(Permissions.SalesView)),
@@ -283,6 +284,7 @@
         new("settings", "Настройки",
         [
             new("organization", "Организация", a => a.Has(Permissions.OrganizationView)),
+            new("sales-documents-settings", "Документы и письма продаж", a => a.Has(Permissions.SalesView)), // D1120
             new("launch", "Готовность к запуску", a => a.Has(Permissions.OrganizationEdit)),
             new("settings/production", "Производство", a => a.Has(Permissions.OrganizationView)),
             new("hr/settings", "Кадры и заработок", a => a.Has(Permissions.OrganizationEdit) || a.Has(Permissions.PayrollCalculate)),

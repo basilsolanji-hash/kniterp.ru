@@ -1,0 +1,256 @@
+@*
+    D1131–D1133: быстрый ввод строк заказа — подбор с остатками, сетка «размер × цвет», вставка из Excel или буфера.
+    Сервис вызывается только по нажатию (страница в это время свободна); после изменения — OnChanged, родитель перечитывает заказ.
+*@
+@using KnitErp.Application.Sales
+@inject SalesService Sales
+@inject ISpreadsheetFormat Spreadsheet
+
+<div class="sx-entry">
+    <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="@Tab(Mode.Pick)" @onclick="() => _mode = _mode == Mode.Pick ? Mode.None : Mode.Pick" disabled="@Busy">@L("Подбор")</button>
+        <button type="button" role="tab" class="@Tab(Mode.Grid)" @onclick="() => _mode = _mode == Mode.Grid ? Mode.None : Mode.Grid" disabled="@Busy">@L("Размер × цвет")</button>
+        <button type="button" role="tab" class="@Tab(Mode.Paste)" @onclick="() => _mode = _mode == Mode.Paste ? Mode.None : Mode.Paste" disabled="@Busy">@L("Вставить из Excel")</button>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span></div>
+    }
+
+    @if (_mode is Mode.Pick or Mode.Grid)
+    {
+        <form class="inline-form" @onsubmit="SearchAsync">
+            <label>@(_mode == Mode.Grid ? L("Модель") : L("Поиск")) <input @bind="_search" size="30" placeholder="@L("Артикул, название, штрихкод")" /></label>
+            <button type="submit" class="secondary" disabled="@Busy">@L("Найти")</button>
+        </form>
+        @if (_pick is not null && _grid is null)
+        {
+            <div class="scroll">
+                <table class="sx-table compact">
+                    <thead><tr><th>@L("Позиция")</th><th class="num">@L("Остаток")</th><th class="num">@L("Резерв")</th><th class="num">@L("Ожидается")</th><th class="num">@L("Цена")</th><th class="num">@L("Количество")</th><th></th></tr></thead>
+                    <tbody>
+                        @if (_pick.Count == 0)
+                        {
+                            <tr><td colspan="7" class="muted">@L("Ничего не найдено.")</td></tr>
+                        }
+                        @foreach (var p in _pick.Where(p => _mode == Mode.Pick || p.HasModifications))
+                        {
+                            <tr>
+                                <td data-label="@L("Позиция")">@p.Code — @p.Name @if (p.Article is not null) { <span class="sx-sub">@p.Article</span> }</td>
+                                <td data-label="@L("Остаток")" class="num">@(p.Stock is { } s ? Quantities.Format(s) : "—")</td>
+                                <td data-label="@L("Резерв")" class="num">@(p.Reserved is > 0 ? Quantities.Format(p.Reserved.Value) : "—")</td>
+                                <td data-label="@L("Ожидается")" class="num">@(p.Expected is { } e ? Quantities.Format(e) + (p.ExpectedDate is { } d ? $" · {d:dd.MM}" : "") : "—")</td>
+                                <td data-label="@L("Цена")" class="num">@(p.Price is { } pr ? Amounts.Format(pr) : "—")</td>
+                                @if (p.HasModifications)
+                                {
+                                    <td colspan="2" class="sx-row-actions"><button type="button" class="secondary" @onclick="() => OpenGridAsync(p)" disabled="@Busy">@L("Сетка размер × цвет")</button></td>
+                                }
+                                else
+                                {
+                                    <td data-label="@L("Количество")" class="num"><input value="@_pickQty.GetValueOrDefault(p.ItemId)" @onchange="e => _pickQty[p.ItemId] = e.Value?.ToString()" inputmode="decimal" size="6" aria-label="@L("Количество: {0}", p.Code)" /></td>
+                                    <td class="sx-row-actions"><button type="button" @onclick="() => AddPickAsync(p)" disabled="@Busy" aria-label="@L("Добавить: {0}", p.Code)">@L("Добавить")</button></td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        @if (_grid is { } g)
+        {
+            <p class="sx-lead"><b>@g.Code — @g.Name</b> · @(g.RowAxis ?? "") × @(g.ColAxis ?? "") · <button type="button" class="link" @onclick="() => _grid = null">@L("к поиску")</button></p>
+            <div class="scroll">
+                <table class="sx-table compact sx-grid">
+                    <thead><tr><th></th>@foreach (var c in g.Cols) { <th class="num">@c</th> }</tr></thead>
+                    <tbody>
+                        @foreach (var r in g.Rows)
+                        {
+                            <tr>
+                                <th>@r</th>
+                                @foreach (var c in g.Cols)
+                                {
+                                    var cell = g.Cells.FirstOrDefault(x => x.Row == r && x.Col == c);
+                                    <td class="num">
+                                        @if (cell is not null)
+                                        {
+                                            <input value="@_gridQty.GetValueOrDefault(cell.ItemId)" @onchange="e => _gridQty[cell.ItemId] = e.Value?.ToString()" inputmode="decimal" size="4"
+                                                   aria-label="@L("{0}, {1}", r, c)" title="@(cell.Stock is { } st ? L("остаток {0}", Quantities.Format(st)) : cell.Code)" />
+                                            @if (cell.Stock is { } st2) { <span class="sx-sub">@Quantities.Format(st2)</span> }
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <button type="button" @onclick="AddGridAsync" disabled="@Busy">@L("Добавить в заказ")</button>
+        }
+    }
+
+    @if (_mode == Mode.Paste)
+    {
+        <p class="sx-lead">@L("Скопируйте строки из Excel: артикул или штрихкод, [размер, цвет,] количество, [цена]. Ошибочные строки останутся в поле с пояснением.")</p>
+        <textarea @bind="_paste" rows="6" class="sx-paste" placeholder="СВ-001&#9;10&#10;СВ-002&#9;48&#9;синий&#9;5" aria-label="@L("Строки для вставки")"></textarea>
+        <div class="actions" style="margin-top: 6px">
+            <button type="button" class="secondary" @onclick="PreviewAsync" disabled="@Busy">@L("Проверить")</button>
+            <button type="button" @onclick="AddPasteAsync" disabled="@Busy">@L("Добавить строки")</button>
+            <label class="button secondary sx-file">@L("Загрузить .xlsx") <InputFile OnChange="LoadFileAsync" accept=".xlsx" /></label>
+        </div>
+        @if (_preview is not null)
+        {
+            <div class="scroll">
+                <table class="sx-table compact">
+                    <thead><tr><th class="num">№</th><th>@L("Строка")</th><th>@L("Позиция")</th><th class="num">@L("Количество")</th><th>@L("Итог")</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _preview)
+                        {
+                            <tr class="@(r.Error is null ? null : "sx-bad")">
+                                <td class="num">@r.Row</td><td>@r.Text</td><td>@(r.Code is null ? "—" : $"{r.Code} — {r.Name}")</td>
+                                <td class="num">@(r.Quantity is { } q ? Quantities.Format(q) : "—")</td>
+                                <td>@(r.Error is null ? L("верно") : r.Error)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .sx-entry { margin: 6px 0 10px; }
+    .sx-entry .tabs { margin-bottom: 6px; }
+    .sx-paste { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 13px; }
+    .sx-file input[type=file] { display: none; }
+    .sx-grid input { width: 4.5em; text-align: right; }
+    .sx-grid th { white-space: nowrap; }
+    tr.sx-bad > td { color: var(--bad-text); }
+</style>
+
+@code {
+    [Parameter, EditorRequired]
+    public long OrderId { get; set; }
+
+    [Parameter, EditorRequired]
+    public byte[] RowVersion { get; set; } = [];
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private enum Mode
+    {
+        None,
+        Pick,
+        Grid,
+        Paste,
+    }
+
+    private Mode _mode;
+    private string? _search;
+    private IReadOnlyList<SalesPickItemDto>? _pick;
+    private SalesGridDto? _grid;
+    private readonly Dictionary<long, string?> _pickQty = [];
+    private readonly Dictionary<long, string?> _gridQty = [];
+    private string? _paste;
+    private IReadOnlyList<PasteLineDto>? _preview;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    private bool Busy => _busy || Disabled;
+
+    private string Tab(Mode m) => _mode == m ? "tab active" : "tab secondary";
+
+    private Task SearchAsync() => RunAsync(async () =>
+    {
+        _grid = null;
+        _pick = await Sales.PickItemsAsync(OrderId, _search);
+    }, false);
+
+    private Task OpenGridAsync(SalesPickItemDto p) => RunAsync(async () =>
+    {
+        _gridQty.Clear();
+        _grid = await Sales.GridAsync(OrderId, p.ItemId);
+        _mode = Mode.Grid;
+    }, false);
+
+    private Task AddPickAsync(SalesPickItemDto p) => RunAsync(async () =>
+    {
+        var qty = Number(_pickQty.GetValueOrDefault(p.ItemId)) ?? 1;
+        await Sales.AddOrderLineAsync(OrderId, p.ItemId, qty, RowVersion);
+        _pickQty.Remove(p.ItemId);
+        _message = L("Добавлено: {0}", p.Code);
+    }, true);
+
+    private Task AddGridAsync() => RunAsync(async () =>
+    {
+        var quantities = _gridQty.Select(x => (x.Key, Qty: Number(x.Value) ?? 0)).Where(x => x.Qty > 0).ToDictionary(x => x.Key, x => x.Qty);
+        var n = await Sales.AddGridAsync(OrderId, quantities, RowVersion);
+        _gridQty.Clear();
+        _message = L("Добавлено строк: {0}", n);
+    }, true);
+
+    private Task PreviewAsync() => RunAsync(async () => _preview = await Sales.PreviewPasteAsync(OrderId, _paste), false);
+
+    private Task AddPasteAsync() => RunAsync(async () =>
+    {
+        _preview = await Sales.AddPastedLinesAsync(OrderId, _paste, RowVersion);
+        var bad = _preview.Where(r => r.Error is not null).ToList();
+        // Ошибочные строки остаются в поле — исправить и добавить снова; добавленные убираются.
+        _paste = string.Join('\n', bad.Select(r => r.Text));
+        _message = L("Добавлено строк: {0}, с ошибками: {1}", _preview.Count - bad.Count, bad.Count);
+    }, true);
+
+    private async Task LoadFileAsync(InputFileChangeEventArgs e)
+    {
+        await RunAsync(async () =>
+        {
+            await using var stream = e.File.OpenReadStream(5 * 1024 * 1024);
+            using var copy = new MemoryStream();
+            await stream.CopyToAsync(copy);
+            copy.Position = 0;
+            _paste = SalesService.SheetToText(Spreadsheet.ReadFirstSheet(copy, SalesService.MaxPasteRows + 1));
+            _preview = await Sales.PreviewPasteAsync(OrderId, _paste);
+        }, false);
+    }
+
+    private static decimal? Number(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null
+        : Quantities.TryParse(text, out var v) ? v
+        : throw new BusinessRuleException("sales.number", L("Укажите число, например 1 220,50."));
+
+    private async Task RunAsync(Func<Task> action, bool changed)
+    {
+        if (Busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            if (changed)
+            {
+                await OnChanged.InvokeAsync();
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

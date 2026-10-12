@@ -1,7 +1,10 @@
 @page "/print/upd/{Id:long}"
 @layout KnitErp.Web.Components.Layout.PrintLayout
 @using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
 @inject PrintService Print
+@inject SalesDocumentPrintService Extras
 
 @*
     УПД со статусом 1: счёт-фактура и передаточный документ. Строки и графы счёта-фактуры — по приложению 1 к ПП РФ № 1137
@@ -16,6 +19,7 @@
     .sheet.upd .upd-fields div { font-size: 10.5px; }
 </style>
 
+<SalesPrintStyles />
 <div class="print-bar">
     <button type="button" data-print>@L("Печать")</button>
     <a href="stock-documents/@Id">@L("← К отгрузке")</a>
@@ -130,13 +134,13 @@ else
         <div class="sign">
             @if (r.SoleProprietor)
             {
-                <div>Индивидуальный предприниматель или иное уполномоченное лицо <span class="line"></span> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
+                <div>Индивидуальный предприниматель или иное уполномоченное лицо <SalesPrintSign Image="_deco.DirectorSignature" /> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
                 <div>@(r.Ogrn is null ? "" : "ОГРНИП " + r.Ogrn) <span class="line"></span><div class="small">(реквизиты свидетельства о государственной регистрации индивидуального предпринимателя)</div></div>
             }
             else
             {
-                <div>Руководитель организации или иное уполномоченное лицо <span class="line"></span> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
-                <div>Главный бухгалтер или иное уполномоченное лицо <span class="line"></span> @(r.AccountantName ?? r.DirectorName)<div class="small">(подпись) (ф.и.о.)</div></div>
+                <div>Руководитель организации или иное уполномоченное лицо <SalesPrintSign Image="_deco.DirectorSignature" /> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
+                <div>Главный бухгалтер или иное уполномоченное лицо <SalesPrintSign Image="@(_deco.AccountantSignature ?? _deco.DirectorSignature)" /> @(r.AccountantName ?? r.DirectorName)<div class="small">(подпись) (ф.и.о.)</div></div>
             }
         </div>
 
@@ -159,7 +163,7 @@ else
                     <span class="line"></span> <span class="line"></span> <span class="line"></span><div class="small">(должность) (подпись) (ф.и.о.)</div></td></tr>
             <tr><td>Наименование экономического субъекта — составителя документа (в т. ч. комиссионера / агента): @_doc.Seller.Name, ИНН/КПП @_doc.Seller.Inn@(_doc.Seller.Kpp is null ? "" : "/" + _doc.Seller.Kpp) <span class="small">[14]</span></td>
                 <td>Наименование экономического субъекта — составителя документа: @_doc.Buyer.Name@(_doc.Buyer.Inn is null ? "" : ", ИНН/КПП " + _doc.Buyer.Inn + (_doc.Buyer.Kpp is null ? "" : "/" + _doc.Buyer.Kpp)) <span class="small">[19]</span></td></tr>
-            <tr><td>М. П.</td><td>М. П.</td></tr>
+            <tr><td>М. П.@if (_deco.Stamp is { } stamp) { <img class="sx-stamp sx-stamp-upd" src="@stamp.DataUri" alt="" /> }</td><td>М. П.</td></tr>
         </table>
     </div>
 }
@@ -169,6 +173,7 @@ else
     public long Id { get; set; }
 
     private UpdPrintDto? _doc;
+    private SalesPrintDecorations _deco = SalesPrintDecorations.None;
     private string? _error;
 
     protected override async Task OnParametersSetAsync()
@@ -176,6 +181,7 @@ else
         try
         {
             _doc = await Print.UpdAsync(Id);
+            _deco = await Extras.DecorationsAsync(SalesMailDocument.Upd, Id); // D1120: печать и подписи по настройкам юрлица
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

@@ -1,0 +1,369 @@
+@page "/sales-documents-settings"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesDocumentSettingsService Settings
+
+@*
+    D1120, D1124: оформление документов продаж по каждому своему юрлицу (логотип, печать, факсимиле подписей, что выводить в счёте,
+    УПД и заказе, QR для оплаты) и письма клиентам (шаблоны, автоотправка по событиям и этапам). Смотреть — «Продажи: просмотр»,
+    менять — «Организация: изменение» (проверяет сервис).
+*@
+<PageTitle>@L("Документы и письма продаж") — knitERP</PageTitle>
+<SalesStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head"><h1>@L("Документы и письма продаж")</h1></div>
+    <p class="sx-lead">@L("Логотип, печать и подписи в счёте, УПД и заказе покупателя; QR-код для оплаты в счёте; письма клиентам — вручную из заказа и счёта или автоматически по событиям.")</p>
+
+    <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="@(_tab == 0 ? "tab active" : "tab secondary")" aria-selected="@(_tab == 0 ? "true" : "false")"
+                @onclick="() => _tab = 0" disabled="@_busy">@L("Оформление документов")</button>
+        <button type="button" role="tab" class="@(_tab == 1 ? "tab active" : "tab secondary")" aria-selected="@(_tab == 1 ? "true" : "false")"
+                @onclick="() => _tab = 1" disabled="@_busy">@L("Письма клиентам")</button>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    @if (_tab == 0)
+    {
+        @if (_data.Entities.Count == 0)
+        {
+            <p class="muted">@L("Нет действующих юрлиц — добавьте их в разделе «Юрлица и счета».")</p>
+        }
+        else
+        {
+            @if (_data.Entities.Count > 1)
+            {
+                <form class="sx-form">
+                    <label class="w2">
+                        @L("Юрлицо")
+                        <select value="@_entityId" @onchange="SelectEntityAsync" disabled="@_busy">
+                            @foreach (var e in _data.Entities)
+                            {
+                                <option value="@e.Id">@e.Name</option>
+                            }
+                        </select>
+                    </label>
+                </form>
+            }
+
+            @if (_entity is { } en)
+            {
+                <div class="sx-kv">
+                    <div><span>@L("Юрлицо")</span><span>@en.Name</span></div>
+                    @if (en.SoleProprietor)
+                    {
+                        <div><span>@L("Подписывает")</span><span>@(en.DirectorName ?? "—")</span></div>
+                    }
+                    else
+                    {
+                        <div><span>@L("Руководитель")</span><span>@(en.DirectorPosition ?? "—") · @(en.DirectorName ?? "—")</span></div>
+                        <div><span>@L("Главный бухгалтер")</span><span>@(en.AccountantName ?? L("как руководитель"))</span></div>
+                    }
+                    <div><span>@L("Подписанты и реквизиты")</span><span><a href="legal-entities">@L("Юрлица и счета")</a></span></div>
+                </div>
+                @if (!en.HasBankAccount)
+                {
+                    <div class="sx-issues">@L("У юрлица нет расчётного счёта — QR-код для оплаты в счёте не выводится.")</div>
+                }
+
+                <form class="sx-form" @onsubmit="SaveFlagsAsync">
+                    <div class="sx-legend">@L("Что выводить в документах")</div>
+                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnInvoice" disabled="@(!_data.CanEdit)" /> @L("Логотип в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnOrder" disabled="@(!_data.CanEdit)" /> @L("Логотип в заказе")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.QrOnInvoice" disabled="@(!_data.CanEdit)" /> @L("QR для оплаты в счёте")</label>
+                    <span></span>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnInvoice" disabled="@(!_data.CanEdit)" /> @L("Печать и подписи в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnUpd" disabled="@(!_data.CanEdit)" /> @L("Печать и подписи в УПД")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnOrder" disabled="@(!_data.CanEdit)" /> @L("Печать и подписи в заказе")</label>
+                    @if (_data.CanEdit)
+                    {
+                        <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                    }
+                </form>
+
+                <div class="sx-legend" style="margin-top: 12px">@L("Изображения (PNG или JPEG, до 1 МБ; печать и подписи — на прозрачном фоне)")</div>
+                <div class="sx-images">
+                    @foreach (var kind in SalesDocumentImage.Kinds)
+                    {
+                        var image = en.Images.FirstOrDefault(i => i.Kind == kind);
+                        <div class="sx-image">
+                            <b>@L(SalesDocumentImage.KindName(kind))</b>
+                            <div class="sx-image-box">
+                                @if (image?.DataUri is { } uri)
+                                {
+                                    <img src="@uri" alt="@L(SalesDocumentImage.KindName(kind))" />
+                                }
+                                else if (image is not null)
+                                {
+                                    <span class="muted small">@L("загружено")</span>
+                                }
+                                else
+                                {
+                                    <span class="muted small">@L("не загружено")</span>
+                                }
+                            </div>
+                            @if (image is not null)
+                            {
+                                <span class="muted small">@(image.SizeBytes / 1024 + 1) @L("КБ") · @TimeZones.ToLocal(image.UploadedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy")</span>
+                            }
+                            @if (_data.CanEdit)
+                            {
+                                <label class="sx-upload">
+                                    @(image is null ? L("Загрузить") : L("Заменить"))
+                                    <InputFile OnChange="e => UploadAsync(kind, e)" accept=".png,.jpg,.jpeg" disabled="@_busy" />
+                                </label>
+                                @if (image is not null)
+                                {
+                                    <ConfirmButton Class="secondary" Disabled="@_busy" Question='@L("Удалить изображение?")' OnConfirm="() => DeleteAsync(kind)">@L("Удалить")</ConfirmButton>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+                <p class="muted small">@L("Факсимиле подписи и печать на документе допустимы, если это предусмотрено договором с покупателем; для УПД и счетов-фактур в бумажном виде нужна собственноручная подпись.")</p>
+            }
+        }
+    }
+    else
+    {
+        @if (!_data.MailConfigured)
+        {
+            <div class="sx-issues">@L("Почта сервера не настроена: письма будут вставать в очередь со статусом «Не отправлено». Обратитесь к администратору сервера.")</div>
+        }
+        <p class="sx-lead">@L("Подстановки: {Номер}, {Дата}, {Покупатель}, {Сумма}, {Этап}, {Организация}. Автоматически письмо уходит, только если у покупателя указана почта для документов и не стоит «не отправлять автоматически»; одно событие — одно письмо.")</p>
+        @foreach (var t in _templates)
+        {
+            <form class="sx-form" @onsubmit="() => SaveTemplateAsync(t)">
+                <div class="sx-legend">@L(SalesMailMessage.KindName(t.Kind)) — @TriggerName(t.Kind)</div>
+                <label class="inline w4"><input type="checkbox" @bind="t.AutoSend" disabled="@(!_data.CanEdit)" /> @L("Отправлять автоматически")</label>
+                <label class="w4">@L("Тема") <input @bind="t.Subject" maxlength="@SalesMailTemplate.SubjectMaxLength" disabled="@(!_data.CanEdit)" /></label>
+                <label class="w4">@L("Текст") <textarea rows="5" @bind="t.Body" maxlength="@SalesMailTemplate.BodyMaxLength" disabled="@(!_data.CanEdit)"></textarea></label>
+                @if (_data.CanEdit)
+                {
+                    <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                }
+            </form>
+        }
+
+        <form class="sx-form" @onsubmit="SaveStagesAsync">
+            <div class="sx-legend">@L("Этапы, о которых сообщать клиенту")</div>
+            @if (_data.Stages.Count == 0)
+            {
+                <p class="w4 muted small">@L("Этапов заказов нет — настройте их в разделе «Этапы заказов».")</p>
+            }
+            @foreach (var s in _data.Stages)
+            {
+                <label class="inline">
+                    <input type="checkbox" checked="@_stages.Contains(s.Id)" @onchange="e => ToggleStage(s.Id, e)" disabled="@(!_data.CanEdit)" />
+                    @s.Name@(s.IsArchived ? " (" + L("в архиве") + ")" : "")
+                </label>
+            }
+            @if (_data.CanEdit)
+            {
+                <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+            }
+        </form>
+    }
+
+    <style>
+        .sx-images { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 6px 0; }
+        .sx-image { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-width: 0; }
+        .sx-image-box { height: 110px; display: flex; align-items: center; justify-content: center; background: repeating-conic-gradient(#f3f3f5 0% 25%, #fff 0% 50%) 50% / 16px 16px;
+            border-radius: 6px; overflow: hidden; }
+        .sx-image-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .sx-upload { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-2); }
+        .sx-upload input[type=file] { max-width: 100%; }
+        form.sx-form textarea { width: 100%; box-sizing: border-box; font: inherit; }
+        form.sx-form { margin-bottom: 12px; }
+        @@media (max-width: 899px) { .sx-images { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @@media (max-width: 420px) { .sx-images { grid-template-columns: minmax(0, 1fr); } }
+    </style>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private SalesDocumentSettingsDto? _data;
+    private SalesDocumentEntityDto? _entity;
+    private long _entityId;
+    private FlagsForm _flags = new();
+    private List<TemplateForm> _templates = [];
+    private HashSet<long> _stages = [];
+    private int _tab;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private sealed class FlagsForm
+    {
+        public bool LogoOnInvoice { get; set; }
+        public bool LogoOnOrder { get; set; }
+        public bool StampOnInvoice { get; set; }
+        public bool StampOnUpd { get; set; }
+        public bool StampOnOrder { get; set; }
+        public bool QrOnInvoice { get; set; }
+    }
+
+    private sealed class TemplateForm
+    {
+        public SalesMailKind Kind { get; init; }
+        public bool AutoSend { get; set; }
+        public string? Subject { get; set; }
+        public string? Body { get; set; }
+        public byte[]? RowVersion { get; init; }
+    }
+
+    private string TriggerName(SalesMailKind kind) => kind switch
+    {
+        SalesMailKind.Order => L("при подтверждении заказа"),
+        SalesMailKind.Invoice => L("при выставлении счёта"),
+        SalesMailKind.Upd => L("при проведении отгрузки"),
+        _ => L("при переходе заказа на этап"),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _data = await Settings.GetAsync();
+        _templates = _data.Templates.Select(t => new TemplateForm { Kind = t.Kind, AutoSend = t.AutoSend, Subject = t.Subject, Body = t.Body, RowVersion = t.RowVersion })
+            .ToList();
+        _stages = _data.Stages.Where(s => s.Selected).Select(s => s.Id).ToHashSet();
+        if (_data.Entities.Count > 0)
+        {
+            if (_data.Entities.All(e => e.Id != _entityId))
+            {
+                _entityId = _data.Entities[0].Id;
+            }
+
+            await LoadEntityAsync();
+        }
+    }
+
+    private async Task LoadEntityAsync()
+    {
+        _entity = await Settings.EntityAsync(_entityId);
+        var f = _entity.Flags;
+        _flags = new FlagsForm
+        {
+            LogoOnInvoice = f.LogoOnInvoice, LogoOnOrder = f.LogoOnOrder, StampOnInvoice = f.StampOnInvoice, StampOnUpd = f.StampOnUpd,
+            StampOnOrder = f.StampOnOrder, QrOnInvoice = f.QrOnInvoice,
+        };
+    }
+
+    private Task SelectEntityAsync(ChangeEventArgs e) => RunAsync(async () =>
+    {
+        if (long.TryParse(e.Value?.ToString(), out var id))
+        {
+            _entityId = id;
+            await LoadEntityAsync();
+        }
+    }, null);
+
+    private Task SaveFlagsAsync() => RunAsync(async () =>
+    {
+        var f = _flags;
+        await Settings.SaveFlagsAsync(_entityId, new SalesDocumentFlags(f.LogoOnInvoice, f.LogoOnOrder, f.StampOnInvoice, f.StampOnUpd, f.StampOnOrder,
+            f.QrOnInvoice), _entity?.RowVersion);
+        await LoadEntityAsync();
+    }, L("Оформление документов сохранено."));
+
+    private Task UploadAsync(SalesDocumentImageKind kind, InputFileChangeEventArgs e) => RunAsync(async () =>
+    {
+        var file = e.File;
+        if (file.Size > SalesDocumentImage.MaxBytes)
+        {
+            throw new KnitErp.Domain.Common.BusinessRuleException("sales.document_image.size", "Изображение — не больше 1 МБ.");
+        }
+
+        using var buffer = new MemoryStream();
+        await using (var stream = file.OpenReadStream(SalesDocumentImage.MaxBytes))
+        {
+            await stream.CopyToAsync(buffer);
+        }
+
+        await Settings.UploadImageAsync(_entityId, kind, file.ContentType, buffer.ToArray());
+        await LoadEntityAsync();
+    }, L("Изображение загружено."));
+
+    private Task DeleteAsync(SalesDocumentImageKind kind) => RunAsync(async () =>
+    {
+        await Settings.DeleteImageAsync(_entityId, kind);
+        await LoadEntityAsync();
+    }, L("Изображение удалено."));
+
+    private Task SaveTemplateAsync(TemplateForm t) => RunAsync(async () =>
+    {
+        await Settings.SaveTemplateAsync(t.Kind, t.AutoSend, t.Subject, t.Body, t.RowVersion);
+        await LoadAsync();
+    }, L("Шаблон письма сохранён."));
+
+    private void ToggleStage(long id, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            _stages.Add(id);
+        }
+        else
+        {
+            _stages.Remove(id);
+        }
+    }
+
+    private Task SaveStagesAsync() => RunAsync(async () =>
+    {
+        await Settings.SetMailStagesAsync(_stages.ToList());
+        await LoadAsync();
+    }, L("Этапы для писем о статусе сохранены."));
+
+    private async Task RunAsync(Func<Task> action, string? done)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _message = done;
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

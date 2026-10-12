@@ -47,9 +47,13 @@ public sealed class FakeEmailSender : IEmailSender
         return Task.FromResult(true);
     }
 
+    /// <summary>D1123: письма с вложениями (документы продаж).</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<EmailMessage> SentMessages { get; } = new();
+
     public Task<bool> SendAsync(EmailMessage message, CancellationToken ct = default)
     {
         Messages.Enqueue(message);
+        SentMessages.Enqueue(message);
         return SendAsync(message.To, message.Subject, message.Text, ct);
     }
 
@@ -270,8 +274,15 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Sales.SalesAgreementService(db, guard, user, Clock),
             new StepUpService(Factory, Hasher, user, Clock, StepUpStateOf(userId)),
             new KnitErp.Application.Sales.SalesDiscountService(db, guard, user, Clock),
-            new SignInRestrictionService(db, guard, user, Clock, stepUp));
+            new SignInRestrictionService(db, guard, user, Clock, stepUp),
+            new KnitErp.Application.Sales.SalesDocumentSettingsService(db, guard, user, Clock, Mail),
+            new KnitErp.Application.Sales.SalesDocumentPrintService(db, guard),
+            new KnitErp.Application.Sales.SalesOrderDocumentsService(db, guard, user, Clock, Mail),
+            new KnitErp.Application.Sales.SalesMailDispatcher(db, Mail, PdfRenderer, Clock));
     }
+
+    /// <summary>D1123: PDF документов продаж — настоящий (PDFsharp/MigraDoc), без сети и системных шрифтов.</summary>
+    public static readonly KnitErp.Application.Sales.ISalesPdfRenderer PdfRenderer = new KnitErp.Infrastructure.Documents.SalesPdfRenderer();
 
     public static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
 
@@ -392,7 +403,11 @@ public sealed record Services(
     KnitErp.Application.Sales.SalesAgreementService Agreements,
     StepUpService StepUp,
     KnitErp.Application.Sales.SalesDiscountService Discounts,
-    SignInRestrictionService Restrictions) : IAsyncDisposable
+    SignInRestrictionService Restrictions,
+    KnitErp.Application.Sales.SalesDocumentSettingsService DocumentSettings,
+    KnitErp.Application.Sales.SalesDocumentPrintService DocumentPrint,
+    KnitErp.Application.Sales.SalesOrderDocumentsService OrderDocuments,
+    KnitErp.Application.Sales.SalesMailDispatcher MailDispatcher) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

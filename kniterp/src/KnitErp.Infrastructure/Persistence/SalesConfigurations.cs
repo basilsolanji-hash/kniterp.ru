@@ -146,3 +146,19 @@ internal sealed class SalesDiscountSettingsConfiguration : IEntityTypeConfigurat
         b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_sales_discount_settings_org");
     }
 }
+
+/// <summary>Причины отмены заказа (D1137).</summary>
+internal sealed class SalesCancelReasonConfiguration : IEntityTypeConfiguration<SalesCancelReason>
+{
+    public void Configure(EntityTypeBuilder<SalesCancelReason> b)
+    {
+        b.ToTable("sales_cancel_reasons");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Name).HasMaxLength(SalesCancelReason.NameMaxLength).IsRequired();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_sales_cancel_reasons_org_id");
+        b.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique().HasFilter("[IsArchived] = 0").HasDatabaseName("ux_sales_cancel_reasons_name");
+    }
+}

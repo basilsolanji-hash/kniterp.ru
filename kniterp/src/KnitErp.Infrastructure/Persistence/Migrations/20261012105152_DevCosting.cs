@@ -31,15 +31,6 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 defaultValue: 0m);
 
             migrationBuilder.AddColumn<decimal>(
-                name: "MinMarginPercent",
-                schema: "kniterp",
-                table: "dev_settings",
-                type: "decimal(9,4)",
-                precision: 9,
-                scale: 4,
-                nullable: true);
-
-            migrationBuilder.AddColumn<decimal>(
                 name: "OverheadPercent",
                 schema: "kniterp",
                 table: "dev_settings",
@@ -48,14 +39,6 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 scale: 4,
                 nullable: false,
                 defaultValue: 0m);
-
-            migrationBuilder.AddColumn<bool>(
-                name: "RequireCostForApproval",
-                schema: "kniterp",
-                table: "dev_settings",
-                type: "bit",
-                nullable: false,
-                defaultValue: true);
 
             migrationBuilder.AddColumn<decimal>(
                 name: "YarnWastePercent",
@@ -210,7 +193,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 name: "ck_dev_settings_costing",
                 schema: "kniterp",
                 table: "dev_settings",
-                sql: "[YarnWastePercent] BETWEEN 0 AND 100 AND [OverheadPercent] BETWEEN 0 AND 1000 AND [MarkupPercent] BETWEEN 0 AND 1000 AND ([LaborRatePerMinute] IS NULL OR [LaborRatePerMinute] >= 0) AND ([MinMarginPercent] IS NULL OR [MinMarginPercent] BETWEEN -100 AND 100)");
+                sql: "[YarnWastePercent] BETWEEN 0 AND 100 AND [OverheadPercent] BETWEEN 0 AND 1000 AND [MarkupPercent] BETWEEN 0 AND 1000 AND ([LaborRatePerMinute] IS NULL OR [LaborRatePerMinute] >= 0)");
 
             migrationBuilder.CreateIndex(
                 name: "IX_dev_cost_lines_OrganizationId_ItemId",
@@ -305,17 +288,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                 table: "dev_settings");
 
             migrationBuilder.DropColumn(
-                name: "MinMarginPercent",
-                schema: "kniterp",
-                table: "dev_settings");
-
-            migrationBuilder.DropColumn(
                 name: "OverheadPercent",
-                schema: "kniterp",
-                table: "dev_settings");
-
-            migrationBuilder.DropColumn(
-                name: "RequireCostForApproval",
                 schema: "kniterp",
                 table: "dev_settings");
 

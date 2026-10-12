@@ -35,8 +35,13 @@ public sealed class SmtpEmailSender(EmailOptions options, ILogger<SmtpEmailSende
         try
         {
             var message = new MimeMessage();
-            message.From.Add(new MailboxAddress("knitERP", From!));
-            message.To.Add(MailboxAddress.Parse(m.To));
+            // D1123 (сессия «Продажи»): имя отправителя — организации, адрес — ящика системы; получатели через запятую.
+            message.From.Add(new MailboxAddress(string.IsNullOrWhiteSpace(m.SenderName) ? "knitERP" : m.SenderName, From!));
+            foreach (var address in m.To.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                message.To.Add(MailboxAddress.Parse(address));
+            }
+
             if (m.ReplyTo is { } replyTo && MailboxAddress.TryParse(replyTo, out var reply))
             {
                 reply.Name = m.ReplyToName;
@@ -50,6 +55,10 @@ public sealed class SmtpEmailSender(EmailOptions options, ILogger<SmtpEmailSende
 
             message.Subject = m.Subject;
             var builder = new BodyBuilder { TextBody = m.Text, HtmlBody = m.Html };
+            foreach (var a in m.Attachments ?? [])
+            {
+                builder.Attachments.Add(a.FileName, a.Content, ContentType.Parse(a.ContentType));
+            }
             message.Body = builder.ToMessageBody();
 
             if (!string.IsNullOrWhiteSpace(options.PickupDirectory))

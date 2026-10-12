@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using KnitErp.Application.Access;
 using KnitErp.Application.Common;
 using KnitErp.Domain.Access;
@@ -23,6 +24,14 @@ public sealed record PreviewLineDto(string Entity, int Total, int ToCreate, int 
 /// <summary>D327: выгрузка цен — проверено связанных объектов, сколько отличаются, сколько отправлено, примеры кодов.</summary>
 public sealed record PriceExportDto(int Checked, int ToChange, int Sent, IReadOnlyList<string> Samples);
 
+/// <summary>D330: проверка связи по разделу — ответил ли МойСклад и сколько записей (или текст ошибки).</summary>
+public sealed record MoySkladProbeDto(string Section, bool Ok, string Detail);
+
+/// <summary>D333: расхождение остатка позиции knitERP и МойСклад (по всем складам).</summary>
+public sealed record StockDiffDto(long ItemId, string Code, string Name, decimal KnitErp, decimal MoySklad);
+
+public sealed record StockCompareDto(int Compared, int Different, IReadOnlyList<StockDiffDto> Differences);
+
 public sealed record MoySkladPreviewDto(IReadOnlyList<PreviewLineDto> Lines, IReadOnlyList<string> Conflicts, bool Truncated);
 
 public sealed record ImportIssueDto(string Entity, string? Code, string? Name, bool IsError, string Text);
@@ -38,6 +47,10 @@ public sealed class MoySkladImportService(
 {
     public const int PageSize = 500;
     public const int BundlePageSize = 100;
+
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(15);
+
+    private const string NoAnswer = "нет ответа";
     public const int PreviewLimit = 10_000;
     public const int MaxConflicts = 200;
     private const ExternalSystem Sys = ExternalSystem.MoySklad;
@@ -55,6 +68,131 @@ public sealed class MoySkladImportService(
         "bundle" => "Комплекты",
         _ => "—",
     };
+
+    // ---------- Проверка связи по разделам (D330) ----------
+
+    /// <summary>
+    /// По одному запросу на каждый раздел, который читает загрузка (как в загрузке, по одной записи): какой раздел МойСклад не отдаёт и почему.
+    /// Токен — введённый (ещё не сохранённый, если подключиться не удалось) или сохранённый. Ничего не записывает.
+    /// </summary>
+    public async Task<IReadOnlyList<MoySkladProbeDto>> ProbeAsync(string? token = null, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        var t = string.IsNullOrWhiteSpace(token) ? await TokenAsync(ctx.OrganizationId, ct) : ExternalConnection.NormalizeToken(token);
+        var result = new List<MoySkladProbeDto>();
+        var sections = new (string Title, Func<CancellationToken, Task<string>> Call)[]
+        {
+            ("Доступ к аккаунту", async c => $"юрлицо: {await client.CheckAsync(t, c) ?? "—"}"),
+            ("Виды цен", async c => $"видов: {(await client.PriceTypesAsync(t, c)).Count}"),
+            ("Единицы измерения", c => Size(MoySkladEntities.Uom, null, c)),
+            ("Страны", c => Size(MoySkladEntities.Country, null, c)),
+            ("Группы", c => Size(MoySkladEntities.Folder, null, c)),
+            ("Товары", c => Size(MoySkladEntities.Product, null, c)),
+            ("Услуги", c => Size(MoySkladEntities.Service, null, c)),
+            ("Модификации", c => Size(MoySkladEntities.Variant, null, c)),
+            ("Комплекты", c => Size(MoySkladEntities.Bundle, "components.assortment", c)),
+            ("Остатки", async c => { var p = await client.StockAsync(t, 0, 1, c); return $"записей: {p.Meta?.Size ?? p.Rows?.Count ?? 0}"; }),
+        };
+        foreach (var (title, call) in sections)
+        {
+            // Нет связи уже с первым разделом (не ответ МойСклад, а сеть) — остальные не ждём.
+            if (result.Count == 1 && !result[0].Ok && result[0].Detail.StartsWith(NoAnswer, StringComparison.Ordinal))
+            {
+                result.Add(new MoySkladProbeDto(title, false, "не проверялся: нет связи с МойСклад"));
+                continue;
+            }
+
+            if (result.Count > 1 && result[1].Detail.StartsWith("не проверялся", StringComparison.Ordinal))
+            {
+                result.Add(new MoySkladProbeDto(title, false, "не проверялся: нет связи с МойСклад"));
+                continue;
+            }
+
+            // Не дольше 15 секунд на раздел: при недоступной сети проверка не висит минутами из-за повторов клиента.
+            using var section = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            section.CancelAfter(ProbeTimeout);
+            try
+            {
+                result.Add(new MoySkladProbeDto(title, true, await call(section.Token)));
+            }
+            catch (MoySkladException ex)
+            {
+                // Без кода ответа — сеть (нет связи, тайм-аут), а не отказ МойСклад.
+                result.Add(new MoySkladProbeDto(title, false, ex.Status is null ? $"{NoAnswer}: {ex.Message}" : ex.Message));
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                result.Add(new MoySkladProbeDto(title, false, $"{NoAnswer} за {ProbeTimeout.TotalSeconds:0} с"));
+            }
+        }
+
+        return result;
+
+        async Task<string> Size(string entity, string? expand, CancellationToken c)
+        {
+            var page = await client.ListAsync(t, entity, 0, 1, expand, c);
+            return $"записей: {page.Meta?.Size ?? page.Rows?.Count ?? 0}";
+        }
+    }
+
+    // ---------- Сверка остатков (D333) ----------
+
+    public const int MaxStockDifferences = 500;
+
+    /// <summary>
+    /// Остатки связанных позиций (товары и модификации): сумма движений knitERP по действующим складам против отчёта МойСклад
+    /// «Остатки» по всем складам. Только чтение; расхождения — от большего к меньшему, до 500 строк.
+    /// </summary>
+    public async Task<StockCompareDto> StockCompareAsync(CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        await guard.DemandAsync(Permissions.WarehouseReportView, ct);
+        var org = ctx.OrganizationId;
+        var token = await TokenAsync(org, ct);
+        var links = await db.ExternalLinks.AsNoTracking().Where(l => l.OrganizationId == org && l.System == Sys && l.ObjectType == ExternalObjectType.Item)
+            .ToDictionaryAsync(l => l.ExternalId, l => l.LocalId, StringComparer.Ordinal, ct);
+        var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == org && !i.IsArchived && i.Type != ItemType.Service && i.Type != ItemType.Bundle)
+            .Select(i => new { i.Id, i.Code, i.Name }).ToDictionaryAsync(i => i.Id, ct);
+        var warehouses = await db.Warehouses.AsNoTracking().Where(w => w.OrganizationId == org && !w.IsArchived).Select(w => w.Id).ToListAsync(ct);
+        var local = await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == org && warehouses.Contains(m.WarehouseId))
+            .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+
+        var remote = new Dictionary<long, decimal>();
+        try
+        {
+            for (var offset = 0; offset < 100_000; offset += MoySkladEntities.MaxBatch)
+            {
+                var rows = (await client.StockAsync(token, offset, MoySkladEntities.MaxBatch, ct)).Rows ?? [];
+                foreach (var row in rows)
+                {
+                    var id = row.Meta?.Href is { } href ? MoySkladIds.FromHref(href) : null;
+                    if (id is not null && links.TryGetValue(id, out var itemId) && items.ContainsKey(itemId))
+                    {
+                        remote[itemId] = remote.GetValueOrDefault(itemId) + (row.Stock ?? 0);
+                    }
+                }
+
+                if (rows.Count < MoySkladEntities.MaxBatch)
+                {
+                    break;
+                }
+            }
+        }
+        catch (MoySkladException ex)
+        {
+            throw new BusinessRuleException("exchange.moysklad.check", $"МойСклад не ответил: {ex.Message}");
+        }
+
+        // Сравниваются связанные позиции knitERP (кроме услуг и комплектов): нет в отчёте МойСклад — там ноль.
+        var compared = links.Values.Where(items.ContainsKey).Distinct().ToList();
+        var diffs = compared
+            .Select(id => (Id: id, Local: local.GetValueOrDefault(id), Remote: remote.GetValueOrDefault(id)))
+            .Where(x => x.Local != x.Remote)
+            .OrderByDescending(x => Math.Abs(x.Local - x.Remote)).ThenBy(x => items[x.Id].Code)
+            .ToList();
+        return new StockCompareDto(compared.Count, diffs.Count,
+            diffs.Take(MaxStockDifferences).Select(x => new StockDiffDto(x.Id, items[x.Id].Code, items[x.Id].Name, x.Local, x.Remote)).ToList());
+    }
 
     // ---------- Выгрузка цен в МойСклад (D327) ----------
 
@@ -923,6 +1061,7 @@ public sealed class MoySkladImportService(
 
                 await db.SaveChangesAsync(ct);
                 await CommonAsync(row, item, ct);
+                await AttributesAsync(row, item, ct); // D332
                 if (stage == "bundle")
                 {
                     await ComponentsAsync(row, item, ct);
@@ -959,6 +1098,202 @@ public sealed class MoySkladImportService(
 
         /// <summary>Отмена изменений кэшей движка, сделанных текущей строкой (на случай её отката).</summary>
         private readonly List<Action> _undo = [];
+
+        // ---------- Доп. поля МойСклад → доп. поля номенклатуры (D332) ----------
+
+        private Dictionary<string, CustomFieldDefinition>? _fields;
+        private readonly HashSet<string> _attributeWarnings = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Доп. поля товара МойСклад: поле knitERP с тем же названием (нет — создаётся с подходящим типом), значение — по типу.
+        /// Неподдерживаемый тип (файл, сотрудник, склад…), другой тип у одноимённого поля, неверное значение — предупреждение, строка грузится.
+        /// </summary>
+        private async Task AttributesAsync(MsRow row, Item item, CancellationToken ct)
+        {
+            if (row.Attributes is not { Count: > 0 } attributes)
+            {
+                return;
+            }
+
+            _fields ??= (await db.CustomFieldDefinitions.Where(f => f.OrganizationId == org && f.Target == CustomFieldTarget.Item && !f.IsArchived).ToListAsync(ct))
+                .GroupBy(f => f.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var current = await db.CustomFieldValues.Where(v => v.OrganizationId == org && v.TargetId == item.Id).ToListAsync(ct);
+            foreach (var a in attributes)
+            {
+                var name = (a.Name ?? "").Trim();
+                var type = a.Type switch
+                {
+                    "string" => CustomFieldType.Text,
+                    "text" => CustomFieldType.LongText,
+                    "long" or "double" => CustomFieldType.Number,
+                    "boolean" => CustomFieldType.Flag,
+                    "time" => CustomFieldType.Date,
+                    "link" => CustomFieldType.Link,
+                    "customentity" => CustomFieldType.Catalog,
+                    "counterparty" => CustomFieldType.Counterparty,
+                    _ => (CustomFieldType?)null,
+                };
+                if (name.Length == 0)
+                {
+                    continue;
+                }
+
+                if (type is null)
+                {
+                    await WarnOnceAsync(row, name, $"Доп. поле «{name}» (тип МойСклад «{a.Type}») не переносится: такого типа в knitERP нет.", ct);
+                    continue;
+                }
+
+                try
+                {
+                    var field = await FieldAsync(name, type.Value, ct);
+                    if (field is null)
+                    {
+                        await WarnOnceAsync(row, name, $"Доп. поле «{name}» в knitERP другого типа или полей уже {CustomFieldDefinition.MaxFields} — значение не перенесено.", ct);
+                        continue;
+                    }
+
+                    var value = field.Normalize(await RawValueAsync(field, a.Value, ct));
+                    var existing = current.FirstOrDefault(v => v.FieldId == field.Id);
+                    if (value is null)
+                    {
+                        if (existing is not null)
+                        {
+                            db.CustomFieldValues.Remove(existing);
+                        }
+                    }
+                    else if (existing is null)
+                    {
+                        db.CustomFieldValues.Add(CustomFieldValue.Create(org, field.Id, item.Id, value));
+                    }
+                    else
+                    {
+                        existing.Set(value);
+                    }
+                }
+                catch (BusinessRuleException ex)
+                {
+                    await IssueAsync("Доп. поля", row, false, ex.Message, ct);
+                }
+            }
+
+            await db.SaveChangesAsync(ct);
+        }
+
+        private async Task WarnOnceAsync(MsRow row, string name, string text, CancellationToken ct)
+        {
+            if (_attributeWarnings.Add(name))
+            {
+                await IssueAsync("Доп. поля", row, false, text, ct);
+            }
+        }
+
+        /// <summary>Поле по названию; нет — создаётся (справочник — свой с тем же названием). Другой тип или предел полей — null.</summary>
+        private async Task<CustomFieldDefinition?> FieldAsync(string name, CustomFieldType type, CancellationToken ct)
+        {
+            var key = name.Length > CustomFieldDefinition.NameMaxLength ? name[..CustomFieldDefinition.NameMaxLength] : name;
+            if (_fields!.TryGetValue(key, out var field))
+            {
+                // Текст из МойСклад ложится и в многострочное поле knitERP.
+                return field.Type == type || (type == CustomFieldType.Text && field.Type == CustomFieldType.LongText) ? field : null;
+            }
+
+            if (_fields.Count >= CustomFieldDefinition.MaxFields)
+            {
+                return null;
+            }
+
+            long? catalogId = type == CustomFieldType.Catalog ? await UserCatalogAsync(key, ct) : null;
+            var sort = await db.CustomFieldDefinitions.Where(f => f.OrganizationId == org && f.Target == CustomFieldTarget.Item).Select(f => (int?)f.SortOrder).MaxAsync(ct) ?? 0;
+            field = CustomFieldDefinition.Create(org, CustomFieldTarget.Item, key, type, sort + 10, catalogId);
+            db.CustomFieldDefinitions.Add(field);
+            await db.SaveChangesAsync(ct);
+            _fields[key] = field;
+            _undo.Add(() => _fields.Remove(key));
+            return field;
+        }
+
+        private async Task<long> UserCatalogAsync(string name, CancellationToken ct)
+        {
+            var key = name.Length > UserCatalog.NameMaxLength ? name[..UserCatalog.NameMaxLength] : name;
+            var existing = await db.UserCatalogs.Where(c => c.OrganizationId == org && !c.IsArchived && c.Name == key).Select(c => (long?)c.Id).FirstOrDefaultAsync(ct);
+            if (existing is { } id)
+            {
+                return id;
+            }
+
+            var catalog = UserCatalog.Create(org, key);
+            db.UserCatalogs.Add(catalog);
+            await db.SaveChangesAsync(ct);
+            return catalog.Id;
+        }
+
+        /// <summary>Значение доп. поля МойСклад в виде для knitERP: справочник — номер записи (создаётся по названию), контрагент — по названию.</summary>
+        private async Task<string?> RawValueAsync(CustomFieldDefinition field, JsonElement value, CancellationToken ct)
+        {
+            switch (value.ValueKind)
+            {
+                case JsonValueKind.Null or JsonValueKind.Undefined:
+                    return null;
+                case JsonValueKind.True:
+                    return "true";
+                case JsonValueKind.False:
+                    return null;
+                case JsonValueKind.Number:
+                    return value.GetRawText();
+                case JsonValueKind.String when field.Type == CustomFieldType.Date:
+                    var date = value.GetString() ?? "";
+                    return date.Length >= 10 ? date[..10] : date; // «2026-10-01 00:00:00.000»
+                case JsonValueKind.String:
+                    return value.GetString();
+                case JsonValueKind.Object when value.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String:
+                    var name = n.GetString()!.Trim();
+                    if (field.Type == CustomFieldType.Catalog)
+                    {
+                        var entry = await db.UserCatalogEntries.Where(e => e.OrganizationId == org && e.CatalogId == field.CatalogId && !e.IsArchived && e.Name == name)
+                            .Select(e => (long?)e.Id).FirstOrDefaultAsync(ct);
+                        if (entry is null)
+                        {
+                            var created = UserCatalogEntry.Create(org, field.CatalogId!.Value, name, null);
+                            db.UserCatalogEntries.Add(created);
+                            await db.SaveChangesAsync(ct);
+                            entry = created.Id;
+                        }
+
+                        return entry.Value.ToString(CultureInfo.InvariantCulture);
+                    }
+
+                    if (field.Type == CustomFieldType.Counterparty)
+                    {
+                        var counterparty = await db.Counterparties.Where(c => c.OrganizationId == org && !c.IsArchived && c.Name == name).Select(c => (long?)c.Id).FirstOrDefaultAsync(ct);
+                        return counterparty?.ToString(CultureInfo.InvariantCulture)
+                               ?? throw new BusinessRuleException("exchange.moysklad.counterparty", $"«{field.Name}»: контрагента «{name}» нет в knitERP — значение не перенесено.");
+                    }
+
+                    return name;
+                default:
+                    return null;
+            }
+        }
+
+        private readonly Dictionary<long, IReadOnlyList<string>> _catalogNames = [];
+
+        private async Task<IReadOnlyList<string>?> CatalogNamesAsync(Characteristic c, CancellationToken ct)
+        {
+            if (c.CatalogId is not { } catalogId)
+            {
+                return null;
+            }
+
+            if (!_catalogNames.TryGetValue(catalogId, out var names))
+            {
+                names = await db.UserCatalogEntries.AsNoTracking().Where(e => e.OrganizationId == org && e.CatalogId == catalogId && !e.IsArchived)
+                    .Select(e => e.Name).ToListAsync(ct);
+                _catalogNames[catalogId] = names;
+            }
+
+            return names;
+        }
 
         private void MarkLinked(Item item) => _codes[item.Code] = (item.Id, true);
 
@@ -1033,7 +1368,8 @@ public sealed class MoySkladImportService(
                     characteristics.Add(local);
                 }
 
-                values[local.Id] = Variants.CleanValue(ch.Value);
+                // D328: значение по типу характеристики knitERP (число, да/нет, запись справочника); не подходит — ошибка строки (откат).
+                values[local.Id] = local.Type == CharacteristicType.Text ? Variants.CleanValue(ch.Value) : local.Normalize(ch.Value, await CatalogNamesAsync(local, ct));
             }
 
             var key = Variants.Key(values);

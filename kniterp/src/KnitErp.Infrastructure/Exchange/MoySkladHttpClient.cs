@@ -65,6 +65,9 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
         return GetAsync<MsPage<MsRow>>(token, entity, query, ct);
     }
 
+    public Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default) =>
+        GetAsync<MsPage<MsRow>>(token, MoySkladEntities.StockAll, $"offset={Math.Max(0, offset)}&limit={Math.Clamp(limit, 1, 1000)}&stockMode=all", ct);
+
     public async Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default) =>
         await GetAsync<List<MsPriceType>>(token, MoySkladEntities.PriceTypes, null, ct);
 
@@ -234,6 +237,7 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
         MoySkladEntities.Bundle => "комплекты",
         MoySkladEntities.Variant => "модификации",
         MoySkladEntities.PriceTypes => "виды цен",
+        MoySkladEntities.StockAll => "остатки",
         _ => entity,
     };
 

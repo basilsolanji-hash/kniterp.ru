@@ -225,7 +225,8 @@ internal sealed class ExternalImportIssueConfiguration : IEntityTypeConfiguratio
         b.ToTable("external_import_issues");
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
-        b.Property(x => x.Entity).HasColumnType("varchar(40)").IsRequired();
+        // Ревью D330: раздел — по-русски («Модификации»), varchar терял кириллицу («???»).
+        b.Property(x => x.Entity).HasMaxLength(40).IsRequired();
         b.Property(x => x.ExternalId).HasColumnType("varchar(64)");
         b.Property(x => x.Code).HasMaxLength(255);
         b.Property(x => x.Name).HasMaxLength(300);

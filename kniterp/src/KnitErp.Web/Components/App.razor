@@ -322,6 +322,12 @@
         .tag { font-size: 11px; padding: 1px 6px; }
         p { margin: 6px 0; }
         dl.facts { gap: 4px 14px; margin: 8px 0; }
+        /* D1109 (сессия «Продажи», жалоба владельца на пустые площади): на широком экране реквизиты — пары «подпись — значение»
+           в несколько колонок на всю ширину, а не узкой колонкой слева. */
+        @@media (min-width: 900px) {
+            dl.facts { max-width: none; grid-template-columns: repeat(auto-fill, 136px minmax(200px, 1fr)); column-gap: 14px; }
+            dl.facts dt { overflow-wrap: anywhere; }
+        }
         :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
         input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
         /* Поля понятнее цветом: обязательное — полоска цвета акцента слева, ошибка — красная рамка, только чтение — фон тише. */

@@ -79,6 +79,16 @@ public sealed class FakeMoySkladClient : IMoySkladClient
     public Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<MsPriceType>>(PriceTypes);
 
+    /// <summary>Отчёт «Остатки» (D333): строки с meta.href позиции и stock.</summary>
+    public List<MsRow> Stock { get; } = [];
+
+    public Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default)
+    {
+        Assert.Equal(Token, token);
+        Assert.InRange(limit, 1, MoySkladEntities.MaxBatch);
+        return Task.FromResult(new MsPage<MsRow>(new MsMeta(null, null, Stock.Count, limit, offset), Stock.Skip(offset).Take(limit).ToList()));
+    }
+
     /// <summary>Отправленные изменения цен (D327) — и применены к строкам, как сделал бы МойСклад.</summary>
     public List<(string Entity, MsPriceUpdate Update)> PriceUpdates { get; } = [];
 
@@ -374,6 +384,153 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
 
         await using var db = host.NewDb();
         Assert.True(await db.AuditEntries.AnyAsync(e => e.OrganizationId == _org && e.Reason == "Выгрузка цен в МойСклад"));
+    }
+
+    [SqlFact]
+    public async Task Probe_shows_which_section_fails_without_saving_token()
+    {
+        // D330: проверка связи по разделам — с введённым токеном, ещё до подключения; ничего не сохраняет.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        fake.FailOnEntity = MoySkladEntities.Bundle;
+        await using var s = host.As(_user, _org);
+        var ms = Service(s, fake);
+        var probe = await ms.ProbeAsync("Bearer " + FakeMoySkladClient.Token);
+        Assert.Equal(10, probe.Count);
+        Assert.All(probe.Where(p => p.Section != "Комплекты"), p => Assert.True(p.Ok, p.Section + ": " + p.Detail));
+        var bundles = probe.Single(p => p.Section == "Комплекты");
+        Assert.False(bundles.Ok);
+        Assert.Contains("503", bundles.Detail);
+        Assert.Equal("записей: 2", probe.Single(p => p.Section == "Товары").Detail);
+        Assert.False((await ms.StatusAsync()).Connected); // токен не сохранён
+
+        // Без введённого токена и без подключения — понятный отказ.
+        Assert.Equal("exchange.not_connected", (await Assert.ThrowsAsync<BusinessRuleException>(() => ms.ProbeAsync())).Code);
+    }
+
+    [SqlFact]
+    public async Task Import_respects_characteristic_types()
+    {
+        // D328: у «Цвета» тип «Справочник» — значение из МойСклад должно быть записью справочника (как в справочнике), иначе ошибка строки.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        long colors;
+        await using (var s = host.As(_user, _org))
+        {
+            colors = await s.Nomenclature.CreateCatalogAsync("Цвета");
+            await s.Nomenclature.AddEntryAsync(colors, "Синий", null);
+            await s.Modifications.CreateCharacteristicAsync("Цвет", CharacteristicType.Catalog, colors);
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+            var run = (await ms.StatusAsync()).Runs.First();
+            Assert.Contains(await ms.IssuesAsync(run.Id), i => i.IsError && i.Entity == "Модификации" && i.Text.Contains("нет в справочнике"));
+            Assert.Empty((await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1-К"))).Items);
+
+            await s.Nomenclature.AddEntryAsync(colors, "КРАСНЫЙ", null);
+            await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+        }
+
+        await using var c = host.As(_user, _org);
+        var variant = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1-К"))).Items.Single();
+        var values = (await c.Modifications.VariantsAsync(variant.ParentItemId!.Value)).Modifications.Single().Values;
+        Assert.Equal("КРАСНЫЙ", values.Single().Value); // как в справочнике, а не «Красный» из МойСклад
+    }
+
+    [SqlFact]
+    public async Task Import_maps_moysklad_attributes_to_typed_custom_fields()
+    {
+        // D332: доп. поля МойСклад → доп. поля номенклатуры: тип по МойСклад, справочник создаётся, неподдерживаемое и опасное — предупреждение.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        static MsAttribute A(string name, string type, string json) => new(null, name, type, JsonDocument.Parse(json).RootElement.Clone());
+        var products = fake.Entities[MoySkladEntities.Product];
+        var hatIndex = products.FindIndex(r => r.Id == "p-hat");
+        products[hatIndex] = products[hatIndex] with
+        {
+            Attributes =
+            [
+                A("Состав", "string", "\"шерсть 50%\""),
+                A("Уход", "text", "\"Стирка 30°\\nНе отбеливать\""),
+                A("Плотность", "double", "220.5"),
+                A("Новинка", "boolean", "true"),
+                A("Дата поступления", "time", "\"2026-10-01 00:00:00.000\""),
+                A("Страница", "link", "\"https://shop.example/hat\""),
+                A("Сезон", "customentity", "{\"meta\":{},\"name\":\"Зима\"}"),
+                A("Фото", "file", "{\"meta\":{},\"filename\":\"a.jpg\"}"),
+                A("Плохая ссылка", "link", "\"javascript:alert(1)\""),
+            ],
+        };
+
+        long runId;
+        await using (var s = host.As(_user, _org))
+        {
+            var ms = Service(s, fake);
+            await ms.ConnectAsync(FakeMoySkladClient.Token);
+            runId = await ms.StartAsync();
+            Assert.True(await ms.ProcessNextAsync());
+            var run = (await ms.StatusAsync()).Runs.Single();
+            Assert.Equal((ImportRunStatus.Completed, 0), (run.Status, run.Errors)); // предупреждения — не ошибки строки
+            var issues = await ms.IssuesAsync(runId);
+            Assert.Contains(issues, i => !i.IsError && i.Entity == "Доп. поля" && i.Text.Contains("«Фото»"));
+            Assert.Contains(issues, i => !i.IsError && i.Entity == "Доп. поля" && i.Text.Contains("https://"));
+        }
+
+        await using var c = host.As(_user, _org);
+        var hat = (await c.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1"))).Items.Single(i => i.ParentItemId is null).Id;
+        var fields = (await c.Nomenclature.GetItemAsync(hat)).CustomFields.ToDictionary(f => f.Name);
+        Assert.Equal((CustomFieldType.Text, "шерсть 50%"), (fields["Состав"].Type, fields["Состав"].Value));
+        Assert.Equal((CustomFieldType.LongText, "Стирка 30°\nНе отбеливать"), (fields["Уход"].Type, fields["Уход"].Value));
+        Assert.Equal((CustomFieldType.Number, "220.5"), (fields["Плотность"].Type, fields["Плотность"].Value));
+        Assert.Equal((CustomFieldType.Flag, "true"), (fields["Новинка"].Type, fields["Новинка"].Value));
+        Assert.Equal((CustomFieldType.Date, "2026-10-01"), (fields["Дата поступления"].Type, fields["Дата поступления"].Value));
+        Assert.Equal((CustomFieldType.Link, "https://shop.example/hat"), (fields["Страница"].Type, fields["Страница"].Value));
+        Assert.Equal((CustomFieldType.Catalog, "Зима"), (fields["Сезон"].Type, fields["Сезон"].Display));
+        Assert.False(fields.ContainsKey("Фото"));
+        Assert.Null(fields["Плохая ссылка"].Value);
+        Assert.Contains(await c.Nomenclature.CatalogsAsync(), x => x.Name == "Сезон");
+    }
+
+    [SqlFact]
+    public async Task Stock_compare_shows_linked_items_with_different_balances()
+    {
+        // D333: сверка остатков — только связанные позиции, отсутствующая в отчёте МойСклад — ноль; ничего не записывает.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        await using var s = host.As(_user, _org);
+        var ms = Service(s, fake);
+        await ms.ConnectAsync(FakeMoySkladClient.Token);
+        await ms.StartAsync();
+        Assert.True(await ms.ProcessNextAsync());
+
+        // В knitERP: 5 шапок на складе (поступление).
+        var hat = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1"))).Items.Single(i => i.ParentItemId is null).Id;
+        var store = await s.Warehouses.CreateWarehouseAsync("Склад", null);
+        await using (var db = host.NewDb())
+        {
+            var reason = await db.OperationReasons.Where(r => r.OrganizationId == _org && r.Kind == KnitErp.Domain.Warehousing.StockOperationKind.Receipt)
+                .Select(r => (long?)r.Id).FirstAsync();
+            var doc = await s.Documents.CreateAsync(KnitErp.Domain.Warehousing.StockOperationKind.Receipt,
+                new KnitErp.Domain.Warehousing.StockDocumentHeader(store, null, null, reason, new DateOnly(2026, 10, 1), null));
+            await s.Documents.SetLineAsync(doc, hat, 5, (await s.Documents.GetAsync(doc)).RowVersion);
+            await s.Documents.PostAsync(doc, (await s.Documents.GetAsync(doc)).RowVersion);
+        }
+
+        // В МойСклад: шапок 3 (по двум строкам отчёта не бывает — но сумма на всякий случай), шарфов 0, модификации нет в отчёте.
+        static MsRow R(string entity, string id, decimal stock) => new() { Meta = new MsMeta($"https://api.moysklad.ru/api/remap/1.2/{entity}/{id}?expand=supplier", "product", null, null, null), Stock = stock };
+        fake.Stock.AddRange([R("entity/product", "p-hat", 3), R("entity/product", "p-scarf", 0), R("entity/product", "чужой-id", 100)]);
+        var result = await ms.StockCompareAsync();
+        var diff = result.Differences.Single();
+        Assert.Equal((hat, 5m, 3m), (diff.ItemId, diff.KnitErp, diff.MoySklad));
+        Assert.Equal(1, result.Different);
+        Assert.True(result.Compared >= 3); // шапка, шарф, модификация
+        Assert.Empty(fake.PriceUpdates);
     }
 
     [SqlFact]

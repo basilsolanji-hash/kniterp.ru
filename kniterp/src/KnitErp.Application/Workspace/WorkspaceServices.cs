@@ -265,6 +265,12 @@ public sealed class NotificationService(IKnitErpDbContextFactory factory, Person
                 result.Add(new(a.Text, a.Href, null, a.Warning ? NotificationLevel.Warning : NotificationLevel.Action, a.Key));
             }
 
+            // D1113 (сессия «Продажи»): просрочка оплаты покупателей — их менеджеру, одно напоминание на покупателя в день.
+            foreach (var a in await KnitErp.Application.Sales.SalesReceivables.AlertsAsync(db, ctx, today, ct))
+            {
+                result.Add(new(a.Text, "reports/receivables", null, NotificationLevel.Warning, a.Key));
+            }
+
             // D107: упоминания в обсуждениях и новые ответы там, где пользователь писал.
             foreach (var a in await KnitErp.Application.Collaboration.DiscussionService.AlertsAsync(db, ctx, clock.UtcNow, ct))
             {
