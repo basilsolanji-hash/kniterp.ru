@@ -121,6 +121,9 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
             t.HasCheckConstraint("ck_production_operations_reason", "[Kind] NOT IN (2, 4) OR [Reason] IS NOT NULL");
             t.HasCheckConstraint("ck_production_operations_corrects", "[CorrectsOperationId] IS NULL OR ([Kind] = 2 AND [EmployeeId] IS NOT NULL)");
             t.HasCheckConstraint("ck_production_operations_culprit", "[CulpritEmployeeId] IS NULL OR [Kind] = 4");
+            // Повторная работа после переделки (D410): часть «Сделано» (0…количество) или исправления (количество…0), у остального — 0.
+            t.HasCheckConstraint("ck_production_operations_repeat",
+                "([Kind] = 1 AND [RepeatQuantity] >= 0 AND [RepeatQuantity] <= [Quantity]) OR ([Kind] = 2 AND [RepeatQuantity] <= 0 AND [RepeatQuantity] >= [Quantity]) OR [RepeatQuantity] = 0");
             // Только вставка — триггер в миграции AddProductionStages.
             t.HasTrigger("tr_production_operations_immutable");
         });
@@ -130,8 +133,10 @@ internal sealed class ProductionOperationConfiguration : IEntityTypeConfiguratio
         b.Property(x => x.Kind).HasConversion<byte>();
         b.Property(x => x.ReturnToStage).HasConversion<byte?>();
         b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.RepeatQuantity).HasColumnType("decimal(18,6)").HasDefaultValue(0m);
         b.Property(x => x.Reason).HasMaxLength(ProductionOperation.ReasonMaxLength);
         b.Ignore(x => x.Step);
+        b.Ignore(x => x.PaidQuantity);
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         // Заказ — той же организации.
         b.HasOne<ProductionOrder>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionOrderId })

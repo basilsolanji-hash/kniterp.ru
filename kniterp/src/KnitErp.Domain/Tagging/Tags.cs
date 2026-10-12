@@ -31,9 +31,14 @@ public enum TaggedEntity : byte
 
     /// <summary>Производственный заказ (D99).</summary>
     ProductionOrder = 11,
-    // 11–19 — производство и другие модули; 20–29 — модуль «Сотрудники» (D202).
+    // 11–19 — производство и другие модули; 20–29 — модуль «Сотрудники» (D202); 30–39 — CRM, 40–49 — «Разработка»,
+    // 50–99 — следующие модули (D117: объекты подключаются через ObjectDirectory.Register, CHECK в базе — 1…99).
     Employee = 20,
 
+    // 40–49 — модуль «Разработка» (D700).
+    DevModel = 40,
+    DevSample = 41,
+    DevPattern = 42,
     // 30–39 — CRM (D601).
     CrmLead = 30,
     CrmDeal = 31,
@@ -84,6 +89,9 @@ public static class TagColors
         TaggedEntity.ExpenseReport => "Авансовые отчёты",
         TaggedEntity.ProductionOrder => "Производственные заказы",
         TaggedEntity.Employee => "Сотрудники",
+        TaggedEntity.DevModel => "Модели в разработке",
+        TaggedEntity.DevSample => "Образцы",
+        TaggedEntity.DevPattern => "Рисунки",
         TaggedEntity.CrmLead => "Лиды",
         TaggedEntity.CrmDeal => "Сделки",
         TaggedEntity.CrmContact => "Контакты",
@@ -183,7 +191,10 @@ public sealed class TagLink
     public DateTime CreatedAtUtc { get; private set; }
 
     public static TagLink Create(long organizationId, long tagId, TaggedEntity entity, long entityId, long userId, DateTime nowUtc) =>
-        Enum.IsDefined(entity)
+        Enum.IsDefined(entity) || IsModule(entity)
             ? new TagLink { OrganizationId = organizationId, TagId = tagId, Entity = entity, EntityId = entityId, CreatedByUserId = userId, CreatedAtUtc = nowUtc }
             : throw new BusinessRuleException("tag.entity", "Этот объект нельзя отметить тегом.");
+
+    /// <summary>D117: объекты модулей (30–99) подключаются через справочник объектов, их значения могут быть не описаны в перечислении.</summary>
+    public static bool IsModule(TaggedEntity entity) => (int)entity is >= 30 and <= 99;
 }

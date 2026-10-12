@@ -16,11 +16,11 @@ public static class ApiCatalog
         api.MapGet("/catalog/items", async (CatalogService catalog, CatalogQueryService query, string? search, ItemType? type, ItemKind? kind, long? groupId,
                 long? tagId, bool? includeArchived, int? offset, int? limit, CancellationToken ct) =>
             {
-                var list = await catalog.ListItemsAsync(new ItemFilter(type, search, includeArchived ?? false, 5000, groupId, tagId, kind), ct);
                 var o = Math.Max(0, offset ?? 0);
                 var l = Math.Clamp(limit ?? 100, 1, MaxLimit);
-                var page = list.Items.Skip(o).Take(l).ToList();
-                return ApiResult.Ok(new Page<CatalogItemDto>(await query.EnrichAsync(page, ct), o, l, o + page.Count < list.Items.Count ? o + page.Count : null));
+                var list = await catalog.ListItemsAsync(new ItemFilter(type, search, includeArchived ?? false, l, groupId, tagId, kind, Skip: o), ct);
+                return ApiResult.Ok(new Page<CatalogItemDto>(await query.EnrichAsync(list.Items, ct), o, l,
+                    o + list.Items.Count < list.Total ? o + list.Items.Count : null));
             })
             .WithSummary("Номенклатура для обмена: вид, предмет расчёта, маркировка, GTIN, упаковки, состав комплекта");
 

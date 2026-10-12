@@ -8,24 +8,11 @@ namespace KnitErp.E2ETests;
 public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppFixture>
 {
     [SqlFact]
-    public async Task Workshop_head_creates_releases_and_cancels_production_order()
+    public Task Workshop_head_creates_releases_and_cancels_production_order() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
-        var page = await context.NewPageAsync();
-        try
-        {
-            await ScenarioAsync(page);
-        }
-        catch
-        {
-            // Снимок и текст страницы — в папку KNITERP_E2E_ARTIFACTS (по умолчанию временная): по ним видно, на чём остановился сценарий.
-            var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath();
-            Directory.CreateDirectory(dir);
-            await page.ScreenshotAsync(new() { Path = Path.Combine(dir, "production-order-failure.png"), FullPage = true });
-            await File.WriteAllTextAsync(Path.Combine(dir, "production-order-failure.txt"), page.Url + "\n" + await page.InnerTextAsync("body"));
-            throw;
-        }
-    }
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await ScenarioAsync(await context.NewPageAsync());
+    });
 
     private async Task ScenarioAsync(IPage page)
     {
@@ -75,10 +62,10 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
     /// <summary>D92: начальник цеха отмечает этапы в карточке; больше пришедшего с предыдущего этапа отметить нельзя.</summary>
     [SqlFact]
-    public async Task Workshop_head_marks_stages_and_sees_limit()
+    public Task Workshop_head_marks_stages_and_sees_limit() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateReleasedOrderAsync(10);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page);
         await page.GotoAsync($"production-orders/{order}");
@@ -102,6 +89,8 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("Отмечено.")).ToBeVisibleAsync();
         var knitting = page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Вязание" });
         await Assertions.Expect(knitting).ToContainTextAsync("6 шт");
+        // D413: после отметки количество подставлено само — сколько ещё можно отметить на этапе.
+        await Assertions.Expect(page.GetByLabel("Количество", new() { Exact = true })).ToHaveValueAsync("4");
 
         await page.GetByLabel("Этап", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Сборка" });
         await page.GetByLabel("Количество", new() { Exact = true }).FillAsync("7");
@@ -115,14 +104,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Отменить заказ" })).ToHaveCountAsync(0);
         await page.GetByText("История отметок (2)").ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Cell, new() { Name = "Начальник цеха" })).ToHaveCountAsync(2);
-    }
+    });
 
     /// <summary>D93: кладовщик выдаёт пряжу в цех из карточки заказа и возвращает часть обратно.</summary>
     [SqlFact]
-    public async Task Storekeeper_issues_yarn_to_workshop()
+    public Task Storekeeper_issues_yarn_to_workshop() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateReleasedOrderAsync(20);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page, AppFixture.StorekeeperEmail);
         await page.GotoAsync($"production-orders/{order}");
@@ -164,14 +153,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("Документ сторнирован.")).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator("td[data-label='Возвращено']")).ToHaveTextAsync("0");
         await Assertions.Expect(page.Locator("td[data-label='В цехе (НЗП)']")).ToHaveTextAsync("6,592");
-    }
+    });
 
     /// <summary>D95: кладовщик выпускает продукцию с расходом по норме и возвращает остаток пряжи; начальник цеха закрывает заказ.</summary>
     [SqlFact]
-    public async Task Output_return_rest_and_close_order()
+    public Task Output_return_rest_and_close_order() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreatePackedOrderAsync(10);
-        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        await using (var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
         {
             var page = await context.NewPageAsync();
             await LoginAsync(page, AppFixture.StorekeeperEmail);
@@ -207,7 +196,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             await Assertions.Expect(page.GetByText("Председатель комиссии")).ToBeVisibleAsync();
         }
 
-        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        await using (var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
         {
             var page = await context.NewPageAsync();
             await LoginAsync(page);
@@ -217,14 +206,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             await Assertions.Expect(page.Locator("h1 .tag")).ToHaveTextAsync("Закрыт");
             await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Заказ закрыт.");
         }
-    }
+    });
 
     /// <summary>D98: начальник цеха видит заказ в отчёте по производству и скачивает отчёт в Excel.</summary>
     [SqlFact]
-    public async Task Workshop_head_opens_production_report_and_downloads_excel()
+    public Task Workshop_head_opens_production_report_and_downloads_excel() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreatePackedOrderAsync(7);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page);
         await page.GotoAsync("reports/production");
@@ -239,14 +228,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         var response = await page.APIRequest.GetAsync(href!);
         Assert.Equal(200, response.Status);
         Assert.StartsWith("application/vnd.openxmlformats", response.Headers["content-type"]);
-    }
+    });
 
     /// <summary>D99: на карточке производственного заказа есть теги и обсуждение; комментарий виден после отправки.</summary>
     [SqlFact]
-    public async Task Workshop_head_comments_on_production_order()
+    public Task Workshop_head_comments_on_production_order() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateReleasedOrderAsync(3);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page);
         await page.GotoAsync($"production-orders/{order}");
@@ -261,14 +250,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
         await page.GetByRole(AriaRole.Button, new() { Name = "Отправить" }).ClickAsync();
         await Assertions.Expect(page.Locator("section.discussion")).ToContainTextAsync("Нитки для манжет — с партии 12");
-    }
+    });
 
     /// <summary>D90 (дополнение): из карточки заказа покупателя — черновики производственных заказов одной кнопкой.</summary>
     [SqlFact]
-    public async Task Production_orders_created_from_sales_order_card()
+    public Task Production_orders_created_from_sales_order_card() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var sales = await app.CreateConfirmedSalesOrderAsync(12);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page);
         await page.GotoAsync($"sales-orders/{sales}");
@@ -281,14 +270,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await panel.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^ПЗ-") }).Last.ClickAsync();
         await Assertions.Expect(page.Locator("h1 .tag")).ToHaveTextAsync("Черновик");
         await Assertions.Expect(page.GetByText("Заказ покупателя ЗК-")).ToBeVisibleAsync();
-    }
+    });
 
     /// <summary>D90 (дополнение «сборка из полуфабрикатов»): из заказа на кофты — заказ на рукава кнопкой у материала.</summary>
     [SqlFact]
-    public async Task Workshop_head_creates_semi_finished_order_from_material()
+    public Task Workshop_head_creates_semi_finished_order_from_material() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateOrderWithSemiFinishedAsync(5);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page);
         await page.GotoAsync($"production-orders/{order}");
@@ -297,14 +286,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.Locator("h1")).ToContainTextAsync("РУ-1 Рукав");
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^ПЗ-") }).First).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByText("10 шт")).ToBeVisibleAsync(); // 2 рукава × 5 кофт
-    }
+    });
 
     /// <summary>D94 (дополнение «планирование»): начальник цеха видит потребность в пряже по открытым заказам; заказывать поставщикам — не его право.</summary>
     [SqlFact]
-    public async Task Workshop_head_sees_material_planning()
+    public Task Workshop_head_sees_material_planning() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         await app.CreateReleasedOrderAsync(500); // 160 кг пряжи с отходом при 50 кг на складе — нехватка
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page);
         await page.GotoAsync("production/planning");
@@ -312,14 +301,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         var yarn = page.GetByRole(AriaRole.Row).Filter(new() { HasText = "ПР-1" });
         await Assertions.Expect(yarn).ToHaveClassAsync(new Regex("short"));
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Создать заказы поставщикам на нехватку" })).ToHaveCountAsync(0);
-    }
+    });
 
     /// <summary>D92 (дополнение «терминал цеха»): вязальщица на телефоне вводит код операции и отмечает часть работы с причиной.</summary>
     [SqlFact]
-    public async Task Worker_marks_partial_work_from_phone_terminal()
+    public Task Worker_marks_partial_work_from_phone_terminal() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateReleasedOrderAsync(10);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
             BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
             ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
@@ -379,14 +368,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await page.GetByRole(AriaRole.Button, new() { Name = "Исправить", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Отметка исправлена.");
         await Assertions.Expect(page.Locator(".shop-totals li").Filter(new() { HasText = "Вязание" })).ToContainTextAsync("5 шт");
-    }
+    });
 
     /// <summary>Сменное задание: начальник цеха назначает вязальщице норму, она видит процент на телефоне и сообщает причину.</summary>
     [SqlFact]
-    public async Task Workshop_head_assigns_shift_task_and_worker_reports_shortfall()
+    public Task Workshop_head_assigns_shift_task_and_worker_reports_shortfall() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateReleasedOrderAsync(10);
-        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        await using (var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
         {
             var page = await context.NewPageAsync();
             await LoginAsync(page);
@@ -412,13 +401,17 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
             await Assertions.Expect(assigned).ToBeVisibleAsync();
             await Assertions.Expect(page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Петрова А. С." }).Last).ToContainTextAsync("0%");
+            // D413: после выбора заказа этап и план подставлены по свободному количеству.
+            await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync("");
+            await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync(order.ToString());
+            await Assertions.Expect(page.GetByLabel("План на смену")).ToHaveValueAsync("10");
             // Повтор заданий прошлого дня: вчера заданий нет — ничего не скопировано, сообщение понятное.
             await page.GetByRole(AriaRole.Button, new() { Name = "Повторить задания прошлого дня" }).ClickAsync();
             await page.GetByRole(AriaRole.Button, new() { Name = "Да", Exact = true }).ClickAsync();
             await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Скопировано заданий: 0.");
         }
 
-        await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        await using (var phone = await browser.NewContextAsync(new BrowserNewContextOptions
         {
             BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
             ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
@@ -437,14 +430,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             await Assertions.Expect(task).ToContainTextAsync("Причина: Нет пряжи или материалов");
             Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
         }
-    }
+    });
 
     /// <summary>Настройки производства организации: начальник цеха видит правила без права менять; баллы — в отчёте и на телефоне.</summary>
     [SqlFact]
-    public async Task Production_settings_are_read_only_for_head_and_points_are_visible()
+    public Task Production_settings_are_read_only_for_head_and_points_are_visible() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         await app.EnablePointsAsync();
-        await using (var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
+        await using (var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true }))
         {
             var page = await context.NewPageAsync();
             await LoginAsync(page);
@@ -462,7 +455,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             Assert.EndsWith(".xlsx", download.SuggestedFilename);
         }
 
-        await using (var phone = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        await using (var phone = await browser.NewContextAsync(new BrowserNewContextOptions
         {
             BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
             ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
@@ -475,14 +468,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             await Assertions.Expect(page.Locator(".shop-totals li").Filter(new() { HasText = "Баллы" })).ToHaveCountAsync(1);
             Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
         }
-    }
+    });
 
     /// <summary>D407: контролёр на телефоне отмечает брак с виновником и отправляет на переделку.</summary>
     [SqlFact]
-    public async Task Controller_marks_defect_and_rework_on_phone()
+    public Task Controller_marks_defect_and_rework_on_phone() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateOrderReadyForQualityAsync(6);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
             BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true,
             ViewportSize = new ViewportSize { Width = 390, Height = 844 }, IsMobile = true, HasTouch = true,
@@ -505,14 +498,14 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await page.GetByRole(AriaRole.Button, new() { Name = "Отправить на переделку" }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToHaveTextAsync("Отправлено на переделку: 1 шт.");
         Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth"));
-    }
+    });
 
     /// <summary>Маршрутный лист: QR-код и текстовый код на каждый этап.</summary>
     [SqlFact]
-    public async Task Workshop_head_prints_route_sheet_with_qr_codes()
+    public Task Workshop_head_prints_route_sheet_with_qr_codes() => ScenarioBrowser.RunAsync(app.Browser, async browser =>
     {
         var order = await app.CreateReleasedOrderAsync(5);
-        await using var context = await app.Browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions { BaseURL = app.BaseUrl, Locale = "ru-RU", IgnoreHTTPSErrors = true });
         var page = await context.NewPageAsync();
         await LoginAsync(page);
         await page.GotoAsync($"production-orders/{order}");
@@ -524,7 +517,7 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("Маршрут: Вязание → Сборка → ВТО → Контроль качества → Упаковка.")).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByText($"ОП-{order}-4", new() { Exact = true })).ToBeVisibleAsync();
         Assert.StartsWith("data:image/png;base64,", await page.Locator("td.qr img").First.GetAttributeAsync("src"));
-    }
+    });
 
     private Task LoginAsync(IPage page) => LoginAsync(page, AppFixture.UserEmail);
 

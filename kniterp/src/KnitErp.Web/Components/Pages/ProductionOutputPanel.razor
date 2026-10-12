@@ -20,10 +20,12 @@
 @if (CanOutput)
 {
     <form class="inline-form" @onsubmit="ProposeAsync">
-        <label>@L("Выпустить, {0}", Progress.UnitSymbol) <input @bind="_quantityText" inputmode="decimal" size="8" aria-label="@L("Выпустить")" /></label>
+        <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+        <label>@L("Выпустить, {0}", Progress.UnitSymbol) <input @bind="_quantityText" @bind:event="oninput" inputmode="decimal" size="8" aria-label="@L("Выпустить")" /></label>
         <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата выпуска")" /></label>
         <label>@L("Комментарий") <input @bind="_comment" size="24" aria-label="@L("Комментарий к выпуску")" /></label>
         <button type="submit" class="secondary" disabled="@_busy">@L("Рассчитать расход")</button>
+        </fieldset>
     </form>
 
     @if (_proposal is not null)

@@ -72,6 +72,21 @@ public sealed class SalesOrder
     /// <summary>Этап работы с заказом из справочника организации (D75); null — этап не выбран.</summary>
     public long? StageId { get; private set; }
 
+    /// <summary>
+    /// D117: сделка CRM, из которой создан заказ (модуль CRM, D600). Связь ставит и снимает только сервис CRM;
+    /// внешний ключ на таблицу сделок добавляет миграция модуля CRM.
+    /// </summary>
+    public long? CrmDealId { get; private set; }
+
+    /// <summary>D1101: соглашение с покупателем, по которому подставлены цена и скидка; null — без соглашения.</summary>
+    public long? AgreementId { get; private set; }
+
+    /// <summary>D1104: причина подтверждения с ценой ниже допустимой (право «Продажи: цена ниже минимальной»).</summary>
+    public string? PriceOverrideReason { get; private set; }
+
+    public long? PriceOverrideByUserId { get; private set; }
+    public DateTime? PriceOverrideAtUtc { get; private set; }
+
     public string? Comment { get; private set; }
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
@@ -205,6 +220,17 @@ public sealed class SalesOrder
     }
 
     /// <summary>Этап меняется в любом состоянии, кроме отменённого: это метка работы, а не учёт.</summary>
+    /// <summary>D117: связь заказа со сделкой CRM; null — снять. Не меняет статус и строки заказа.</summary>
+    public void LinkCrmDeal(long? dealId)
+    {
+        if (dealId is <= 0)
+        {
+            throw new BusinessRuleException("sales.order.crm_deal", "Неверная сделка.");
+        }
+
+        CrmDealId = dealId;
+    }
+
     public void SetStage(long? stageId)
     {
         if (Status == SalesOrderStatus.Cancelled)
@@ -213,6 +239,24 @@ public sealed class SalesOrder
         }
 
         StageId = stageId;
+    }
+
+    public const int OverrideReasonMaxLength = 500;
+
+    /// <summary>D1101: соглашение заказа — меняется только в черновике (цены подтверждённого заказа зафиксированы).</summary>
+    public void SetAgreement(long? agreementId)
+    {
+        EnsureDraft();
+        AgreementId = agreementId;
+    }
+
+    /// <summary>D1104: разрешение подтвердить заказ с ценой ниже допустимой — с причиной; пишется перед подтверждением.</summary>
+    public void ApprovePriceOverride(long userId, string? reason, DateTime nowUtc)
+    {
+        EnsureDraft();
+        PriceOverrideReason = DomainText.Require(reason, OverrideReasonMaxLength, "Причина цены ниже допустимой");
+        PriceOverrideByUserId = userId;
+        PriceOverrideAtUtc = nowUtc;
     }
 
     public void Confirm(long userId, DateTime nowUtc)

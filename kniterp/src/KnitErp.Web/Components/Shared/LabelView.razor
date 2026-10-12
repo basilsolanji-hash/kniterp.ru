@@ -1,0 +1,77 @@
+@using System.Globalization
+@using KnitErp.Application.Catalog
+@using KnitErp.Domain.Catalog
+@*
+    D316: одна этикетка по шаблону — общая для предпросмотра в конструкторе и для печати (что видно, то и печатается).
+    Размеры — в мм, шрифты — в пт; штрихкод: EAN-13 рисуется с цифрами, прочие печатные коды — Code 128, иначе — подсказка.
+    Этикетка печатается по-русски, как и другие печатные формы (D68).
+*@
+<div class="item-label" style="width: @Mm(Template.WidthMm); height: @Mm(Template.HeightMm); padding: @Mm(Template.PaddingMm)">
+    @foreach (var e in Template.Elements)
+    {
+        if (e.Field == LabelField.Barcode)
+        {
+            <div class="lb-bars" style="text-align: @Align(e.Align)">
+                @if (Item.Barcode is { } ean && Ean13Pattern.CanEncode(ean))
+                {
+                    <BarcodeEan13 Value="@ean" Height="@($"{e.BarcodeHeightMm}mm")" />
+                }
+                else if (Item.Barcode is { Length: > 0 and <= 80 } other && other.All(c => c is >= ' ' and <= '~'))
+                {
+                    <Barcode128 Value="@other" Height="@($"{e.BarcodeHeightMm}mm")" />
+                    <div style="font-size: @(e.FontPt)pt; text-align: center; font-family: monospace">@other</div>
+                }
+                else
+                {
+                    <div class="lb-missing" style="font-size: @(e.FontPt)pt">нет штрихкода — создайте EAN-13 в карточке</div>
+                }
+            </div>
+        }
+        else if (Value(e) is { Length: > 0 } text)
+        {
+            <div class="@(e.Wrap ? "lb-line wrap" : "lb-line")" style="font-size: @(e.FontPt)pt; font-weight: @(e.Bold ? 700 : 400); text-align: @Align(e.Align)">
+                @(e.Field == LabelField.CustomText ? text : (e.Text ?? "") + text)
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
+
+    [Parameter, EditorRequired]
+    public LabelTemplateDto Template { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public LabelItemDto Item { get; set; } = default!;
+
+    [Parameter]
+    public string Organization { get; set; } = "";
+
+    [Parameter]
+    public string Currency { get; set; } = "₽";
+
+    [Parameter]
+    public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Today);
+
+    private static string Mm(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "mm";
+
+    private static string Align(LabelAlign a) => a switch { LabelAlign.Center => "center", LabelAlign.Right => "right", _ => "left" };
+
+    private string? Value(LabelElement e) => e.Field switch
+    {
+        LabelField.Name => Item.Name,
+        LabelField.Code => Item.Code,
+        LabelField.Article => Item.Article,
+        LabelField.Price => Item.Price is { } p ? p.ToString("#,##0.##", Ru) + " " + Currency : null,
+        LabelField.Unit => Item.Unit,
+        LabelField.Characteristics => Item.Characteristics,
+        LabelField.Country => Item.Country,
+        LabelField.Description => Item.Description,
+        LabelField.Group => Item.Group,
+        LabelField.Organization => Organization,
+        LabelField.CustomText => e.Text,
+        LabelField.PrintDate => Date.ToString("dd.MM.yyyy", Ru),
+        _ => null,
+    };
+}

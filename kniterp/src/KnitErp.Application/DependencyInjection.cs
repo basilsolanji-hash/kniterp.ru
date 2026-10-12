@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<KnitErp.Application.Hr.LeaveStatusSync>();
         services.AddScoped<KnitErp.Application.Hr.PayrollService>();
         services.AddScoped<KnitErp.Application.Hr.HrSettingsService>();
+        services.AddScoped<KnitErp.Application.Hr.EmployeeAgreementService>(); // D227: документы перед доступом
         services.AddScoped<KnitErp.Application.Hr.PayrollEnterpriseDataExport>();
         // Граница с производством: настоящая выработка регистрируется модулем производства и заменяет заглушку.
         services.TryAddScoped<KnitErp.Application.Hr.IWorkOutputSource, KnitErp.Application.Hr.EmptyWorkOutputSource>();
@@ -58,12 +59,17 @@ public static class DependencyInjection
         // Производство на главном экране (контракт D111 базовой ветки).
         services.AddScoped<Workspace.IProductionDashboardSource, Production.ProductionDashboardSource>();
         services.AddScoped<Workspace.IShiftStaffingSource, Hr.ShiftStaffingSource>(); // D221: «смена сегодня» на главном
+        // Модуль «Разработка» (D700–D799).
+        services.AddScoped<Development.DevModelService>();
+        services.AddScoped<Development.DevSettingsService>();
+        services.AddScoped<Development.DevExchangeService>();
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();
         services.AddScoped<Sales.SalesService>();
         services.AddScoped<Sales.CustomerInvoiceService>();
         services.AddScoped<Sales.SalesStageService>();
+        services.AddScoped<Sales.SalesAgreementService>();
         services.AddScoped<Sales.SalesSettingsService>();
         // CRM (D600–D699).
         services.AddScoped<Crm.CrmSettingsService>();
@@ -89,8 +95,14 @@ public static class DependencyInjection
         services.AddScoped<Catalog.PackService>(); // D307 (сессия 4)
         services.AddScoped<Catalog.CatalogQueryService>(); // D307 (сессия 4)
         services.AddScoped<Catalog.ItemSupplierService>(); // D309 (сессия 4)
+        services.AddScoped<Exchange.MoySklad.MoySkladImportService>(); // D310 (сессия 4)
+        services.AddScoped<Catalog.CatalogSettingsService>(); // D312 (сессия 4)
+        services.AddScoped<Catalog.CatalogFeedService>(); // D314 (сессия 4)
+        services.AddScoped<Catalog.ItemCodesService>(); // D315 (сессия 4)
+        services.AddScoped<Catalog.LabelService>(); // D316 (сессия 4)
         services.AddScoped<Finance.MoneyService>();
         services.AddScoped<Finance.MoneyOperationService>();
+        services.AddScoped<Finance.BankStatementService>();
         services.AddScoped<Finance.SettlementStatementService>();
         services.AddScoped<Finance.CashFlowItemService>();
         services.AddScoped<Finance.AccountableService>();

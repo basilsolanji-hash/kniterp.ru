@@ -25,7 +25,9 @@ description: Модуль «Производство» knitERP — произв�
   Исправление — новая запись «Исправление» с отрицательным количеством.
 - Запущенный заказ: изделие, количество, техкарта и снимок норм защищены триггером `tr_production_orders_fixed_after_release`.
 - Цены и себестоимость показывать только с `Permissions.PriceView`; на терминале цеха цен нет.
-- Выработка (`IWorkOutputSource`) — только отметки с исполнителем; исправление выработки — `CorrectAsync`, всегда сегодняшним днём
+- Выработка (`IWorkOutputSource`) — только отметки с исполнителем; повторная работа после переделки не оплачивается (D224 кадров,
+  реализация D410: `RepeatQuantity` в отметке, `ProductionRepeat.Part`, выработка = `Quantity − RepeatQuantity`; тесты
+  `Rework_redo_is_not_paid_in_hr_output` и `Repeat_work_after_rework_is_marked_and_not_paid_twice` не ослаблять); исправление выработки — `CorrectAsync`, всегда сегодняшним днём
   (прошлые дни и утверждённый расчёт заработка не меняются). Допуск баланса и правила баллов — `ProductionSettingsService.LoadAsync`, не константы.
 - Сценарий, который упал после `Add`/изменения отслеживаемой сущности (проверка, конфликт версий), вызывает `db.DiscardChanges()`:
   у вкладки Blazor один DbContext, и следующая операция иначе сохранит «мусор».
@@ -46,6 +48,12 @@ description: Модуль «Производство» knitERP — произв�
   Запуск: `dotnet build` всего решения, затем `dotnet test tests/KnitErp.E2ETests --no-build` (нужен `KNITERP_TEST_SQL`).
 
 ## Частые ошибки
+- Меньше ручного ввода (D413, `docs/production-automation.md`): подставлять вычислимое, но не затирать набранное и ничего не отправлять
+  само; виновника и причины — только подсказывать. Поток многих заказов — `ShopFloorService.FlowsAsync`, не цикл по заказам.
+- Права модуля: выгрузка «Баллы и показатели» — `hr.employee.view` в пределах подразделений, причины — `hr.personal_data.view`,
+  запись `production.scores.exported` обязательна (D411, D223); виновник брака — `production.defect.culprit` (D412).
+- Сквозной тест производства — через `ScenarioBrowser.RunAsync(app.Browser, async browser => …)` и `browser.NewContextAsync(...)`:
+  при падении снимок и текст каждой открытой страницы — в `KNITERP_E2E_ARTIFACTS`. `app.Browser.NewContextAsync` напрямую не вызывать.
 - «Server not found / Login failed» в тестах — контейнер пересоздан: порт — `docker port kniterp-sql`, пароль — из `docker inspect` контейнера;
   строку держать в файле окружения в scratchpad (права 600), не в репозитории.
 - Баллы зависят от табеля кадров (D409): тест баллов с отсутствием — `Organization_settings_drive_tolerance_and_quality_discipline_points`.

@@ -18,6 +18,9 @@ public sealed class HrAppFixture : IAsyncLifetime
     private WebAppProcess? _app;
     private IPlaywright? _playwright;
     private string? _ownerState;
+    private CreatedOrganization? _org;
+    private long _department;
+    private long _employee;
 
     public string BaseUrl => _app?.BaseUrl ?? string.Empty;
     public string Password { get; } = "E2e-" + Guid.NewGuid().ToString("N")[..16] + "!a";
@@ -92,14 +95,42 @@ public sealed class HrAppFixture : IAsyncLifetime
         {
             var department = await s.Structure.CreateDepartmentAsync("Вязальный цех", null);
             var position = await s.Structure.CreatePositionAsync("Вязальщица");
-            await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand("0001", "Петрова", "Анна", "Сергеевна",
+            _employee = await s.Employees.HireAsync(new KnitErp.Application.Structure.EmployeeCommand("0001", "Петрова", "Анна", "Сергеевна",
                 department, position, DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-1)));
+            _department = department;
         }
+
+        _org = org;
 
         await using (var s = _host.As(null, null))
         {
             await s.SignIn.AcceptInvitationAsync(org.OwnerSetupToken, Password, Password);
         }
+    }
+
+    /// <summary>
+    /// Табель «Вязального цеха» за текущий месяц и отметка Петровой на сегодня (часовой пояс организации): в рабочий день — больничный
+    /// (блок «Смена сегодня» покажет её среди не вышедших), в выходной или праздник — выход сверх графика (она на смене).
+    /// Возвращает true, если сегодня рабочий день. Повторный вызов только меняет отметку.
+    /// </summary>
+    public async Task<bool> MarkShiftTodayAsync()
+    {
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "Europe/Moscow"));
+        var holidays = KnitErp.Application.Workspace.ProductionCalendar.Holidays("RU", today, today.AddDays(1)).Select(h => h.Date).ToHashSet();
+        var workday = KnitErp.Domain.Hr.WorkSchedule.DefaultPlan(today, holidays).Work;
+        await using var hr = _host.Hr(_org!.OwnerUserId, _org.OrganizationId);
+        var grid = await hr.Timesheets.GetAsync(_department, today.Year, today.Month);
+        var id = grid.Id ?? await hr.Timesheets.CreateAsync(_department, today.Year, today.Month);
+        if (workday)
+        {
+            await hr.Timesheets.SetDayAsync(id, _employee, today, "Б", 0, 0, 0);
+        }
+        else
+        {
+            await hr.Timesheets.SetDayAsync(id, _employee, today, "Я", 8, 0, 0);
+        }
+
+        return workday;
     }
 
     /// <summary>Вымышленный ИНН юрлица с верной контрольной цифрой.</summary>

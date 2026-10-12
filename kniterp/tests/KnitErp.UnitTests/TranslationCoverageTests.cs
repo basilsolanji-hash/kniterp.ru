@@ -56,6 +56,12 @@ public sealed partial class TranslationCoverageTests
             {
                 keys.Add(Regex.Unescape(m.Groups[1].Value));
             }
+
+            // D117: названия вкладок и блоков модулей — ModuleUi.Text("…").
+            foreach (Match m in ModuleText().Matches(text))
+            {
+                keys.Add(Regex.Unescape(m.Groups[1].Value));
+            }
         }
 
         // Названия разделов меню и групп — строки в MainLayout, переводятся при выводе.
@@ -112,6 +118,21 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(KnitErp.Domain.Hr.DismissalGrounds.All.Select(g => g.Title));
         keys.UnionWith(KnitErp.Domain.Hr.TimesheetCodes.All.Select(c => c.Name));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.PayrollLineKind>().Select(KnitErp.Domain.Hr.PayrollRules.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.EmployeeDocumentKind>().Select(KnitErp.Domain.Hr.EmployeeDocumentKinds.Name)); // D226
+        keys.UnionWith(KnitErp.Domain.Hr.EmployeeCompleteness.Of(false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
+            .Missing);
+        keys.UnionWith(KnitErp.Domain.Hr.AgreementTemplates.All.Select(KnitErp.Domain.Hr.AgreementTemplates.Title)); // D227
+
+        // Модуль «Разработка» (D700–D799): стадии, категории, аудитории, приоритеты, исполнители, виды файлов и справочников, объекты тегов.
+        keys.UnionWith(KnitErp.Domain.Development.DevStages.All.Select(KnitErp.Domain.Development.DevStages.Name));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevCategory>().Select(KnitErp.Domain.Development.DevModel.CategoryName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevAudience>().Select(KnitErp.Domain.Development.DevModel.AudienceName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevPriority>().Select(KnitErp.Domain.Development.DevModel.PriorityName));
+        keys.UnionWith(KnitErp.Domain.Development.DevModel.Roles.Select(KnitErp.Domain.Development.DevModel.RoleName));
+        keys.UnionWith(KnitErp.Domain.Development.DevFile.Kinds.Select(KnitErp.Domain.Development.DevFile.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevLookupKind>().Select(KnitErp.Domain.Development.DevLookup.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Tagging.TaggedEntity>().Select(KnitErp.Domain.Tagging.TagColors.EntityName));
+        keys.UnionWith(KnitErp.Domain.Development.DevAutomationRules.AllHints);
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
 
         // CRM (D600–D699): статусы лидов, итоги сделок, виды справочников; готовая воронка и справочники выводятся как данные организации.
@@ -122,6 +143,10 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Application.Crm.CrmImportKind>().Select(KnitErp.Application.Crm.CrmImportService.KindName));
         keys.UnionWith(KnitErp.Domain.Crm.CrmEmailTemplate.Variables.Select(v => v.Meaning)); // D674: подсказки к переменным шаблонов
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.Select(c => c.Name));
+        // Продажи (D1100–D1199): кому адресовано соглашение, видимость заказов роли, источник цены строки.
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesAgreementScope>().Select(KnitErp.Domain.Sales.SalesAgreement.ScopeName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesOrderVisibility>().Select(KnitErp.Domain.Sales.SalesRoleSettings.VisibilityName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Application.Sales.PriceSource>().Select(KnitErp.Application.Sales.PriceQuoteDto.SourceName));
         keys.UnionWith(["без НДС", "ещё не действует", "Без роли", "Вся организация"]);
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.SelectMany(c => KnitErp.Domain.Catalog.VatRate.DefaultsFor(1, c.Code)).Select(r => r.Name));
         var labels = File.ReadAllText(Path.Combine(WebDir, "Components", "Shared", "Labels.cs"));
@@ -259,6 +284,9 @@ public sealed partial class TranslationCoverageTests
 
     [GeneratedRegex("""(?<![\w.])(?:Text\.)?(?:L|CssText)\("((?:[^"\\]|\\.)*)"[,)]""")]
     private static partial Regex Call();
+
+    [GeneratedRegex("""ModuleUi\.Text\("((?:[^"\\]|\\.)*)"\)""")]
+    private static partial Regex ModuleText();
 
     [GeneratedRegex("""\("[\w/?=&-]*", "([^"]+)", (?:a =>|Docs\))""")]
     private static partial Regex MenuItem();

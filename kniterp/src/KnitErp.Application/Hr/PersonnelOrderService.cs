@@ -25,9 +25,17 @@ public sealed record PersonnelOrderDto(
     public string StatusName => PersonnelOrder.StatusName(Status);
 }
 
+/// <summary>Оклад действующей строки штатного расписания для подразделения и должности — подставляется в приказ (D225).</summary>
+public sealed record StaffingSalaryDto(long DepartmentId, long PositionId, decimal Salary);
+
+/// <param name="NextPersonnelNumber">Следующий свободный табельный номер для приказа о приёме (D225).</param>
 public sealed record PersonnelOrderOptionsDto(
     IReadOnlyList<Structure.LookupDto> Employees, IReadOnlyList<Structure.LookupDto> Departments, IReadOnlyList<Structure.LookupDto> Positions,
-    DateOnly Today);
+    DateOnly Today, string NextPersonnelNumber = "0001", IReadOnlyList<StaffingSalaryDto>? Salaries = null)
+{
+    public decimal? SalaryFor(long departmentId, long positionId) =>
+        Salaries?.FirstOrDefault(s => s.DepartmentId == departmentId && s.PositionId == positionId)?.Salary;
+}
 
 /// <summary>Данные для печати приказа по форме Т-1, Т-5, Т-6 или Т-8.</summary>
 public sealed record PersonnelOrderPrintDto(
@@ -52,7 +60,7 @@ public sealed record PersonnelOrderFilter(PersonnelOrderKind? Kind = null, Perso
 /// историю назначений; проведённый приказ не меняется (триггер в базе).
 /// </summary>
 public sealed class PersonnelOrderService(
-    IKnitErpDbContext db, IAccessGuard guard, UserAccessService userAccess, ICurrentUser currentUser, IClock clock)
+    IKnitErpDbContext db, IAccessGuard guard, UserAccessService userAccess, ICurrentUser currentUser, IClock clock, TimesheetService timesheets)
 {
     public const string NumberKind = "hr-order";
 
@@ -136,7 +144,15 @@ public sealed class PersonnelOrderService(
             .OrderBy(d => d.Name).Select(d => new Structure.LookupDto(d.Id, d.Name)).ToListAsync(ct);
         var positions = await db.Positions.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && !p.IsArchived)
             .OrderBy(p => p.Name).Select(p => new Structure.LookupDto(p.Id, p.Name)).ToListAsync(ct);
-        return new PersonnelOrderOptionsDto(employees, departments, positions, await TodayAsync(ctx, ct));
+        var today = await TodayAsync(ctx, ct);
+        var numbers = await db.Employees.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId).Select(e => e.PersonnelNumber).ToListAsync(ct);
+        var staffing = await db.StaffingPositions.AsNoTracking().Where(s => s.OrganizationId == ctx.OrganizationId && !s.IsArchived)
+            .Select(s => new { s.DepartmentId, s.PositionId, s.Salary, s.ValidFrom }).ToListAsync(ct);
+        // Действующая строка — последняя начавшаяся; если все будущие — ближайшая.
+        var salaries = staffing.GroupBy(s => (s.DepartmentId, s.PositionId))
+            .Select(g => g.Where(s => s.ValidFrom <= today).MaxBy(s => s.ValidFrom) ?? g.MinBy(s => s.ValidFrom)!)
+            .Select(s => new StaffingSalaryDto(s.DepartmentId, s.PositionId, Plain(s.Salary))).ToList();
+        return new PersonnelOrderOptionsDto(employees, departments, positions, today, PersonnelNumbers.Next(numbers), salaries);
     }
 
     public async Task<PersonnelOrderDto> GetAsync(long id, CancellationToken ct = default)
@@ -209,10 +225,14 @@ public sealed class PersonnelOrderService(
         var order = await LoadAsync(ctx, id, rowVersion, ct);
         try
         {
+            var before = order.EmployeeId is { } eid
+                ? await db.Employees.AsNoTracking().Where(e => e.Id == eid && e.OrganizationId == ctx.OrganizationId).Select(e => (long?)e.DepartmentId).SingleOrDefaultAsync(ct)
+                : null;
             await ApplyAsync(ctx, order, ct);
             order.Post(ctx.UserId, clock.UtcNow);
             Audit(ctx, AuditActions.HrOrderPosted, order, PersonnelOrder.StatusName(PersonnelOrderStatus.Draft), PersonnelOrder.StatusName(order.Status));
             await db.SaveChangesAsync(ct);
+            await AutomateAsync(ctx, order, before, ct);
             await tx.CommitAsync(ct);
         }
         catch (DbUpdateConcurrencyException)
@@ -258,6 +278,40 @@ public sealed class PersonnelOrderService(
             names.Departments.GetValueOrDefault(o.DepartmentId ?? 0), names.Positions.GetValueOrDefault(o.PositionId ?? 0),
             o.Rate, o.Salary, o.TrialMonths, o.LeaveKind, o.LeaveDays, DismissalGrounds.Find(o.DismissalGround), employee?.HiredOn, o.Basis,
             director?.DirectorName, director?.DirectorPosition);
+    }
+
+    /// <summary>
+    /// D225 — что после проведения раньше делали руками: приём или перевод в другое подразделение назначает график подразделения по умолчанию
+    /// с даты приказа (если с этой даты графика ещё нет); открытые табели затронутых подразделений с месяца приказа перезаполняются
+    /// (ручные дни сохраняются). В той же транзакции, что и проведение.
+    /// </summary>
+    /// <summary>Сумма без хвостовых нулей точности базы (43500.0000 → 43500) — так она выглядит в поле формы.</summary>
+    private static decimal Plain(decimal value) =>
+        decimal.Parse(value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), System.Globalization.CultureInfo.InvariantCulture);
+
+    private async Task AutomateAsync(AccessContext ctx, PersonnelOrder order, long? departmentBefore, CancellationToken ct)
+    {
+        var employeeId = order.EmployeeId!.Value;
+        var departmentNow = await db.Employees.AsNoTracking().Where(e => e.Id == employeeId).Select(e => e.DepartmentId).SingleAsync(ct);
+        if (order.Kind == PersonnelOrderKind.Hire || (order.Kind == PersonnelOrderKind.Transfer && departmentNow != departmentBefore))
+        {
+            var schedule = await (from d in db.DepartmentSchedules.AsNoTracking()
+                                  join w in db.WorkSchedules.AsNoTracking() on d.ScheduleId equals w.Id
+                                  where d.OrganizationId == ctx.OrganizationId && d.DepartmentId == departmentNow && !w.IsArchived
+                                  select new { w.Id, w.Name }).SingleOrDefaultAsync(ct);
+            if (schedule is not null
+                && !await db.EmployeeSchedules.AnyAsync(s => s.OrganizationId == ctx.OrganizationId && s.EmployeeId == employeeId && s.ValidFrom == order.EffectiveFrom, ct))
+            {
+                db.EmployeeSchedules.Add(EmployeeSchedule.Create(ctx.OrganizationId, employeeId, schedule.Id, order.EffectiveFrom));
+                db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.ScheduleChanged, nameof(Employee),
+                    employeeId.ToString(), null, $"{schedule.Name} с {order.EffectiveFrom:dd.MM.yyyy}",
+                    $"График подразделения по умолчанию, приказ № {order.Number}", currentUser.CorrelationId));
+                await db.SaveChangesAsync(ct);
+            }
+        }
+
+        List<long> departments = departmentBefore is { } old && old != departmentNow ? [old, departmentNow] : [departmentNow];
+        await timesheets.RefillOpenAsync(ctx.OrganizationId, departments, order.EffectiveFrom, ct);
     }
 
     private async Task ApplyAsync(AccessContext ctx, PersonnelOrder order, CancellationToken ct)

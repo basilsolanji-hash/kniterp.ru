@@ -17,7 +17,8 @@ public sealed record ProductionStageDto(ProductionStage Stage, decimal Done, dec
 
 public sealed record ProductionOperationDto(
     long Id, DateOnly OccurredOn, ProductionStage Stage, ProductionOperationKind Kind, decimal Quantity, ProductionStage? ReturnTo, string? Reason,
-    string CreatedBy, DateTime CreatedAtUtc, string? Employee = null, decimal? Remaining = null, bool CanCorrect = false, string? Culprit = null)
+    string CreatedBy, DateTime CreatedAtUtc, string? Employee = null, decimal? Remaining = null, bool CanCorrect = false, string? Culprit = null,
+    decimal Repeat = 0)
 {
     public string StageName => ProductionFlow.StageName(Stage);
     public string KindName => ProductionFlow.KindName(Kind);
@@ -28,7 +29,8 @@ public sealed record ProductionOperationDto(
 public sealed record ProductionProgressDto(
     long OrderId, ProductionOrderStatus Status, decimal Quantity, string UnitSymbol, byte Precision,
     IReadOnlyList<ProductionStageDto> Stages, decimal Good, decimal Defect, decimal Rework, decimal ReadyForOutput, decimal Released,
-    IReadOnlyList<ProductionOperationDto> History, bool CanMark, IReadOnlyList<ShiftEmployeeOptionDto>? Employees = null);
+    IReadOnlyList<ProductionOperationDto> History, bool CanMark, IReadOnlyList<ShiftEmployeeOptionDto>? Employees = null,
+    IReadOnlyList<string>? DefectReasons = null, IReadOnlyList<string>? ReworkReasons = null);
 
 /// <summary>Отметка из формы: этап, вид, количество (у исправления — на сколько уменьшить, положительным числом), этап возврата переделки.</summary>
 public sealed record ProductionOperationCommand(
@@ -70,7 +72,7 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
                 return new ProductionOperationDto(o.Id, o.OccurredOn, o.Stage, o.Kind, o.Quantity, o.ReturnToStage, o.Reason,
                     users.GetValueOrDefault(o.CreatedByUserId) ?? "—", o.CreatedAtUtc,
                     o.EmployeeId is { } e ? employeeNames.GetValueOrDefault(e) : null, remaining, correctable && remaining > 0,
-                    o.CulpritEmployeeId is { } c ? employeeNames.GetValueOrDefault(c) : null);
+                    o.CulpritEmployeeId is { } c ? employeeNames.GetValueOrDefault(c) : null, o.RepeatQuantity);
             })
             .ToList();
         var inWork = inWorkStatus(order);
@@ -78,7 +80,10 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
             flow.Route.Stages.Select(s => new ProductionStageDto(s, flow.Done(s), inWork ? flow.Available(s) : 0)).ToList(),
             flow.Done(ProductionStage.QualityControl), flow.Defect, flow.Rework, flow.ReadyForOutput, flow.Released, history,
             inWork && ctx.Permissions.Has(Permissions.ProductionStageMark),
-            inWork && ctx.Permissions.Has(Permissions.ProductionStageMark) ? await WorkingEmployeesAsync(ctx, ct) : null);
+            inWork && ctx.Permissions.Has(Permissions.ProductionStageMark) && ctx.Permissions.Has(Permissions.ProductionDefectCulprit)
+                ? await CulpritOptionsAsync(db, ctx.OrganizationId, ops, ct) : null,
+            inWork ? await FrequentReasonsAsync(db, ctx.OrganizationId, ProductionOperationKind.Defect, clock.UtcNow, ct) : null,
+            inWork ? await FrequentReasonsAsync(db, ctx.OrganizationId, ProductionOperationKind.Rework, clock.UtcNow, ct) : null);
     }
 
     /// <summary>Отметка на этапе. Проверка потока и запись — под блокировкой заказа в одной транзакции.</summary>
@@ -114,18 +119,25 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
         }
 
         (await FlowAsync(order, ops, ct)).EnsureCanApply(step);
+        if (command.CulpritEmployeeId is not null && !ctx.Permissions.Has(Permissions.ProductionDefectCulprit))
+        {
+            await guard.DenyAsync(ctx, Permissions.ProductionDefectCulprit, ct);
+        }
+
         if (command.CulpritEmployeeId is { } culprit
             && !await db.Employees.AnyAsync(e => e.Id == culprit && e.OrganizationId == ctx.OrganizationId, ct))
         {
             throw new NotFoundException("Сотрудник");
         }
 
+        var repeat = ProductionRepeat.Part(step, ops, correctsOperationId is { } c ? ops.Single(o => o.Id == c) : null);
         var op = ProductionOperation.Create(ctx.OrganizationId, orderId, step, command.Reason, command.OccurredOn, ctx.UserId, clock.UtcNow, employeeId,
-            correctsOperationId, command.CulpritEmployeeId);
+            correctsOperationId, command.CulpritEmployeeId, repeat);
         db.ProductionOperations.Add(op);
         await db.SaveChangesAsync(ct);
         var text = $"{ProductionFlow.StageName(step.Stage)}: {ProductionFlow.KindName(step.Kind)} {Quantities.Format(step.Quantity)} {item.Symbol}"
-                   + (step.ReturnTo is { } r ? $" → {ProductionFlow.StageName(r)}" : "");
+                   + (step.ReturnTo is { } r ? $" → {ProductionFlow.StageName(r)}" : "")
+                   + (repeat != 0 ? $", в т. ч. повторно после переделки {Quantities.Format(repeat)}" : "");
         if (command.CulpritEmployeeId is { } guilty)
         {
             var g = await db.Employees.AsNoTracking().Where(x => x.Id == guilty)
@@ -175,15 +187,43 @@ public sealed class ProductionFloorService(IKnitErpDbContext db, IAccessGuard gu
             new ProductionOperationCommand(target.Stage, ProductionOperationKind.Correction, quantity, null, reason, today), target.EmployeeId, ct, target.Id);
     }
 
-    /// <summary>Работающие сотрудники — для выбора виновника брака.</summary>
-    private async Task<IReadOnlyList<ShiftEmployeeOptionDto>> WorkingEmployeesAsync(AccessContext ctx, CancellationToken ct) =>
-        (await db.Employees.AsNoTracking()
-            .Where(e => e.OrganizationId == ctx.OrganizationId && e.Status == KnitErp.Domain.Structure.EmploymentStatus.Working)
-            .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
-            .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName, e.PersonnelNumber }).ToListAsync(ct))
-        .Select(e => new ShiftEmployeeOptionDto(e.Id, ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName), e.PersonnelNumber)).ToList();
+    /// <summary>
+    /// Работающие сотрудники для выбора виновника брака (D413): сначала те, кто отмечал работу по этому заказу, — обычно виновник среди них,
+    /// и искать его в списке всей фабрики не нужно. Сам виновник не подставляется: он влияет на баллы и премии, выбирает контролёр.
+    /// </summary>
+    internal static async Task<IReadOnlyList<ShiftEmployeeOptionDto>> CulpritOptionsAsync(IKnitErpDbContext db, long organizationId,
+        IEnumerable<ProductionOperation> orderOps, CancellationToken ct)
+    {
+        var worked = orderOps.Where(o => o.Kind == ProductionOperationKind.Done && o.EmployeeId is not null).Select(o => o.EmployeeId!.Value).ToHashSet();
+        return (await db.Employees.AsNoTracking()
+                .Where(e => e.OrganizationId == organizationId && e.Status == KnitErp.Domain.Structure.EmploymentStatus.Working)
+                .Select(e => new { e.Id, e.LastName, e.FirstName, e.MiddleName, e.PersonnelNumber }).ToListAsync(ct))
+            .OrderByDescending(e => worked.Contains(e.Id)).ThenBy(e => e.LastName).ThenBy(e => e.FirstName)
+            .Select(e => new ShiftEmployeeOptionDto(e.Id, ShopFloorService.ShortName(e.LastName, e.FirstName, e.MiddleName), e.PersonnelNumber,
+                worked.Contains(e.Id)))
+            .ToList();
+    }
 
-    /// <summary>Сколько осталось от отметки рабочего после её исправлений.</summary>
+    /// <summary>Сколько последних дней смотреть для подсказок причин и сколько подсказок показывать.</summary>
+    public const int ReasonHintDays = 180;
+
+    public const int ReasonHintCount = 8;
+
+    /// <summary>
+    /// Частые причины брака или переделки организации за полгода (D413): подсказки в поле причины — контролёр выбирает, а не печатает.
+    /// Причина всё равно свободный текст; подсказки — только из записей своей организации.
+    /// </summary>
+    internal static async Task<IReadOnlyList<string>> FrequentReasonsAsync(IKnitErpDbContext db, long organizationId, ProductionOperationKind kind,
+        DateTime nowUtc, CancellationToken ct)
+    {
+        var since = DateOnly.FromDateTime(nowUtc).AddDays(-ReasonHintDays);
+        return await db.ProductionOperations.AsNoTracking()
+            .Where(o => o.OrganizationId == organizationId && o.Kind == kind && o.Reason != null && o.OccurredOn >= since)
+            .GroupBy(o => o.Reason!)
+            .OrderByDescending(g => g.Count()).ThenBy(g => g.Key)
+            .Select(g => g.Key).Take(ReasonHintCount).ToListAsync(ct);
+    }
+
     internal static decimal Remaining(ProductionOperation done, IEnumerable<ProductionOperation> ops) =>
         done.Quantity + ops.Where(o => o.CorrectsOperationId == done.Id).Sum(o => o.Quantity);
 

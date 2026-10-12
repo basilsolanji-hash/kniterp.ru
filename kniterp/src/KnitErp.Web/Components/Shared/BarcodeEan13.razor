@@ -1,0 +1,34 @@
+@using KnitErp.Domain.Catalog
+@*
+    D315: штрихкод EAN-13 в SVG — без скриптов и внешних библиотек (CSP). Поля тишины: 11 модулей слева, 7 справа; краевые и центральные
+    штрихи длиннее, под штрихами — цифры, как на товарах.
+*@
+@{
+    var modules = Ean13Pattern.Modules(Value);
+    const int left = 11;
+    var total = left + modules.Length + 7;
+}
+<svg class="barcode" viewBox="0 0 @total 46" preserveAspectRatio="xMidYMid meet" shape-rendering="crispEdges" role="img" aria-label="EAN-13 @Value"
+     style="width: 100%; height: @Height; display: block">
+    <rect x="0" y="0" width="@total" height="46" fill="#fff" />
+    @for (var i = 0; i < modules.Length; i++)
+    {
+        if (modules[i] == '1')
+        {
+            var guard = i < 3 || (i >= 45 && i < 50) || i >= 92;
+            <rect x="@(left + i)" y="0" width="1" height="@(guard ? 44 : 38)" fill="#000" />
+        }
+    }
+    <text x="5" y="45" font-size="8" font-family="monospace" text-anchor="middle">@Value[0]</text>
+    <text x="@(left + 3 + 21)" y="45" font-size="8" font-family="monospace" text-anchor="middle" letter-spacing="1.6">@Value[1..7]</text>
+    <text x="@(left + 50 + 21)" y="45" font-size="8" font-family="monospace" text-anchor="middle" letter-spacing="1.6">@Value[7..]</text>
+</svg>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = "";
+
+    /// <summary>Высота в единицах CSS, например «14mm».</summary>
+    [Parameter]
+    public string Height { get; set; } = "14mm";
+}

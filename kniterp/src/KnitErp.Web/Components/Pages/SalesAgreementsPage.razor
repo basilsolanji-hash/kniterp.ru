@@ -1,0 +1,486 @@
+@page "/sales-agreements"
+@using KnitErp.Application.Sales
+@using KnitErp.Application.Structure
+@using KnitErp.Domain.Sales
+@inject SalesAgreementService Agreements
+@inject NavigationManager Navigation
+
+<PageTitle>@L("Соглашения с покупателями") — knitERP</PageTitle>
+<SalesStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Соглашения с покупателями")</h1>
+        @if (CanEdit && _section == Section.Agreements)
+        {
+            <button type="button" @onclick="OpenCreate" disabled="@_busy">@L("Новое соглашение")</button>
+        }
+    </div>
+    <p class="sx-lead">@L("Цена в заказе подставляется сама: соглашение с покупателем → вид цены клиента → основной вид цены. Своё соглашение покупателя сильнее соглашения его группы (тег контрагента), группа — сильнее типового для всех.")</p>
+
+    <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="@(_section == Section.Agreements ? "tab active" : "tab secondary")" aria-selected="@(_section == Section.Agreements ? "true" : "false")"
+                @onclick="() => SwitchAsync(Section.Agreements)" disabled="@_busy">@L("Соглашения ({0})", _rows.Count)</button>
+        <button type="button" role="tab" class="@(_section == Section.Roles ? "tab active" : "tab secondary")" aria-selected="@(_section == Section.Roles ? "true" : "false")"
+                @onclick="() => SwitchAsync(Section.Roles)" disabled="@_busy">@L("Ограничения цен по ролям")</button>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    @if (_section == Section.Agreements)
+    {
+        @if (_form is not null && _options is not null)
+        {
+            <section class="panel" aria-label="@L("Соглашение")">
+                <h2 style="margin: 0 0 8px">@(_editId is null ? L("Новое соглашение") : L("Соглашение {0}", _editNumber ?? ""))</h2>
+                <form class="sx-form" @onsubmit="SaveAsync">
+                    <label class="w2">@L("Название") <input @bind="_form.Name" maxlength="@SalesAgreement.NameMaxLength" required placeholder="@L("Опт 2026, отсрочка 14 дней")" /></label>
+                    <label>
+                        @L("Для кого")
+                        <select @bind="_form.Scope">
+                            <option value="@SalesAgreementScope.Customer">@L("Покупатель")</option>
+                            <option value="@SalesAgreementScope.Group">@L("Группа покупателей (тег)")</option>
+                            <option value="@SalesAgreementScope.Everyone">@L("Все покупатели")</option>
+                        </select>
+                    </label>
+                    @if (_form.Scope == SalesAgreementScope.Customer)
+                    {
+                        <label>
+                            @L("Покупатель")
+                            <select @bind="_form.Customer">
+                                <option value="">@L("— выберите —")</option>
+                                @foreach (var c in _options.Customers)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    else if (_form.Scope == SalesAgreementScope.Group)
+                    {
+                        <label>
+                            @L("Тег контрагентов")
+                            <select @bind="_form.Tag">
+                                <option value="">@L("— выберите —")</option>
+                                @foreach (var t in _options.Tags)
+                                {
+                                    <option value="@t.Id">@t.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    else
+                    {
+                        <label>@L("Покупатель") <input value="@L("Все покупатели")" disabled /></label>
+                    }
+
+                    <div class="sx-legend">@L("Цена")</div>
+                    <label>
+                        @L("Вид цены")
+                        <select @bind="_form.PriceType">
+                            <option value="">@L("— как у клиента —")</option>
+                            @foreach (var p in _options.PriceTypes)
+                            {
+                                <option value="@p.Id">@p.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Скидка, %") <input @bind="_form.Discount" inputmode="decimal" placeholder="0" /></label>
+                    <label>@L("Действует с") <input type="date" @bind="_form.From" required /></label>
+                    <label>@L("Действует по") <input type="date" @bind="_form.To" /></label>
+
+                    <div class="sx-legend">@L("Оплата и отгрузка")</div>
+                    <label>@L("Предоплата, %") <input @bind="_form.Prepayment" inputmode="decimal" placeholder="—" /></label>
+                    <label>@L("Отсрочка, дней") <input @bind="_form.Days" inputmode="numeric" placeholder="@L("как в договоре")" /></label>
+                    <label>@L("Кредитный лимит") <input @bind="_form.Limit" inputmode="decimal" placeholder="@L("как в договоре")" /></label>
+                    <label>
+                        @L("Склад по умолчанию")
+                        <select @bind="_form.Warehouse">
+                            <option value="">—</option>
+                            @foreach (var w in _options.Warehouses)
+                            {
+                                <option value="@w.Id">@w.Name</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_form.Scope == SalesAgreementScope.Customer)
+                    {
+                        <label class="w2">
+                            @L("Договор")
+                            <select @bind="_form.Contract">
+                                <option value="">—</option>
+                                @foreach (var k in _options.Contracts.Where(k => k.CounterpartyId.ToString() == _form.Customer))
+                                {
+                                    <option value="@k.Id">@k.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <label class="@(_form.Scope == SalesAgreementScope.Customer ? "w2" : "w4")">@L("Комментарий") <input @bind="_form.Comment" maxlength="@SalesAgreement.CommentMaxLength" /></label>
+                    <div class="sx-actions">
+                        <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                        <button type="button" class="secondary" @onclick="() => _form = null" disabled="@_busy">@L("Отмена")</button>
+                    </div>
+                </form>
+            </section>
+        }
+
+        <form class="inline-form" @onsubmit="ReloadAsync">
+            <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, название, покупатель, ИНН")" size="32" /></label>
+            <label class="inline"><input type="checkbox" @bind="_archived" /> @L("Показать архив")</label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        </form>
+
+        <div class="scroll">
+            <table class="sx-table compact">
+                <thead>
+                    <tr>
+                        <th>@L("Соглашение")</th><th>@L("Для кого")</th><th>@L("Вид цены")</th><th class="num">@L("Скидка")</th><th>@L("Срок")</th>
+                        <th>@L("Оплата")</th><th class="num">@L("Лимит")</th><th>@L("Статус")</th><th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_rows.Count == 0)
+                    {
+                        <tr><td colspan="9" class="muted">@L("Соглашений пока нет. Создайте типовое для всех или своё для крупного покупателя.")</td></tr>
+                    }
+                    @foreach (var a in _rows)
+                    {
+                        <tr class="@(_history?.Agreement.Id == a.Id ? "sx-selected" : a.Status == SalesAgreementStatus.Archived ? "archived" : null)">
+                            <td data-label="@L("Соглашение")">@a.Number <span class="sx-sub">@a.Name</span></td>
+                            <td data-label="@L("Для кого")">@(a.Scope == SalesAgreementScope.Everyone ? L("Все покупатели") : a.Target) <span class="sx-sub">@L(a.ScopeName)</span></td>
+                            <td data-label="@L("Вид цены")">@(a.PriceType ?? L("как у клиента"))</td>
+                            <td data-label="@L("Скидка")" class="num">@(a.DiscountPercent > 0 ? $"{a.DiscountPercent:0.##}%" : "—")</td>
+                            <td data-label="@L("Срок")">@a.ValidFrom.ToString("dd.MM.yyyy") – @(a.ValidTo?.ToString("dd.MM.yyyy") ?? L("бессрочно"))</td>
+                            <td data-label="@L("Оплата")">@PaymentText(a)</td>
+                            <td data-label="@L("Лимит")" class="num">@(a.CreditLimit is { } l ? Amounts.Format(l) : "—")</td>
+                            <td data-label="@L("Статус")"><span class="tag @StatusClass(a)">@StatusText(a)</span></td>
+                            <td class="sx-row-actions">
+                                <button type="button" class="secondary" @onclick="() => HistoryAsync(a)" disabled="@_busy">@L("История")</button>
+                                @if (CanEdit)
+                                {
+                                    @if (a.Status == SalesAgreementStatus.Active)
+                                    {
+                                        <button type="button" class="secondary" @onclick="() => OpenEdit(a)" disabled="@_busy" aria-label="@L("Изменить: {0}", a.Number)">@L("Изменить")</button>
+                                        <button type="button" class="secondary" @onclick="() => ArchiveAsync(a, true)" disabled="@_busy">@L("В архив")</button>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="secondary" @onclick="() => ArchiveAsync(a, false)" disabled="@_busy">@L("Вернуть")</button>
+                                    }
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (_history is not null)
+        {
+            <section class="panel" aria-label="@L("История соглашения")">
+                <div class="sx-head"><h2 style="margin: 0">@L("История {0}", _history.Agreement.Number)</h2><button type="button" class="secondary" @onclick="() => _history = null">@L("Закрыть")</button></div>
+                <ul class="sx-history">
+                    @foreach (var h in _history.History)
+                    {
+                        <li><b>@TimeZones.ToLocal(h.AtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</b> · @h.User · @L(AuditLabels.Action(h.Action))
+                            @if (h.Before is not null) { <div class="muted">@L("Было:") @h.Before</div> }
+                            @if (h.After is not null) { <div>@L("Стало:") @h.After</div> }
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+    }
+    else if (_roles is not null && _options is not null)
+    {
+        <p class="sx-lead">@L("Для каждой роли: наибольшая ручная скидка от цены по соглашению и вид цены — нижняя граница. Минимальная цена позиции из карточки действует всегда. Заказ с ценой ниже допустимой сохраняется, а подтверждает его тот, у кого есть право «Продажи: цена ниже минимальной», с причиной — это попадает в журнал.")</p>
+        <div class="scroll">
+            <table class="sx-table compact">
+                <thead><tr><th>@L("Роль")</th><th>@L("Макс. скидка, %")</th><th>@L("Нижняя граница — вид цены")</th><th>@L("Видимость заказов")</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in _roles)
+                    {
+                        var row = _roleForms[r.RoleId];
+                        <tr>
+                            <td data-label="@L("Роль")">@L(r.Role)</td>
+                            <td data-label="@L("Макс. скидка, %")"><input @bind="row.Discount" inputmode="decimal" placeholder="@L("без ограничения")" disabled="@(!CanEdit)" aria-label="@L("Макс. скидка, %")" /></td>
+                            <td data-label="@L("Нижняя граница — вид цены")">
+                                <select @bind="row.PriceType" disabled="@(!CanEdit)" aria-label="@L("Нижняя граница — вид цены")">
+                                    <option value="">@L("только минимальная цена позиции")</option>
+                                    @foreach (var p in _options.PriceTypes)
+                                    {
+                                        <option value="@p.Id">@p.Name</option>
+                                    }
+                                </select>
+                            </td>
+                            <td data-label="@L("Видимость заказов")">
+                                <select @bind="row.Visibility" disabled="@(!CanEdit)" aria-label="@L("Видимость заказов")">
+                                    @foreach (var v in Enum.GetValues<SalesOrderVisibility>())
+                                    {
+                                        <option value="@v">@L(SalesRoleSettings.VisibilityName(v))</option>
+                                    }
+                                </select>
+                            </td>
+                            <td class="sx-row-actions">
+                                @if (CanEdit)
+                                {
+                                    <button type="button" @onclick="() => SaveRoleAsync(r)" disabled="@_busy" aria-label="@L("Сохранить: {0}", L(r.Role))">@L("Сохранить")</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [SupplyParameterFromQuery(Name = "new")]
+    public string? New { get; set; }
+
+    private enum Section
+    {
+        Agreements,
+        Roles,
+    }
+
+    private Section _section;
+    private IReadOnlyList<SalesAgreementRowDto>? _rows;
+    private IReadOnlyList<SalesRoleSettingsDto>? _roles;
+    private Dictionary<long, RoleForm> _roleForms = [];
+    private SalesAgreementOptionsDto? _options;
+    private SalesAgreementDto? _history;
+    private AgreementForm? _form;
+    private long? _editId;
+    private string? _editNumber;
+    private byte[]? _editVersion;
+    private string? _search;
+    private bool _archived;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private bool CanEdit => CurrentAccess.Has(Permissions.SalesAgreementEdit);
+
+    private sealed class AgreementForm
+    {
+        public string Name { get; set; } = string.Empty;
+        public SalesAgreementScope Scope { get; set; } = SalesAgreementScope.Customer;
+        public string Customer { get; set; } = string.Empty;
+        public string Tag { get; set; } = string.Empty;
+        public string PriceType { get; set; } = string.Empty;
+        public string? Discount { get; set; }
+        public DateTime From { get; set; } = DateTime.Today;
+        public DateTime? To { get; set; }
+        public string? Prepayment { get; set; }
+        public string? Days { get; set; }
+        public string? Limit { get; set; }
+        public string Warehouse { get; set; } = string.Empty;
+        public string Contract { get; set; } = string.Empty;
+        public string? Comment { get; set; }
+    }
+
+    private sealed class RoleForm
+    {
+        public string? Discount { get; set; }
+        public string PriceType { get; set; } = string.Empty;
+        public SalesOrderVisibility Visibility { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+            if (New is not null && CanEdit)
+            {
+                await OpenCreateCore();
+            }
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _rows = await Agreements.ListAsync(_archived, null, _search);
+        if (_section == Section.Roles)
+        {
+            _options ??= await Agreements.OptionsAsync();
+            _roles = await Agreements.RoleSettingsAsync();
+            _roleForms = _roles.ToDictionary(r => r.RoleId, r => new RoleForm
+            {
+                Discount = r.MaxDiscountPercent?.ToString("0.##", Ru), PriceType = r.MinPriceTypeId?.ToString() ?? string.Empty, Visibility = r.Visibility,
+            });
+        }
+    }
+
+    private Task SwitchAsync(Section section) => RunAsync(() =>
+    {
+        _section = section;
+        _form = null;
+        _history = null;
+        return Task.CompletedTask;
+    }, null);
+
+    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
+
+    private Task OpenCreate() => RunAsync(OpenCreateCore, null);
+
+    private async Task OpenCreateCore()
+    {
+        _options ??= await Agreements.OptionsAsync();
+        _form = new AgreementForm { From = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date };
+        _editId = null;
+        _editNumber = null;
+        _editVersion = null;
+        _history = null;
+    }
+
+    private Task OpenEdit(SalesAgreementRowDto a) => RunAsync(async () =>
+    {
+        _options ??= await Agreements.OptionsAsync();
+        _editId = a.Id;
+        _editNumber = a.Number;
+        _editVersion = a.RowVersion;
+        _history = null;
+        _form = new AgreementForm
+        {
+            Name = a.Name, Scope = a.Scope, Customer = a.CounterpartyId?.ToString() ?? string.Empty, Tag = a.TagId?.ToString() ?? string.Empty,
+            PriceType = a.PriceTypeId?.ToString() ?? string.Empty, Discount = a.DiscountPercent > 0 ? a.DiscountPercent.ToString("0.##", Ru) : null,
+            From = a.ValidFrom.ToDateTime(TimeOnly.MinValue), To = a.ValidTo?.ToDateTime(TimeOnly.MinValue),
+            Prepayment = a.PrepaymentPercent?.ToString("0.##", Ru), Days = a.PaymentDays?.ToString(), Limit = a.CreditLimit?.ToString("0.##", Ru),
+            Warehouse = a.WarehouseId?.ToString() ?? string.Empty, Contract = a.ContractId?.ToString() ?? string.Empty, Comment = a.Comment,
+        };
+    }, null);
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var f = _form!;
+        long? customer = f.Scope == SalesAgreementScope.Customer ? Id(f.Customer) ?? throw new BusinessRuleException("sales.agreement.customer", L("Выберите покупателя.")) : null;
+        long? tag = f.Scope == SalesAgreementScope.Group ? Id(f.Tag) ?? throw new BusinessRuleException("sales.agreement.tag", L("Выберите тег группы покупателей.")) : null;
+        var terms = new SalesAgreementTerms(f.Name, customer, tag, Id(f.PriceType), Dec(f.Discount) ?? 0, DateOnly.FromDateTime(f.From),
+            f.To is { } to ? DateOnly.FromDateTime(to) : null, Dec(f.Prepayment), string.IsNullOrWhiteSpace(f.Days) ? null : (int)(Dec(f.Days) ?? 0),
+            Dec(f.Limit), Id(f.Warehouse), customer is null ? null : Id(f.Contract), f.Comment);
+        if (_editId is { } id)
+        {
+            await Agreements.UpdateAsync(id, terms, _editVersion!);
+            _message = L("Соглашение сохранено.");
+        }
+        else
+        {
+            await Agreements.CreateAsync(terms);
+            _message = L("Соглашение создано.");
+        }
+
+        _form = null;
+    }, null);
+
+    private Task ArchiveAsync(SalesAgreementRowDto a, bool archived) =>
+        RunAsync(() => Agreements.SetArchivedAsync(a.Id, archived, a.RowVersion), archived ? L("Соглашение в архиве.") : L("Соглашение снова действует."));
+
+    private Task HistoryAsync(SalesAgreementRowDto a) => RunAsync(async () =>
+    {
+        _form = null;
+        _history = _history?.Agreement.Id == a.Id ? null : await Agreements.GetAsync(a.Id);
+    }, null);
+
+    private Task SaveRoleAsync(SalesRoleSettingsDto r) => RunAsync(async () =>
+    {
+        var row = _roleForms[r.RoleId];
+        await Agreements.SetRoleSettingsAsync(r.RoleId, Dec(row.Discount), Id(row.PriceType), row.Visibility);
+    }, L("Ограничения роли сохранены."));
+
+    private string PaymentText(SalesAgreementRowDto a)
+    {
+        var parts = new List<string>();
+        if (a.PrepaymentPercent is { } p && p > 0)
+        {
+            parts.Add(L("предоплата {0}%", p.ToString("0.##", Ru)));
+        }
+
+        if (a.PaymentDays is { } d)
+        {
+            parts.Add(L("отсрочка {0} дн.", d));
+        }
+
+        return parts.Count == 0 ? "—" : string.Join(", ", parts);
+    }
+
+    private static string StatusClass(SalesAgreementRowDto a) =>
+        a.Status == SalesAgreementStatus.Archived ? "" : a.ValidToday ? "ok" : "warn";
+
+    private string StatusText(SalesAgreementRowDto a)
+    {
+        if (a.Status == SalesAgreementStatus.Archived)
+        {
+            return L("В архиве");
+        }
+
+        if (a.ValidToday)
+        {
+            return L("Действует");
+        }
+
+        return a.ValidTo is { } to && to < DateOnly.FromDateTime(TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId)) ? L("Истекло") : L("Ещё не началось");
+    }
+
+    private static readonly System.Globalization.CultureInfo Ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+
+    private static long? Id(string? value) => long.TryParse(value, out var id) ? id : null;
+
+    private static decimal? Dec(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null
+        : Quantities.TryParse(text, out var value) ? value
+        : throw new BusinessRuleException("sales.number", L("Укажите число, например 1 220,50."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _isError = false;
+        try
+        {
+            await action();
+            if (success is not null)
+            {
+                _message = success;
+            }
+
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

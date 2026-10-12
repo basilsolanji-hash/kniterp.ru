@@ -213,7 +213,7 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Production.ShopFloorService(db, guard, Clock, new KnitErp.Application.Production.ProductionFloorService(db, guard, user, Clock)),
             new KnitErp.Application.Production.ShiftTaskService(db, guard, user, Clock),
             new KnitErp.Application.Production.ProductionSettingsService(db, guard, user, Clock),
-            new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock, Spreadsheet),
+            new KnitErp.Application.Production.ProductionScoreService(db, guard, Clock, user, Spreadsheet),
             new RoleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.ItemTradeService(db, guard, user, Clock),
@@ -221,7 +221,15 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Catalog.PackService(db, guard, user, Clock),
             new KnitErp.Application.Catalog.CatalogQueryService(db, guard, new KnitErp.Application.Catalog.BundleService(db, guard, user, Clock)),
             new KnitErp.Application.Catalog.ItemSupplierService(db, guard, user, Clock),
-            new AccountSecurityService(db, Hasher, Mail, user, Clock));
+            new KnitErp.Application.Catalog.CatalogSettingsService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.CatalogFeedService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.ItemCodesService(db, guard, user, Clock),
+            new KnitErp.Application.Catalog.LabelService(db, guard, user, Clock),
+            new AccountSecurityService(db, Hasher, Mail, user, Clock),
+            new KnitErp.Application.Finance.BankStatementService(db, guard, user, Clock,
+                new KnitErp.Application.Sales.SalesService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock)),
+                new KnitErp.Application.Purchasing.PurchaseService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock))),
+            new KnitErp.Application.Sales.SalesAgreementService(db, guard, user, Clock));
     }
 
     public static readonly IPasswordHasher<UserAccount> Hasher = new PasswordHasher<UserAccount>();
@@ -328,7 +336,13 @@ public sealed record Services(
     KnitErp.Application.Catalog.PackService Packs,
     KnitErp.Application.Catalog.CatalogQueryService CatalogQuery,
     KnitErp.Application.Catalog.ItemSupplierService Suppliers,
-    AccountSecurityService Account) : IAsyncDisposable
+    KnitErp.Application.Catalog.CatalogSettingsService CatalogSettings,
+    KnitErp.Application.Catalog.CatalogFeedService Feeds,
+    KnitErp.Application.Catalog.ItemCodesService Codes,
+    KnitErp.Application.Catalog.LabelService Labels,
+    AccountSecurityService Account,
+    KnitErp.Application.Finance.BankStatementService BankStatements,
+    KnitErp.Application.Sales.SalesAgreementService Agreements) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

@@ -1,0 +1,71 @@
+@using KnitErp.Application.Hr
+@inject EmployeeAgreementService Agreements
+
+@*
+    D227: пока сотрудник не подписал документы перед доступом, вместо страниц системы он видит их тексты со своими данными.
+    Подпись — простая электронная подпись: подтверждение паролем учётной записи (соглашение о ней — в «Правилах работы»).
+*@
+<div class="page-head"><h1>@L("Документы перед началом работы")</h1></div>
+<p>@L("Прочитайте документы. Они заполнены вашими данными — если данные неверны, обратитесь в отдел кадров до подписания.")</p>
+
+@foreach (var d in Documents)
+{
+    <details class="panel" open="@(Documents.Count == 1)">
+        <summary><b>@L(d.Title)</b></summary>
+        @foreach (var p in d.Text.Paragraphs)
+        {
+            <p>@p</p>
+        }
+    </details>
+}
+
+@if (_message is not null)
+{
+    <div class="flash error" role="alert">@_message</div>
+}
+
+<form class="panel" @onsubmit="SignAsync">
+    <label class="inline"><input type="checkbox" @bind="_agree" /> @L("Я прочитал(а) документы и согласен(на) с ними")</label>
+    <label>@L("Пароль для подписи") <input type="password" @bind="_password" @bind:event="oninput" autocomplete="current-password" /></label>
+    <p class="muted small">@L("Ввод пароля — ваша простая электронная подпись (ст. 9 Федерального закона № 63-ФЗ).")</p>
+    <button type="submit" disabled="@(_busy || !_agree || string.IsNullOrEmpty(_password))">@L("Подписать документы")</button>
+</form>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<AgreementDocumentDto> Documents { get; set; } = [];
+
+    [Parameter]
+    public EventCallback Signed { get; set; }
+
+    private bool _agree;
+    private string _password = string.Empty;
+    private bool _busy;
+    private string? _message;
+
+    private async Task SignAsync()
+    {
+        if (_busy || !_agree)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await Agreements.SignAsync(_password);
+            _password = string.Empty;
+            await Signed.InvokeAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _password = string.Empty;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

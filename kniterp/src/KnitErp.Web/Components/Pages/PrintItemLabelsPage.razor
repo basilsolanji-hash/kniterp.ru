@@ -1,0 +1,152 @@
+@page "/catalog/labels/print"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using System.Globalization
+@using KnitErp.Application.Catalog
+@using KnitErp.Domain.Catalog
+@using KnitErp.Web.Components.Shared
+@inject LabelService Labels
+
+@*
+    D316: печать этикеток позиций по шаблону организации. Рулон — по этикетке на страницу (@page размером этикетки),
+    лист A4 — сетка колонки × ряды; «пропустить» — сколько ячеек начатого листа уже использовано.
+    Параметры — в адресе (форма GET): ссылку можно сохранить и повторить.
+*@
+<PageTitle>Этикетки — knitERP</PageTitle>
+@if (_data is { } d)
+{
+    var t = d.Template;
+    if (t.Sheet == LabelSheet.A4)
+    {
+        <style>
+            @@media print { @@page { size: A4 portrait; margin: 0; } .print-bar { display: none; } }
+            .label-sheet { display: grid; grid-template-columns: repeat(@t.Columns, @Mm(t.WidthMm)); grid-auto-rows: @Mm(t.HeightMm); width: 210mm;
+                           justify-content: center; align-content: start; margin: 0 auto; padding-top: @Mm((297 - t.Rows * t.HeightMm) / 2); background: #fff; }
+            .label-sheet .page-break { grid-column: 1 / -1; break-after: page; height: 0; }
+        </style>
+    }
+    else
+    {
+        <style>
+            @@media print { @@page { size: @Mm(t.WidthMm) @Mm(t.HeightMm); margin: 0; } .print-bar { display: none; }
+                            .label-sheet { display: block; gap: 0; padding: 0; } .label-sheet .item-label { break-after: page; } }
+            .label-sheet { display: flex; flex-wrap: wrap; gap: 4mm; padding: 4mm; }
+        </style>
+    }
+}
+
+<form class="print-bar" method="get" action="catalog/labels/print">
+    <button type="button" data-print>Печать</button>
+    <input type="hidden" name="ids" value="@Ids" />
+    @if (_templates.Count > 0)
+    {
+        <label>Шаблон
+            <select name="template">
+                @foreach (var x in _templates)
+                {
+                    <option value="@x.Id" selected="@(x.Id == _data?.Template.Id)">@x.Name</option>
+                }
+            </select>
+        </label>
+    }
+    <label>Копий <input type="number" name="copies" min="1" max="100" value="@CopiesValue" style="width: 4em" /></label>
+    @if (_data?.Template.Sheet == LabelSheet.A4)
+    {
+        <label>Пропустить ячеек <input type="number" name="skip" min="0" max="239" value="@SkipValue" style="width: 4em" /></label>
+    }
+    <button type="submit">Обновить</button>
+    <a href="catalog/labels">Конструктор этикеток</a>
+    @if (_data is { } info)
+    {
+        <span>Этикеток: @(info.Items.Count * CopiesValue)</span>
+        @if (_templates.Count == 0)
+        {
+            <span class="warn">Шаблонов нет — печатается образец «@info.Template.Name». Свой шаблон — в конструкторе.</span>
+        }
+    }
+</form>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_data is null)
+{
+    <div class="sheet portrait"><p>Загрузка…</p></div>
+}
+else
+{
+    var t = _data.Template;
+    var perSheet = t.Columns * t.Rows;
+    var n = 0;
+    <div class="label-sheet">
+        @if (t.Sheet == LabelSheet.A4)
+        {
+            for (var s = 0; s < SkipValue % perSheet; s++, n++)
+            {
+                <div></div>
+            }
+        }
+        @foreach (var item in _data.Items)
+        {
+            for (var c = 0; c < CopiesValue; c++, n++)
+            {
+                if (t.Sheet == LabelSheet.A4 && n > 0 && n % perSheet == 0)
+                {
+                    <div class="page-break"></div>
+                }
+
+                <LabelView Template="t" Item="item" Organization="@_data.Organization" Currency="@_data.Currency" Date="_data.Date" />
+            }
+        }
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "ids")]
+    public string? Ids { get; set; }
+
+    [SupplyParameterFromQuery(Name = "template")]
+    public long? TemplateId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "copies")]
+    public int? Copies { get; set; }
+
+    [SupplyParameterFromQuery(Name = "skip")]
+    public int? Skip { get; set; }
+
+    private LabelPrintDto? _data;
+    private IReadOnlyList<LabelTemplateDto> _templates = [];
+    private string? _error;
+
+    private int CopiesValue => Math.Clamp(Copies ?? 1, 1, 100);
+
+    private int SkipValue => Math.Clamp(Skip ?? 0, 0, 239);
+
+    private static string Mm(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "mm";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var ids = (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => long.TryParse(x, out var v) ? v : 0).Where(v => v > 0).ToList();
+            if (ids.Count == 0)
+            {
+                _error = "Не выбраны позиции: откройте печать из карточки позиции или из списка номенклатуры.";
+                return;
+            }
+
+            _templates = await Labels.TemplatesAsync();
+            _data = await Labels.PrintAsync(ids, TemplateId);
+            if (_data.Items.Count * CopiesValue > LabelService.MaxLabels)
+            {
+                _error = $"За раз — не больше {LabelService.MaxLabels} этикеток: уменьшите число копий или позиций.";
+                _data = null;
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

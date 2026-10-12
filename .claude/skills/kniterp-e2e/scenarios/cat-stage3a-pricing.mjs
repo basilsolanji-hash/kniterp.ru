@@ -20,7 +20,7 @@ await form.locator('label:has-text("Наименование") input').fill('П�
 await form.locator('label:has-text("Тип") select').selectOption('Finished');
 await form.getByRole('button', { name: 'Сохранить' }).click();
 await page.waitForSelector('text=Позиция сохранена.');
-await page.getByRole('link', { name: 'Плед вязаный ' + sfx }).click();
+await page.locator('.flash').getByRole('link', { name: 'Плед вязаный ' + sfx }).click(); // ссылка на новую позицию — в сообщении (список листается страницами)
 await page.waitForSelector('text=Торговля и маркировка'); await ready(page);
 
 // Неверный GTIN — понятная ошибка; верный EAN-13 становится GTIN-14.

@@ -26,7 +26,7 @@ public sealed record ItemPriceDto(long PriceTypeId, string PriceType, bool Inclu
 public sealed record ItemCardDto(
     long Id, string Code, string Name, ItemType Type, long UnitId, string UnitSymbol, string? Description, long? VatRateId, bool IsArchived,
     ItemDetails Details, string? GroupPath, IReadOnlyList<ItemBarcodeDto> Barcodes, IReadOnlyList<ItemPriceDto> Prices,
-    IReadOnlyList<CustomValueDto> CustomFields, decimal Stock, bool CanEdit, bool CanSeePrices, byte[] RowVersion)
+    IReadOnlyList<CustomValueDto> CustomFields, decimal? Stock, bool CanEdit, bool CanSeePrices, byte[] RowVersion, bool StockAllWarehouses = true)
 {
     public string TypeName => ItemTypes.Name(Type);
 
@@ -163,12 +163,14 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         var barcodes = await db.ItemBarcodes.AsNoTracking().Where(b => b.OrganizationId == ctx.OrganizationId && b.ItemId == id).OrderBy(b => b.Id)
             .Select(b => new ItemBarcodeDto(b.Id, b.Type, b.Code)).ToListAsync(ct);
         var prices = ctx.Permissions.Has(Permissions.PriceView) ? await PricesAsync(ctx.OrganizationId, id, ct) : [];
-        var stock = await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == ctx.OrganizationId && m.ItemId == id)
-            .SumAsync(m => (decimal?)m.Quantity, ct) ?? 0m;
+        // D118: остаток — только по складам области пользователя; без складских прав — не показывается.
+        var movements = KnitErp.Application.Warehousing.WarehouseScope.VisibleMovements(db, ctx);
+        decimal? stock = movements is null ? null : await movements.Where(m => m.ItemId == id).SumAsync(m => (decimal?)m.Quantity, ct) ?? 0m;
         var details = ctx.Permissions.Has(Permissions.PriceView) ? item.Details : item.Details with { PurchasePrice = null };
         return new ItemCardDto(item.Id, item.Code, item.Name, item.Type, item.UnitId, unit, item.Description, item.VatRateId, item.IsArchived, details,
             path, barcodes, prices, await Fields.ValuesAsync(ctx, CustomFieldTarget.Item, id, ct), stock,
-            ctx.Permissions.Has(Permissions.CatalogEdit), ctx.Permissions.Has(Permissions.PriceView), item.RowVersion);
+            ctx.Permissions.Has(Permissions.CatalogEdit), ctx.Permissions.Has(Permissions.PriceView), item.RowVersion,
+            KnitErp.Application.Warehousing.WarehouseScope.SeesAllWarehouses(ctx));
     }
 
     /// <summary>
@@ -198,6 +200,12 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         if (!ctx.Permissions.Has(Permissions.PriceView))
         {
             details = details with { PurchasePrice = item.PurchasePrice };
+        }
+
+        // D312: обязательная группа — её нельзя убрать у позиции (модификация берёт группу основной позиции).
+        if (item.ParentItemId is null)
+        {
+            (await db.CatalogSettings.AsNoTracking().SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId, ct))?.EnsureGroup(details.GroupId);
         }
 
         if (details.GroupId is { } gid && gid != item.GroupId)

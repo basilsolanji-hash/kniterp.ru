@@ -5,6 +5,8 @@
 @using KnitErp.Domain.Common
 @inject NomenclatureService Nomenclature
 @inject ModificationService Modifications
+@inject CatalogSettingsService Settings
+@inject ItemCodesService Codes
 
 <PageTitle>@L("Настройки номенклатуры") — knitERP</PageTitle>
 
@@ -30,7 +32,7 @@ else
         @foreach (var (tab, title) in Tabs)
         {
             var t = tab;
-            <button type="button" role="tab" class="@(_tab == t ? "tab active" : "tab")" aria-selected="@(_tab == t ? "true" : "false")" @onclick="() => _tab = t">@L(title)</button>
+            <button type="button" role="tab" class="@(_tab == t ? "tab active" : "tab")" aria-selected="@(_tab == t ? "true" : "false")" @onclick="() => _tab = t">@(t == Tab.General ? L("Общие") : L(title))</button>
         }
     </div>
 
@@ -368,6 +370,127 @@ else
             </div>
             break;
 
+        case Tab.General:
+            @* D312 (сессия 4): общие настройки каталога организации. *@
+            <p class="muted">@L("Что использует ваша организация и как нумеруются новые позиции. Выключенный вид скрыт в списках выбора и не создаётся вручную; уже созданные позиции остаются.")</p>
+            @if (_settings is not null)
+            {
+                <form class="panel" @onsubmit="SaveSettingsAsync">
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Виды позиций")</legend>
+                        <label class="check"><input type="checkbox" @bind="_servicesOn" /> @L("Услуги — продаются и покупаются, не хранятся на складе")</label>
+                        <label class="check"><input type="checkbox" @bind="_bundlesOn" /> @L("Комплекты — набор позиций одной строкой продажи")</label>
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Код новой позиции")</legend>
+                        <div class="grid">
+                            <label>@L("Префикс автокода") <input @bind="_prefix" maxlength="@CatalogSettings.PrefixMaxLength" placeholder="@L("пусто — код вводится вручную")" /></label>
+                            <label>
+                                @L("Цифр в номере")
+                                <select @bind="_digits">
+                                    @for (var d = CatalogSettings.MinDigits; d <= CatalogSettings.MaxDigits; d++)
+                                    {
+                                        <option value="@d">@d</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Следующий номер") <input type="number" min="1" @bind="_nextNumber" /></label>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(_prefix))
+                        {
+                            <p class="muted small">@L("Пример кода: {0}. Поле «Код» в новой позиции можно оставить пустым — код подставится сам; занятые номера пропускаются.", _prefix.Trim().ToUpperInvariant() + _nextNumber.ToString().PadLeft(_digits, '0'))</p>
+                        }
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Обязательные поля")</legend>
+                        <label class="check"><input type="checkbox" @bind="_requireGroup" /> @L("Группа — у новой позиции и при сохранении сведений")</label>
+                        <label class="check"><input type="checkbox" @bind="_requireVat" /> @L("Ставка НДС — у новой и изменяемой позиции")</label>
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Блоки карточки позиции")</legend>
+                        <p class="muted small">@L("Снимите флажок, чтобы не показывать блок. Данные не удаляются, блок можно вернуть в любой момент.")</p>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Trade)" @onchange="e => ToggleBlock(CardBlocks.Trade, e)" /> @L("Торговля и маркировка")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Packs)" @onchange="e => ToggleBlock(CardBlocks.Packs, e)" /> @L("Упаковки")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Suppliers)" @onchange="e => ToggleBlock(CardBlocks.Suppliers, e)" /> @L("Поставщики")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Photos)" @onchange="e => ToggleBlock(CardBlocks.Photos, e)" /> @L("Фото")</label>
+                        <label class="check"><input type="checkbox" checked="@ShowsBlock(CardBlocks.Modifications)" @onchange="e => ToggleBlock(CardBlocks.Modifications, e)" /> @L("Модификации")</label>
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Новая позиция")</legend>
+                        <label>
+                            @L("Тип по умолчанию")
+                            <select @bind="_defaultType">
+                                @foreach (var t in ItemTypes.All)
+                                {
+                                    <option value="@t">@L(ItemTypes.Name(t))</option>
+                                }
+                            </select>
+                        </label>
+                    </fieldset>
+                    @if (_settings.CanEdit)
+                    {
+                        <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить настройки")</button></div>
+                    }
+                </form>
+
+                @* D315: автоматические штрихкоды и артикулы — своя форма и своё сохранение. *@
+                <h2 style="margin-top: 20px">@L("Штрихкоды и артикулы автоматически")</h2>
+                <form class="panel" @onsubmit="SaveCodesAsync">
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Штрихкод EAN-13")</legend>
+                        <label class="check"><input type="checkbox" @bind="_autoBarcode" /> @L("Выдавать штрихкод новой позиции сразу (кроме услуг)")</label>
+                        <div class="grid">
+                            <label>
+                                @L("Префикс")
+                                <select @bind="_barcodePrefix">
+                                    @for (var p = InternalEan13.MinPrefix; p <= InternalEan13.MaxPrefix; p++)
+                                    {
+                                        <option value="@p">@p</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Следующий номер") <input type="number" min="1" @bind="_nextBarcode" /></label>
+                        </div>
+                        <p class="muted small">@L("Внутренний штрихкод из диапазона 20–29 — для своего склада, касс и этикеток. Для маркировки (Честный ЗНАК) и площадок, требующих GTIN, нужен настоящий GTIN из Национального каталога — его вводят в блоке «Торговля и маркировка».")</p>
+                        @if (_settings.Codes?.NextBarcode is { } nb)
+                        {
+                            <p class="small">@L("Следующий штрихкод: {0}", nb)</p>
+                        }
+                    </fieldset>
+                    <fieldset disabled="@(!_settings.CanEdit)">
+                        <legend>@L("Артикул")</legend>
+                        <label class="check"><input type="checkbox" @bind="_autoArticle" /> @L("Заполнять пустой артикул новой позиции по шаблону")</label>
+                        <div class="grid">
+                            <label>@L("Шаблон") <input @bind="_articleTemplate" maxlength="@ArticleTemplate.MaxLength" placeholder="KN-{N}" /></label>
+                            <label>
+                                @L("Цифр в номере")
+                                <select @bind="_articleDigits">
+                                    @for (var d = CatalogSettings.MinDigits; d <= CatalogSettings.MaxDigits; d++)
+                                    {
+                                        <option value="@d">@d</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Следующий номер") <input type="number" min="1" @bind="_nextArticle" /></label>
+                        </div>
+                        <p class="muted small">@L("{N} — номер по счётчику, {CODE} — код позиции. Например: «KN-{N}» → KN-00042, «{CODE}-A» → ТВ-0001-A.")</p>
+                        @if (_settings.Codes?.ArticleExample is { } ae)
+                        {
+                            <p class="small">@L("Следующий артикул: {0}", ae)</p>
+                        }
+                    </fieldset>
+                    @if (_settings.CanEdit)
+                    {
+                        <div class="actions">
+                            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                            <ConfirmButton Class="secondary" Disabled="_busy" Question="@L("Выдать внутренний EAN-13 всем действующим позициям без штрихкода (кроме услуг)?")"
+                                           OnConfirm="GenerateMissingAsync">@L("Создать штрихкоды для позиций без штрихкода")</ConfirmButton>
+                        </div>
+                    }
+                </form>
+            }
+            break;
+
         case Tab.Characteristics:
             <p class="muted">@L("Характеристики модификаций: «Цвет», «Размер», «Рост». Значения вводятся у позиции при создании модификаций. Не больше {0}.", Characteristic.MaxCharacteristics)</p>
             @if (CanEdit)
@@ -426,11 +549,11 @@ else
 }
 
 @code {
-    private enum Tab { Groups, Prices, Fields, Catalogs, Characteristics }
+    private enum Tab { Groups, Prices, Fields, Catalogs, Characteristics, General }
 
     private static readonly (Tab Tab, string Title)[] Tabs =
         [(Tab.Groups, "Группы"), (Tab.Prices, "Виды цен"), (Tab.Fields, "Доп. поля"), (Tab.Catalogs, "Свои справочники"),
-         (Tab.Characteristics, "Характеристики")];
+         (Tab.Characteristics, "Характеристики"), (Tab.General, "Общие")];
 
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
@@ -466,6 +589,44 @@ else
 
     private bool CanEdit => CurrentAccess.Has(Permissions.CatalogEdit);
 
+    // D312: общие настройки каталога.
+    private CatalogSettingsDto? _settings;
+    private bool _servicesOn = true;
+    private bool _bundlesOn = true;
+    private string? _prefix;
+    private byte _digits = 5;
+    private int _nextNumber = 1;
+    private ItemType _defaultType = ItemType.Finished;
+    private bool _requireGroup;
+    private bool _requireVat;
+    private CardBlocks _hidden;
+
+    private bool ShowsBlock(CardBlocks block) => (_hidden & block) == 0;
+
+    private void ToggleBlock(CardBlocks block, ChangeEventArgs e) => _hidden = e.Value is true ? _hidden & ~block : _hidden | block;
+
+    // D315: автоматические штрихкоды и артикулы.
+    private bool _autoBarcode;
+    private byte _barcodePrefix = InternalEan13.MinPrefix;
+    private long _nextBarcode = 1;
+    private bool _autoArticle;
+    private string? _articleTemplate;
+    private byte _articleDigits = 5;
+    private int _nextArticle = 1;
+
+    private Task SaveCodesAsync() => Run(() => Settings.SaveCodesAsync(
+        new CatalogCodesCommand(_autoBarcode, _barcodePrefix, _nextBarcode, _autoArticle, _articleTemplate, _articleDigits, _nextArticle),
+        _settings!.RowVersion), L("Настройки штрихкодов и артикулов сохранены."));
+
+    private Task GenerateMissingAsync() => Run(async () =>
+    {
+        var r = await Codes.GenerateMissingBarcodesAsync();
+        _message = r.Created == 0 ? L("У всех позиций уже есть штрихкоды.") : L("Создано штрихкодов: {0} ({1} … {2}).", r.Created, r.First!, r.Last!);
+    }, null);
+
+    private Task SaveSettingsAsync() => Run(() => Settings.SaveAsync(
+        new CatalogSettingsCommand(_servicesOn, _bundlesOn, _prefix, _digits, _nextNumber, _defaultType, _requireGroup, _requireVat, _hidden), _settings!.RowVersion), L("Настройки каталога сохранены."));
+
     /// <summary>Каждый справочник — свой пункт меню (?tab=…): переход между ними не пересоздаёт страницу.</summary>
     protected override void OnParametersSet()
     {
@@ -498,6 +659,20 @@ else
         _catalogId ??= _catalogs.FirstOrDefault()?.Id;
         _entries = _catalogId is { } cid && _catalogs.Any(c => c.Id == cid) ? await Nomenclature.EntriesAsync(cid, includeArchived: true) : [];
         _characteristics = await Modifications.CharacteristicsAsync(includeArchived: true);
+        _settings = await Settings.GetAsync();
+        if (_isError)
+        {
+            return; // после отказа введённое остаётся в форме — исправить и сохранить снова
+        }
+
+        (_servicesOn, _bundlesOn, _prefix, _digits, _nextNumber, _defaultType) =
+            (_settings.ServicesEnabled, _settings.BundlesEnabled, _settings.AutoCodePrefix, _settings.AutoCodeDigits, _settings.NextNumber, _settings.DefaultItemType);
+        (_requireGroup, _requireVat, _hidden) = (_settings.RequireGroup, _settings.RequireVat, _settings.HiddenBlocks);
+        if (_settings.Codes is { } c)
+        {
+            (_autoBarcode, _barcodePrefix, _nextBarcode, _autoArticle, _articleTemplate, _articleDigits, _nextArticle) =
+                (c.AutoBarcode, c.BarcodePrefix, c.NextBarcodeNumber, c.AutoArticle, c.ArticleTemplate, c.ArticleDigits, c.NextArticleNumber);
+        }
     }
 
     private string TypeName(CustomFieldType type) => type switch
@@ -585,7 +760,7 @@ else
         try
         {
             await action();
-            _message = success;
+            _message = success ?? _message;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

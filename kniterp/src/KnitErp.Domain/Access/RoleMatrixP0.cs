@@ -17,6 +17,12 @@ public static class SystemRoles
     /// <summary>Кадровик (D205) — роль модуля «Сотрудники», её права заданы в <see cref="HrRoleMatrix"/>, а не столбцом матрицы P0.</summary>
     public const string HrOfficer = "hr_officer";
 
+    /// <summary>Роли модуля «Разработка» (D700) — права в <see cref="KnitErp.Domain.Development.DevRoleMatrix"/>.</summary>
+    public const string DevChief = "dev_chief";
+    public const string DevTechnologist = "dev_technologist";
+    public const string DevDessinator = "dev_dessinator";
+    public const string DevSampler = "dev_sampler";
+
     /// <summary>Менеджер продаж (D600, CRM) — права в <see cref="CrmRoleMatrix"/>.</summary>
     public const string SalesManager = "sales_manager";
 
@@ -25,7 +31,8 @@ public static class SystemRoles
 
     /// <summary>Порядок столбцов матрицы ТЗ §4.8.</summary>
     public static readonly IReadOnlyList<string> Ordered =
-        [Owner, Administrator, DepartmentHead, SeniorStorekeeper, Storekeeper, Accountant, Auditor, Employee, HrOfficer, SalesManager, SalesHead];
+        [Owner, Administrator, DepartmentHead, SeniorStorekeeper, Storekeeper, Accountant, Auditor, Employee, HrOfficer, SalesManager, SalesHead,
+            DevChief, DevTechnologist, DevDessinator, DevSampler];
 
     public static string NameOf(string code) => code switch
     {
@@ -38,6 +45,10 @@ public static class SystemRoles
         Auditor => "Аудитор",
         Employee => "Сотрудник",
         HrOfficer => "Кадровик",
+        DevChief => "Главный технолог",
+        DevTechnologist => "Разработчик (технолог)",
+        DevDessinator => "Дессинатор",
+        DevSampler => "Образцовщица",
         SalesManager => "Менеджер продаж",
         SalesHead => "Руководитель продаж",
         _ => code,
@@ -107,12 +118,25 @@ public static class RoleMatrixP0
         (Permissions.ProductionOrderEdit,     [Full, Full, Full, None, None, None, None, None]),
         // Допущение D92: этапы отмечает начальник цеха, мастерам и контролёрам ОТК (роль «Сотрудник») право выдаётся отдельно.
         (Permissions.ProductionStageMark,     [Full, Full, Full, None, None, None, None, ByGrant]),
+        // Допущение D412: виновника брака указывает тот, кто ведёт качество, — начальник цеха; контролёру ОТК право выдаётся отдельно
+        // (виновник влияет на баллы и премии, поэтому право уже, чем отметка этапов).
+        (Permissions.ProductionDefectCulprit, [Full, Full, Full, None, None, None, None, ByGrant]),
         // Допущение D93: выдачу, возврат, отходы и выпуск проводят кладовщики своих складов — нужны ещё права складских документов.
         (Permissions.ProductionMaterialMove,  [Full, None, None, Scoped, Scoped, None, None, None]),
         // Допущение D302 (каталог): состав комплектов меняют те, кто меняет справочники организации целиком.
         (Permissions.BundleEdit,              [Full, Full, None, None, None, None, None, None]),
         // Допущение D306: массовую переоценку проводят Владелец и Администратор (цены видят — право «Цены и суммы»).
         (Permissions.PriceEdit,               [Full, Full, None, None, None, None, None, None]),
+        // Допущение D700 (разработка): Владелец — всё; Администратор настраивает справочники и видит модели; начальник цеха и Аудитор
+        // смотрят; Бухгалтер (экономист) видит модели и себестоимость (Администратор — тоже, иначе не смог бы выдать роль Бухгалтера).
+        // Отдел разработки — роли DevRoleMatrix.
+        (Permissions.DevView,                 [Full, Full, ReadOnly, None, None, ReadOnly, ReadOnly, None]),
+        (Permissions.DevEdit,                 [Full, None, None, None, None, None, None, None]),
+        (Permissions.DevPattern,              [Full, None, None, None, None, None, None, None]),
+        (Permissions.DevSample,               [Full, None, None, None, None, None, None, None]),
+        (Permissions.DevApprove,              [Full, None, None, None, None, None, None, None]),
+        (Permissions.DevCostView,             [Full, Full, None, None, None, Full, ReadOnly, None]),
+        (Permissions.DevSettings,             [Full, Full, None, None, None, None, None, None]),
         // Допущение D600 (CRM): Владелец — всё; Администратор видит CRM и настраивает воронки (сделки ведут менеджеры).
         // Менеджер и руководитель продаж — роли CRM, их права в CrmRoleMatrix.
         (Permissions.CrmView,                 [Full, Full, None, None, None, None, None, None]),
@@ -120,6 +144,18 @@ public static class RoleMatrixP0
         (Permissions.CrmAll,                  [Full, None, None, None, None, None, None, None]),
         (Permissions.CrmSettings,             [Full, Full, None, None, None, None, None, None]),
         (Permissions.CrmExport,               [Full, None, None, None, None, None, None, None]),
+        // Допущение D1100 (продажи): обходы ограничений цены и кредита — Владелец; соглашения и скидки — Владелец, Администратор
+        // и Бухгалтер (договорные условия); отчёты продаж — кто видит продажи и цены; план — Владелец; коды маркировки сканируют
+        // кладовщики своих складов. Менеджер и руководитель продаж — CrmRoleMatrix.
+        (Permissions.SalesPriceOverride,      [Full, None, None, None, None, None, None, None]),
+        (Permissions.SalesCreditOverride,     [Full, None, None, None, None, None, None, None]),
+        (Permissions.SalesAgreementEdit,      [Full, Full, None, None, None, Full, None, None]),
+        (Permissions.SalesDiscountEdit,       [Full, Full, None, None, None, Full, None, None]),
+        (Permissions.SalesReportView,         [Full, Full, None, None, None, Full, Full, None]),
+        (Permissions.SalesPlanEdit,           [Full, None, None, None, None, None, None, None]),
+        (Permissions.SalesMarkingEdit,        [Full, None, None, Scoped, Scoped, None, None, None]),
+        // Допущение D310: МойСклад подключают Владелец и Администратор (ТЗ каталога, этап 4).
+        (Permissions.MoySkladManage,          [Full, Full, None, None, None, None, None, None]),
         (Permissions.CrmLeadsCreate,          [Full, None, None, None, None, None, None, None]),
         (Permissions.CrmMailing,              [Full, None, None, None, None, None, None, None]),
     ];
@@ -131,6 +167,11 @@ public static class RoleMatrixP0
         if (roleCode == SystemRoles.HrOfficer)
         {
             return HrRoleMatrix.LevelOf(permissionCode);
+        }
+
+        if (KnitErp.Domain.Development.DevRoleMatrix.Roles.TryGetValue(roleCode, out var dev))
+        {
+            return dev.TryGetValue(permissionCode, out var devLevel) ? devLevel : None;
         }
 
         if (CrmRoleMatrix.Of(roleCode) is { } crm)
@@ -156,6 +197,11 @@ public static class RoleMatrixP0
         if (roleCode == SystemRoles.HrOfficer)
         {
             return HrRoleMatrix.HrOfficer.Select(p => (p.Key, p.Value)).ToArray();
+        }
+
+        if (KnitErp.Domain.Development.DevRoleMatrix.Roles.TryGetValue(roleCode, out var dev))
+        {
+            return dev.Select(p => (p.Key, p.Value)).ToArray();
         }
 
         if (CrmRoleMatrix.Of(roleCode) is { } crm)
@@ -218,6 +264,8 @@ public static class CrmRoleMatrix
         [Permissions.SalesEdit] = Full,
         [Permissions.PriceView] = Full,
         [Permissions.CatalogView] = Full,
+        // D1100: свои отчёты продаж (выручка, дебиторка своих клиентов).
+        [Permissions.SalesReportView] = Full,
     };
 
     public static readonly IReadOnlyDictionary<string, PermissionLevel> SalesHead = new Dictionary<string, PermissionLevel>(StringComparer.Ordinal)
@@ -233,6 +281,13 @@ public static class CrmRoleMatrix
         [Permissions.SalesEdit] = Full,
         [Permissions.PriceView] = Full,
         [Permissions.CatalogView] = Full,
+        // D1100: руководитель продаж разрешает обходы, ведёт соглашения, скидки, план и отчёты.
+        [Permissions.SalesPriceOverride] = Full,
+        [Permissions.SalesCreditOverride] = Full,
+        [Permissions.SalesAgreementEdit] = Full,
+        [Permissions.SalesDiscountEdit] = Full,
+        [Permissions.SalesReportView] = Full,
+        [Permissions.SalesPlanEdit] = Full,
     };
 
     public static IReadOnlyDictionary<string, PermissionLevel>? Of(string roleCode) => roleCode switch

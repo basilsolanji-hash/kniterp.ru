@@ -121,13 +121,47 @@ public static class ObjectDirectory
                         e.Position, $"employees/{e.Id}")).ToList();
             }
 
+            case TaggedEntity.DevModel when has(Permissions.DevView):
+                // D700: номер, название и стадия модели — без себестоимости и цены.
+                return (await db.DevModels.AsNoTracking().Where(m => m.OrganizationId == org && ids.Contains(m.Id))
+                        .Select(m => new { m.Id, m.Number, m.Name, m.Stage }).ToListAsync(ct))
+                    .Select(m => new TaggedObjectDto(entity, m.Id, $"{m.Number} — {m.Name}", KnitErp.Domain.Development.DevStages.Name(m.Stage),
+                        $"dev/models/{m.Id}")).ToList();
             case TaggedEntity.CrmLead or TaggedEntity.CrmDeal or TaggedEntity.CrmContact:
                 // D601 (CRM): видимость лида, сделки и контакта решает CRM — ответственный, наблюдатель или право crm.all.
                 return await Crm.CrmVisibility.DescribeAsync(db, ctx, entity, ids, ct);
 
             default:
-                return [];
+                return Modules.TryGetValue(entity, out var describe) ? await describe(db, ctx, ids, ct) : [];
         }
     }
 
+    /// <summary>Описание объектов модуля: только объекты своей организации, которые пользователь вправе видеть; права проверяет модуль.</summary>
+    public delegate Task<IReadOnlyList<TaggedObjectDto>> Describer(IKnitErpDbContext db, AccessContext ctx, IReadOnlyList<long> ids, CancellationToken ct);
+
+    /// <summary>Первое значение <see cref="TaggedEntity"/> для модулей, подключаемых через <see cref="Register"/> (D117): CRM — 30–39, «Разработка» — 40–49.</summary>
+    public const int ModuleRangeStart = 30;
+
+    /// <summary>Наибольшее значение, которое пропускают CHECK тегов и обсуждений в базе (D117).</summary>
+    public const int ModuleRangeEnd = 99;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<TaggedEntity, Describer> Modules = new();
+
+    /// <summary>
+    /// D117: модуль (CRM, «Разработка» и следующие) подключает свои объекты к тегам и обсуждениям без правки этого класса —
+    /// вызовом в регистрации своих сервисов. Значение — из диапазона модуля; встроенные объекты переопределить нельзя.
+    /// </summary>
+    public static void Register(TaggedEntity entity, Describer describer)
+    {
+        ArgumentNullException.ThrowIfNull(describer);
+        if ((int)entity is < ModuleRangeStart or > ModuleRangeEnd)
+        {
+            throw new ArgumentOutOfRangeException(nameof(entity), $"Объекты модулей — значения {ModuleRangeStart}–{ModuleRangeEnd}.");
+        }
+
+        if (!Modules.TryAdd(entity, describer) && Modules[entity] != describer)
+        {
+            throw new InvalidOperationException($"Объект {entity} уже подключён другим модулем.");
+        }
+    }
 }

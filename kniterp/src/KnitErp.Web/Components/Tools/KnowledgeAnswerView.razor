@@ -1,0 +1,40 @@
+@* Готовый ответ базы знаний (D900): абзацы по шагам, кнопки «Открыть» доступных экранов, источники и дата проверки. *@
+@using KnitErp.Application.Workspace.Knowledge
+
+<div class="kb-answer">
+    @if (ShowText)
+    {
+        @foreach (var p in Doc.Article.Body)
+        {
+            <p>@L(p)</p>
+        }
+    }
+    @{ var links = KnowledgeLinks.Allowed(Context, Doc.Links); }
+    @if (links.Count > 0)
+    {
+        <div class="kb-open">
+            @foreach (var link in links)
+            {
+                <a class="button secondary" href="@link.Href" @onclick="() => Context.Navigate(link.Href)" @onclick:preventDefault>
+                    @L("Открыть") @(link.Label.Length > 0 ? $"«{link.Label}»" : "")
+                </a>
+            }
+        </div>
+    }
+    @if (KnowledgeLinks.SourcesLine(Doc) is { } sources)
+    {
+        <p class="muted small kb-sources">@L("Источники: {0}. Проверено: {1}.", sources, Doc.Reviewed)</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public KnowledgeDoc Doc { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public ToolContext Context { get; set; } = default!;
+
+    /// <summary>false — текст уже показан (ответ модели), нужны только кнопки и источники.</summary>
+    [Parameter]
+    public bool ShowText { get; set; } = true;
+}

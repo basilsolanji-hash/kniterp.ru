@@ -1,0 +1,30 @@
+# Модуль «Разработка» — сообщения другим сессиям
+
+Ветка сессии — `claude/clever-pascal-fahux9` (в ТЗ — `claude/development`; имя ветки задано средой сессии). Основа — `claude/fervent-volta-3pn88r`.
+Решения — D700–D799 (`docs/decisions.md`, раздел «Разработка»). ТЗ — `docs/tz/development.md`.
+
+## Что сделано
+- Этап 1 (D700–D709): модели, стадии и история, задание, исполнители, файлы, доска и таблица, «Мои задачи», настройки. Миграция `DevModels`.
+- Автоматизация (D790–D798, `docs/tz/development-automation.md`): шаблоны задания, исполнители по умолчанию, дата запуска и название по
+  умолчанию, «Создать похожую», Excel моделей, автопереход по файлу, колокольчик и поиск, камера, подсказка «Что дальше». Миграция `DevAutomation`.
+
+## Что изменено в общих файлах (точечно, с пометкой D700)
+- `Permissions.cs` — права `dev.*`, группа «Разработка» в `Groups` и `GroupOf`.
+- `RoleMatrixP0.cs` — строки прав `dev.*`, коды ролей отдела в `SystemRoles` (`dev_chief`, `dev_technologist`, `dev_dessinator`, `dev_sampler`) и обращение к `DevRoleMatrix`.
+- `Tags.cs` — `TaggedEntity` 40–42; CHECK `ck_tag_links_entity` и `ck_discussion_comments_target` — `BETWEEN 1 AND 29 OR BETWEEN 40 AND 49`; CRM при слиянии расширяет до «1–49».
+- `ObjectDirectory.cs` — ветка `DevModel`; `AuditEntry.cs`/`Labels.cs` — действия `dev.*`; `Abstractions.cs`/`KnitErpDbContext.cs` — наборы `Dev*` в конце.
+- `MainLayout.razor` — раздел меню «Разработка»; `App.razor` — цвет раздела `--sec-dev`; `Program.cs` — выдача `/dev/files/{id}`.
+- `TranslationCoverageTests` — регистрация названий домена разработки и всех `TaggedEntity`.
+- `WorkspaceServices.cs` — `NotificationService` вызывает `DevNotifications.ComputeAsync`, `QuickSearchService` ищет модели (D796).
+- `tests/KnitErp.E2ETests/DevScreenshotTests.cs` — снимки экранов модуля по переменной `KNITERP_SCREENSHOTS` (без неё тест пустой).
+
+## Вопросы к базе
+1. **Сжатие фото до 2000 px (ТЗ §13).** Нужна библиотека обработки изображений (например, SkiaSharp или ImageSharp — у второй коммерческая лицензия).
+   Добавлять пакет в locked mode без решения базы не стал (D705). Подскажите, какой пакет допустим.
+2. **Колокольчик.** Для напоминаний о невозвращённых образцах (этап 3) нужен метод записи уведомления пользователю из сервиса модуля.
+
+## Вопросы к производству
+- Этап 6: нужен метод «создать черновик техкарты» (`TechCardService`) с материалами, нормами, маршрутом и файлами; предложу сигнатуру в этом файле до начала этапа.
+
+## Вопросы к каталогу
+- Этап 6: метод «создать позицию „Готовая продукция“ с модификациями размер × цвет» — предложу сигнатуру до начала этапа.

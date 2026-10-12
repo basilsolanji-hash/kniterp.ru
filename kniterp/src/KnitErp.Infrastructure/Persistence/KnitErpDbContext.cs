@@ -29,6 +29,13 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<PriceRevaluation> PriceRevaluations => Set<PriceRevaluation>();
     public DbSet<ItemPack> ItemPacks => Set<ItemPack>();
     public DbSet<ItemSupplier> ItemSuppliers => Set<ItemSupplier>();
+    public DbSet<CatalogSettings> CatalogSettings => Set<CatalogSettings>();
+    public DbSet<CatalogFeed> CatalogFeeds => Set<CatalogFeed>();
+    public DbSet<LabelTemplate> LabelTemplates => Set<LabelTemplate>();
+    public DbSet<ExternalLink> ExternalLinks => Set<ExternalLink>();
+    public DbSet<ExternalConnection> ExternalConnections => Set<ExternalConnection>();
+    public DbSet<ExternalImportRun> ExternalImportRuns => Set<ExternalImportRun>();
+    public DbSet<ExternalImportIssue> ExternalImportIssues => Set<ExternalImportIssue>();
     public DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations => Set<KnitErp.Domain.Finance.MoneyOperation>();
     public DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens => Set<KnitErp.Domain.Integrations.ApiToken>();
     public DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions => Set<KnitErp.Domain.Integrations.WebhookSubscription>();
@@ -63,6 +70,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Purchasing.SupplierPayment> SupplierPayments => Set<KnitErp.Domain.Purchasing.SupplierPayment>();
     public DbSet<KnitErp.Domain.Sales.SalesOrder> SalesOrders => Set<KnitErp.Domain.Sales.SalesOrder>();
     public DbSet<KnitErp.Domain.Sales.CustomerPayment> CustomerPayments => Set<KnitErp.Domain.Sales.CustomerPayment>();
+    public DbSet<KnitErp.Domain.Finance.BankStatementLine> BankStatementLines => Set<KnitErp.Domain.Finance.BankStatementLine>();
     public DbSet<KnitErp.Domain.Sales.CustomerInvoice> CustomerInvoices => Set<KnitErp.Domain.Sales.CustomerInvoice>();
     public DbSet<KnitErp.Domain.Sales.SalesOrderStage> SalesOrderStages => Set<KnitErp.Domain.Sales.SalesOrderStage>();
     public DbSet<KnitErp.Domain.Sales.SalesStageRule> SalesStageRules => Set<KnitErp.Domain.Sales.SalesStageRule>();
@@ -108,6 +116,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.EmploymentRecord> EmploymentHistory => Set<KnitErp.Domain.Hr.EmploymentRecord>();
     public DbSet<KnitErp.Domain.Hr.WorkSchedule> WorkSchedules => Set<KnitErp.Domain.Hr.WorkSchedule>();
     public DbSet<KnitErp.Domain.Hr.EmployeeSchedule> EmployeeSchedules => Set<KnitErp.Domain.Hr.EmployeeSchedule>();
+    public DbSet<KnitErp.Domain.Hr.DepartmentSchedule> DepartmentSchedules => Set<KnitErp.Domain.Hr.DepartmentSchedule>();
+    public DbSet<KnitErp.Domain.Hr.EmployeeAgreement> EmployeeAgreements => Set<KnitErp.Domain.Hr.EmployeeAgreement>();
     public DbSet<KnitErp.Domain.Hr.Timesheet> Timesheets => Set<KnitErp.Domain.Hr.Timesheet>();
     public DbSet<KnitErp.Domain.Hr.TimesheetDay> TimesheetDays => Set<KnitErp.Domain.Hr.TimesheetDay>();
     public DbSet<KnitErp.Domain.Hr.PieceRate> PieceRates => Set<KnitErp.Domain.Hr.PieceRate>();
@@ -115,6 +125,14 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Hr.PayrollLine> PayrollLines => Set<KnitErp.Domain.Hr.PayrollLine>();
     public DbSet<KnitErp.Domain.Hr.HrSettings> HrSettings => Set<KnitErp.Domain.Hr.HrSettings>();
 
+    // Модуль «Разработка» (D700–D799).
+    public DbSet<KnitErp.Domain.Development.DevModel> DevModels => Set<KnitErp.Domain.Development.DevModel>();
+    public DbSet<KnitErp.Domain.Development.DevModelStageEntry> DevModelStages => Set<KnitErp.Domain.Development.DevModelStageEntry>();
+    public DbSet<KnitErp.Domain.Development.DevStageSetting> DevStageSettings => Set<KnitErp.Domain.Development.DevStageSetting>();
+    public DbSet<KnitErp.Domain.Development.DevFile> DevFiles => Set<KnitErp.Domain.Development.DevFile>();
+    public DbSet<KnitErp.Domain.Development.DevLookup> DevLookups => Set<KnitErp.Domain.Development.DevLookup>();
+    public DbSet<KnitErp.Domain.Development.DevSettings> DevSettings => Set<KnitErp.Domain.Development.DevSettings>();
+    public DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates => Set<KnitErp.Domain.Development.DevCategoryTemplate>();
     // CRM (D600–D699).
     public DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines => Set<KnitErp.Domain.Crm.CrmPipeline>();
     public DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages => Set<KnitErp.Domain.Crm.CrmStage>();
@@ -124,6 +142,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Crm.CrmDeal> CrmDeals => Set<KnitErp.Domain.Crm.CrmDeal>();
     public DbSet<KnitErp.Domain.Crm.CrmDealStageHistory> CrmDealStageHistory => Set<KnitErp.Domain.Crm.CrmDealStageHistory>();
     public DbSet<KnitErp.Domain.Crm.CrmDealOrder> CrmDealOrders => Set<KnitErp.Domain.Crm.CrmDealOrder>();
+    public DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements => Set<KnitErp.Domain.Sales.SalesAgreement>();
+    public DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles => Set<KnitErp.Domain.Sales.CustomerSalesProfile>();
+    public DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings => Set<KnitErp.Domain.Sales.SalesRoleSettings>();
     public DbSet<KnitErp.Domain.Crm.CrmActivity> CrmActivities => Set<KnitErp.Domain.Crm.CrmActivity>();
     public DbSet<KnitErp.Domain.Crm.CrmOffer> CrmOffers => Set<KnitErp.Domain.Crm.CrmOffer>();
     public DbSet<KnitErp.Domain.Crm.CrmSettings> CrmSettings => Set<KnitErp.Domain.Crm.CrmSettings>();

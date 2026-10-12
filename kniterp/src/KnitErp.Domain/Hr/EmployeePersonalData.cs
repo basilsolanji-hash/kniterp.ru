@@ -232,9 +232,56 @@ public sealed class EmployeePersonalData
     }
 }
 
+/// <summary>Вид документа сотрудника (D226): сканы личного дела — паспорт, регистрация, договор, заявления и т. д. — и фотография.</summary>
+public enum EmployeeDocumentKind : byte
+{
+    Consent = 1,
+    Passport = 2,
+    Registration = 3,
+    Photo = 4,
+    Contract = 5,
+    Application = 6,
+    Snils = 7,
+    Inn = 8,
+    Education = 9,
+    Military = 10,
+    Medical = 11,
+    WorkBook = 12,
+    Other = 13,
+}
+
+public static class EmployeeDocumentKinds
+{
+    public static readonly IReadOnlyList<EmployeeDocumentKind> All =
+    [
+        EmployeeDocumentKind.Passport, EmployeeDocumentKind.Registration, EmployeeDocumentKind.Photo, EmployeeDocumentKind.Contract,
+        EmployeeDocumentKind.Application, EmployeeDocumentKind.Consent, EmployeeDocumentKind.Snils, EmployeeDocumentKind.Inn,
+        EmployeeDocumentKind.Education, EmployeeDocumentKind.Military, EmployeeDocumentKind.Medical, EmployeeDocumentKind.WorkBook,
+        EmployeeDocumentKind.Other,
+    ];
+
+    public static string Name(EmployeeDocumentKind kind) => kind switch
+    {
+        EmployeeDocumentKind.Consent => "Скан согласия на обработку ПДн",
+        EmployeeDocumentKind.Passport => "Скан паспорта",
+        EmployeeDocumentKind.Registration => "Скан регистрации",
+        EmployeeDocumentKind.Photo => "Фотография",
+        EmployeeDocumentKind.Contract => "Скан трудового договора и дополнительных соглашений",
+        EmployeeDocumentKind.Application => "Скан заявления (о приёме, переводе, отпуске, увольнении)",
+        EmployeeDocumentKind.Snils => "Скан СНИЛС",
+        EmployeeDocumentKind.Inn => "Скан ИНН",
+        EmployeeDocumentKind.Education => "Скан документа об образовании",
+        EmployeeDocumentKind.Military => "Скан военного билета (приписного свидетельства)",
+        EmployeeDocumentKind.Medical => "Скан медицинской книжки или заключения медосмотра",
+        EmployeeDocumentKind.WorkBook => "Скан трудовой книжки (сведений о трудовой деятельности)",
+        EmployeeDocumentKind.Other => "Другой документ",
+        _ => kind.ToString(),
+    };
+}
+
 /// <summary>
-/// Скан подписанного согласия на обработку ПДн. Только вставка: новый скан не заменяет старый, история остаётся.
-/// Содержимое в базе зашифровано, как и сами персональные данные.
+/// Документ сотрудника: скан согласия на обработку ПДн, паспорта, регистрации или фотография (D226; таблица прежняя — сканы согласия).
+/// Только вставка: новый файл не заменяет старый, история остаётся (действует последний). Содержимое в базе зашифровано, как и сами ПДн.
 /// </summary>
 public sealed class ConsentScan
 {
@@ -255,19 +302,27 @@ public sealed class ConsentScan
     public byte[] Content { get; private set; } = [];
     public DateTime UploadedAtUtc { get; private set; }
     public long UploadedByUserId { get; private set; }
+    public EmployeeDocumentKind Kind { get; private set; } = EmployeeDocumentKind.Consent;
 
     public static ConsentScan Create(long organizationId, long employeeId, string fileName, string contentType, byte[] content,
-        DateTime nowUtc, long userId)
+        DateTime nowUtc, long userId, EmployeeDocumentKind kind = EmployeeDocumentKind.Consent)
     {
-        if (content.Length == 0 || content.Length > MaxBytes)
+        if (!Enum.IsDefined(kind))
         {
-            throw new BusinessRuleException("hr.consent.scan_size", "Скан согласия: файл до 3 МБ.");
+            throw new BusinessRuleException("hr.document.kind", "Неизвестный вид документа.");
         }
 
-        // Тип — по сигнатуре файла, а не по заголовку браузера: иначе под видом PDF можно загрузить HTML со скриптом.
-        if (!AllowedTypes.Contains(contentType) || !SignatureMatches(contentType, content))
+        if (content.Length == 0 || content.Length > MaxBytes)
         {
-            throw new BusinessRuleException("hr.consent.scan_type", "Скан согласия: PDF, JPEG или PNG.");
+            throw new BusinessRuleException("hr.consent.scan_size", $"{EmployeeDocumentKinds.Name(kind)}: файл до 3 МБ.");
+        }
+
+        // Тип — по сигнатуре файла, а не по заголовку браузера: иначе под видом PDF можно загрузить HTML со скриптом. Фото — только картинка.
+        if (!AllowedTypes.Contains(contentType) || !SignatureMatches(contentType, content)
+            || (kind == EmployeeDocumentKind.Photo && contentType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new BusinessRuleException("hr.consent.scan_type",
+                kind == EmployeeDocumentKind.Photo ? "Фотография: JPEG или PNG." : $"{EmployeeDocumentKinds.Name(kind)}: PDF, JPEG или PNG.");
         }
 
         var name = Path.GetFileName(fileName ?? string.Empty).Trim();
@@ -281,6 +336,7 @@ public sealed class ConsentScan
             Content = content,
             UploadedAtUtc = nowUtc,
             UploadedByUserId = userId,
+            Kind = kind,
         };
     }
 
@@ -291,4 +347,25 @@ public sealed class ConsentScan
         "image/png" => c.Length >= 8 && c[0] == 0x89 && c[1] == 0x50 && c[2] == 0x4E && c[3] == 0x47,
         _ => false,
     };
+}
+
+/// <summary>
+/// Заполненность карточки сотрудника (D226): что из обязательного для кадров есть. Только факт наличия — без самих значений,
+/// поэтому показатель виден и тем, кто не читает ПДн, но ведёт сотрудников.
+/// </summary>
+public sealed record EmployeeCompleteness(IReadOnlyList<(string Item, bool Done)> Items)
+{
+    public int Percent => Items.Count == 0 ? 0 : Items.Count(i => i.Done) * 100 / Items.Count;
+
+    public IReadOnlyList<string> Missing => Items.Where(i => !i.Done).Select(i => i.Item).ToList();
+
+    public static EmployeeCompleteness Of(bool birthDate, bool passport, bool snils, bool inn, bool registrationAddress, bool phone, bool consent,
+        bool consentScan, bool passportScan, bool registrationScan, bool photo, bool schedule, bool hireOrder, bool contractScan, bool agreements) =>
+        new([
+            ("Дата рождения", birthDate), ("Паспорт: номер, кем и когда выдан", passport), ("СНИЛС", snils), ("ИНН", inn),
+            ("Адрес регистрации", registrationAddress), ("Телефон", phone), ("Действующее согласие на обработку ПДн", consent),
+            ("Скан согласия на обработку ПДн", consentScan), ("Скан паспорта", passportScan), ("Скан регистрации", registrationScan),
+            ("Фотография", photo), ("Скан трудового договора", contractScan), ("График работы", schedule), ("Приказ о приёме", hireOrder),
+            ("Подписаны согласие, правила работы и обязательство о конфиденциальности", agreements),
+        ]);
 }

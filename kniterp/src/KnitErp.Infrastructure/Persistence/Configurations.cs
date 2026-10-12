@@ -207,6 +207,8 @@ internal sealed class RoleConfiguration : IEntityTypeConfiguration<Role>
         b.ToTable(t => t.HasCheckConstraint("ck_roles_archive_custom", "[IsArchived] = 0 OR [IsSystem] = 0"));
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.Code }).IsUnique().HasDatabaseName("ux_roles_org_code");
+        // D1103 (сессия «Продажи»): ключ (организация, роль) — для составного внешнего ключа настроек продаж роли.
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_roles_org_id");
         b.HasMany(x => x.Permissions).WithOne().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.Permissions).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_permissions");
     }
@@ -1011,6 +1013,9 @@ internal sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOr
         b.ToTable("sales_orders", t =>
         {
             t.HasCheckConstraint("ck_sales_orders_status", "[Status] IN (1, 2, 3, 9)");
+            t.HasCheckConstraint("ck_sales_orders_price_override",
+                "([PriceOverrideReason] IS NULL AND [PriceOverrideByUserId] IS NULL AND [PriceOverrideAtUtc] IS NULL)"
+                + " OR ([PriceOverrideReason] IS NOT NULL AND [PriceOverrideByUserId] IS NOT NULL AND [PriceOverrideAtUtc] IS NOT NULL)");
             t.HasCheckConstraint("ck_sales_orders_confirmed",
                 "([Status] = 1 AND [ConfirmedByUserId] IS NULL) OR ([Status] IN (2, 3) AND [ConfirmedByUserId] IS NOT NULL AND [ConfirmedAtUtc] IS NOT NULL)"
                 + " OR [Status] = 9");
@@ -1038,6 +1043,8 @@ internal sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOr
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_sales_orders_stage");
         b.HasIndex(x => new { x.OrganizationId, x.StageId }).HasDatabaseName("ix_sales_orders_org_stage");
+        // D117: заказы сделки CRM — для ленты сделки и автоматического «выиграна».
+        b.HasIndex(x => new { x.OrganizationId, x.CrmDealId }).HasFilter("[CrmDealId] IS NOT NULL").HasDatabaseName("ix_sales_orders_org_crm_deal");
         b.HasOne<LegalEntity>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.LegalEntityId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_sales_orders_legal_entity");
@@ -1048,6 +1055,15 @@ internal sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOr
         b.HasIndex(x => new { x.OrganizationId, x.LegalEntityId }).HasDatabaseName("ix_sales_orders_org_legal_entity");
         b.Property(x => x.OrderTime).HasColumnType("time(0)");
         b.Property(x => x.DeliveryAddress).HasMaxLength(SalesOrder.AddressMaxLength);
+        // D1101, D1104: соглашение заказа и разрешение цены ниже допустимой.
+        b.HasOne<SalesAgreement>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.AgreementId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_sales_orders_agreement");
+        b.HasIndex(x => new { x.OrganizationId, x.AgreementId }).HasFilter("[AgreementId] IS NOT NULL").HasDatabaseName("ix_sales_orders_org_agreement");
+        b.Property(x => x.PriceOverrideReason).HasMaxLength(SalesOrder.OverrideReasonMaxLength);
+        b.Property(x => x.PriceOverrideAtUtc).HasColumnType("datetime2(3)");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.PriceOverrideByUserId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_sales_orders_price_override_user");
         b.HasOne<Lookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProjectId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_sales_orders_project");
@@ -1517,9 +1533,9 @@ internal sealed class DiscussionCommentConfiguration : IEntityTypeConfiguration<
     {
         b.ToTable("discussion_comments", t =>
         {
-            // Диапазоны (D202): 1–10 — общие объекты, 11–19 — производство, 20–29 — модуль «Сотрудники», 30–39 — CRM (D601).
-            // Новое значение внутри своего диапазона не требует миграции — модули не переписывают ограничение друг друга.
-            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 39");
+            // Диапазоны (D202): 1–10 — общие объекты, 11–19 — производство, 20–29 — модуль «Сотрудники». Новое значение внутри своего
+            // диапазона не требует миграции — модули не переписывают ограничение друг друга.
+            t.HasCheckConstraint("ck_discussion_comments_target", "[Target] BETWEEN 1 AND 99");
             t.HasCheckConstraint("ck_discussion_comments_deleted",
                 "([DeletedAtUtc] IS NULL AND [DeletedByUserId] IS NULL AND LEN([Text]) > 0) OR ([DeletedAtUtc] IS NOT NULL AND [DeletedByUserId] IS NOT NULL AND [Text] = N'')");
         });
@@ -1572,7 +1588,7 @@ internal sealed class TagLinkConfiguration : IEntityTypeConfiguration<KnitErp.Do
 {
     public void Configure(EntityTypeBuilder<KnitErp.Domain.Tagging.TagLink> b)
     {
-        b.ToTable("tag_links", t => t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 39"));
+        b.ToTable("tag_links", t => t.HasCheckConstraint("ck_tag_links_entity", "[Entity] BETWEEN 1 AND 99"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Entity).HasConversion<byte>();
@@ -1920,5 +1936,39 @@ internal sealed class ApiIdempotencyRecordConfiguration : IEntityTypeConfigurati
         b.HasOne<KnitErp.Domain.Integrations.ApiToken>().WithMany().HasForeignKey(x => x.TokenId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.TokenId, x.Key }).IsUnique().HasDatabaseName("ux_api_idempotency_token_key");
         b.HasIndex(x => x.CreatedAtUtc).HasDatabaseName("ix_api_idempotency_created");
+    }
+}
+
+/// <summary>D119 (А1): строки загруженных выписок — только вставка (триггер в миграции), отпечаток уникален в организации.</summary>
+internal sealed class BankStatementLineConfiguration : IEntityTypeConfiguration<KnitErp.Domain.Finance.BankStatementLine>
+{
+    public void Configure(EntityTypeBuilder<KnitErp.Domain.Finance.BankStatementLine> b)
+    {
+        b.ToTable("bank_statement_lines", t =>
+        {
+            t.HasCheckConstraint("ck_bank_statement_lines_amount", "[Amount] > 0");
+            t.HasCheckConstraint("ck_bank_statement_lines_payment",
+                "([Direction] = 1 AND [CustomerPaymentId] IS NOT NULL AND [SupplierPaymentId] IS NULL) OR ([Direction] = 2 AND [SupplierPaymentId] IS NOT NULL AND [CustomerPaymentId] IS NULL)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Fingerprint).HasMaxLength(32).IsFixedLength().IsRequired();
+        b.Property(x => x.Direction).HasConversion<byte>();
+        b.Property(x => x.DocumentNumber).HasMaxLength(30).IsRequired();
+        b.Property(x => x.Amount).HasColumnType("decimal(19,4)");
+        b.Property(x => x.Purpose).HasMaxLength(KnitErp.Domain.Finance.BankStatementLine.PurposeMaxLength).IsRequired();
+        b.HasIndex(x => new { x.OrganizationId, x.Fingerprint }).IsUnique().HasDatabaseName("ux_bank_statement_lines_fingerprint");
+        b.HasIndex(x => new { x.OrganizationId, x.DocumentDate }).HasDatabaseName("ix_bank_statement_lines_date");
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<LegalEntityAccount>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.MoneyAccountId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_bank_statement_lines_account");
+        b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CounterpartyId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_bank_statement_lines_counterparty");
+        b.HasOne<CustomerPayment>().WithMany().HasForeignKey(x => x.CustomerPaymentId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_bank_statement_lines_customer_payment");
+        b.HasOne<SupplierPayment>().WithMany().HasForeignKey(x => x.SupplierPaymentId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_bank_statement_lines_supplier_payment");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ImportedByUserId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_bank_statement_lines_user");
     }
 }

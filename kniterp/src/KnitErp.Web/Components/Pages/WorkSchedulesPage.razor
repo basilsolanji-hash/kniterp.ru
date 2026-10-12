@@ -72,6 +72,42 @@ else
         </table>
     </div>
 
+    @if (_data.Departments is { Count: > 0 } deps && _data.Schedules.Count > 0)
+    {
+        <h2>@L("График подразделения по умолчанию")</h2>
+        <p class="muted">@L("Приказ о приёме или переводе в подразделение назначит этот график сам — с даты приказа.")</p>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Подразделение")</th><th>@L("График по умолчанию")</th></tr></thead>
+                <tbody>
+                    @foreach (var d in deps)
+                    {
+                        <tr>
+                            <td>@d.DepartmentName</td>
+                            <td>
+                                @if (_data.CanEdit)
+                                {
+                                    <select value="@(d.ScheduleId?.ToString() ?? "")" @onchange="e => SetDefaultAsync(d, e.Value as string)" disabled="@_busy"
+                                            aria-label="@L("График по умолчанию")">
+                                        <option value="">@L("— не задан —")</option>
+                                        @foreach (var s in _data.Schedules)
+                                        {
+                                            <option value="@s.Id">@s.Name</option>
+                                        }
+                                    </select>
+                                }
+                                else
+                                {
+                                    @(_data.Schedules.FirstOrDefault(s => s.Id == d.ScheduleId)?.Name ?? L("— не задан —"))
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
     <h2>@L("Графики сотрудников")</h2>
     <div class="scroll">
         <table>
@@ -150,6 +186,14 @@ else
         await Timesheets.SaveScheduleAsync(null, new WorkScheduleCommand(_name, _kind, _shiftHours, _nightHours, _workDays, _restDays, _cycleStart, _summarized), null);
         _message = L("График добавлен.");
         _name = string.Empty;
+    });
+
+    private Task SetDefaultAsync(DepartmentScheduleDto d, string? value) => RunAsync(async () =>
+    {
+        long? id = long.TryParse(value, out var v) ? v : null;
+        await Timesheets.SetDepartmentScheduleAsync(d.DepartmentId, id);
+        await ReloadAsync();
+        _message = id is null ? L("График по умолчанию снят: {0}.", d.DepartmentName) : L("График по умолчанию задан: {0}.", d.DepartmentName);
     });
 
     private Task AssignAsync(EmployeeScheduleDto e) => RunAsync(async () =>

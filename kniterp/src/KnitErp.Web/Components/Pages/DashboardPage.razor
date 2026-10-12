@@ -119,6 +119,12 @@ else
                 case DashboardBlocks.Production:
                     @ProductionBlock(_data.Production)
                     break;
+                case DashboardBlocks.Modules:
+                    @foreach (var module in KnitErp.Web.Modules.ModuleUi.DashboardBlocks)
+                    {
+                        <DynamicComponent @key="module.Key" Type="module.Component" />
+                    }
+                    break;
                 case DashboardBlocks.Attention:
                     @AttentionBlock(f, layout.Shows(DashboardBlocks.Debtors) && f is { TopDebtors.Count: > 0 })
                     break;
@@ -225,7 +231,7 @@ else
         }
 
         var layout = _data?.Layout ?? DashboardBlocks.Default;
-        _setup = [.. layout.Order.Select(b => new SetupRow(b, layout.Shows(b))), new SetupRow(DashboardBlocks.Readiness, layout.Shows(DashboardBlocks.Readiness))];
+        _setup = [.. layout.Order.Where(b => b != DashboardBlocks.Modules || KnitErp.Web.Modules.ModuleUi.DashboardBlocks.Count > 0).Select(b => new SetupRow(b, layout.Shows(b))), new SetupRow(DashboardBlocks.Readiness, layout.Shows(DashboardBlocks.Readiness))];
         // Действия: выбранные — в их порядке, затем остальные доступные (снятые).
         var chosen = layout.ActionKeys;
         _actionSetup = [.. chosen.Select(k => new SetupRow(k, true)),
@@ -328,6 +334,7 @@ else
         DashboardBlocks.Month => L("Склад за месяц"),
         DashboardBlocks.Reference => L("Справочно"),
         DashboardBlocks.Production => L("Производство"),
+        DashboardBlocks.Modules => L("Блоки модулей (CRM, разработка)"),
         DashboardBlocks.Readiness => L("Готовность к запуску"),
         _ => block,
     };

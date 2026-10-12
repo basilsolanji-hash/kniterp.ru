@@ -85,7 +85,8 @@ public sealed record SalesOrderDto(
     string? ConfirmedBy, DateTime? ConfirmedAtUtc, IReadOnlyList<SalesOrderLineDto> Lines, IReadOnlyList<SalesLinkedDocumentDto> Documents,
     IReadOnlyList<CustomerPaymentDto> Payments, decimal? Total, decimal? VatTotal, decimal? ShippedValue, decimal? ReturnedValue, decimal? Paid,
     bool CanEdit, bool CanSeePrices, bool CanCreateDocuments, byte[] RowVersion, SalesStageRefDto? Stage = null, bool Reserve = false,
-    decimal? DiscountTotal = null, SalesOrderDetailsDto? Details = null)
+    decimal? DiscountTotal = null, SalesOrderDetailsDto? Details = null, long? AgreementId = null, string? Agreement = null,
+    IReadOnlyList<PriceIssueDto>? PriceIssues = null, string? PriceOverrideReason = null, bool CanOverridePrice = false)
 {
     public string StatusName => SalesOrder.StatusName(Status);
     public decimal? Debt => ShippedValue is { } r && ReturnedValue is { } ret && Paid is { } p ? r - ret - p : null;
@@ -136,8 +137,9 @@ public sealed record CustomerBalanceDto(long CustomerId, string Customer, decima
 /// а сумма отгрузки считается по ценам заказа. Права: «Продажи: просмотр», «Продажи: заказы и оплаты»;
 /// цены и суммы видны только с правом «Цены и суммы».
 /// </summary>
-public sealed class SalesService(
-    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, StockDocumentService documents)
+public sealed partial class SalesService(
+    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, StockDocumentService documents,
+    IEnumerable<ISalesOrderEvents>? orderEvents = null)
 {
     public const int MaxRows = 2000;
 
@@ -281,7 +283,103 @@ public sealed class SalesService(
             prices ? payments.Where(p => p.Status == CustomerPaymentStatus.Posted).Sum(p => p.ToOrder ?? 0) : null,
             canEdit, prices, canDocs, order.RowVersion,
             order.StageId is { } sid && (await StagesAsync(ctx, ct)).TryGetValue(sid, out var stage) ? stage : null,
-            order.Reserve, prices ? order.DiscountTotal : null, await DetailsAsync(ctx, order, prices, ct));
+            order.Reserve, prices ? order.DiscountTotal : null, await DetailsAsync(ctx, order, prices, ct),
+            order.AgreementId, prices ? await AgreementLabelAsync(ctx, order.AgreementId, ct) : null,
+            prices && order.Status == SalesOrderStatus.Draft ? await SalesPricing.IssuesAsync(db, ctx, order, clock.UtcNow, ct) : [],
+            prices ? order.PriceOverrideReason : null, ctx.Permissions.Has(Permissions.SalesPriceOverride));
+    }
+
+    private async Task<string?> AgreementLabelAsync(AccessContext ctx, long? agreementId, CancellationToken ct) =>
+        agreementId is { } aid
+            ? await db.SalesAgreements.AsNoTracking().Where(a => a.Id == aid && a.OrganizationId == ctx.OrganizationId)
+                .Select(a => a.Number + " «" + a.Name + "»").SingleOrDefaultAsync(ct)
+            : null;
+
+    /// <summary>D1102: цены позиций для этого заказа — по его покупателю, дате, соглашению и базе НДС (подсказка в форме строки).</summary>
+    public async Task<PriceQuoteSetDto> QuoteForOrderAsync(long id, IReadOnlyCollection<long>? itemIds = null, CancellationToken ct = default)
+    {
+        var ctx = await DemandEditAsync(ct);
+        var order = await db.SalesOrders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == id && o.OrganizationId == ctx.OrganizationId, ct)
+                    ?? throw new NotFoundException("Заказ покупателя");
+        return await SalesPricing.QuoteAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, order.PricesIncludeVat, itemIds, order.AgreementId, ct);
+    }
+
+    /// <summary>
+    /// D1102: строка с ценой, скидкой и НДС по правилам подстановки (соглашение → вид цены клиента → основной). Цены нет ни в
+    /// одном виде — отказ: цену нужно ввести вручную.
+    /// </summary>
+    public async Task AddOrderLineAsync(long id, long itemId, decimal quantity, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
+        var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
+        StockEntry.EnsurePrecision(item, quantity);
+        var quote = (await SalesPricing.QuoteAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, order.PricesIncludeVat, [itemId], order.AgreementId, ct))
+            .Items[itemId];
+        if (quote.Price is not { } price)
+        {
+            throw new BusinessRuleException("sales.price.missing", $"У позиции {item.Code} нет цены ни в одном виде цены — введите цену вручную.");
+        }
+
+        var existing = order.Lines.FirstOrDefault(l => l.ItemId == itemId);
+        order.SetLine(itemId, (existing?.Quantity ?? 0) + quantity, price, quote.VatPercent, quote.DiscountPercent);
+        var line = order.Lines.Single(l => l.ItemId == itemId);
+        Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null,
+            $"{item.Code}: {Quantities.Format(line.Quantity)} {item.UnitSymbol} × {price:0.####} ({PriceQuoteDto.SourceName(quote.Source)}) = {line.Amount:0.00}",
+            $"{order.Number}: строка");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>D1102: пересчитать цены и скидки всех строк черновика по действующим правилам; возвращает число изменённых строк.</summary>
+    public async Task<int> RepriceOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
+        var quotes = await SalesPricing.QuoteAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, order.PricesIncludeVat,
+            order.Lines.Select(l => l.ItemId).ToList(), order.AgreementId, ct);
+        var changed = 0;
+        foreach (var line in order.Lines.ToList())
+        {
+            if (quotes.Items.TryGetValue(line.ItemId, out var q) && q.Price is { } price && (price != line.Price || q.DiscountPercent != line.DiscountPercent))
+            {
+                order.SetLine(line.ItemId, line.Quantity, price, line.VatPercent, q.DiscountPercent);
+                changed++;
+            }
+        }
+
+        if (changed > 0)
+        {
+            Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null, $"цены пересчитаны: {changed} строк, итого {order.Total:0.00}", order.Number);
+            await db.SaveOrConflictAsync(ct);
+        }
+
+        return changed;
+    }
+
+    /// <summary>D1101: выбрать соглашение заказа вручную (из действующих для покупателя на дату) или снять — null.</summary>
+    public async Task SetOrderAgreementAsync(long id, long? agreementId, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
+        if (agreementId is { } aid)
+        {
+            var a = await db.SalesAgreements.AsNoTracking().SingleOrDefaultAsync(x => x.Id == aid && x.OrganizationId == ctx.OrganizationId, ct)
+                    ?? throw new NotFoundException("Соглашение");
+            var tags = await db.TagLinks.AsNoTracking().Where(l => l.OrganizationId == ctx.OrganizationId
+                    && l.Entity == KnitErp.Domain.Tagging.TaggedEntity.Counterparty && l.EntityId == order.CustomerId).Select(l => l.TagId).ToListAsync(ct);
+            var applies = a.Scope switch
+            {
+                SalesAgreementScope.Customer => a.CounterpartyId == order.CustomerId,
+                SalesAgreementScope.Group => tags.Contains(a.TagId!.Value),
+                _ => true,
+            };
+            if (!applies || !a.IsValidOn(order.OrderDate))
+            {
+                throw new BusinessRuleException("sales.agreement.not_applicable", $"Соглашение {a.Number} не действует для этого покупателя на дату заказа.");
+            }
+        }
+
+        var before = order.AgreementId;
+        order.SetAgreement(agreementId);
+        Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, before?.ToString() ?? "—", agreementId?.ToString() ?? "—", $"{order.Number}: соглашение");
+        await db.SaveOrConflictAsync(ct);
     }
 
     private async Task<SalesOrderDetailsDto> DetailsAsync(AccessContext ctx, SalesOrder order, bool prices, CancellationToken ct)
@@ -497,6 +595,8 @@ public sealed class SalesService(
         await using var tx = await db.BeginTransactionAsync(ct);
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, SalesOrder.NumberPrefix, ct);
         var order = SalesOrder.Create(ctx.OrganizationId, number, header, ctx.UserId, clock.UtcNow);
+        // D1101: соглашение покупателя на дату заказа — по нему подставляются цена и скидка строк.
+        order.SetAgreement((await SalesPricing.AgreementForAsync(db, ctx.OrganizationId, header.CustomerId, header.OrderDate, ct))?.Id);
         db.SalesOrders.Add(order);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.SalesOrderCreated, nameof(SalesOrder), order.Id, null, $"{order.Number} от {order.OrderDate:dd.MM.yyyy}", null);
@@ -509,7 +609,14 @@ public sealed class SalesService(
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         header = await ValidateHeaderAsync(ctx, header, order.LegalEntityId, ct);
+        var repick = header.CustomerId != order.CustomerId || header.OrderDate != order.OrderDate;
         order.UpdateHeader(header);
+        if (repick)
+        {
+            // D1101: другой покупатель или дата — соглашение подбирается заново (цены строк — «Пересчитать цены»).
+            order.SetAgreement((await SalesPricing.AgreementForAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, ct))?.Id);
+        }
+
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null, $"{order.OrderDate:dd.MM.yyyy}, договор {order.CustomerReference ?? "—"}",
             $"{order.Number}: шапка");
         await db.SaveOrConflictAsync(ct);
@@ -542,10 +649,32 @@ public sealed class SalesService(
         await db.SaveOrConflictAsync(ct);
     }
 
-    public async Task ConfirmOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default)
+    public Task ConfirmOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default) => ConfirmOrderAsync(id, rowVersion, null, ct);
+
+    /// <summary>
+    /// Подтверждение. D1104: цена ниже допустимой или скидка сверх допустимой для роли подтверждающего — только с правом
+    /// «Продажи: цена ниже минимальной» и причиной (priceOverrideReason); разрешение пишется в заказ и в журнал аудита.
+    /// </summary>
+    public async Task ConfirmOrderAsync(long id, byte[] rowVersion, string? priceOverrideReason, CancellationToken ct = default)
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         await ValidateHeaderAsync(ctx, Header(order) with { LegalEntityId = order.LegalEntityId }, null, ct);
+        var issues = await SalesPricing.IssuesAsync(db, ctx, order, clock.UtcNow, ct);
+        if (issues.Count > 0)
+        {
+            var list = string.Join("; ", issues.Take(5).Select(SalesPricing.Describe)) + (issues.Count > 5 ? $" и ещё {issues.Count - 5}" : "");
+            if (string.IsNullOrWhiteSpace(priceOverrideReason))
+            {
+                throw ctx.Permissions.Has(Permissions.SalesPriceOverride)
+                    ? new BusinessRuleException("sales.price.override_reason", $"Цена ниже допустимой: {list}. Укажите причину, чтобы подтвердить.")
+                    : new BusinessRuleException("sales.price.below_limit", $"Цена ниже допустимой: {list}. Исправьте цены или попросите подтвердить руководителя.");
+            }
+
+            await guard.DemandAsync(Permissions.SalesPriceOverride, ct);
+            order.ApprovePriceOverride(ctx.UserId, priceOverrideReason, clock.UtcNow);
+            Audit(ctx, AuditActions.SalesPriceOverride, nameof(SalesOrder), id, list, order.PriceOverrideReason, order.Number);
+        }
+
         order.Confirm(ctx.UserId, clock.UtcNow);
         Audit(ctx, AuditActions.SalesOrderConfirmed, nameof(SalesOrder), id, "Черновик", "Подтверждён", $"{order.Number}: {order.Total:0.00}");
         await using var tx = await db.BeginTransactionAsync(ct);
@@ -554,6 +683,14 @@ public sealed class SalesService(
         await StageAutomation.ApplyAsync(db, ctx, [id], clock.UtcNow, currentUser.CorrelationId, ct);
         // D607 (сессия CRM): заказ из сделки подтверждён — сделка «Выиграна», в той же транзакции.
         await Crm.CrmDealService.OnOrderConfirmedAsync(db, ctx, id, clock.UtcNow, currentUser.CorrelationId, ct);
+        await db.SaveChangesAsync(ct);
+
+        // D117: модули (CRM — «сделка выиграна») — в той же транзакции.
+        foreach (var handler in orderEvents ?? [])
+        {
+            await handler.OnConfirmedAsync(db, ctx, id, ct);
+        }
+
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
     }

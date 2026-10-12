@@ -42,6 +42,7 @@ public static class Permissions
     public const string ProductionOrderEdit = "production.order.edit";
     public const string ProductionStageMark = "production.stage.mark";
     public const string ProductionMaterialMove = "production.material.move";
+    public const string ProductionDefectCulprit = "production.defect.culprit";
 
     /// <summary>D302 (сессия № 4): состав комплектов.</summary>
     public const string BundleEdit = "catalog.bundle.edit";
@@ -49,6 +50,14 @@ public static class Permissions
     /// <summary>D306 (сессия № 4): массовая переоценка. Через API не выдаётся.</summary>
     public const string PriceEdit = "catalog.price.edit";
 
+    // Модуль «Разработка» (D700, шестая сессия): модели, рисунки, образцы.
+    public const string DevView = "dev.view";
+    public const string DevEdit = "dev.edit";
+    public const string DevPattern = "dev.pattern";
+    public const string DevSample = "dev.sample";
+    public const string DevApprove = "dev.approve";
+    public const string DevCostView = "dev.cost.view";
+    public const string DevSettings = "dev.settings";
     /// <summary>D600 (CRM): свои лиды, сделки и контакты — где пользователь ответственный или наблюдатель.</summary>
     public const string CrmView = "crm.view";
 
@@ -63,6 +72,29 @@ public static class Permissions
 
     /// <summary>D600 (CRM): выгрузка в Excel (персональные данные контактов).</summary>
     public const string CrmExport = "crm.export";
+    /// <summary>D310 (сессия № 4): подключение и загрузка из МойСклад. Через API не выдаётся.</summary>
+    public const string MoySkladManage = "integration.moysklad.manage";
+
+    /// <summary>D1104 (продажи): подтвердить заказ с ценой ниже минимальной или скидкой выше допустимой — с причиной.</summary>
+    public const string SalesPriceOverride = "sales.price.override";
+
+    /// <summary>D1105 (продажи): подтвердить или отгрузить сверх кредитного лимита или при просрочке — с причиной.</summary>
+    public const string SalesCreditOverride = "sales.credit.override";
+
+    /// <summary>D1101 (продажи): соглашения с покупателями, вид цены клиента, настройки продаж ролей.</summary>
+    public const string SalesAgreementEdit = "sales.agreement.edit";
+
+    /// <summary>D1106 (продажи): правила скидок и акции.</summary>
+    public const string SalesDiscountEdit = "sales.discount.edit";
+
+    /// <summary>D1107 (продажи): отчёты продаж — выручка, ABC, план-факт, дебиторка (маржа — ещё и право цен).</summary>
+    public const string SalesReportView = "sales.report.view";
+
+    /// <summary>D1107 (продажи): план продаж менеджеров на месяц.</summary>
+    public const string SalesPlanEdit = "sales.plan.edit";
+
+    /// <summary>D1108 (продажи): коды маркировки в строках отгрузки.</summary>
+    public const string SalesMarkingEdit = "sales.marking.edit";
 
     /// <summary>D640 (CRM): приём заявок через API v1 (токен сайта или маркетплейса) и событий телефонии.</summary>
     public const string CrmLeadsCreate = "crm.leads.create";
@@ -109,13 +141,29 @@ public static class Permissions
         [ProductionOrderEdit] = "Производство: заказы — создание, запуск и отмена",
         [ProductionStageMark] = "Производство: отметка этапов и контроль качества",
         [ProductionMaterialMove] = "Производство: выдача, возврат и списание материалов, выпуск",
+        [ProductionDefectCulprit] = "Производство: указание виновника брака",
         [BundleEdit] = "Номенклатура: состав комплектов",
         [PriceEdit] = "Цены: переоценка",
+        [DevView] = "Разработка: просмотр моделей, рисунков и образцов",
+        [DevEdit] = "Разработка: модели, задания, замеры и файлы",
+        [DevPattern] = "Разработка: рисунки и библиотека рисунков",
+        [DevSample] = "Разработка: результат вязки образца",
+        [DevApprove] = "Разработка: утверждение и передача в производство",
+        [DevCostView] = "Разработка: себестоимость и цена",
+        [DevSettings] = "Разработка: справочники и стадии",
         [CrmView] = "CRM: свои лиды, сделки и контакты",
         [CrmEdit] = "CRM: создание и изменение своих лидов, сделок и контактов",
         [CrmAll] = "CRM: все лиды и сделки, переназначение ответственного",
         [CrmSettings] = "CRM: воронки, этапы, справочники и план",
         [CrmExport] = "CRM: выгрузка в Excel",
+        [MoySkladManage] = "МойСклад: подключение и загрузка",
+        [SalesPriceOverride] = "Продажи: цена ниже минимальной и скидка сверх допустимой",
+        [SalesCreditOverride] = "Продажи: отгрузка сверх кредитного лимита и при просрочке",
+        [SalesAgreementEdit] = "Продажи: соглашения с покупателями и ограничения цен",
+        [SalesDiscountEdit] = "Продажи: скидки и акции",
+        [SalesReportView] = "Продажи: отчёты и дебиторская задолженность",
+        [SalesPlanEdit] = "Продажи: план продаж",
+        [SalesMarkingEdit] = "Продажи: коды маркировки в отгрузке",
         [CrmLeadsCreate] = "CRM: приём заявок и звонков через API",
         [CrmMailing] = "CRM: рассылки клиентам",
     };
@@ -128,7 +176,7 @@ public static class Permissions
 
     /// <summary>Группы прав для редактора ролей (D112), в порядке разделов меню.</summary>
     public static readonly IReadOnlyList<string> Groups =
-        ["Продажи", "Закупки", "CRM", "Склад", "Деньги и цены", "Справочники", "Производство", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
+        ["Продажи", "Закупки", "CRM", "Склад", "Деньги и цены", "Справочники", "Производство", "Разработка", "Организация и сотрудники", "Пользователи и доступ", "Журнал и контроль", "Прочее"];
 
     /// <summary>Группа права по его коду — так новые права модулей (производство, кадры) сами попадают в свой раздел.</summary>
     public static string GroupOf(string code) => code.Split('.')[0] switch
@@ -140,6 +188,7 @@ public static class Permissions
         "finance" or "money" => "Деньги и цены",
         "catalog" => "Справочники",
         "production" => "Производство",
+        "dev" => "Разработка",
         "organization" or "structure" or "hr" => "Организация и сотрудники",
         "access" => "Пользователи и доступ",
         "audit" => "Журнал и контроль",

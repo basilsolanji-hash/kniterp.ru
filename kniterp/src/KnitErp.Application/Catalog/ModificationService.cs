@@ -12,7 +12,7 @@ public sealed record CharacteristicDto(long Id, string Name, bool IsArchived, in
 
 public sealed record VariantValueDto(long CharacteristicId, string Characteristic, string Value);
 
-public sealed record ModificationDto(long Id, string Code, string Name, IReadOnlyList<VariantValueDto> Values, decimal Stock, bool IsArchived);
+public sealed record ModificationDto(long Id, string Code, string Name, IReadOnlyList<VariantValueDto> Values, decimal? Stock, bool IsArchived);
 
 public sealed record ItemRefDto(long Id, string Code, string Name);
 
@@ -110,10 +110,12 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
             .OrderBy(i => i.IsArchived).ThenBy(i => i.Code).Select(i => new { i.Id, i.Code, i.Name, i.IsArchived }).ToListAsync(ct);
         var ids = modifications.Select(m => m.Id).ToList();
         var values = await ValuesAsync(ctx, ids, names, ct);
-        var stock = await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == ctx.OrganizationId && ids.Contains(m.ItemId))
+        // D118: остатки — только по складам области пользователя; без складских прав — не показываются.
+        var movements = KnitErp.Application.Warehousing.WarehouseScope.VisibleMovements(db, ctx);
+        var stock = movements is null ? null : await movements.Where(m => ids.Contains(m.ItemId))
             .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
         return new ItemVariantsDto(null, [], modifications
-            .Select(m => new ModificationDto(m.Id, m.Code, m.Name, values.GetValueOrDefault(m.Id) ?? [], stock.GetValueOrDefault(m.Id), m.IsArchived)).ToList(),
+            .Select(m => new ModificationDto(m.Id, m.Code, m.Name, values.GetValueOrDefault(m.Id) ?? [], stock is null ? null : stock.GetValueOrDefault(m.Id), m.IsArchived)).ToList(),
             item.RowVersion);
     }
 

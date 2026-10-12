@@ -1,0 +1,447 @@
+@page "/catalog/labels"
+@using System.Globalization
+@using KnitErp.Application.Catalog
+@using KnitErp.Domain.Catalog
+@using KnitErp.Web.Components.Shared
+@inject LabelService Labels
+@inject NomenclatureService Nomenclature
+
+<PageTitle>@L("Конструктор этикеток") — knitERP</PageTitle>
+
+@*
+    D316 (сессия 4): конструктор этикеток. Шаблон — размер (образцы или свой), рулон или лист A4, строки (поле, подпись, шрифт,
+    выравнивание, перенос, высота штрихкода), вид цены. Предпросмотр строится на странице без сервера — сразу при каждом изменении;
+    образец позиции можно найти поиском. Сохраняет право «Справочники: изменение» (проверка — на сервере).
+*@
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_templates is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <p><a href="catalog">@L("← Номенклатура")</a></p>
+    <h1>@L("Конструктор этикеток")</h1>
+    <p class="muted">@L("Ценники, этикетки со штрихкодом, бирки на одежду и коробки. Шаблон печатается из карточки позиции и из списка номенклатуры — на термопринтере (рулон) или на листе A4 с самоклеящимися этикетками.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="label-designer">
+        <section class="panel">
+            <h2>@L("Шаблоны")</h2>
+            @if (_templates.Count == 0)
+            {
+                <p class="muted">@L("Своих шаблонов пока нет — начните с образца.")</p>
+            }
+            <ul class="plain-list">
+                @foreach (var t in _templates)
+                {
+                    var template = t;
+                    <li>
+                        <button type="button" class="@(_editId == t.Id ? "link active" : "link")" @onclick="() => Edit(template)" disabled="@_busy">
+                            @t.Name @if (t.IsDefault) { <span class="tag">@L("основной")</span> } @if (t.IsArchived) { <span class="tag">@L("архив")</span> }
+                        </button>
+                        <span class="muted small">@Size(t.WidthMm, t.HeightMm, t.Sheet, t.Columns, t.Rows)</span>
+                    </li>
+                }
+            </ul>
+            @if (CanEdit)
+            {
+                <label>
+                    @L("Новый из образца")
+                    <select @bind="_presetKey">
+                        @foreach (var p in LabelTemplate.Presets)
+                        {
+                            <option value="@p.Key">@p.Name</option>
+                        }
+                    </select>
+                </label>
+                <div class="actions">
+                    <button type="button" class="secondary" @onclick="NewFromPreset" disabled="@_busy">@L("Начать с образца")</button>
+                </div>
+            }
+            <label class="check"><input type="checkbox" @bind="_showArchived" @bind:after="LoadAsync" /> @L("Показать архив")</label>
+        </section>
+
+        @if (_form is not null)
+        {
+            <section class="panel">
+                <h2>@(_editId is null ? L("Новый шаблон") : L("Шаблон «{0}»", _form.Name ?? ""))</h2>
+                <fieldset disabled="@(!CanEdit)">
+                    <div class="grid">
+                        <label>@L("Название") <input @bind="_form.Name" maxlength="@LabelTemplate.NameMaxLength" required /></label>
+                        <label>
+                            @L("Размер")
+                            <select value="@SizeKey" @onchange="ApplySize">
+                                <option value="">@L("свой размер")</option>
+                                @foreach (var p in LabelTemplate.Presets)
+                                {
+                                    <option value="@p.Key">@Size(p.WidthMm, p.HeightMm, p.Sheet, p.Columns, p.Rows)</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("Ширина, мм") <input type="number" min="15" max="150" step="0.5" @bind="_form.Width" @bind:event="oninput" /></label>
+                        <label>@L("Высота, мм") <input type="number" min="15" max="150" step="0.5" @bind="_form.Height" @bind:event="oninput" /></label>
+                        <label>
+                            @L("Печать")
+                            <select @bind="_form.Sheet">
+                                <option value="@LabelSheet.Roll">@L("рулон (термопринтер)")</option>
+                                <option value="@LabelSheet.A4">@L("лист A4")</option>
+                            </select>
+                        </label>
+                        @if (_form.Sheet == LabelSheet.A4)
+                        {
+                            <label>@L("Колонок") <input type="number" min="1" max="8" @bind="_form.Columns" /></label>
+                            <label>@L("Рядов") <input type="number" min="1" max="30" @bind="_form.Rows" /></label>
+                        }
+                        <label>@L("Поля, мм") <input type="number" min="0" max="10" step="0.5" @bind="_form.Padding" @bind:event="oninput" /></label>
+                        @if (_priceTypes.Count > 0)
+                        {
+                            <label>
+                                @L("Вид цены")
+                                <select @bind="_form.PriceType">
+                                    <option value="">@L("основной")</option>
+                                    @foreach (var p in _priceTypes)
+                                    {
+                                        <option value="@p.Id">@p.Name</option>
+                                    }
+                                </select>
+                            </label>
+                        }
+                    </div>
+
+                    <h3>@L("Строки этикетки")</h3>
+                    <div class="scroll">
+                        <table class="compact">
+                            <thead><tr><th>@L("Поле")</th><th>@L("Подпись или текст")</th><th>@L("Шрифт, пт")</th><th>@L("Жирный")</th><th>@L("Выравнивание")</th><th class="opt">@L("Перенос")</th><th>@L("Штрихкод, мм")</th><th></th></tr></thead>
+                            <tbody>
+                                @for (var i = 0; i < _form.Elements.Count; i++)
+                                {
+                                    var index = i;
+                                    var e = _form.Elements[i];
+                                    <tr>
+                                        <td>
+                                            <select @bind="e.Field" aria-label="@L("Поле")">
+                                                @foreach (var f in Enum.GetValues<LabelField>())
+                                                {
+                                                    <option value="@f">@FieldTitle(f)</option>
+                                                }
+                                            </select>
+                                        </td>
+                                        <td><input @bind="e.Text" @bind:event="oninput" maxlength="@LabelTemplate.TextMaxLength" size="12" aria-label="@L("Подпись или текст")"
+                                                   placeholder="@(e.Field == LabelField.CustomText ? L("текст") : L("например «Цена: »"))" /></td>
+                                        <td><input type="number" min="5" max="48" @bind="e.Font" @bind:event="oninput" style="width: 4.5em" aria-label="@L("Шрифт, пт")" /></td>
+                                        <td><input type="checkbox" @bind="e.Bold" aria-label="@L("Жирный")" /></td>
+                                        <td>
+                                            <select @bind="e.Align" aria-label="@L("Выравнивание")">
+                                                <option value="@LabelAlign.Left">@L("слева")</option>
+                                                <option value="@LabelAlign.Center">@L("по центру")</option>
+                                                <option value="@LabelAlign.Right">@L("справа")</option>
+                                            </select>
+                                        </td>
+                                        <td><input type="checkbox" @bind="e.Wrap" aria-label="@L("Перенос")" /></td>
+                                        <td>
+                                            @if (e.Field == LabelField.Barcode)
+                                            {
+                                                <input type="number" min="5" max="140" @bind="e.BarcodeHeight" @bind:event="oninput" style="width: 4.5em" aria-label="@L("Штрихкод, мм")" />
+                                            }
+                                        </td>
+                                        <td>
+                                            <div class="row-actions">
+                                                <button type="button" class="secondary" @onclick="() => Move(index, -1)" disabled="@(index == 0)" aria-label="@L("Выше")">↑</button>
+                                                <button type="button" class="secondary" @onclick="() => Move(index, 1)" disabled="@(index == _form.Elements.Count - 1)" aria-label="@L("Ниже")">↓</button>
+                                                <button type="button" class="secondary" @onclick="() => _form.Elements.RemoveAt(index)" disabled="@(_form.Elements.Count == 1)" aria-label="@L("Убрать строку")">✕</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (_form.Elements.Count < LabelTemplate.MaxElements)
+                    {
+                        <div class="inline-form">
+                            <label>
+                                @L("Добавить строку")
+                                <select @bind="_addField">
+                                    @foreach (var f in Enum.GetValues<LabelField>())
+                                    {
+                                        <option value="@f">@FieldTitle(f)</option>
+                                    }
+                                </select>
+                            </label>
+                            <button type="button" class="secondary" @onclick="AddElement">@L("Добавить")</button>
+                        </div>
+                    }
+                </fieldset>
+                @if (CanEdit)
+                {
+                    <div class="actions">
+                        <button type="button" @onclick="SaveAsync" disabled="@_busy">@L("Сохранить шаблон")</button>
+                        @if (Current is { } cur)
+                        {
+                            if (!cur.IsDefault && !cur.IsArchived)
+                            {
+                                <button type="button" class="secondary" @onclick='() => RunAsync(() => Labels.SetDefaultAsync(cur.Id), L("Шаблон стал основным."))' disabled="@_busy">@L("Сделать основным")</button>
+                            }
+                            <button type="button" class="secondary" @onclick='() => RunAsync(() => Labels.SetArchivedAsync(cur.Id, !cur.IsArchived, cur.RowVersion), cur.IsArchived ? L("Шаблон снова действует.") : L("Шаблон в архиве."))' disabled="@_busy">@(cur.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
+                        }
+                    </div>
+                }
+            </section>
+
+            <section class="panel label-preview-panel">
+                <h2>@L("Предпросмотр")</h2>
+                <form class="inline-form" @onsubmit="LoadSampleAsync">
+                    <label>@L("Позиция для примера") <input @bind="_sampleSearch" placeholder="@L("Код, наименование или артикул")" /></label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+                </form>
+                @if (_sample is not null && Preview() is { } preview)
+                {
+                    <div class="label-zoom" style="width: calc(@Mm(preview.WidthMm) * 2); height: calc(@Mm(preview.HeightMm) * 2)">
+                        <div style="transform: scale(2); transform-origin: 0 0">
+                            <LabelView Template="preview" Item="_sample" Organization="@_organization" />
+                        </div>
+                    </div>
+                    <p class="muted small">
+                        @L("Масштаб 2:1.")@(" ")@(preview.Sheet == LabelSheet.A4 ? L("На листе A4: {0} шт.", preview.Columns * preview.Rows) : L("Рулон: одна этикетка на страницу."))@(" ")
+                        @if (_sample.Id > 0)
+                        {
+                            <a href="@PrintLink" target="_blank" rel="noopener">@L("Пробная печать")</a>
+                        }
+                    </p>
+                }
+                else if (_sample is not null)
+                {
+                    <p class="muted">@L("Проверьте размеры и строки — предпросмотр появится, когда шаблон будет корректным.")</p>
+                }
+            </section>
+        }
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private sealed class ElementForm
+    {
+        public LabelField Field { get; set; } = LabelField.Name;
+        public string? Text { get; set; }
+        public int Font { get; set; } = 8;
+        public bool Bold { get; set; }
+        public LabelAlign Align { get; set; } = LabelAlign.Left;
+        public bool Wrap { get; set; }
+        public int BarcodeHeight { get; set; } = 12;
+    }
+
+    private sealed class TemplateForm
+    {
+        public string? Name { get; set; }
+        public decimal Width { get; set; } = 58;
+        public decimal Height { get; set; } = 40;
+        public LabelSheet Sheet { get; set; } = LabelSheet.Roll;
+        public byte Columns { get; set; } = 1;
+        public byte Rows { get; set; } = 1;
+        public decimal Padding { get; set; } = 2;
+        public string PriceType { get; set; } = string.Empty;
+        public List<ElementForm> Elements { get; set; } = [];
+    }
+
+    private IReadOnlyList<LabelTemplateDto>? _templates;
+    private IReadOnlyList<PriceTypeDto> _priceTypes = [];
+    private TemplateForm? _form;
+    private long? _editId;
+    private string _presetKey = LabelTemplate.Presets[0].Key;
+    private LabelField _addField = LabelField.Name;
+    private bool _showArchived;
+    private LabelItemDto? _sample;
+    private string? _sampleSearch;
+    private string _organization = "";
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private bool CanEdit => CurrentAccess.Has(Permissions.CatalogEdit);
+
+    private LabelTemplateDto? Current => _editId is { } id ? _templates?.FirstOrDefault(t => t.Id == id) : null;
+
+    private string SizeKey => _form is null ? "" : LabelTemplate.Presets.FirstOrDefault(p => p.WidthMm == _form.Width && p.HeightMm == _form.Height
+        && p.Sheet == _form.Sheet && (p.Sheet == LabelSheet.Roll || (p.Columns == _form.Columns && p.Rows == _form.Rows)))?.Key ?? "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+            _priceTypes = CurrentAccess.Has(Permissions.PriceView) ? await Nomenclature.PriceTypesAsync() : [];
+            _sample = await Labels.SampleAsync(null, null);
+            _organization = CurrentAccess.OrganizationName;
+            if (_templates!.FirstOrDefault() is { } first)
+            {
+                Edit(first);
+            }
+            else if (CanEdit)
+            {
+                NewFromPreset();
+            }
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync() => _templates = await Labels.TemplatesAsync(_showArchived);
+
+    private string PrintLink => $"catalog/labels/print?ids={_sample!.Id}" + (Current is { } c ? $"&template={c.Id}" : "");
+
+    private static string Mm(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "mm";
+
+    private string Size(decimal w, decimal h, LabelSheet sheet, byte cols, byte rows) =>
+        $"{w.ToString("0.#", CultureInfo.InvariantCulture)}×{h.ToString("0.#", CultureInfo.InvariantCulture)} " + L("мм") +
+        (sheet == LabelSheet.A4 ? $", A4 {cols}×{rows}" : ", " + L("рулон"));
+
+    private string FieldTitle(LabelField f) => f switch
+    {
+        LabelField.Name => L("Наименование"),
+        LabelField.Code => L("Код"),
+        LabelField.Article => L("Артикул"),
+        LabelField.Price => L("Цена"),
+        LabelField.Barcode => L("Штрихкод"),
+        LabelField.Unit => L("Единица"),
+        LabelField.Characteristics => L("Характеристики"),
+        LabelField.Country => L("Страна происхождения"),
+        LabelField.Description => L("Описание"),
+        LabelField.Group => L("Группа"),
+        LabelField.Organization => L("Организация"),
+        LabelField.CustomText => L("Свой текст"),
+        _ => L("Дата печати"),
+    };
+
+    private void Edit(LabelTemplateDto t)
+    {
+        _editId = t.Id;
+        _message = null;
+        _form = new TemplateForm
+        {
+            Name = t.Name, Width = t.WidthMm, Height = t.HeightMm, Sheet = t.Sheet, Columns = t.Columns, Rows = t.Rows, Padding = t.PaddingMm,
+            PriceType = t.PriceTypeId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            Elements = t.Elements.Select(ToForm).ToList(),
+        };
+    }
+
+    private void NewFromPreset()
+    {
+        var p = LabelTemplate.Presets.Single(x => x.Key == _presetKey);
+        _editId = null;
+        _message = null;
+        _form = new TemplateForm
+        {
+            Name = p.Name, Width = p.WidthMm, Height = p.HeightMm, Sheet = p.Sheet, Columns = p.Columns, Rows = p.Rows,
+            Elements = p.Elements.Select(ToForm).ToList(),
+        };
+    }
+
+    private static ElementForm ToForm(LabelElement e) =>
+        new() { Field = e.Field, Text = e.Text, Font = e.FontPt, Bold = e.Bold, Align = e.Align, Wrap = e.Wrap, BarcodeHeight = e.BarcodeHeightMm is 0 ? 12 : e.BarcodeHeightMm };
+
+    private void ApplySize(ChangeEventArgs e)
+    {
+        if (_form is null || LabelTemplate.Presets.FirstOrDefault(p => p.Key == e.Value?.ToString()) is not { } p)
+        {
+            return;
+        }
+
+        (_form.Width, _form.Height, _form.Sheet, _form.Columns, _form.Rows) = (p.WidthMm, p.HeightMm, p.Sheet, p.Columns, p.Rows);
+    }
+
+    private void Move(int index, int delta)
+    {
+        var list = _form!.Elements;
+        (list[index], list[index + delta]) = (list[index + delta], list[index]);
+    }
+
+    private void AddElement() => _form!.Elements.Add(new ElementForm
+    {
+        Field = _addField, Font = _addField == LabelField.Price ? 14 : 8, Bold = _addField is LabelField.Name or LabelField.Price,
+        Text = _addField == LabelField.CustomText ? L("Сделано с любовью") : null,
+        BarcodeHeight = (int)Math.Clamp(_form.Height / 3, 5, 40),
+    });
+
+    private IReadOnlyList<LabelElement> Elements() => _form!.Elements.Select(e => new LabelElement(e.Field, e.Text, (byte)Math.Clamp(e.Font, 5, 48), e.Bold,
+        e.Align, e.Wrap, (byte)(e.Field == LabelField.Barcode ? Math.Clamp(e.BarcodeHeight, 1, 149) : 0))).ToList();
+
+    private LabelTemplateCommand Command() => new(_form!.Name, _form.Width, _form.Height, _form.Sheet, _form.Columns, _form.Rows, _form.Padding,
+        long.TryParse(_form.PriceType, out var p) ? p : null, Elements());
+
+    /// <summary>Предпросмотр — только корректного шаблона (те же правила, что при сохранении), иначе подсказка.</summary>
+    private LabelTemplateDto? Preview()
+    {
+        try
+        {
+            var c = Command();
+            var t = LabelTemplate.Create(0, string.IsNullOrWhiteSpace(c.Name) ? "—" : c.Name, c.WidthMm, c.HeightMm, c.Sheet, c.Columns, c.Rows, c.PaddingMm, null,
+                c.Elements, DateTime.UtcNow);
+            return new LabelTemplateDto(0, t.Name, t.WidthMm, t.HeightMm, t.Sheet, t.Columns, t.Rows, t.PaddingMm, null, t.Elements, false, false, []);
+        }
+        catch (KnitErp.Domain.Common.BusinessRuleException)
+        {
+            return null;
+        }
+    }
+
+    private Task LoadSampleAsync() => RunAsync(async () => _sample = await Labels.SampleAsync(_sampleSearch, long.TryParse(_form?.PriceType, out var p) ? p : null), null);
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        if (_editId is { } id)
+        {
+            await Labels.UpdateAsync(id, Command(), Current!.RowVersion);
+        }
+        else
+        {
+            _editId = await Labels.CreateAsync(Command());
+        }
+    }, L("Шаблон сохранён."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}
