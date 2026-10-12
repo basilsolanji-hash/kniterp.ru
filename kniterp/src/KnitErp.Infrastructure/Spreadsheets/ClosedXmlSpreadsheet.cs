@@ -19,10 +19,17 @@ public sealed class ClosedXmlSpreadsheet : ISpreadsheetFormat
 
     public IReadOnlyList<IReadOnlyList<string>> ReadFirstSheet(Stream stream, int maxRows) => ReadSheet(stream, maxRows, null)!;
 
+    // D1168 (сессия «Продажи»): отчёты маркетплейсов — до 200 столбцов и 2 млн ячеек (Wildberries — около 80 столбцов).
+    public const int MaxWideColumns = 200;
+    public const long MaxWideCells = 2_000_000;
+
+    public IReadOnlyList<IReadOnlyList<string>> ReadWideSheet(Stream stream, int maxRows) => ReadSheet(stream, maxRows, null, MaxWideColumns, MaxWideCells)!;
+
     /// <summary>Лист по названию (D308: «Состав комплектов»); листа нет — null. Те же ограничения размера, что у первого листа.</summary>
     public IReadOnlyList<IReadOnlyList<string>>? ReadNamedSheet(Stream stream, string sheetName, int maxRows) => ReadSheet(stream, maxRows, sheetName);
 
-    private IReadOnlyList<IReadOnlyList<string>>? ReadSheet(Stream stream, int maxRows, string? sheetName)
+    private IReadOnlyList<IReadOnlyList<string>>? ReadSheet(Stream stream, int maxRows, string? sheetName, int maxColumns = MaxColumns,
+        long maxCells = MaxCells)
     {
         if (!stream.CanSeek)
         {
@@ -68,13 +75,13 @@ public sealed class ClosedXmlSpreadsheet : ISpreadsheetFormat
             }
 
             var lastColumn = used.LastColumn().ColumnNumber();
-            if (lastColumn > MaxColumns)
+            if (lastColumn > maxColumns)
             {
                 throw new BusinessRuleException("import.too_many_columns",
-                    $"В таблице {lastColumn} столбцов — больше {MaxColumns}. Удалите лишние столбцы или скачайте шаблон заново.");
+                    $"В таблице {lastColumn} столбцов — больше {maxColumns}. Удалите лишние столбцы или скачайте шаблон заново.");
             }
 
-            if ((long)lastRow * lastColumn > MaxCells)
+            if ((long)lastRow * lastColumn > maxCells)
             {
                 throw new BusinessRuleException("import.too_many_cells", "Таблица слишком большая. Разбейте файл на части.");
             }

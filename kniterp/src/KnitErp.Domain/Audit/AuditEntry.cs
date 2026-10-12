@@ -250,6 +250,13 @@ public static class AuditActions
     public const string SalesMailChanged = "sales.mail.changed";
     public const string SalesDocumentLinked = "sales.document.linked";
     public const string SalesDocumentUnlinked = "sales.document.unlinked";
+    // D1107, D1162, D1168–D1170 (продажи, аналитика): план продаж, каналы, отчёты маркетплейсов.
+    public const string SalesPlanChanged = "sales.plan.changed";
+    public const string SalesChannelChanged = "sales.channel.changed";
+    public const string MarketplaceColumnsChanged = "sales.marketplace_columns.changed";
+    public const string MarketplaceReportImported = "sales.marketplace_report.imported";
+    public const string MarketplaceReportResolved = "sales.marketplace_report.resolved";
+    public const string MarketplaceReportCancelled = "sales.marketplace_report.cancelled";
     public const string ReceivedVatInvoiceRegistered = "purchase.vat_invoice.registered";
     public const string ReceivedVatInvoiceCancelled = "purchase.vat_invoice.cancelled";
     public const string PeriodClosed = "period.closed";
