@@ -156,6 +156,7 @@
             Soon("sales-funnel", "Воронка продаж"),
             Soon("unit-economics", "Юнит-экономика"),
             new("sales-order-stages", "Этапы заказов", a => a.Has(Permissions.SalesView)),
+            new("sales-agreements", "Соглашения и цены", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("learn/sales", "Обучение", a => true),
         ]),
         new("purchases", "Закупки",

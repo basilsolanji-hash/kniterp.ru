@@ -11,6 +11,7 @@
 @inject NavigationManager Navigation
 
 <PageTitle>@(_order?.Number ?? L("Заказ покупателя")) — knitERP</PageTitle>
+<SalesStyles />
 
 @if (_denied is not null)
 {
@@ -136,6 +137,18 @@ else
             @if (_order.CanSeePrices)
             {
                 <dt>@L("Цены")</dt><dd>@(_order.PricesIncludeVat ? L("включают НДС") : L("без НДС, НДС сверху"))</dd>
+                <dt>@L("Соглашение")</dt>
+                <dd>
+                    @if (_order.Agreement is not null) { <a href="sales-agreements">@_order.Agreement</a> } else { <span class="muted">@L("нет — цены по виду цены клиента или основному")</span> }
+                    @if (editable && _quote is not null && _quote.AgreementId != _order.AgreementId)
+                    {
+                        <span class="sx-line-flag">@L("действует другое: {0}", _quote.Agreement ?? L("нет"))</span>
+                    }
+                </dd>
+            }
+            @if (_order.PriceOverrideReason is not null)
+            {
+                <dt>@L("Цена ниже допустимой")</dt><dd>@_order.PriceOverrideReason</dd>
             }
             @if (_order.Comment is not null)
             {
@@ -301,12 +314,17 @@ else
             </label>
             <label>@L("Скидка, %") <input @bind="_discountText" inputmode="decimal" size="5" placeholder="0" /></label>
             <button type="submit" disabled="@_busy">@L("Добавить или изменить")</button>
+            @if (_priceHint is not null)
+            {
+                <span class="sx-price-hint">@_priceHint</span>
+            }
         </form>
         @if (_order.Lines.Count > 0)
         {
             <form class="inline-form" @onsubmit="SetOrderDiscountAsync">
                 <label>@L("Скидка на весь заказ, %") <input @bind="_orderDiscountText" inputmode="decimal" size="5" placeholder="5" /></label>
                 <button type="submit" class="secondary" disabled="@_busy">@L("Применить ко всем строкам")</button>
+                <button type="button" class="secondary" @onclick="RepriceAsync" disabled="@_busy" title="@L("Цены и скидки строк — заново по соглашению, виду цены клиента и основному виду цены")">@L("Пересчитать цены")</button>
             </form>
         }
     }
@@ -344,7 +362,12 @@ else
                 {
                     <tr>
                         <td>@l.Code</td>
-                        <td>@l.Name</td>
+                        <td>@l.Name
+                            @foreach (var issue in _order.PriceIssues?.Where(i => i.ItemId == l.ItemId) ?? [])
+                            {
+                                <span class="sx-line-flag">@IssueText(issue)</span>
+                            }
+                        </td>
                         <td class="num">@Quantities.Format(l.Quantity)</td>
                         <td>@l.UnitSymbol</td>
                         @if (_order.CanSeePrices)
@@ -402,8 +425,28 @@ else
         </div>
     }
 
+    @if (editable && _order.PriceIssues is { Count: > 0 } issues)
+    {
+        <div class="sx-issues" role="alert">
+            <b>@L("Цена ниже допустимой — подтвердить может руководитель с причиной:")</b>
+            <ul>
+                @foreach (var i in issues)
+                {
+                    <li>@i.Code: @IssueText(i)</li>
+                }
+            </ul>
+            @if (_order.CanOverridePrice)
+            {
+                <form @onsubmit="ConfirmOverrideAsync">
+                    <label>@L("Причина") <input @bind="_overrideReason" maxlength="@SalesOrder.OverrideReasonMaxLength" required placeholder="@L("Распродажа остатков, согласовано с директором")" /></label>
+                    <button type="submit" disabled="@_busy">@L("Подтвердить с ценой ниже допустимой")</button>
+                </form>
+            }
+        </div>
+    }
+
     <div class="actions" style="margin-top: 12px">
-        @if (editable)
+        @if (editable && _order.PriceIssues is not { Count: > 0 })
         {
             <button type="button" @onclick="ConfirmAsync" disabled="@(_busy || _order.Lines.Count == 0)">@L("Подтвердить заказ")</button>
         }
@@ -569,6 +612,9 @@ else
     private string _vatText = string.Empty;
     private string _discountText = string.Empty;
     private string _orderDiscountText = string.Empty;
+    private PriceQuoteSetDto? _quote;
+    private string? _priceHint;
+    private string? _overrideReason;
     private DateTime _payDate = DateTime.Today;
     private string _payText = string.Empty;
     private string? _payComment;
@@ -647,6 +693,8 @@ else
         }
 
         _order = await Sales.GetOrderAsync(Id);
+        // D1102: цены для формы строки — по покупателю, дате и соглашению заказа (обновляются после смены шапки).
+        _quote = _order.CanEdit && _order.Status == SalesOrderStatus.Draft ? await Sales.QuoteForOrderAsync(Id) : null;
         _lots = _order.Documents.Count > 0 ? await BatchService.ForSalesOrderAsync(Id) : null;
         _invoiceId = _order.CanSeePrices ? await Invoices.FindForOrderAsync(Id) : null;
         _advances = _order.CanEdit && _order.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Closed ? await Sales.AvailableAdvancesAsync(Id) : 0;
@@ -751,9 +799,21 @@ else
         {
             _itemText = $"{item.Code} — {item.Name}";
             _vatText = item.VatPercent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-            // Цена основного вида из карточки (D79) — если цену ещё не ввели.
-            if (item.Price is { } price && string.IsNullOrWhiteSpace(_priceText))
+            _priceHint = null;
+            // D1102: цена по соглашению → виду цены клиента → основному виду, скидка соглашения — если цену ещё не ввели.
+            if (_quote is not null && _quote.Items.TryGetValue(item.Id, out var q) && q.Price is { } quoted)
             {
+                if (string.IsNullOrWhiteSpace(_priceText))
+                {
+                    _priceText = Amounts.Input(quoted);
+                    _discountText = q.DiscountPercent > 0 ? q.DiscountPercent.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) : string.Empty;
+                }
+
+                _priceHint = L("{0}: {1}", q.PriceType ?? "", L(PriceQuoteDto.SourceName(q.Source))) + (q.DiscountPercent > 0 ? L(", скидка {0}%", q.DiscountPercent.ToString("0.##")) : "");
+            }
+            else if (item.Price is { } price && string.IsNullOrWhiteSpace(_priceText))
+            {
+                // Цена основного вида из карточки (D79).
                 _priceText = Amounts.Input(Amounts.Reprice(price, item.PriceIncludesVat, _order!.PricesIncludeVat, item.VatPercent));
             }
         }
@@ -798,7 +858,24 @@ else
         _discountText = string.Empty;
         _qtyText = string.Empty;
         _priceText = string.Empty;
+        _priceHint = null;
     }, null);
+
+    private Task RepriceAsync() => RunAsync(async () =>
+    {
+        var changed = await Sales.RepriceOrderAsync(Id, _order!.RowVersion);
+        _message = changed == 0 ? L("Цены уже актуальны.") : L("Цены пересчитаны: {0} строк.", changed);
+    }, null);
+
+    private Task ConfirmOverrideAsync() => RunAsync(async () =>
+    {
+        await Sales.ConfirmOrderAsync(Id, _order!.RowVersion, _overrideReason);
+        _overrideReason = null;
+    }, L("Заказ подтверждён с ценой ниже допустимой; причина записана в журнал."));
+
+    private string IssueText(PriceIssueDto i) => i.Kind == PriceIssueKind.BelowMinimum
+        ? L("цена {0} ниже допустимой {1}", Amounts.Format(i.Actual), Amounts.Format(i.Limit))
+        : L("скидка {0}% больше допустимой {1}%", i.Actual.ToString("0.##"), i.Limit.ToString("0.##"));
 
     private Task RemoveLineAsync(SalesOrderLineDto l) => RunAsync(() => Sales.RemoveOrderLineAsync(Id, l.ItemId, _order!.RowVersion), null);
 
