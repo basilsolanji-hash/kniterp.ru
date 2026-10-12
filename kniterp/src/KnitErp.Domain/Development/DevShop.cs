@@ -34,7 +34,14 @@ public sealed class DevSample
     public string? Comment { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public long CreatedByUserId { get; private set; }
+
+    /// <summary>Черновик складского списания пряжи на этот образец (D721) — второй раз не списываем, пока документ не отменён.</summary>
+    public long? YarnWriteOffDocumentId { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
+
+    /// <summary>Запомнить документ списания пряжи (D721).</summary>
+    public void LinkYarnWriteOff(long documentId) => YarnWriteOffDocumentId = documentId;
 
     public static string StatusName(DevSampleStatus status) => status switch
     {
@@ -203,6 +210,10 @@ public sealed class DevSampleMeasure
 
     public long Id { get; private set; }
     public long OrganizationId { get; private set; }
+
+    /// <summary>Версия строки (D720): одновременное сохранение той же ячейки — конфликт, а не тихая перезапись.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
     public long SampleId { get; private set; }
     public long MeasureId { get; private set; }
     public decimal Value { get; private set; }

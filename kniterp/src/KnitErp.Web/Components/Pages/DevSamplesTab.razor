@@ -50,11 +50,19 @@ else
                 <span class="actions" style="margin: 0; align-items: center">
                     <span class="tag @(smp.Status == DevSampleStatus.Accepted ? "ok" : smp.Status is DevSampleStatus.Rework or DevSampleStatus.Rejected ? "bad" : "warn")">@L(smp.StatusName)</span>
                     <DevLabelLink Kind="sample" Id="smp.Id" />
+                    @if (data.CanEdit || data.CanRecord)
+                    {
+                        <button type="button" class="secondary" @onclick="() => _yarnFor = _yarnFor == sample.Id ? null : sample.Id">@(_yarnFor == smp.Id ? L("Скрыть списание") : L("Списать пряжу"))</button>
+                    }
                 </span>
             </div>
             @if (smp.Comment is not null)
             {
                 <p class="small">@smp.Comment</p>
+            }
+            @if (_yarnFor == smp.Id)
+            {
+                <DevYarnWriteOff SampleId="smp.Id" />
             }
             <div class="scroll">
                 <table>
@@ -138,6 +146,9 @@ else
 
     private DevSamplesDto? _s;
     private readonly Dictionary<(long, long), decimal?> _facts = [];
+
+    // D720: замеры, пришедшие с сервера; на сервер уходят только изменённые, чужие изменения не затираются.
+    private readonly Dictionary<(long, long), decimal?> _wasFacts = [];
     private string _size = string.Empty;
     private string _decision = ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture);
     private string? _decisionComment;
@@ -145,6 +156,8 @@ else
     private string? _message;
     private bool _isError;
     private long _loaded;
+    private long? _resetSample;
+    private long? _yarnFor;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -158,20 +171,44 @@ else
     private async Task LoadAsync()
     {
         _s = await Gate.Run(() => Shop.SamplesAsync(ModelId));
+        // Несохранённые замеры других образцов остаются на экране; сохранённый образец показывает значения сервера.
+        var dirty = _facts.Where(kv => kv.Value != _wasFacts.GetValueOrDefault(kv.Key) && (_isError || kv.Key.Item1 != _resetSample)).ToList();
         _facts.Clear();
+        _wasFacts.Clear();
         foreach (var s in _s.Samples)
         {
             foreach (var m in s.Measures.Where(m => m.Fact is not null))
             {
                 _facts[(s.Id, m.MeasureId)] = m.Fact;
+                _wasFacts[(s.Id, m.MeasureId)] = m.Fact;
             }
         }
+
+        foreach (var (k, v) in dirty)
+        {
+            _facts[k] = v;
+        }
+
+        _resetSample = null;
     }
 
     private Task CreateAsync() => RunAsync(() => Shop.CreateSampleAsync(ModelId, long.TryParse(_size, out var z) ? z : null), L("Образец создан."));
 
-    private Task SaveMeasuresAsync(DevSampleDto s) => RunAsync(() => Shop.SetSampleMeasuresAsync(s.Id,
-        s.Measures.Select(m => (m.MeasureId, _facts.GetValueOrDefault((s.Id, m.MeasureId)))).ToList()), L("Замеры сохранены."));
+    private async Task SaveMeasuresAsync(DevSampleDto s)
+    {
+        DevSaveResult? result = null;
+        var edits = s.Measures.Where(m => _facts.GetValueOrDefault((s.Id, m.MeasureId)) != _wasFacts.GetValueOrDefault((s.Id, m.MeasureId)))
+            .Select(m => new DevCellEdit(m.MeasureId, 0, 0, _wasFacts.GetValueOrDefault((s.Id, m.MeasureId)), _facts.GetValueOrDefault((s.Id, m.MeasureId))))
+            .ToList();
+        _resetSample = s.Id;
+        await RunAsync(async () => result = await Shop.SetSampleMeasuresAsync(s.Id, edits), L("Замеры сохранены."));
+        if (result is { Conflicts.Count: > 0 } r && !_isError)
+        {
+            _message = L("Сохранено значений: {0}. Не сохранено — уже изменил другой пользователь, показаны его значения: {1}.", r.Saved,
+                string.Join("; ", r.Conflicts));
+            _isError = true;
+        }
+    }
 
     private Task DecideAsync(DevSampleDto s) => RunAsync(async () =>
     {

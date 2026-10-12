@@ -4,6 +4,7 @@ using KnitErp.Domain.Access;
 using KnitErp.Domain.Audit;
 using KnitErp.Domain.Common;
 using KnitErp.Domain.Development;
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.Application.Development;
@@ -100,63 +101,113 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         });
     }
 
-    /// <summary>Штук в коробке по размеру и размер короба (упаковка на техкарте).</summary>
-    public async Task SetPackingAsync(long modelId, IReadOnlyDictionary<long, int?> perBox, string? packBox, CancellationToken ct = default)
+    /// <summary>
+    /// Штук в коробке по размеру и размер короба (упаковка на техкарте). Ячейки — <see cref="DevCellEdit"/> (строка — размер); короб —
+    /// со значением, которое видел пользователь. Изменённое другим пользователем не перезаписывается (D720).
+    /// </summary>
+    public async Task<DevSaveResult> SetPackingAsync(long modelId, IReadOnlyList<DevCellEdit> perBox, string? packBoxWas, string? packBox, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        DevSaveResult result = new(0, []);
         await RunAsync(async () =>
         {
             await tech.FindEditableModelAsync(ctx, modelId, ct);
             var m = await db.DevModels.SingleAsync(x => x.Id == modelId && x.OrganizationId == ctx.OrganizationId, ct);
-            m.SetPackBox(packBox);
-            foreach (var s in await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId).ToListAsync(ct))
+            var sizes = await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId).ToListAsync(ct);
+            if (perBox.Any(e => sizes.All(z => z.Id != e.RowId)))
             {
-                if (perBox.TryGetValue(s.Id, out var n))
+                throw new NotFoundException("Размер");
+            }
+
+            var saved = 0;
+            var conflicts = new List<string>();
+            if (!string.Equals(Norm(packBoxWas), Norm(packBox), StringComparison.Ordinal))
+            {
+                if (string.Equals(Norm(m.PackBox), Norm(packBoxWas), StringComparison.Ordinal))
                 {
-                    s.Set(s.Name, n);
+                    m.SetPackBox(packBox);
+                    saved++;
+                }
+                else
+                {
+                    conflicts.Add($"размер короба (сейчас «{m.PackBox ?? "—"}»)");
                 }
             }
 
-            Audit(ctx, nameof(DevModel), modelId, null, m.PackBox ?? "—", $"{m.Number}: упаковка");
+            foreach (var e in perBox)
+            {
+                var size = sizes.Single(z => z.Id == e.RowId);
+                if (size.PerBox != (int?)e.Was)
+                {
+                    conflicts.Add($"штук в коробке, размер {size.Name} (сейчас {size.PerBox?.ToString(CultureInfo.InvariantCulture) ?? "—"})");
+                    continue;
+                }
+
+                size.Set(size.Name, e.Value is { } v ? (int)v : null);
+                saved++;
+            }
+
+            Audit(ctx, nameof(DevModel), modelId, null, $"{saved} значений", $"{m.Number}: упаковка");
             await db.SaveOrConflictAsync(ct);
+            result = new DevSaveResult(saved, conflicts);
         });
+        return result;
     }
 
-    /// <summary>Размеры деталей по размерам сетки (длина с машины, после ВТО, ширина) — таблица целиком.</summary>
-    public async Task SetDetailSizesAsync(long modelId, IReadOnlyList<(long DetailId, long SizeId, decimal? OffMachine, decimal? AfterSteam, decimal? Width)> values,
-        CancellationToken ct = default)
+    private static string? Norm(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    /// <summary>
+    /// Размеры деталей по размерам сетки (длина с машины, после ВТО, ширина): только изменённые ячейки (D720). Ячейку, которую после
+    /// загрузки экрана изменил другой пользователь, не перезаписываем — возвращаем в <see cref="DevSaveResult.Conflicts"/>.
+    /// </summary>
+    public async Task<DevSaveResult> SetDetailSizesAsync(long modelId, IReadOnlyList<DevCellEdit> edits, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        DevSaveResult result = new(0, []);
         await RunAsync(async () =>
         {
             var model = await tech.FindEditableModelAsync(ctx, modelId, ct);
-            var detailIds = await db.DevDetails.Where(d => d.OrganizationId == ctx.OrganizationId && d.ModelId == modelId).Select(d => d.Id).ToListAsync(ct);
-            var sizeIds = await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId).Select(s => s.Id).ToListAsync(ct);
-            if (values.Any(v => !detailIds.Contains(v.DetailId) || !sizeIds.Contains(v.SizeId)))
+            var details = await db.DevDetails.Where(d => d.OrganizationId == ctx.OrganizationId && d.ModelId == modelId).Select(d => new { d.Id, d.Name }).ToListAsync(ct);
+            var sizes = await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId).Select(s => new { s.Id, s.Name }).ToListAsync(ct);
+            if (edits.Any(v => details.All(d => d.Id != v.RowId) || sizes.All(z => z.Id != v.ColumnId) || v.Field is < 0 or > 2))
             {
                 throw new NotFoundException("Деталь");
             }
 
+            var detailIds = details.Select(d => d.Id).ToList();
             var existing = await db.DevDetailSizes.Where(v => v.OrganizationId == ctx.OrganizationId && detailIds.Contains(v.DetailId)).ToListAsync(ct);
-            foreach (var v in values)
+            var saved = 0;
+            var conflicts = new List<string>();
+            foreach (var e in edits)
             {
-                var row = existing.FirstOrDefault(e => e.DetailId == v.DetailId && e.SizeId == v.SizeId);
+                var row = existing.FirstOrDefault(x => x.DetailId == e.RowId && x.SizeId == e.ColumnId);
+                var current = row is null ? null : e.Field switch { 0 => row.LengthOffMachineCm, 1 => row.LengthAfterSteamCm, _ => row.WidthCm };
+                if (current != e.Was)
+                {
+                    conflicts.Add($"{details.Single(d => d.Id == e.RowId).Name}, размер {sizes.Single(z => z.Id == e.ColumnId).Name}, "
+                                  + $"{DetailFieldName(e.Field)} (сейчас {current?.ToString("0.#", CultureInfo.InvariantCulture) ?? "—"})");
+                    continue;
+                }
+
                 if (row is null)
                 {
-                    row = DevDetailSize.Create(ctx.OrganizationId, v.DetailId, v.SizeId);
-                    row.Set(v.OffMachine, v.AfterSteam, v.Width);
+                    row = DevDetailSize.Create(ctx.OrganizationId, e.RowId, e.ColumnId);
                     db.DevDetailSizes.Add(row);
+                    existing.Add(row);
                 }
-                else
-                {
-                    row.Set(v.OffMachine, v.AfterSteam, v.Width);
-                }
+
+                row.Set(e.Field == 0 ? e.Value : row.LengthOffMachineCm, e.Field == 1 ? e.Value : row.LengthAfterSteamCm, e.Field == 2 ? e.Value : row.WidthCm);
+                saved++;
             }
 
-            Audit(ctx, nameof(DevModel), modelId, null, $"{values.Count} значений", $"{model.Number}: размеры деталей");
+            Audit(ctx, nameof(DevModel), modelId, null, $"{saved} значений", $"{model.Number}: размеры деталей");
             await db.SaveOrConflictAsync(ct);
+            result = new DevSaveResult(saved, conflicts);
         });
+        return result;
     }
+
+    private static string DetailFieldName(int field) => field switch { 0 => "длина с машины", 1 => "длина после ВТО", _ => "ширина" };
 
     public async Task<long> AddMeasureAsync(long modelId, string? name, decimal tolerance, decimal? step, CancellationToken ct = default)
     {
@@ -186,43 +237,65 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         return id;
     }
 
-    /// <summary>Значения табеля мер: точка × размер. Пустое значение убирает его.</summary>
-    public async Task SetMeasureValuesAsync(long modelId, IReadOnlyList<(long MeasureId, long SizeId, decimal? Value)> values, CancellationToken ct = default)
+    /// <summary>Значения табеля мер: точка × размер, только изменённые ячейки; пустое значение убирает его. Чужие изменения не перезаписываем (D720).</summary>
+    public async Task<DevSaveResult> SetMeasureValuesAsync(long modelId, IReadOnlyList<DevCellEdit> edits, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        DevSaveResult result = new(0, []);
         await RunAsync(async () =>
         {
             var model = await tech.FindEditableModelAsync(ctx, modelId, ct);
             var (mids, sizeIds) = await MeasureScopeAsync(ctx, modelId, ct);
-            if (values.Any(v => !mids.Contains(v.MeasureId) || !sizeIds.Contains(v.SizeId)))
+            if (edits.Any(v => !mids.Contains(v.RowId) || !sizeIds.Contains(v.ColumnId)))
             {
                 throw new NotFoundException("Точка измерения");
             }
 
+            var names = await db.DevMeasures.Where(m => mids.Contains(m.Id)).Select(m => new { m.Id, m.Name }).ToDictionaryAsync(m => m.Id, m => m.Name, ct);
+            var sizeNames = await db.DevModelSizes.Where(z => sizeIds.Contains(z.Id)).Select(z => new { z.Id, z.Name }).ToDictionaryAsync(z => z.Id, z => z.Name, ct);
             var existing = await db.DevMeasureValues.Where(v => v.OrganizationId == ctx.OrganizationId && mids.Contains(v.MeasureId)).ToListAsync(ct);
-            foreach (var v in values)
+            var saved = 0;
+            var conflicts = new List<string>();
+            foreach (var e in edits)
             {
-                var row = existing.FirstOrDefault(e => e.MeasureId == v.MeasureId && e.SizeId == v.SizeId);
-                if (v.Value is not { } value)
+                var row = existing.FirstOrDefault(x => x.MeasureId == e.RowId && x.SizeId == e.ColumnId);
+                if (row?.Value != e.Was)
                 {
-                    if (row is not null)
-                    {
-                        db.DevMeasureValues.Remove(row);
-                    }
+                    conflicts.Add($"{names[e.RowId]}, размер {sizeNames[e.ColumnId]} (сейчас {row?.Value.ToString("0.#", CultureInfo.InvariantCulture) ?? "—"})");
+                    continue;
                 }
-                else if (row is null)
-                {
-                    db.DevMeasureValues.Add(DevMeasureValue.Create(ctx.OrganizationId, v.MeasureId, v.SizeId, value));
-                }
-                else
-                {
-                    row.Set(value);
-                }
+
+                ApplyValue(row, e.Value, () => db.DevMeasureValues.Add(DevMeasureValue.Create(ctx.OrganizationId, e.RowId, e.ColumnId, e.Value!.Value)),
+                    r => db.DevMeasureValues.Remove(r), (r, v) => r.Set(v));
+                saved++;
             }
 
-            Audit(ctx, nameof(DevModel), modelId, null, $"{values.Count} значений", $"{model.Number}: табель мер");
+            Audit(ctx, nameof(DevModel), modelId, null, $"{saved} значений", $"{model.Number}: табель мер");
             await db.SaveOrConflictAsync(ct);
+            result = new DevSaveResult(saved, conflicts);
         });
+        return result;
+    }
+
+    /// <summary>Ячейка «значение или пусто»: нет строки и есть значение — добавить; пусто — убрать строку; иначе — изменить.</summary>
+    private static void ApplyValue<T>(T? row, decimal? value, Action add, Action<T> remove, Action<T, decimal> set)
+        where T : class
+    {
+        if (value is not { } v)
+        {
+            if (row is not null)
+            {
+                remove(row);
+            }
+        }
+        else if (row is null)
+        {
+            add();
+        }
+        else
+        {
+            set(row, v);
+        }
     }
 
     /// <summary>
@@ -455,8 +528,11 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         });
     }
 
-    /// <summary>Замеры образца по табелю мер; пустое значение убирает замер. Пишут конструктор и цех.</summary>
-    public async Task SetSampleMeasuresAsync(long sampleId, IReadOnlyList<(long MeasureId, decimal? Value)> values, CancellationToken ct = default)
+    /// <summary>
+    /// Замеры образца по табелю мер (строка — точка, столбец не нужен): только изменённые; пустое значение убирает замер. Пишут конструктор
+    /// и цех; замер, который успел изменить другой, не перезаписываем (D720).
+    /// </summary>
+    public async Task<DevSaveResult> SetSampleMeasuresAsync(long sampleId, IReadOnlyList<DevCellEdit> edits, CancellationToken ct = default)
     {
         var ctx = await guard.CurrentAsync(ct);
         if (!ctx.Permissions.Has(Permissions.DevEdit) && !ctx.Permissions.Has(Permissions.DevSample))
@@ -464,40 +540,40 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             await guard.DemandAsync(Permissions.DevSample, ct);
         }
 
+        DevSaveResult result = new(0, []);
         await RunAsync(async () =>
         {
             var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
             var model = await tech.FindEditableModelAsync(ctx, s.ModelId, ct);
             var (mids, _) = await MeasureScopeAsync(ctx, s.ModelId, ct);
-            if (values.Any(v => !mids.Contains(v.MeasureId)))
+            if (edits.Any(v => !mids.Contains(v.RowId)))
             {
                 throw new NotFoundException("Точка измерения");
             }
 
+            var names = await db.DevMeasures.Where(m => mids.Contains(m.Id)).Select(m => new { m.Id, m.Name }).ToDictionaryAsync(m => m.Id, m => m.Name, ct);
             var existing = await db.DevSampleMeasures.Where(x => x.OrganizationId == ctx.OrganizationId && x.SampleId == sampleId).ToListAsync(ct);
-            foreach (var v in values)
+            var saved = 0;
+            var conflicts = new List<string>();
+            foreach (var e in edits)
             {
-                var row = existing.FirstOrDefault(e => e.MeasureId == v.MeasureId);
-                if (v.Value is not { } value)
+                var row = existing.FirstOrDefault(x => x.MeasureId == e.RowId);
+                if (row?.Value != e.Was)
                 {
-                    if (row is not null)
-                    {
-                        db.DevSampleMeasures.Remove(row);
-                    }
+                    conflicts.Add($"{names[e.RowId]} (сейчас {row?.Value.ToString("0.#", CultureInfo.InvariantCulture) ?? "—"})");
+                    continue;
                 }
-                else if (row is null)
-                {
-                    db.DevSampleMeasures.Add(DevSampleMeasure.Create(ctx.OrganizationId, sampleId, v.MeasureId, value));
-                }
-                else
-                {
-                    row.Set(value);
-                }
+
+                ApplyValue(row, e.Value, () => db.DevSampleMeasures.Add(DevSampleMeasure.Create(ctx.OrganizationId, sampleId, e.RowId, e.Value!.Value)),
+                    r => db.DevSampleMeasures.Remove(r), (r, v) => r.Set(v));
+                saved++;
             }
 
-            Audit(ctx, nameof(DevModel), s.ModelId, null, $"{values.Count(v => v.Value is not null)} замеров", $"{model.Number}: замеры образца № {s.No}");
+            Audit(ctx, nameof(DevModel), s.ModelId, null, $"{saved} замеров", $"{model.Number}: замеры образца № {s.No}");
             await db.SaveOrConflictAsync(ct);
+            result = new DevSaveResult(saved, conflicts);
         });
+        return result;
     }
 
     // ---------- Операции технолога ----------
@@ -698,6 +774,12 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         try
         {
             await action();
+        }
+        catch (DbUpdateException ex) when (ex.InnerException?.Message.Contains("ux_dev_", StringComparison.Ordinal) == true)
+        {
+            // D720: ту же новую ячейку одновременно добавил другой пользователь — это конфликт правки, а не сбой.
+            db.DiscardChanges();
+            throw new ConcurrencyConflictException();
         }
         catch
         {

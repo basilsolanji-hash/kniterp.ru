@@ -14,6 +14,10 @@ public sealed class DevModelSize
 
     public long Id { get; private set; }
     public long OrganizationId { get; private set; }
+
+    /// <summary>Версия строки (D720): одновременное сохранение той же ячейки — конфликт, а не тихая перезапись.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
     public long ModelId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public int SortOrder { get; private set; }
@@ -52,6 +56,10 @@ public sealed class DevDetailSize
 
     public long Id { get; private set; }
     public long OrganizationId { get; private set; }
+
+    /// <summary>Версия строки (D720): одновременное сохранение той же ячейки — конфликт, а не тихая перезапись.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
     public long DetailId { get; private set; }
     public long SizeId { get; private set; }
     public decimal? LengthOffMachineCm { get; private set; }
@@ -126,6 +134,10 @@ public sealed class DevMeasureValue
 
     public long Id { get; private set; }
     public long OrganizationId { get; private set; }
+
+    /// <summary>Версия строки (D720): одновременное сохранение той же ячейки — конфликт, а не тихая перезапись.</summary>
+    public byte[] RowVersion { get; private set; } = [];
+
     public long MeasureId { get; private set; }
     public long SizeId { get; private set; }
     public decimal Value { get; private set; }

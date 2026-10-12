@@ -3754,6 +3754,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<long>("SizeId")
                         .HasColumnType("bigint");
 
@@ -4086,6 +4092,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<long>("SizeId")
                         .HasColumnType("bigint");
 
@@ -4201,6 +4213,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<byte>("Priority")
                         .HasColumnType("tinyint");
 
+                    b.Property<long?>("ProductionItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("ProductionTechCardId")
+                        .HasColumnType("bigint");
+
                     b.Property<long?>("ProgrammerUserId")
                         .HasColumnType("bigint");
 
@@ -4263,6 +4281,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasIndex("OrganizationId", "Number")
                         .IsUnique()
                         .HasDatabaseName("ux_dev_models_number");
+
+                    b.HasIndex("OrganizationId", "ProductionItemId");
+
+                    b.HasIndex("OrganizationId", "ProductionTechCardId");
 
                     b.HasIndex("OrganizationId", "Stage")
                         .HasDatabaseName("ix_dev_models_stage");
@@ -4405,6 +4427,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<int?>("PerBox")
                         .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
@@ -4573,6 +4601,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<byte>("Status")
                         .HasColumnType("tinyint");
 
+                    b.Property<long?>("YarnWriteOffDocumentId")
+                        .HasColumnType("bigint");
+
                     b.HasKey("Id");
 
                     b.HasAlternateKey("OrganizationId", "Id")
@@ -4581,6 +4612,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasIndex("CreatedByUserId");
 
                     b.HasIndex("OrganizationId", "SizeId");
+
+                    b.HasIndex("OrganizationId", "YarnWriteOffDocumentId");
 
                     b.HasIndex("OrganizationId", "ModelId", "No")
                         .IsUnique()
@@ -4695,6 +4728,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<long>("SampleId")
                         .HasColumnType("bigint");
@@ -11317,6 +11356,20 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_dev_models_sketch");
+
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProductionItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_models_production_item");
+
+                    b.HasOne("KnitErp.Domain.Production.TechCard", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ProductionTechCardId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_models_production_techcard");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevModelColor", b =>
@@ -11447,6 +11500,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_dev_samples_size");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.StockDocument", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "YarnWriteOffDocumentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_samples_yarn_writeoff");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevSampleColorShare", b =>

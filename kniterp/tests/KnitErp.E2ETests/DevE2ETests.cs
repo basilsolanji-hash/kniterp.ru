@@ -218,6 +218,20 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         var info = await page.Locator(".ks-tech .kt-info").BoundingBoxAsync();
         Assert.True(info!.X > feed!.X + feed.Width - 1, "общая информация должна стоять справа от заправки");
         await page.SetViewportSizeAsync(390, 844);
+
+        // D721: списание пряжи у образца — без пряжи в палитре объясняет, чего не хватает.
+        await page.GotoAsync(modelUrl);
+        await Ready(page);
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Образцы" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Списать пряжу", Exact = true }).First.ClickAsync();
+        await Assertions.Expect(page.Locator(".dev-yarn")).ToContainTextAsync("Нечего списывать");
+
+        // D750: утверждённая модель — панель передачи в производство с нормами и причиной, почему пока нельзя.
+        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждено");
+        await Assertions.Expect(page.Locator(".dev-handoff")).ToContainTextAsync("Нет ни одной нормы пряжи");
+        await AssertNoHorizontalScrollAsync(page, "передача в производство");
         await page.GotoAsync("dev/machines");
         await Ready(page);
         await AssertNoHorizontalScrollAsync(page, "станки");
