@@ -236,8 +236,27 @@ public sealed class CrmContactService(IKnitErpDbContext db, IAccessGuard guard, 
             lead.ErasePersonalData();
         }
 
+        // D677: переписка с клиентом (мессенджеры и почта) по контакту, его лидам и сделкам обезличивается; адреса в рассылках стираются.
+        var leadIds = leads.Select(l => l.Id).ToList();
+        var dealIds = await db.CrmDeals.Where(d => d.OrganizationId == ctx.OrganizationId && d.ContactId == id).Select(d => d.Id).ToListAsync(ct);
+        var talk = await db.CrmActivities.Where(a => a.OrganizationId == ctx.OrganizationId
+                && (a.Source == CrmActivitySource.Messenger || a.Source == CrmActivitySource.Mail || a.Kind == CrmActivityKind.Email || a.Kind == CrmActivityKind.Message)
+                && ((a.Target == CrmTarget.Contact && a.TargetId == id) || (a.Target == CrmTarget.Lead && leadIds.Contains(a.TargetId))
+                    || (a.Target == CrmTarget.Deal && dealIds.Contains(a.TargetId))))
+            .ToListAsync(ct);
+        foreach (var a in talk)
+        {
+            a.ErasePersonalData();
+        }
+
+        var recipients = await db.CrmMailings.Where(m => m.OrganizationId == ctx.OrganizationId).SelectMany(m => m.Recipients).Where(r => r.ContactId == id).ToListAsync(ct);
+        foreach (var r in recipients)
+        {
+            r.ErasePersonalData();
+        }
+
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmContactErased, nameof(CrmContact), id.ToString(),
-            null, $"ПДн удалены, лидов затронуто: {leads.Count}", why, currentUser.CorrelationId));
+            null, $"ПДн удалены, лидов затронуто: {leads.Count}, сообщений и писем: {talk.Count}", why, currentUser.CorrelationId));
         await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
     }

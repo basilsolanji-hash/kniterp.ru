@@ -222,6 +222,7 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
             throw new BusinessRuleException("crm.mail.not_configured", "Почта сервера не настроена — обратитесь к администратору.");
         }
 
+        await CrmEmailTemplateService.EnsureEmailQuotaAsync(db, ctx, clock.UtcNow, ct);
         var (replyTo, replyName) = await CrmEmailTemplateService.ReplyToAsync(db, ctx.UserId, ct);
         if (!await mail.SendAsync(new EmailMessage(address, subj, body, CrmEmailHtml.FromText(body), replyTo, replyName), ct))
         {

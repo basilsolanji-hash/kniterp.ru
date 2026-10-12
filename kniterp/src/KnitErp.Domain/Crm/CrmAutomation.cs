@@ -306,6 +306,9 @@ public sealed class CrmMailingRecipient
     public DateTime? AttemptedAtUtc { get; private set; }
 
     public void SetDelivered(bool delivered, DateTime nowUtc) => (Delivered, AttemptedAtUtc) = (delivered, nowUtc);
+
+    /// <summary>Удаление ПДн по запросу (D677): адрес получателя стирается, факт отправки остаётся.</summary>
+    public void ErasePersonalData() => Email = CrmContact.ErasedName;
 }
 
 /// <summary>Объект CRM для внешней ссылки импорта.</summary>

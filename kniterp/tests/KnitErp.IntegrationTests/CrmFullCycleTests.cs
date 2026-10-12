@@ -469,6 +469,12 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
             Assert.Contains(feed.Items, i => i.Text == "Согласны, выставляйте счёт.");
             var lead = (await crm.Leads.ListAsync(new CrmLeadFilter())).Rows.Single();
             Assert.Equal(("500 шарфов", "Пётр"), (lead.Title, lead.ContactName));
+
+            // D677: удаление ПДн по запросу обезличивает и переписку — текст письма клиента в ленте сделки не остаётся.
+            var contact = (await crm.Contacts.ListAsync("Ирина")).Rows.Single();
+            await crm.Contacts.ErasePersonalDataAsync(contact.Id, "заявление от 12.10.2026");
+            var erased = await crm.Activities.FeedAsync(CrmTarget.Deal, deal.Id);
+            Assert.DoesNotContain(erased.Items, i => (i.Text ?? "").Contains("выставляйте") || i.Title.Contains("Ирина"));
         }
 
         // Права подключившего отозваны — ящик не читается, ошибка видна в настройках.

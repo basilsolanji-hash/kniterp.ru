@@ -137,6 +137,21 @@ public sealed class CrmEmailTemplateService(IKnitErpDbContext db, IAccessGuard g
     internal static async Task<(string? Email, string? Name)> ReplyToAsync(IKnitErpDbContext db, long userId, CancellationToken ct) =>
         await db.Users.AsNoTracking().Where(u => u.Id == userId).Select(u => new ValueTuple<string?, string?>(u.Email, u.DisplayName)).SingleOrDefaultAsync(ct);
 
+    /// <summary>Писем из карточек на пользователя в час (D678): защита почты сервера от рассылки спама через «Письмо клиенту».</summary>
+    public const int EmailsPerUserPerHour = 100;
+
+    internal static async Task EnsureEmailQuotaAsync(IKnitErpDbContext db, AccessContext ctx, DateTime nowUtc, CancellationToken ct)
+    {
+        var since = nowUtc.AddHours(-1);
+        var sent = await db.CrmActivities.AsNoTracking().CountAsync(a => a.OrganizationId == ctx.OrganizationId && a.CreatedByUserId == ctx.UserId
+            && a.Source == CrmActivitySource.Mail && a.ExternalRef == null && a.CreatedAtUtc >= since, ct);
+        if (sent >= EmailsPerUserPerHour)
+        {
+            throw new BusinessRuleException("crm.mail.quota",
+                $"Не больше {EmailsPerUserPerHour} писем в час от одного сотрудника. Для массовых писем — «Рассылки».");
+        }
+    }
+
     private async Task EnsureUniqueAsync(AccessContext ctx, string name, long? id, CancellationToken ct)
     {
         if (await db.CrmEmailTemplates.AnyAsync(t => t.OrganizationId == ctx.OrganizationId && t.Name == name && t.Id != id, ct))
