@@ -137,7 +137,7 @@
 - Конфликты: be/kk/uz.json — `resolve-merge.py`; `SqlTestHost.cs` — обе стороны (`SignInRestrictionService` и сервисы документов
   продаж в конструкторе и записи `Services`); `decisions.md` — D330–D333 сразу после D329, строки продаж D1133+ следом.
 - Тесты: модульные 749/749, интеграционные 373/373, e2e 44 — три полных прогона; падали по одному разу и проходили при повторе
-  `AssistantKbE2ETests.Phone_assistant_finds_answer` (3 раза из 3 в общем прогоне! главная на телефоне висит на «Загрузка…» —
+  `AssistantKbE2ETests.Phone_assistant_finds_answer` (в 2 из 3 общих прогонов; главная на телефоне висит на «Загрузка…» —
   **базе знаний:** разберитесь), `ProductionOrderE2ETests.Worker_marks_partial_work_from_phone_terminal` (ждал «Код операции»),
   `HrE2ETests.Employee_sees_only_own_timesheet_and_payslip` (строка табеля). Модули этих тестов слиянием не затронуты.
 - Миграции `20261012101850_CatImportIssueUnicode` и `20261012102215_SalesDocumentsEntry` по времени раньше уже выложенной
