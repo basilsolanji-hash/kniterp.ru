@@ -3002,5 +3002,7 @@
   "Позиция {0} уже в учёте ({1}): код не меняется. Наименование и артикул менять можно.": "{0} pozitsiyasi allaqachon hisobda ({1}): kod o‘zgarmaydi. Nomi va artikulini o‘zgartirish mumkin.",
   "У модификации единица и ставка НДС — как у основной позиции: меняйте их в основной позиции.": "Modifikatsiyaning birligi va QQS stavkasi asosiy pozitsiyadagidek: ularni asosiy pozitsiyada o‘zgartiring.",
   "У позиции {0} есть действующие модификации — сначала отправьте в архив их.": "{0} pozitsiyasida amaldagi modifikatsiyalar bor — avval ularni arxivga yuboring.",
-  "Штрихкод {0} только что добавлен к другой позиции.": "{0} shtrix-kodi hozirgina boshqa pozitsiyaga qo‘shildi."
+  "Штрихкод {0} только что добавлен к другой позиции.": "{0} shtrix-kodi hozirgina boshqa pozitsiyaga qo‘shildi.",
+  "Позиция {0} есть в открытом заказе покупателя {1}: сначала закройте или отмените заказ.": "{0} pozitsiyasi xaridorning ochiq {1} buyurtmasida bor: avval buyurtmani yoping yoki bekor qiling.",
+  "Позиция {0} есть в открытом заказе поставщику {1}: сначала закройте или отмените заказ.": "{0} pozitsiyasi yetkazib beruvchiga ochiq {1} buyurtmasida bor: avval buyurtmani yoping yoki bekor qiling."
 }

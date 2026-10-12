@@ -319,11 +319,36 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
     }
 
     /// <summary>Цены позиции по видам цен: значение — задать, null — убрать. Нужны права на номенклатуру и на цены.</summary>
-    public async Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct = default)
+    public Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct = default) =>
+        SetPricesAsync(itemId, prices, null, ct);
+
+    /// <summary>
+    /// D341: seen — цены, которые пользователь видел в карточке. Если другой пользователь уже изменил цену этого вида —
+    /// конфликт, а не тихая перезапись (у цены нет своего rowversion: сравниваем значение).
+    /// </summary>
+    public async Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, IReadOnlyDictionary<long, decimal?>? seen,
+        CancellationToken ct = default)
     {
         try
         {
-            await SetPricesCoreAsync(itemId, prices, ct);
+            if (seen is null)
+            {
+                await SetPricesCoreAsync(itemId, prices, null, ct); // вызов из чужой транзакции (создание по образцу)
+            }
+            else
+            {
+                // Проверка «видел ту же цену» и запись — под блокировкой позиции: два сохранения не перемежаются.
+                await using var tx = await db.BeginTransactionAsync(ct);
+                await db.LockAsync($"kniterp.item.prices.{itemId}", ct);
+                await SetPricesCoreAsync(itemId, prices, seen, ct);
+                await tx.CommitAsync(ct);
+            }
+        }
+        catch (DbUpdateException)
+        {
+            // D341: одновременно добавили цену того же вида (уникальный индекс) — это конфликт правки, а не сбой.
+            db.DiscardChanges();
+            throw new ConcurrencyConflictException();
         }
         catch
         {
@@ -332,7 +357,8 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         }
     }
 
-    private async Task SetPricesCoreAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct)
+    private async Task SetPricesCoreAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, IReadOnlyDictionary<long, decimal?>? seen,
+        CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         await guard.DemandAsync(Permissions.PriceView, ct);
@@ -346,6 +372,21 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
 
         var types = await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(t => t.Id, ct);
         var current = await db.ItemPrices.Where(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == itemId).ToDictionaryAsync(p => p.PriceTypeId, ct);
+        // D341: у вкладки один DbContext — отслеживаемая цена могла устареть (её поменял другой пользователь). Сравниваем и пишем по базе.
+        var fresh = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == itemId)
+            .ToDictionaryAsync(p => p.PriceTypeId, p => p.Price, ct);
+        foreach (var (typeId, tracked) in current.ToList())
+        {
+            if (!fresh.TryGetValue(typeId, out var actual) || actual != tracked.Price)
+            {
+                await db.ReloadAsync(tracked, ct); // удалённая в базе строка отсоединяется
+                if (!fresh.ContainsKey(typeId))
+                {
+                    current.Remove(typeId);
+                }
+            }
+        }
+
         foreach (var (typeId, price) in prices)
         {
             var type = types.GetValueOrDefault(typeId) ?? throw new NotFoundException("Вид цены");
@@ -354,6 +395,11 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             if (before == price)
             {
                 continue;
+            }
+
+            if (seen is not null && seen.TryGetValue(typeId, out var was) && was != before)
+            {
+                throw new ConcurrencyConflictException();
             }
 
             if (type.IsArchived && price is not null)

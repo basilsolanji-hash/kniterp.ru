@@ -533,6 +533,27 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             throw new BusinessRuleException("catalog.archive.in_bundle", $"Позиция {item.Code} входит в действующий комплект — уберите её из состава или отправьте комплект в архив.");
         }
 
+        // D340: открытый заказ (черновик или подтверждён) с позицией — её ещё отгрузят или примут; архив сломал бы заказ и резерв.
+        var salesOrder = await db.SalesOrders.AsNoTracking()
+            .Where(o => o.OrganizationId == ctx.OrganizationId
+                        && (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft || o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed)
+                        && o.Lines.Any(l => l.ItemId == id))
+            .Select(o => o.Number).FirstOrDefaultAsync(ct);
+        if (salesOrder is not null)
+        {
+            throw new BusinessRuleException("catalog.archive.in_sales_order", $"Позиция {item.Code} есть в открытом заказе покупателя {salesOrder}: сначала закройте или отмените заказ.");
+        }
+
+        var purchaseOrder = await db.PurchaseOrders.AsNoTracking()
+            .Where(o => o.OrganizationId == ctx.OrganizationId
+                        && (o.Status == KnitErp.Domain.Purchasing.PurchaseOrderStatus.Draft || o.Status == KnitErp.Domain.Purchasing.PurchaseOrderStatus.Confirmed)
+                        && o.Lines.Any(l => l.ItemId == id))
+            .Select(o => o.Number).FirstOrDefaultAsync(ct);
+        if (purchaseOrder is not null)
+        {
+            throw new BusinessRuleException("catalog.archive.in_purchase_order", $"Позиция {item.Code} есть в открытом заказе поставщику {purchaseOrder}: сначала закройте или отмените заказ.");
+        }
+
         item.Archive(clock.UtcNow);
         Audit(ctx, AuditActions.CatalogArchived, nameof(Item), id, $"{item.Code} {item.Name}", "в архиве", null);
         await db.SaveOrConflictAsync(ct);

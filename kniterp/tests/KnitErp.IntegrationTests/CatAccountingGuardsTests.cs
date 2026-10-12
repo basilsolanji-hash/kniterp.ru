@@ -1,8 +1,12 @@
+using KnitErp.Application.Access;
 using KnitErp.Application.Catalog;
 using KnitErp.Application.Common;
 using KnitErp.Application.Organizations;
+using KnitErp.Application.Sales;
+using KnitErp.Domain.Access;
 using KnitErp.Domain.Catalog;
 using KnitErp.Domain.Common;
+using KnitErp.Domain.Sales;
 using KnitErp.Domain.Warehousing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -79,6 +83,82 @@ public sealed class CatAccountingGuardsTests(SqlTestHost host) : IClassFixture<S
             [new SheetData("Номенклатура", ItemExchangeService.Columns, [["ПР-1", "Пряжа мериносовая", ItemTypes.Name(ItemType.RawMaterial), "шт", ""]])]));
         var plan = await s.ItemExchange.PreviewAsync(file);
         Assert.Contains(plan.Rows.Single().Errors, e => e.Contains("уже в учёте"));
+    }
+
+    [SqlFact]
+    public async Task Item_in_open_order_is_not_archived()
+    {
+        // D340: позиция в открытом заказе покупателя — не в архив; после отмены заказа — можно.
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+        var sweater = await s.Catalog.CreateItemAsync(new ItemCommand("СВ-7", "Свитер", ItemType.Finished, piece, null, (await s.VatRates.ActiveAsync())[0].Id));
+        var store = await s.Warehouses.CreateWarehouseAsync("Склад", null);
+        var customer = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Магазин»", null, null, false, true, null));
+        var day = new DateOnly(2026, 10, 1);
+        var order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(day, customer, store, day, null, false, null));
+        await s.Sales.SetOrderLineAsync(order, sweater, 2, 3000m, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
+
+        var card = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "СВ-7"))).Items.Single();
+        Assert.Equal("catalog.archive.in_sales_order", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Catalog.ArchiveItemAsync(sweater, card.RowVersion))).Code);
+
+        await s.Sales.CancelOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion);
+        await s.Catalog.ArchiveItemAsync(sweater, card.RowVersion);
+    }
+
+    [SqlFact]
+    public async Task Price_changed_by_another_user_is_a_conflict()
+    {
+        // D341: цена, изменённая другим пользователем после открытия карточки, не перезаписывается молча.
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+        var sweater = await s.Catalog.CreateItemAsync(new ItemCommand("СВ-8", "Свитер", ItemType.Finished, piece, null, (await s.VatRates.ActiveAsync())[0].Id));
+        var price = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.IsDefault).Id;
+        await s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1000 });
+
+        var seen = new Dictionary<long, decimal?> { [price] = 1000 };
+        await using (var other = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            await other.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1200 }, seen);
+        }
+
+        await Assert.ThrowsAsync<ConcurrencyConflictException>(() =>
+            s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1100 }, seen));
+        await s.Nomenclature.SetPricesAsync(sweater, new Dictionary<long, decimal?> { [price] = 1100 }, new Dictionary<long, decimal?> { [price] = 1200 });
+        await using var db = host.NewDb();
+        Assert.Equal(1100m, await db.ItemPrices.Where(p => p.ItemId == sweater).Select(p => p.Price).SingleAsync());
+    }
+
+    [SqlFact]
+    public async Task Card_stock_counts_only_visible_warehouses()
+    {
+        // Ревью D339: кладовщик склада пряжи видит в карточке остаток своего склада, а не всей организации.
+        var org = await CreateOrgAsync();
+        long yarn, keeper;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            var kg = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+            yarn = await s.Catalog.CreateItemAsync(new ItemCommand("ПР-5", "Пряжа", ItemType.RawMaterial, kg, null));
+            var own = await s.Warehouses.CreateWarehouseAsync("Склад пряжи", null);
+            var other = await s.Warehouses.CreateWarehouseAsync("Склад цеха", null);
+            await ReceiveAsync(s, org.OrganizationId, own, yarn, 3);
+            await ReceiveAsync(s, org.OrganizationId, other, yarn, 7);
+            Assert.Equal(10m, (await s.Nomenclature.GetItemAsync(yarn)).Stock);
+            keeper = (await s.Access.InviteAsync(new InviteUserCommand($"keeper-{Guid.NewGuid():N}@test.local", "Кладовщик пряжи",
+                SystemRoles.Storekeeper, null, WarehouseId: own))).UserId;
+        }
+
+        await using (var db = host.NewDb())
+        {
+            (await db.Users.SingleAsync(u => u.Id == keeper)).Activate();
+            await db.SaveChangesAsync();
+        }
+
+        await using (var s = host.As(keeper, org.OrganizationId))
+        {
+            Assert.Equal(3m, (await s.Nomenclature.GetItemAsync(yarn)).Stock);
+        }
     }
 
     [SqlFact]
