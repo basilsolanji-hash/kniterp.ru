@@ -147,6 +147,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings => Set<KnitErp.Domain.Sales.SalesRoleSettings>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountRule> SalesDiscountRules => Set<KnitErp.Domain.Sales.SalesDiscountRule>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountSettings> SalesDiscountSettings => Set<KnitErp.Domain.Sales.SalesDiscountSettings>();
+    public DbSet<KnitErp.Domain.Sales.SalesCancelReason> SalesCancelReasons => Set<KnitErp.Domain.Sales.SalesCancelReason>();
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней

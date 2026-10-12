@@ -86,7 +86,8 @@ public sealed record SalesOrderDto(
     IReadOnlyList<CustomerPaymentDto> Payments, decimal? Total, decimal? VatTotal, decimal? ShippedValue, decimal? ReturnedValue, decimal? Paid,
     bool CanEdit, bool CanSeePrices, bool CanCreateDocuments, byte[] RowVersion, SalesStageRefDto? Stage = null, bool Reserve = false,
     decimal? DiscountTotal = null, SalesOrderDetailsDto? Details = null, long? AgreementId = null, string? Agreement = null,
-    IReadOnlyList<PriceIssueDto>? PriceIssues = null, string? PriceOverrideReason = null, bool CanOverridePrice = false)
+    IReadOnlyList<PriceIssueDto>? PriceIssues = null, string? PriceOverrideReason = null, bool CanOverridePrice = false, bool StockHidden = false,
+    string? CancelReason = null)
 {
     public string StatusName => SalesOrder.StatusName(Status);
     public decimal? Debt => ShippedValue is { } r && ReturnedValue is { } ret && Paid is { } p ? r - ret - p : null;
@@ -249,9 +250,9 @@ public sealed partial class SalesService(
             docs.Where(d => d.Kind == kind && d.Status == StockDocumentStatus.Posted).SelectMany(d => d.Lines).Where(l => l.ItemId == itemId).Sum(l => l.Quantity);
 
         var prices = ctx.Permissions.Has(Permissions.PriceView);
-        var stock = await db.StockMovements.AsNoTracking()
-            .Where(m => m.OrganizationId == ctx.OrganizationId && m.WarehouseId == order.WarehouseId && itemIds.Contains(m.ItemId))
-            .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+        // D1133 (ТЗ §11, D118): остаток — только по складам области пользователя; без складских прав не показывается.
+        var visibleStock = await StockByItemAsync(ctx, order.WarehouseId, itemIds, ct);
+        var stock = visibleStock ?? [];
         var reservedByOthers = await Reservations.ByWarehouseItemAsync(db, ctx.OrganizationId, [order.WarehouseId], itemIds, order.Id, ct);
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
         var bundles = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id) && i.Type == ItemType.Bundle).Select(i => i.Id)
@@ -286,7 +287,8 @@ public sealed partial class SalesService(
             order.Reserve, prices ? order.DiscountTotal : null, await DetailsAsync(ctx, order, prices, ct),
             order.AgreementId, prices ? await AgreementLabelAsync(ctx, order.AgreementId, ct) : null,
             prices && order.Status == SalesOrderStatus.Draft ? await SalesPricing.IssuesAsync(db, ctx, order, clock.UtcNow, ct) : [],
-            prices ? order.PriceOverrideReason : null, ctx.Permissions.Has(Permissions.SalesPriceOverride));
+            prices ? order.PriceOverrideReason : null, ctx.Permissions.Has(Permissions.SalesPriceOverride), visibleStock is null,
+            await CancelReasonTextAsync(order, ct));
     }
 
     private async Task<string?> AgreementLabelAsync(AccessContext ctx, long? agreementId, CancellationToken ct) =>
@@ -602,6 +604,13 @@ public sealed partial class SalesService(
         var order = SalesOrder.Create(ctx.OrganizationId, number, header, ctx.UserId, clock.UtcNow);
         // D1101: соглашение покупателя на дату заказа — по нему подставляются цена и скидка строк.
         order.SetAgreement((await SalesPricing.AgreementForAsync(db, ctx.OrganizationId, header.CustomerId, header.OrderDate, ct))?.Id);
+        // D1134 (А5): ответственный — закреплённый менеджер покупателя, если он задан.
+        if (await db.CustomerSalesProfiles.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.CounterpartyId == header.CustomerId)
+                .Select(p => p.ManagerUserId).SingleOrDefaultAsync(ct) is { } manager)
+        {
+            order.SetDetails(new SalesOrderDetails(null, null, null, null, manager));
+        }
+
         db.SalesOrders.Add(order);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.SalesOrderCreated, nameof(SalesOrder), order.Id, null, $"{order.Number} от {order.OrderDate:dd.MM.yyyy}", null);
@@ -722,9 +731,24 @@ public sealed partial class SalesService(
     }
 
     /// <summary>Отмена заказа. Если по нему уже есть документы склада или оплаты — нельзя: сначала их сторно и отмена.</summary>
-    public async Task CancelOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default)
+    public Task CancelOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default) => CancelCoreAsync(id, rowVersion, null, null, ct);
+
+    private async Task CancelCoreAsync(long id, byte[] rowVersion, long? reasonId, string? comment, CancellationToken ct)
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
+        string? reasonName = null;
+        if (reasonId is { } rid)
+        {
+            var reason = await db.SalesCancelReasons.AsNoTracking().SingleOrDefaultAsync(r => r.Id == rid && r.OrganizationId == ctx.OrganizationId, ct)
+                         ?? throw new NotFoundException("Причина отмены");
+            if (reason.IsArchived)
+            {
+                throw new BusinessRuleException("catalog.archived", $"Причина «{reason.Name}» в архиве.");
+            }
+
+            reasonName = reason.Name;
+        }
+
         var hasDocs = await db.StockDocuments.AnyAsync(d => d.SalesOrderId == id
             && (d.Status == StockDocumentStatus.Posted || d.Status == StockDocumentStatus.Draft), ct);
         await using var tx = await db.BeginTransactionAsync(ct);
@@ -737,8 +761,17 @@ public sealed partial class SalesService(
         }
 
         var before = SalesOrder.StatusName(order.Status);
-        order.Cancel();
-        Audit(ctx, AuditActions.SalesOrderCancelled, nameof(SalesOrder), id, before, "Отменён", order.Number);
+        if (reasonId is { } chosen)
+        {
+            order.Cancel(chosen, comment);
+        }
+        else
+        {
+            order.Cancel();
+        }
+
+        Audit(ctx, AuditActions.SalesOrderCancelled, nameof(SalesOrder), id, before, "Отменён",
+            reasonName is null ? order.Number : $"{order.Number}: {reasonName}{(order.CancelComment is null ? "" : " — " + order.CancelComment)}");
         await db.SaveOrConflictAsync(ct);
         await tx.CommitAsync(ct);
     }

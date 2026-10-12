@@ -119,6 +119,13 @@ else
             <dt>@L("Покупатель")</dt><dd>@_order.Customer</dd>
             <dt>@L("Дата")</dt><dd>@_order.OrderDate.ToString("dd.MM.yyyy")@(_order.Details?.OrderTime is { } ot ? $" {ot:HH\\:mm}" : "")@(_order.ShipDate is { } e ? $" · {L("отгрузка")} {e:dd.MM.yyyy}" : "")</dd>
             <dt>@L("Склад отгрузки")</dt><dd>@_order.Warehouse</dd>
+            @if (_estimate is { } est && _order.Status is SalesOrderStatus.Draft or SalesOrderStatus.Confirmed)
+            {
+                @* D1135: расчётная дата отгрузки по остатку и производству. *@
+                <dt>@L("Расчётная отгрузка")</dt>
+                <dd class="@(est.Late ? "warn-text" : null)">@(est.Date is { } ed ? ed.ToString("dd.MM.yyyy") : L("нет данных")) <span class="muted">· @L(est.Basis)</span>
+                    @if (est.Late) { <span class="sx-line-flag">@L("позже обещанной клиенту")</span> }</dd>
+            }
             @if (_order.Details is { LegalEntity: not null } sd)
             {
                 <dt>@L("Продавец")</dt>
@@ -287,6 +294,11 @@ else
     }
 
     <h2 style="margin-top: 16px">@L("Строки ({0})", _order.Lines.Count)</h2>
+    @if (_order.Lines.Count > 0)
+    {
+        @* D1136: печать этикеток позиций документа — по количеству. *@
+        <a class="button secondary sx-label-link" href="@LabelLinks.For(_order.Lines.Select(l => (l.ItemId, l.Quantity)))" target="_blank" rel="noopener">@L("Печать этикеток")</a>
+    }
 
     @if (editable)
     {
@@ -321,7 +333,7 @@ else
         </form>
         @if (_order.Lines.Count > 0)
         {
-            <form class="inline-form" @onsubmit="SetOrderDiscountAsync">
+            <form class="inline-form sx-inline-row" @onsubmit="SetOrderDiscountAsync">
                 <label>@L("Скидка на весь заказ, %") <input @bind="_orderDiscountText" inputmode="decimal" size="5" placeholder="5" /></label>
                 <button type="submit" class="secondary" disabled="@_busy">@L("Применить ко всем строкам")</button>
                 <button type="button" class="secondary" @onclick="RepriceAsync" disabled="@_busy" title="@L("Цены и скидки строк — заново по соглашению, виду цены клиента и основному виду цены")">@L("Пересчитать цены")</button>
@@ -339,6 +351,12 @@ else
     else if (_order.Reserve)
     {
         <p class="muted">@L("Резерв")</p>
+    }
+
+    @if (editable)
+    {
+        @* D1131–D1133: подбор с остатками, сетка «размер × цвет», вставка из Excel. *@
+        <SalesOrderEntryPanel OrderId="Id" RowVersion="_order.RowVersion" Disabled="_busy" OnChanged="ReloadAsync" />
     }
 
     <div class="scroll">
@@ -385,7 +403,12 @@ else
                             <td class="num">@Quantities.Format(l.Returned)</td>
                             <td class="num">@(l.Left > 0 ? Quantities.Format(l.Left) : "—")</td>
                         }
-                        @if (l.Stocked)
+                        @if (l.Stocked && _order.StockHidden)
+                        {
+                            @* D1133: без складских прав остаток не показывается. *@
+                            <td class="num muted" colspan="2" title="@L("Остаток виден со складскими правами")">—</td>
+                        }
+                        else if (l.Stocked)
                         {
                             <td class="num">@Quantities.Format(l.Stock)</td>
                             <td class="num @(l.Short ? "cell-short" : null)" title="@(l.ReservedByOthers > 0 ? L("в резерве других заказов: {0}", Quantities.Format(l.ReservedByOthers)) : null)">@Quantities.Format(l.Available)</td>
@@ -480,6 +503,11 @@ else
         @if (_order.CanEdit && _order.Status is SalesOrderStatus.Draft or SalesOrderStatus.Confirmed)
         {
             <ConfirmButton Class="secondary" OnConfirm="CancelAsync" Disabled="@_busy" Question='@L("Отменить заказ?")'>@L("Отменить заказ")</ConfirmButton>
+        }
+        @if (_order.CanEdit && _order.Lines.Count > 0)
+        {
+            @* D1130 (А3): повтор заказа с актуальными ценами. *@
+            <button type="button" class="secondary" @onclick="RepeatAsync" disabled="@_busy">@L("Создать по образцу")</button>
         }
     </div>
 
@@ -679,6 +707,10 @@ else
             }
 
             _payDate = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+            if (Note is { Length: > 0 } note)
+            {
+                _message = L("Заказ создан по образцу.") + " " + note;
+            }
         }
         catch (AccessDeniedException ex)
         {
@@ -704,6 +736,7 @@ else
         }
 
         _order = await Sales.GetOrderAsync(Id);
+        _estimate = _order.Status is SalesOrderStatus.Draft or SalesOrderStatus.Confirmed && _order.Lines.Count > 0 ? await Sales.ShipEstimateAsync(Id) : null;
         // D1102: цены для формы строки — по покупателю, дате и соглашению заказа (обновляются после смены шапки).
         _quote = _order.CanEdit && _order.Status == SalesOrderStatus.Draft ? await Sales.QuoteForOrderAsync(Id) : null;
         _lots = _order.Documents.Count > 0 ? await BatchService.ForSalesOrderAsync(Id) : null;
@@ -879,6 +912,42 @@ else
     }, null);
 
     private string? _reapplyReason;
+    private ShipEstimateDto? _estimate;
+
+    [SupplyParameterFromQuery(Name = "note")]
+    public string? Note { get; set; }
+
+    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
+
+    /// <summary>А3: новый черновик по образцу; что не перенесено и чего не хватает — сообщением в новом заказе.</summary>
+    private async Task RepeatAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var r = await Sales.RepeatOrderAsync(Id);
+            var note = string.Join("; ", new[]
+            {
+                r.Skipped.Count > 0 ? L("не перенесено: {0}", string.Join(", ", r.Skipped)) : null,
+                r.Short.Count > 0 ? L("не хватает на складе: {0}", string.Join(", ", r.Short)) : null,
+            }.Where(x => x is not null));
+            Navigation.NavigateTo($"sales-orders/{r.OrderId}" + (note.Length > 0 ? "?note=" + Uri.EscapeDataString(note) : ""));
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private Task ReapplyDiscountsAsync() => RunAsync(async () =>
     {

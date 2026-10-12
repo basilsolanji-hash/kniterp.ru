@@ -57,7 +57,7 @@
     <a href="catalog/labels">Конструктор этикеток</a>
     @if (_data is { } info)
     {
-        <span>Этикеток: @(info.Items.Count * CopiesValue)</span>
+        <span>Этикеток: @Total(info)</span>
         @if (_templates.Count == 0)
         {
             <span class="warn">Шаблонов нет — печатается образец «@info.Template.Name». Свой шаблон — в конструкторе.</span>
@@ -88,7 +88,7 @@ else
         }
         @foreach (var item in _data.Items)
         {
-            for (var c = 0; c < CopiesValue; c++, n++)
+            for (var c = 0; c < CopiesValue * PerItem(item.Id); c++, n++)
             {
                 if (t.Sheet == LabelSheet.A4 && n > 0 && n % perSheet == 0)
                 {
@@ -120,6 +120,12 @@ else
 
     private int CopiesValue => Math.Clamp(Copies ?? 1, 1, 100);
 
+    private readonly Dictionary<long, int> _counts = [];
+
+    private int PerItem(long itemId) => _counts.GetValueOrDefault(itemId, 1);
+
+    private int Total(LabelPrintDto data) => data.Items.Sum(i => PerItem(i.Id)) * CopiesValue;
+
     private int SkipValue => Math.Clamp(Skip ?? 0, 0, 239);
 
     private static string Mm(decimal v) => v.ToString("0.#", CultureInfo.InvariantCulture) + "mm";
@@ -128,8 +134,17 @@ else
     {
         try
         {
-            var ids = (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(x => long.TryParse(x, out var v) ? v : 0).Where(v => v > 0).ToList();
+            // D1136 (сессия «Продажи»): «id*количество» — этикеток по количеству в документе (заказ, отгрузка, поступление).
+            foreach (var part in (Ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var pair = part.Split('*', 2);
+                if (long.TryParse(pair[0], out var id) && id > 0)
+                {
+                    _counts[id] = _counts.GetValueOrDefault(id) + (pair.Length > 1 && int.TryParse(pair[1], out var k) ? Math.Clamp(k, 1, LabelService.MaxLabels) : 1);
+                }
+            }
+
+            var ids = _counts.Keys.ToList();
             if (ids.Count == 0)
             {
                 _error = "Не выбраны позиции: откройте печать из карточки позиции или из списка номенклатуры.";
@@ -138,7 +153,7 @@ else
 
             _templates = await Labels.TemplatesAsync();
             _data = await Labels.PrintAsync(ids, TemplateId);
-            if (_data.Items.Count * CopiesValue > LabelService.MaxLabels)
+            if (Total(_data) > LabelService.MaxLabels)
             {
                 _error = $"За раз — не больше {LabelService.MaxLabels} этикеток: уменьшите число копий или позиций.";
                 _data = null;
