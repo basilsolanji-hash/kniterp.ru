@@ -32,7 +32,17 @@ public static class ItemSearch
 /// <summary>Отбор списка номенклатуры. Skip/Take — серверная страница (сессия 4): список на 50 000 позиций не читается целиком.</summary>
 public sealed record ItemFilter(
     ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null,
-    ItemKind? Kind = null, int Skip = 0);
+    ItemKind? Kind = null, int Skip = 0, ItemSort Sort = ItemSort.Default, bool Descending = false);
+
+/// <summary>D338: сортировка списка номенклатуры на сервере (по странице — неверно при 50 000 позиций). Id — устойчивый порядок при равных.</summary>
+public enum ItemSort : byte
+{
+    /// <summary>Тип, затем наименование — как было.</summary>
+    Default = 0,
+    Code = 1,
+    Name = 2,
+    Article = 3,
+}
 
 public sealed record ItemListDto(IReadOnlyList<ItemDto> Items, int Total, bool CanEdit, bool CanArchive);
 
@@ -193,13 +203,24 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         return query;
     }
 
+    private static IQueryable<Item> Sorted(IQueryable<Item> q, ItemFilter f) => (f.Sort, f.Descending) switch
+    {
+        (ItemSort.Code, false) => q.OrderBy(i => i.Code).ThenBy(i => i.Id),
+        (ItemSort.Code, true) => q.OrderByDescending(i => i.Code).ThenByDescending(i => i.Id),
+        (ItemSort.Name, false) => q.OrderBy(i => i.Name).ThenBy(i => i.Id),
+        (ItemSort.Name, true) => q.OrderByDescending(i => i.Name).ThenByDescending(i => i.Id),
+        // Без артикула — в конце при любом направлении: пустые не нужны в начале списка.
+        (ItemSort.Article, false) => q.OrderBy(i => i.Article == null).ThenBy(i => i.Article).ThenBy(i => i.Id),
+        (ItemSort.Article, true) => q.OrderBy(i => i.Article == null).ThenByDescending(i => i.Article).ThenByDescending(i => i.Id),
+        _ => q.OrderBy(i => i.Type).ThenBy(i => i.Name).ThenBy(i => i.Id),
+    };
+
     public async Task<ItemListDto> ListItemsAsync(ItemFilter filter, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
         var query = await FilterAsync(ctx, filter, ct);
         var total = await query.CountAsync(ct);
-        var items = await query
-            .OrderBy(i => i.Type).ThenBy(i => i.Name).ThenBy(i => i.Id) // Id — устойчивый порядок страниц при одинаковых названиях
+        var items = await Sorted(query, filter) // Id — устойчивый порядок страниц при одинаковых значениях
             .Skip(Math.Max(0, filter.Skip))
             .Take(Math.Clamp(filter.Take, 1, 2000))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i, u.Symbol })

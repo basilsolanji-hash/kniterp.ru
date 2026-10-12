@@ -49,6 +49,7 @@ public static class DependencyInjection
         services.AddScoped<Exchange.MoySklad.MoySkladImportService>(); // D310 (сессия 4)
         services.AddScoped<Catalog.CatalogSettingsService>(); // D312 (сессия 4)
         services.AddScoped<Catalog.CatalogFeedService>(); // D314 (сессия 4)
+        services.AddScoped<Catalog.CatalogViewService>(); // D338: вид списка номенклатуры пользователя
         services.AddScoped<Catalog.ItemCodesService>(); // D315 (сессия 4)
         services.AddScoped<Catalog.LabelService>(); // D316 (сессия 4)
         services.AddScoped<Catalog.GroupDefaultsService>(); // D317 (сессия 4)

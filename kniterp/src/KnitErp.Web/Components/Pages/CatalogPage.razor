@@ -12,6 +12,7 @@
 @inject BulkEditService Bulk
 @inject PackService Packs
 @inject NavigationManager Navigation
+@inject CatalogViewService Views
 
 <PageTitle>@L("Номенклатура") — knitERP</PageTitle>
 
@@ -338,13 +339,34 @@ else
         </div>
     }
 
+    @* D338: какие столбцы видны — личная настройка, сохраняется. *@
+    <details class="columns-menu">
+        <summary>@L("Столбцы")</summary>
+        <div class="panel">
+            @foreach (var (key, title) in Columns)
+            {
+                var k = key;
+                <label class="check"><input type="checkbox" checked="@V.Shows(k)" @onchange="e => ToggleColumnAsync(k, e)" disabled="@_busy" /> @title</label>
+            }
+            <button type="button" class="link" @onclick="ResetViewAsync" disabled="@_busy">@L("Вид по умолчанию")</button>
+        </div>
+    </details>
     <div class="scroll">
         <table>
             <thead>
                 <tr>
                     <th class="select-col"><input type="checkbox" checked="@PageSelected" @onchange="TogglePage" aria-label="@L("Выбрать все на странице")" /></th>
-                    <th>@L("Код")</th><th>@L("Наименование")</th><th class="opt">@L("Артикул")</th><th class="opt">@L("Тип")</th><th>@L("Ед.")</th><th class="opt">@L("НДС")</th>
-                    @if (CurrentAccess.Has(Permissions.PriceView))
+                    @* D338: сортировка по столбцу — на сервере; повторный щелчок меняет направление, третий — вид по умолчанию. *@
+                    <th aria-sort="@AriaSort(ItemSort.Code)"><button type="button" class="th-sort" @onclick="() => SortByAsync(ItemSort.Code)" disabled="@_busy">@L("Код")@SortMark(ItemSort.Code)</button></th>
+                    <th aria-sort="@AriaSort(ItemSort.Name)"><button type="button" class="th-sort" @onclick="() => SortByAsync(ItemSort.Name)" disabled="@_busy">@L("Наименование")@SortMark(ItemSort.Name)</button></th>
+                    @if (V.Shows("article"))
+                    {
+                        <th class="opt" aria-sort="@AriaSort(ItemSort.Article)"><button type="button" class="th-sort" @onclick="() => SortByAsync(ItemSort.Article)" disabled="@_busy">@L("Артикул")@SortMark(ItemSort.Article)</button></th>
+                    }
+                    @if (V.Shows("type")) { <th class="opt">@L("Тип")</th> }
+                    @if (V.Shows("unit")) { <th>@L("Ед.")</th> }
+                    @if (V.Shows("vat")) { <th class="opt">@L("НДС")</th> }
+                    @if (CurrentAccess.Has(Permissions.PriceView) && V.Shows("price"))
                     {
                         <th class="num">@L("Цена продажи")</th>
                     }
@@ -365,11 +387,11 @@ else
                         <td class="select-col"><input type="checkbox" checked="@(_allByFilter || _selected.Contains(i.Id))" @onchange="e => ToggleOne(i.Id, e)" aria-label="@L("Выбрать позицию")" /></td>
                         <td>@i.Code</td>
                         <td>@if (i.PhotoId is { } photo) { <img class="item-thumb" src="catalog/photos/@photo" alt="" loading="lazy" /> }@if (i.ParentItemId is not null) { <span class="variant-of" title="@L("Модификация")">↳ </span> }<a href="catalog/items/@i.Id">@i.Name</a><TagDots Tags="@_tagMap.GetValueOrDefault(i.Id)" /> @if (i.Modifications > 0) { <span class="tag">@L("модификаций: {0}", i.Modifications)</span> } @if (i.IsArchived) { <span class="tag">@L("архив")</span> }@if (i.Description is not null) { <div class="muted">@i.Description</div> }</td>
-                        <td>@(i.Article ?? "—")</td>
-                        <td>@L(i.TypeName)</td>
-                        <td>@i.UnitSymbol</td>
-                        <td>@(i.VatRateName is { } vat ? L(vat) : "—")</td>
-                        @if (CurrentAccess.Has(Permissions.PriceView))
+                        @if (V.Shows("article")) { <td>@(i.Article ?? "—")</td> }
+                        @if (V.Shows("type")) { <td>@L(i.TypeName)</td> }
+                        @if (V.Shows("unit")) { <td>@i.UnitSymbol</td> }
+                        @if (V.Shows("vat")) { <td>@(i.VatRateName is { } vat ? L(vat) : "—")</td> }
+                        @if (CurrentAccess.Has(Permissions.PriceView) && V.Shows("price"))
                         {
                             <td class="num">@(i.SalePrice is { } sp ? Amounts.Format(sp) : "—")</td>
                         }
@@ -492,12 +514,13 @@ else
     {
         ItemType? type = byte.TryParse(_typeFilter, out var t) ? (ItemType)t : null;
         ItemKind? kind = byte.TryParse(_kindFilter, out var k) ? (ItemKind)k : null;
-        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, PageSize, _groupId, _tagId, kind, _page * PageSize));
+        _view ??= await Views.GetAsync(); // D338: личный вид списка — один раз при открытии
+        _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, PageSize, _groupId, _tagId, kind, _page * PageSize, _view.Sort, _view.Descending));
         if (_list.Items.Count == 0 && _page > 0)
         {
             // Последнюю страницу опустошили (архив, смена отбора) — на последнюю непустую.
             _page = Math.Max(0, (_list.Total - 1) / PageSize);
-            _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, PageSize, _groupId, _tagId, kind, _page * PageSize));
+            _list = await Catalog.ListItemsAsync(new ItemFilter(type, _search, _includeArchived, PageSize, _groupId, _tagId, kind, _page * PageSize, _view.Sort, _view.Descending));
         }
 
         await LoadTagsAsync();
@@ -584,11 +607,55 @@ else
         _allByFilter = true;
     }, null);
 
+    private CatalogViewDto? _view;
+
+    private CatalogViewDto V => _view ?? new CatalogViewDto();
+
+    private (string Key, string Title)[] Columns =>
+    [
+        ("article", L("Артикул")), ("type", L("Тип")), ("unit", L("Ед.")), ("vat", L("НДС")),
+        .. CurrentAccess.Has(Permissions.PriceView) ? new[] { ("price", L("Цена продажи")) } : [],
+    ];
+
+    private string AriaSort(ItemSort sort) => V.Sort != sort ? "none" : V.Descending ? "descending" : "ascending";
+
+    private string SortMark(ItemSort sort) => V.Sort != sort ? "" : V.Descending ? " ↓" : " ↑";
+
+    /// <summary>По возрастанию → по убыванию → вид по умолчанию (тип, наименование).</summary>
+    private Task SortByAsync(ItemSort sort)
+    {
+        var v = V;
+        _view = v.Sort != sort ? v with { Sort = sort, Descending = false }
+            : !v.Descending ? v with { Descending = true }
+            : v with { Sort = ItemSort.Default, Descending = false };
+        _page = 0;
+        return RunAsync(async () => _view = await Views.SaveAsync(_view), null);
+    }
+
+    private Task ToggleColumnAsync(string column, ChangeEventArgs e)
+    {
+        var hidden = (V.Hidden ?? []).Where(h => h != column).ToList();
+        if (e.Value is not true)
+        {
+            hidden.Add(column);
+        }
+
+        _view = V with { Hidden = hidden };
+        return RunAsync(async () => _view = await Views.SaveAsync(_view), null);
+    }
+
+    private Task ResetViewAsync()
+    {
+        _view = new CatalogViewDto();
+        _page = 0;
+        return RunAsync(async () => _view = await Views.SaveAsync(_view), null);
+    }
+
     private ItemFilter CurrentFilter(int take = 500, int skip = 0)
     {
         ItemType? type = byte.TryParse(_typeFilter, out var t) ? (ItemType)t : null;
         ItemKind? kind = byte.TryParse(_kindFilter, out var k) ? (ItemKind)k : null;
-        return new ItemFilter(type, _search, _includeArchived, take, _groupId, _tagId, kind, skip);
+        return new ItemFilter(type, _search, _includeArchived, take, _groupId, _tagId, kind, skip, _view?.Sort ?? ItemSort.Default, _view?.Descending ?? false);
     }
 
     private Task ApplyBulkAsync() => RunAsync(async () =>

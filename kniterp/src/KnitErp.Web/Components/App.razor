@@ -275,6 +275,12 @@
             .card-flow > .card-sec > h2:first-child { margin-top: 12px !important; }
         }
         .card-sec { min-width: 0; }
+        /* D338: заголовок столбца с сортировкой — кнопка, но выглядит как заголовок; фокус клавиатуры виден. */
+        th > .th-sort { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: inherit; }
+        th > .th-sort:hover { color: var(--text); }
+        .columns-menu { margin: 0 0 6px; }
+        .columns-menu > summary { cursor: pointer; color: var(--text-2); width: max-content; }
+        .columns-menu > .panel { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
         /* Поле выбора файла не шире экрана (на 390 px подпись «Загрузить строки из Excel» с полем давала прокрутку вбок). */
         input[type=file] { max-width: 100%; min-width: 0; }
         label.inline:has(> input[type=file]) { flex-wrap: wrap; max-width: 100%; min-width: 0; }

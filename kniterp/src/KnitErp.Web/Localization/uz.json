@@ -2993,5 +2993,7 @@
   "Найти по названию или ИНН": "Nomi yoki STIR bo‘yicha topish",
   "По складам (склады с одинаковым названием)": "Omborlar bo‘yicha (nomi bir xil omborlar)",
   "Склады без пары с тем же названием — не сравнивались: {0}. Переименуйте склад в одной из систем, чтобы сверить его.": "Nomi bir xil jufti yo‘q omborlar solishtirilmadi: {0}. Solishtirish uchun tizimlardan birida ombor nomini o‘zgartiring.",
-  "Версия knitERP": "knitERP versiyasi"
+  "Версия knitERP": "knitERP versiyasi",
+  "Вид по умолчанию": "Standart ko‘rinish",
+  "Столбцы": "Ustunlar"
 }
