@@ -1,0 +1,64 @@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@* Строки отчёта маркетплейса (D1168): вид, товар, позиция, количество и деньги. Показываются первые строки; все — в Excel. *@
+<div class="scroll">
+    <table class="mp-table">
+        <thead>
+            <tr>
+                <th>@L("Строка")</th><th>@L("Вид")</th><th>@L("Товар")</th><th>@L("Позиция")</th><th class="num">@L("Кол-во")</th><th class="num">@L("Сумма")</th>
+                <th class="num opt">@L("Комиссия")</th><th class="num opt">@L("Логистика")</th><th class="num opt">@L("К перечислению")</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var l in Lines)
+            {
+                <tr>
+                    <td>@l.Row</td>
+                    <td>@KindName(l.Kind)@if (l.Note is not null) {<span class="mp-note">@l.Note</span>}</td>
+                    <td>@(l.Article ?? l.ExternalCode ?? l.Barcode)<span class="mp-note">@l.Name</span></td>
+                    <td>
+                        @if (l.Item is not null)
+                        {
+                            @l.Item<span class="mp-note">@MatchName(l.MatchedBy)</span>
+                        }
+                        else if (l.Kind != MarketplaceLineKind.Service)
+                        {
+                            <span class="sx-line-flag">@L("нужно решение")</span>
+                        }
+                    </td>
+                    <td class="num">@Quantities.Format(l.Quantity)</td>
+                    <td class="num">@Amounts.Format(l.Amount)</td>
+                    <td class="num opt">@Amounts.Format(l.Commission)</td>
+                    <td class="num opt">@Amounts.Format(l.Logistics)</td>
+                    <td class="num opt">@Amounts.Format(l.Payout)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+@if (Total > Lines.Count)
+{
+    <p class="muted small">@L("Показаны первые {0} строк из {1}; все строки — в выгрузке Excel.", Lines.Count, Total)</p>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<MarketplaceLineDto> Lines { get; set; } = [];
+
+    [Parameter]
+    public int Total { get; set; }
+
+    private string KindName(MarketplaceLineKind k) => k switch
+    {
+        MarketplaceLineKind.Sale => L("Продажа"),
+        MarketplaceLineKind.Return => L("Возврат"),
+        _ => L("Услуга"),
+    };
+
+    private string MatchName(MarketplaceMatch m) => m switch
+    {
+        MarketplaceMatch.ExternalLink => L("по связи с площадкой"),
+        MarketplaceMatch.Barcode => L("по штрихкоду"),
+        _ => L("выбрано вручную"),
+    };
+}
