@@ -547,7 +547,7 @@ else
                         <td>
                             @if (_order.CanSeePrices && d.Kind == StockOperationKind.Shipment && d.Status == StockDocumentStatus.Posted)
                             {
-                                <span><a href="print/upd/@d.Id" target="_blank" rel="noopener">@L("УПД")</a> · <a href="sales-documents/upd/@(d.Id).xml" download data-enhance-nav="false" title="@L("XML УПД (формат ФНС 5.03) для загрузки в оператора ЭДО")">@L("XML для ЭДО")</a></span>
+                                <span><a href="print/upd/@d.Id" target="_blank" rel="noopener">@L("УПД")</a> · <a href="print/torg12/@d.Id" target="_blank" rel="noopener">@L("ТОРГ-12")</a> · <a href="print/ttn/@d.Id" target="_blank" rel="noopener" title="@L("Транспортная накладная")">@L("ТН")</a> · <a href="sales-documents/upd/@(d.Id).xml" download data-enhance-nav="false" title="@L("XML УПД (формат ФНС 5.03) для загрузки в оператора ЭДО")">@L("XML для ЭДО")</a></span>
                             }
                         </td>
                     </tr>

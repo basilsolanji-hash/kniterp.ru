@@ -5495,5 +5495,16 @@
   "XML УПД (формат ФНС 5.03) для загрузки в оператора ЭДО": "EHA operatoriga yuklash uchun XML UPD (FNS 5.03 formati)",
   "XML для ЭДО": "EHA uchun XML",
   "Для УПД в ЭДО нужны ИНН продавца и покупателя — заполните реквизиты.": "EHAdagi UPD uchun sotuvchi va xaridorning STIRi kerak — rekvizitlarni toʻldiring.",
-  "Отгрузка сторнирована — УПД для ЭДО не формируется.": "Joʻnatish storno qilingan — EHA uchun UPD shakllantirilmaydi."
+  "Отгрузка сторнирована — УПД для ЭДО не формируется.": "Joʻnatish storno qilingan — EHA uchun UPD shakllantirilmaydi.",
+  "Выберите формы вверху. Счёт печатается, если он выставлен; УПД, ТОРГ-12 и накладная — по проведённым отгрузкам.": "Yuqoridan shakllarni tanlang. Hisob, agar u yozilgan boʻlsa, chop etiladi; UPD, TORG-12 va yuk xati — oʻtkazilgan joʻnatishlar boʻyicha.",
+  "Комплект документов": "Hujjatlar toʻplami",
+  "Листов: {0}. PDF — «Сохранить как PDF» в окне печати.": "Varaqlar: {0}. PDF — chop etish oynasida «PDF sifatida saqlash».",
+  "Печать комплекта": "Toʻplamni chop etish",
+  "ТН": "TYX",
+  "ТОРГ-12": "TORG-12",
+  "Транспортная накладная": "Transport yuk xati",
+  "УПД, статус 1": "UPD, maqom 1",
+  "УПД, статус 2": "UPD, maqom 2",
+  "Форма документа": "Hujjat shakli",
+  "Формы": "Shakllar"
 }
