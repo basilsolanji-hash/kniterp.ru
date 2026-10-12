@@ -1188,6 +1188,7 @@ internal sealed class SalesOrderLineConfiguration : IEntityTypeConfiguration<Sal
             t.HasCheckConstraint("ck_sales_order_lines_price", "[Price] >= 0 AND [Amount] >= 0 AND [VatAmount] >= 0");
             t.HasCheckConstraint("ck_sales_order_lines_vat", "[VatPercent] IS NULL OR [VatPercent] BETWEEN 0 AND 100");
             t.HasCheckConstraint("ck_sales_order_lines_discount", "[DiscountPercent] BETWEEN 0 AND 100");
+            t.HasCheckConstraint("ck_sales_order_lines_manual_discount", "[ManualDiscountPercent] BETWEEN 0 AND 100");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
@@ -1197,6 +1198,9 @@ internal sealed class SalesOrderLineConfiguration : IEntityTypeConfiguration<Sal
         b.Property(x => x.VatAmount).HasColumnType("decimal(19,4)");
         b.Property(x => x.VatPercent).HasColumnType("decimal(5,2)");
         b.Property(x => x.DiscountPercent).HasColumnType("decimal(5,2)").HasDefaultValue(0m);
+        // D1106: ручная часть скидки и расшифровка итоговой скидки строки.
+        b.Property(x => x.ManualDiscountPercent).HasColumnType("decimal(5,2)").HasDefaultValue(0m);
+        b.Property(x => x.DiscountSources).HasMaxLength(SalesOrder.DiscountSourcesMaxLength);
         b.Ignore(x => x.NetPrice);
         b.Ignore(x => x.DiscountAmount);
         b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);

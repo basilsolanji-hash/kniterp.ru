@@ -99,3 +99,50 @@ internal sealed class SalesRoleSettingsConfiguration : IEntityTypeConfiguration<
         b.HasIndex(x => new { x.OrganizationId, x.RoleId }).IsUnique().HasDatabaseName("ux_sales_role_settings_role");
     }
 }
+
+/// <summary>Правила скидок и акции (D1106).</summary>
+internal sealed class SalesDiscountRuleConfiguration : IEntityTypeConfiguration<SalesDiscountRule>
+{
+    public void Configure(EntityTypeBuilder<SalesDiscountRule> b)
+    {
+        b.ToTable("sales_discount_rules", t =>
+        {
+            t.HasCheckConstraint("ck_sales_discount_rules_kind", "[Kind] IN (2, 3, 4)");
+            t.HasCheckConstraint("ck_sales_discount_rules_percent", "[Percent] > 0 AND [Percent] <= 100");
+            t.HasCheckConstraint("ck_sales_discount_rules_period", "[ValidTo] IS NULL OR [ValidTo] >= [ValidFrom]");
+            t.HasCheckConstraint("ck_sales_discount_rules_terms",
+                "([Kind] = 2 AND [MinOrderAmount] > 0) OR ([Kind] = 3 AND [MinQuantity] > 0) OR ([Kind] = 4 AND [ItemGroupId] IS NOT NULL)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Kind).HasConversion<byte>();
+        b.Property(x => x.Name).HasMaxLength(SalesDiscountRule.NameMaxLength).IsRequired();
+        b.Property(x => x.Percent).HasPrecision(5, 2);
+        b.Property(x => x.MinOrderAmount).HasPrecision(19, 4);
+        b.Property(x => x.MinQuantity).HasPrecision(18, 6);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<ItemGroup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemGroupId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_sales_discount_rules_group");
+        b.HasOne<Tag>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.TagId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_sales_discount_rules_tag");
+        b.HasIndex(x => new { x.OrganizationId, x.IsArchived, x.ValidFrom }).HasDatabaseName("ix_sales_discount_rules_active");
+    }
+}
+
+/// <summary>Настройки скидок организации (D1106): одна запись.</summary>
+internal sealed class SalesDiscountSettingsConfiguration : IEntityTypeConfiguration<SalesDiscountSettings>
+{
+    public void Configure(EntityTypeBuilder<SalesDiscountSettings> b)
+    {
+        b.ToTable("sales_discount_settings", t => t.HasCheckConstraint("ck_sales_discount_settings_mode", "[Mode] IN (1, 2)"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Mode).HasConversion<byte>();
+        b.Property(x => x.KindOrder).HasMaxLength(20).IsRequired();
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Order);
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasIndex(x => x.OrganizationId).IsUnique().HasDatabaseName("ux_sales_discount_settings_org");
+    }
+}

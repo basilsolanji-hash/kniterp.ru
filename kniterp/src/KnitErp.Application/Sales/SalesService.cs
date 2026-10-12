@@ -50,7 +50,7 @@ public sealed record SalesOrderRowDto(
 public sealed record SalesOrderLineDto(
     long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Price, decimal? VatPercent,
     decimal? Amount, decimal? VatAmount, decimal Shipped, decimal Returned, decimal DiscountPercent = 0, decimal Stock = 0, decimal ReservedByOthers = 0,
-    bool Stocked = true, bool IsBundle = false)
+    bool Stocked = true, bool IsBundle = false, decimal ManualDiscountPercent = 0, string? DiscountSources = null)
 {
     public decimal Left => Math.Max(0, Quantity - Shipped + Returned);
     public decimal Available => Stock - ReservedByOthers;
@@ -263,7 +263,7 @@ public sealed partial class SalesService(
                 prices ? l.Price : null, l.VatPercent, prices ? l.Amount : null, prices ? l.VatAmount : null,
                 Moved(l.ItemId, StockOperationKind.Shipment), Moved(l.ItemId, StockOperationKind.CustomerReturn),
                 l.DiscountPercent, stock.GetValueOrDefault(l.ItemId), reservedByOthers.GetValueOrDefault((order.WarehouseId, l.ItemId)),
-                !services.Contains(l.ItemId), bundles.Contains(l.ItemId));
+                !services.Contains(l.ItemId), bundles.Contains(l.ItemId), l.ManualDiscountPercent, prices ? l.DiscountSources : null);
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);
@@ -321,7 +321,8 @@ public sealed partial class SalesService(
         }
 
         var existing = order.Lines.FirstOrDefault(l => l.ItemId == itemId);
-        order.SetLine(itemId, (existing?.Quantity ?? 0) + quantity, price, quote.VatPercent, quote.DiscountPercent);
+        order.SetLine(itemId, (existing?.Quantity ?? 0) + quantity, price, quote.VatPercent, existing?.ManualDiscountPercent ?? 0);
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
         var line = order.Lines.Single(l => l.ItemId == itemId);
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null,
             $"{item.Code}: {Quantities.Format(line.Quantity)} {item.UnitSymbol} × {price:0.####} ({PriceQuoteDto.SourceName(quote.Source)}) = {line.Amount:0.00}",
@@ -335,15 +336,17 @@ public sealed partial class SalesService(
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         var quotes = await SalesPricing.QuoteAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, order.PricesIncludeVat,
             order.Lines.Select(l => l.ItemId).ToList(), order.AgreementId, ct);
-        var changed = 0;
+        var before = order.Lines.ToDictionary(l => l.ItemId, l => (l.Price, l.DiscountPercent));
         foreach (var line in order.Lines.ToList())
         {
-            if (quotes.Items.TryGetValue(line.ItemId, out var q) && q.Price is { } price && (price != line.Price || q.DiscountPercent != line.DiscountPercent))
+            if (quotes.Items.TryGetValue(line.ItemId, out var q) && q.Price is { } price && price != line.Price)
             {
-                order.SetLine(line.ItemId, line.Quantity, price, line.VatPercent, q.DiscountPercent);
-                changed++;
+                order.SetLine(line.ItemId, line.Quantity, price, line.VatPercent, line.ManualDiscountPercent);
             }
         }
+
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
+        var changed = order.Lines.Count(l => before[l.ItemId] != (l.Price, l.DiscountPercent));
 
         if (changed > 0)
         {
@@ -378,6 +381,7 @@ public sealed partial class SalesService(
 
         var before = order.AgreementId;
         order.SetAgreement(agreementId);
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, before?.ToString() ?? "—", agreementId?.ToString() ?? "—", $"{order.Number}: соглашение");
         await db.SaveOrConflictAsync(ct);
     }
@@ -501,6 +505,7 @@ public sealed partial class SalesService(
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         order.SetDiscount(discountPercent);
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null, $"скидка {discountPercent:0.##}% на все строки, итого {order.Total:0.00}",
             order.Number);
         await db.SaveOrConflictAsync(ct);
@@ -617,6 +622,8 @@ public sealed partial class SalesService(
             order.SetAgreement((await SalesPricing.AgreementForAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, ct))?.Id);
         }
 
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
+
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null, $"{order.OrderDate:dd.MM.yyyy}, договор {order.CustomerReference ?? "—"}",
             $"{order.Number}: шапка");
         await db.SaveOrConflictAsync(ct);
@@ -634,6 +641,7 @@ public sealed partial class SalesService(
         var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
         StockEntry.EnsurePrecision(item, quantity);
         order.SetLine(itemId, quantity, price, vatPercent, discountPercent);
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
         var line = order.Lines.Single(l => l.ItemId == itemId);
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null,
             $"{item.Code}: {Quantities.Format(quantity)} {item.UnitSymbol} × {price:0.####}{(discountPercent > 0 ? $" − {discountPercent:0.##}%" : "")} = {line.Amount:0.00}",
@@ -645,6 +653,7 @@ public sealed partial class SalesService(
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         order.RemoveLine(itemId);
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, $"позиция №{itemId}", "строка удалена", order.Number);
         await db.SaveOrConflictAsync(ct);
     }
@@ -659,6 +668,7 @@ public sealed partial class SalesService(
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         await ValidateHeaderAsync(ctx, Header(order) with { LegalEntityId = order.LegalEntityId }, null, ct);
+        await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки на дату подтверждения
         var issues = await SalesPricing.IssuesAsync(db, ctx, order, clock.UtcNow, ct);
         if (issues.Count > 0)
         {
