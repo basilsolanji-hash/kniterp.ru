@@ -229,6 +229,17 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.SalesMailAttachment> SalesMailAttachments { get; }
     DbSet<KnitErp.Domain.Sales.SalesDocumentLink> SalesDocumentLinks { get; }
     DbSet<KnitErp.Domain.Sales.SalesCreditApproval> SalesCreditApprovals { get; }
+    // D1150–D1159, D1108 (продажи): сборка, отгрузка по нескольким заказам, доставка, возвраты, коды маркировки.
+    DbSet<KnitErp.Domain.Sales.SalesPickList> SalesPickLists { get; }
+    DbSet<KnitErp.Domain.Sales.SalesPickListLine> SalesPickListLines { get; }
+    DbSet<KnitErp.Domain.Sales.SalesDeliveryMethod> SalesDeliveryMethods { get; }
+    DbSet<KnitErp.Domain.Sales.SalesShipmentGroup> SalesShipmentGroups { get; }
+    DbSet<KnitErp.Domain.Sales.SalesShipmentGroupDocument> SalesShipmentGroupDocuments { get; }
+    DbSet<KnitErp.Domain.Sales.SalesReturnReason> SalesReturnReasons { get; }
+    DbSet<KnitErp.Domain.Sales.SalesReturnDetails> SalesReturnDetails { get; }
+    DbSet<KnitErp.Domain.Sales.SalesReturnLine> SalesReturnLines { get; }
+    DbSet<KnitErp.Domain.Sales.CustomerRefund> CustomerRefunds { get; }
+    DbSet<KnitErp.Domain.Sales.SalesMarkingCode> SalesMarkingCodes { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
