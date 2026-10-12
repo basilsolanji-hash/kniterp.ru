@@ -120,6 +120,9 @@ public sealed class ItemCharacteristicValue
 
     public static ItemCharacteristicValue Create(long organizationId, long itemId, long characteristicId, string value) =>
         new() { OrganizationId = organizationId, ItemId = itemId, CharacteristicId = characteristicId, Value = Variants.CleanValue(value) };
+
+    /// <summary>D328: запись своего справочника переименована — значение следует за ней (ключ модификации пересчитывает вызывающий).</summary>
+    public void Rename(string value) => Value = Variants.CleanValue(value);
 }
 
 /// <summary>

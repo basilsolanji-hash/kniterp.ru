@@ -20,6 +20,7 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
 {
     public const long MaxResponseBytes = 32L * 1024 * 1024;
     public const int MaxAttempts = 4;
+    public const string AcceptHeader = "application/json;charset=utf-8";
     private const int WindowRequests = 45;
     private static readonly TimeSpan Window = TimeSpan.FromSeconds(3);
     private static readonly SemaphoreSlim Parallel = new(5, 5);
@@ -30,8 +31,9 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
     {
         client.BaseAddress = new Uri(MoySkladEntities.BaseUrl);
         client.Timeout = TimeSpan.FromSeconds(60);
-        // Значение заголовка — как в документации JSON API 1.2 («application/json;charset=utf-8»).
-        client.DefaultRequestHeaders.Accept.Add(MediaTypeWithQualityHeaderValue.Parse("application/json;charset=utf-8"));
+        // D334: МойСклад принимает Accept только дословно «application/json;charset=utf-8» (ошибка 1062 на реальном аккаунте).
+        // Типизированный заголовок .NET пишет «application/json; charset=utf-8» — с пробелом, поэтому значение — строкой без проверки.
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", AcceptHeader);
         client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
         client.DefaultRequestHeaders.UserAgent.ParseAdd("knitERP/1.0");
     }

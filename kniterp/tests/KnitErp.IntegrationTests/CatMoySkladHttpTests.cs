@@ -69,7 +69,9 @@ public sealed class CatMoySkladHttpTests
         Assert.Equal(400, ex.Status);
         Assert.Equal("товары: ответ 400 (код 1062: Неверное значение заголовка 'Accept'подробности)", ex.Message);
         Assert.DoesNotContain(Token, ex.Message);
-        Assert.Equal("application/json; charset=utf-8", handler.Requests.Single().Headers.Accept.ToString());
+        // D334: дословно, без пробела после «;» — иначе реальный МойСклад отвечает 400 (код 1062).
+        // NonValidated — сырое значение, которое уходит в сеть (GetValues сам переформатировал бы его с пробелом).
+        Assert.Equal("application/json;charset=utf-8", handler.Requests.Single().Headers.NonValidated["Accept"].ToString());
 
         // Тело не JSON — только раздел и код ответа.
         var (plain, _) = Create((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("<html>bad</html>") });

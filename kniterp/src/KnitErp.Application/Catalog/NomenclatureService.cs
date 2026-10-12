@@ -519,6 +519,12 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             throw new BusinessRuleException("catalog.user.used", $"Справочник «{catalog.Name}» подключён к доп. полю — сначала уберите поле в архив.");
         }
 
+        // Ревью D328: и к характеристике модификаций (тип «Справочник») — иначе новые значения ей не из чего выбрать.
+        if (archived && await db.Characteristics.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.CatalogId == id && !c.IsArchived, ct))
+        {
+            throw new BusinessRuleException("catalog.user.used_by_characteristic", $"Справочник «{catalog.Name}» подключён к характеристике модификаций — сначала смените её тип или уберите в архив.");
+        }
+
         if (!archived)
         {
             await EnsureCatalogFreeAsync(ctx, catalog.Name, id, ct);
@@ -584,10 +590,60 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
     {
         var (ctx, entry) = await LoadEntryAsync(id, rowVersion, ct);
         var before = entry.Display;
-        entry.Set(name, code);
-        await EnsureEntryFreeAsync(entry.CatalogId, entry.Name, id, ct);
-        Audit(ctx, AuditActions.CatalogChanged, nameof(UserCatalogEntry), id, before, entry.Display, "Запись своего справочника");
-        await db.SaveOrConflictAsync(ct);
+        var oldName = entry.Name;
+        try
+        {
+            entry.Set(name, code);
+            await EnsureEntryFreeAsync(entry.CatalogId, entry.Name, id, ct);
+            Audit(ctx, AuditActions.CatalogChanged, nameof(UserCatalogEntry), id, before, entry.Display, "Запись своего справочника");
+            await using var tx = await db.BeginTransactionAsync(ct);
+            await db.SaveOrConflictAsync(ct);
+            if (!string.Equals(oldName, entry.Name, StringComparison.Ordinal))
+            {
+                await RenameCharacteristicValuesAsync(ctx.OrganizationId, entry.CatalogId, oldName, entry.Name, ct);
+            }
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Ревью D328: у модификаций хранится название записи справочника — переименование переносится в их значения и ключи,
+    /// иначе любая правка такой модификации отклонялась бы («нет в справочнике»).
+    /// </summary>
+    private async Task RenameCharacteristicValuesAsync(long org, long catalogId, string oldName, string newName, CancellationToken ct)
+    {
+        var characteristicIds = await db.Characteristics.Where(c => c.OrganizationId == org && c.CatalogId == catalogId).Select(c => c.Id).ToListAsync(ct);
+        if (characteristicIds.Count == 0)
+        {
+            return;
+        }
+
+        var affected = (await db.ItemCharacteristicValues.Where(v => v.OrganizationId == org && characteristicIds.Contains(v.CharacteristicId)).ToListAsync(ct))
+            .Where(v => string.Equals(v.Value, oldName, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (affected.Count == 0)
+        {
+            return;
+        }
+
+        var itemIds = affected.Select(v => v.ItemId).Distinct().ToList();
+        foreach (var v in affected)
+        {
+            v.Rename(newName);
+        }
+
+        var all = (await db.ItemCharacteristicValues.Where(v => itemIds.Contains(v.ItemId)).ToListAsync(ct)).ToLookup(v => v.ItemId);
+        foreach (var item in await db.Items.Where(i => i.OrganizationId == org && itemIds.Contains(i.Id)).ToListAsync(ct))
+        {
+            item.SetVariantKey(Variants.Key(all[item.Id].ToDictionary(v => v.CharacteristicId, v => v.Value)));
+        }
+
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task SetEntryArchivedAsync(long id, bool archived, byte[] rowVersion, CancellationToken ct = default)

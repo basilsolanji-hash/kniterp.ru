@@ -2983,5 +2983,10 @@
   "Показаны {0} самых больших расхождений.": "Eng katta {0} ta farq ko‘rsatilgan.",
   "Расходятся остатки {0} из {1} позиций.": "{1} ta pozitsiyadan {0} tasining qoldig‘i farq qiladi.",
   "Сверить остатки": "Qoldiqlarni solishtirish",
-  "Сверка остатков с МойСклад": "MoySklad bilan qoldiqlarni solishtirish"
+  "Сверка остатков с МойСклад": "MoySklad bilan qoldiqlarni solishtirish",
+  "«{0}»: в справочнике уже {1} записей — «{2}» не добавлена.": "«{0}»: ma’lumotnomada allaqachon {1} ta yozuv bor — «{2}» qo‘shilmadi.",
+  "МойСклад отклонил цены {0} позиций (удалены или в архиве в МойСклад?) — запустите проверку цен ещё раз.": "MoySklad {0} ta pozitsiya narxini rad etdi (MoySkladda o‘chirilgan yoki arxivdami?) — narxlarni qayta tekshiring.",
+  "Поле «{0}»: ссылка слишком длинная — не больше {1} символов после кодирования.": "«{0}» maydoni: havola juda uzun — kodlashdan keyin {1} belgidan oshmasligi kerak.",
+  "Своих справочников — не больше {0}: «{1}» не создан.": "O‘z ma’lumotnomalaringiz — {0} tadan oshmaydi: «{1}» yaratilmadi.",
+  "Справочник «{0}» подключён к характеристике модификаций — сначала смените её тип или уберите в архив.": "«{0}» ma’lumotnomasi modifikatsiyalar xususiyatiga ulangan — avval uning turini o‘zgartiring yoki arxivga yuboring."
 }

@@ -57,6 +57,19 @@ public sealed class CatTypedFieldsTests(SqlTestHost host) : IClassFixture<SqlTes
         Assert.Contains("XL", mismatch.Message);
         Assert.Equal(CharacteristicType.Text, (await s.Modifications.CharacteristicsAsync()).Single(c => c.Id == letter).Type);
 
+        // Переименование записи справочника переносится в значения модификаций; правка модификации после этого не отклоняется.
+        var red = (await s.Nomenclature.EntriesAsync(colors)).Single(e => e.Name == "Красный");
+        await s.Nomenclature.UpdateEntryAsync(red.Id, "Бордовый", null, red.RowVersion);
+        var renamed = (await s.Modifications.VariantsAsync(sweater)).Modifications.Single();
+        Assert.Equal("Бордовый", renamed.Values.Single(v => v.CharacteristicId == color).Value);
+        var mod = await s.Nomenclature.GetItemAsync(renamed.Id);
+        await s.Modifications.SetValuesAsync(renamed.Id, renamed.Values.ToDictionary(v => v.CharacteristicId, v => (string?)v.Value) is var vals
+            ? new Dictionary<long, string?>(vals) { [size] = "50" } : null!, mod.RowVersion);
+        // Справочник, подключённый к характеристике, в архив не уходит.
+        var cat = (await s.Nomenclature.CatalogsAsync()).Single(c => c.Id == colors);
+        Assert.Equal("catalog.user.used_by_characteristic", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            s.Nomenclature.SetCatalogArchivedAsync(colors, true, cat.RowVersion))).Code);
+
         // Чужой справочник — не найден.
         var other = await CreateOrgAsync();
         long foreignCatalog;

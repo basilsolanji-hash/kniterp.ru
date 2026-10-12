@@ -166,6 +166,10 @@ else
             </div>
             @if (_priceExport is { } x)
             {
+                @if (x.Rejected > 0)
+                {
+                    <p class="neg" role="alert">@L("МойСклад отклонил цены {0} позиций (удалены или в архиве в МойСклад?) — запустите проверку цен ещё раз.", x.Rejected)</p>
+                }
                 <p role="status">@(x.Sent > 0 ? L("Отправлено в МойСклад: {0} из {1} проверенных.", x.Sent, x.Checked)
                                     : x.ToChange == 0 ? L("Цены совпадают с МойСклад (проверено: {0}).", x.Checked)
                                     : L("Отличаются цены {0} из {1} связанных позиций: {2}{3}", x.ToChange, x.Checked, string.Join(", ", x.Samples), x.ToChange > x.Samples.Count ? " …" : ""))</p>

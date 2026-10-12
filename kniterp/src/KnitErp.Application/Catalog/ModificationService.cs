@@ -103,8 +103,9 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
             characteristic.SetType(type, catalogId);
             var names = (await CatalogNamesAsync(ctx.OrganizationId, [characteristic], ct)).GetValueOrDefault(catalogId ?? 0);
             var bad = new List<string>();
-            foreach (var value in await db.ItemCharacteristicValues.AsNoTracking().Where(v => v.OrganizationId == ctx.OrganizationId && v.CharacteristicId == id)
-                         .Select(v => v.Value).Distinct().ToListAsync(ct))
+            // Ревью: различаем регистр («да» и «Да» у разных модификаций) — Distinct в SQL с CI-коллацией их бы схлопнул.
+            foreach (var value in (await db.ItemCharacteristicValues.AsNoTracking().Where(v => v.OrganizationId == ctx.OrganizationId && v.CharacteristicId == id)
+                         .Select(v => v.Value).ToListAsync(ct)).Distinct(StringComparer.Ordinal).ToList())
             {
                 try
                 {
@@ -303,11 +304,15 @@ public sealed class ModificationService(IKnitErpDbContext db, IAccessGuard guard
         item.EnsureVersion(item.RowVersion, rowVersion);
         var characteristics = await db.Characteristics.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(c => c.Id, ct);
         var catalogNames = await CatalogNamesAsync(ctx.OrganizationId, characteristics.Values, ct);
+        var stored = await db.ItemCharacteristicValues.AsNoTracking().Where(v => v.ItemId == itemId).ToDictionaryAsync(v => v.CharacteristicId, v => v.Value, ct);
         var clean = new Dictionary<long, string>();
         foreach (var (id, value) in values.Where(v => !string.IsNullOrWhiteSpace(v.Value)))
         {
             var c = characteristics.GetValueOrDefault(id) ?? throw new NotFoundException("Характеристика");
-            clean[id] = c.Normalize(value, catalogNames.GetValueOrDefault(c.CatalogId ?? 0)); // D328
+            // D328: новое значение — по типу; уже сохранённое без изменений принимается как есть (запись могла уйти в архив).
+            clean[id] = stored.TryGetValue(id, out var was) && string.Equals(was, Variants.CleanValue(value), StringComparison.Ordinal)
+                ? was
+                : c.Normalize(value, catalogNames.GetValueOrDefault(c.CatalogId ?? 0));
         }
 
         var key = Variants.Key(clean);

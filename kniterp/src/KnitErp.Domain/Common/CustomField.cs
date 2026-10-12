@@ -122,9 +122,15 @@ public sealed class CustomFieldDefinition
                 return text is "true" or "1" or "on" or "да" ? "true" : null;
             case CustomFieldType.Link:
                 // Только абсолютная http(s)-ссылка: «javascript:» и прочие схемы в поле не попадут.
-                return text.Length <= ValueMaxLength && Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+                if (!Uri.TryCreate(text, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+                {
+                    throw new BusinessRuleException("custom_field.link", $"Поле «{Name}»: укажите ссылку, начинающуюся с https://.");
+                }
+
+                // Ревью: хранится закодированный адрес — кириллица в %XX длиннее введённого в несколько раз.
+                return uri.AbsoluteUri.Length <= ValueMaxLength
                     ? uri.AbsoluteUri
-                    : throw new BusinessRuleException("custom_field.link", $"Поле «{Name}»: укажите ссылку, начинающуюся с https://.");
+                    : throw new BusinessRuleException("custom_field.link_long", $"Поле «{Name}»: ссылка слишком длинная — не больше {ValueMaxLength} символов после кодирования.");
             case CustomFieldType.Counterparty:
                 return long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var counterparty) && counterparty > 0
                     ? counterparty.ToString(CultureInfo.InvariantCulture)

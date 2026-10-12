@@ -173,7 +173,8 @@ else
                                     }
                                     @if (field.Value is not null && field.Display is not null && _counterparties.All(x => x.Id.ToString() != field.Value))
                                     {
-                                        <option value="@field.Value">@field.Display (@L("в архиве"))</option>
+                                        @* Список — до 2000 действующих: выбранный может быть в архиве или за пределом списка. *@
+                                        <option value="@field.Value">@field.Display</option>
                                     }
                                 </select>
                             </label>
