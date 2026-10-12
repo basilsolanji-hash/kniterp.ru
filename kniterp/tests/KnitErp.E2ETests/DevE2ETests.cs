@@ -226,6 +226,17 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByRole(AriaRole.Button, new() { Name = "Списать пряжу", Exact = true }).First.ClickAsync();
         await Assertions.Expect(page.Locator(".dev-yarn")).ToContainTextAsync("Нечего списывать");
 
+        // D723: принятый образец передаём заказчику со сроком возврата — метка «У заказчика», без горизонтальной прокрутки.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Записать решение", Exact = true }).First.ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Решение записано" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Передать заказчику", Exact = true }).First.ClickAsync();
+        await page.GetByLabel("Кому").FillAsync("ООО «Пример», Иванова");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Передать", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Образец передан заказчику" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".tag", new() { HasText = "У заказчика" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Вернули на фабрику", Exact = true })).ToBeVisibleAsync();
+        await AssertNoHorizontalScrollAsync(page, "образец у заказчика");
+
         // D750: утверждённая модель — панель передачи в производство с нормами и причиной, почему пока нельзя.
         // D746: без сохранённого расчёта себестоимости утвердить нельзя — сначала версия расчёта.
         await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
@@ -253,6 +264,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GotoAsync("dev/analytics");
         await Ready(page);
         await Assertions.Expect(page.Locator(".dev-cost-tiles").First).ToContainTextAsync("В работе");
+        await Assertions.Expect(page.Locator("#samples-out")).ToContainTextAsync("ООО «Пример», Иванова");
         await AssertNoHorizontalScrollAsync(page, "аналитика");
         var xlsx = await page.APIRequest.GetAsync(await page.GetByRole(AriaRole.Link, new() { Name = "Выгрузить в Excel" }).GetAttributeAsync("href") is { } href
             ? new Uri(new Uri(page.Url), "/" + href).ToString() : throw new InvalidOperationException("нет ссылки")); // <base href="/">

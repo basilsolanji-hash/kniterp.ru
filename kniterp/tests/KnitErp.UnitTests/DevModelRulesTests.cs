@@ -287,4 +287,23 @@ public sealed class DevAutomationRulesTests
         Assert.Equal("dev.file.quota", Assert.Throws<BusinessRuleException>(() => DevFile.EnsureQuota(DevFile.MaxFilesPerModel, 0, 1)).Code);
         Assert.Equal("dev.file.quota", Assert.Throws<BusinessRuleException>(() => DevFile.EnsureQuota(1, DevFile.MaxBytesPerModel - 10, 11)).Code);
     }
+
+    [Fact]
+    public void Sample_custody_transitions_and_overdue()
+    {
+        Assert.True(DevSample.IsReturnOverdue(DevSampleCustody.AtCustomer, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 2)));
+        Assert.False(DevSample.IsReturnOverdue(DevSampleCustody.AtCustomer, new DateOnly(2026, 10, 2), new DateOnly(2026, 10, 2)));
+        Assert.False(DevSample.IsReturnOverdue(DevSampleCustody.AtCustomer, null, new DateOnly(2027, 1, 1)));
+        Assert.False(DevSample.IsReturnOverdue(DevSampleCustody.Returned, new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 2)));
+
+        var s = DevSample.Create(1, 1, 1, null, DateTime.UtcNow, 1);
+        Assert.Equal("dev.sample.custody.knitting", Assert.Throws<BusinessRuleException>(() => s.HandToCustomer(null, "ООО", new DateOnly(2026, 10, 1), null, null)).Code);
+        s.MarkKnitted();
+        Assert.Equal("dev.sample.custody.not_out", Assert.Throws<BusinessRuleException>(() => s.CloseCustody(DevSampleCustody.Returned, new DateOnly(2026, 10, 1), null)).Code);
+        s.HandToCustomer(5, "  ООО «Пример»  ", new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 15), null);
+        Assert.Equal(("ООО «Пример»", DevSampleCustody.AtCustomer, 5L), (s.CustodyRecipient, s.Custody, s.CustodyCounterpartyId!.Value));
+        Assert.Equal("dev.sample.custody.result", Assert.Throws<BusinessRuleException>(() => s.CloseCustody(DevSampleCustody.AtFactory, new DateOnly(2026, 10, 2), null)).Code);
+        s.CloseCustody(DevSampleCustody.Kept, new DateOnly(2026, 10, 2), null);
+        Assert.Equal("dev.sample.custody.out", Assert.Throws<BusinessRuleException>(() => s.HandToCustomer(null, "ООО", new DateOnly(2026, 10, 3), null, null)).Code);
+    }
 }

@@ -257,6 +257,10 @@ else
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
+    /// <summary>Вкладка из ссылки (`?tab=samples`) — например, из списка «Образцы у заказчиков».</summary>
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? TabQuery { get; set; }
+
     private DevModelDto? _model;
     private DevCompletenessDto? _completeness;
     private DevModelOptionsDto? _options;
@@ -295,7 +299,7 @@ else
         {
             // Переход на другую модель тем же компонентом («Создать похожую»): начинаем с вкладки «Задание», без открытых форм.
             _loadedId = Id;
-            _tab = Tab.Brief;
+            _tab = Enum.TryParse<Tab>(TabQuery, true, out var fromLink) && Enum.IsDefined(fromLink) ? fromLink : Tab.Brief;
             _options = null;
             _editingBrief = false;
             _cancelling = false;

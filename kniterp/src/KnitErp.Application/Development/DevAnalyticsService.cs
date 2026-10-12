@@ -23,10 +23,12 @@ public sealed record DevPlanFactDto(long ModelId, string Number, string Name, de
 public sealed record DevAnalyticsDto(
     DateOnly From, DateOnly To, int InWork, int Overdue, int Late, int Handed, int Cancelled, decimal? AvgDevelopmentDays, decimal? AvgPatternDays,
     decimal? SamplesPerModel, int SamplesAccepted, int SamplesRework, int SamplesRejected, int SamplesWaiting, IReadOnlyList<DevStageStatDto> Stages,
-    IReadOnlyList<DevReasonDto> ReworkReasons, IReadOnlyList<DevLoadDto> Load, IReadOnlyList<DevPlanFactDto>? PlanFact);
+    IReadOnlyList<DevReasonDto> ReworkReasons, IReadOnlyList<DevLoadDto> Load, IReadOnlyList<DevPlanFactDto>? PlanFact,
+    IReadOnlyList<DevSampleOutDto>? SamplesOut = null);
 
-/// <summary>Данные модуля разработки для главного экрана (ТЗ §12): в работе, просрочено, образцы ждут решения.</summary>
-public sealed record DevDashboardData(int InWork, int Overdue, int SamplesWaiting, string Href = "dev/models");
+/// <summary>Данные модуля разработки для главного экрана (ТЗ §12): в работе, просрочено, образцы ждут решения, у заказчиков и не возвращены к сроку (D723).</summary>
+public sealed record DevDashboardData(int InWork, int Overdue, int SamplesWaiting, string Href = "dev/models", int SamplesAtCustomer = 0,
+    int SamplesOverdue = 0);
 
 /// <summary>
 /// Источник блока «Разработка» главного экрана (ТЗ §12, по образцу IProductionDashboardSource D111): база подключает его к своему
@@ -130,7 +132,7 @@ public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard
             avgDays.GetValueOrDefault(DevStage.Pattern), withSamples == 0 ? null : Math.Round((decimal)samples.Count / withSamples, 1),
             samples.Count(s => s.Status == DevSampleStatus.Accepted), samples.Count(s => s.Status == DevSampleStatus.Rework),
             samples.Count(s => s.Status == DevSampleStatus.Rejected), samples.Count(s => s.Status is DevSampleStatus.Knitting or DevSampleStatus.Ready),
-            stages, reasons, load, planFact);
+            stages, reasons, load, planFact, await DevShopService.SamplesOut(db, org, today, ct));
     }
 
     /// <summary>Выгрузка отчёта в Excel (ТЗ §12): лист на каждый раздел; суммы — только с правом на себестоимость.</summary>
@@ -154,6 +156,9 @@ public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard
             new("Загрузка", ["Участник", "Роль", "Моделей в работе", "Из них дольше нормы"],
                 r.Load.Select(l => (IReadOnlyList<string>)[l.User, l.Role, $"{l.Open}", $"{l.Overdue}"]).ToList(), new HashSet<int> { 2, 3 }),
         };
+        sheets.Add(new SheetData("Образцы у заказчиков", ["Модель", "Название", "Образец", "Кому", "Передан", "Вернуть до", "Просрочен"],
+            (r.SamplesOut ?? []).Select(x => (IReadOnlyList<string>)[x.Number, x.ModelName, $"{x.No}", x.Recipient, x.HandedOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture),
+                x.ReturnBy?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? "", x.Overdue ? "да" : ""]).ToList(), new HashSet<int> { 2 }));
         if (r.PlanFact is { } pf)
         {
             sheets.Add(new SheetData("План-факт себестоимости", ["Модель", "Название", "Целевая", "Расчёт", "Разница"],
@@ -176,7 +181,10 @@ public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard
         var open = await dashboardDb.DevModels.AsNoTracking().Where(m => m.OrganizationId == org && m.Stage != DevStage.Handed && m.Stage != DevStage.Cancelled)
             .Select(m => new { m.Stage, m.StageSinceUtc }).ToListAsync(ct);
         var waiting = await dashboardDb.DevSamples.AsNoTracking().CountAsync(s => s.OrganizationId == org && s.Status == DevSampleStatus.Ready, ct);
-        return new DevDashboardData(open.Count, open.Count(m => DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), now)), waiting);
+        var out_ = await dashboardDb.DevSamples.AsNoTracking().Where(s => s.OrganizationId == org && s.Custody == DevSampleCustody.AtCustomer)
+            .Select(s => s.ReturnBy).ToListAsync(ct);
+        return new DevDashboardData(open.Count, open.Count(m => DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), now)), waiting,
+            SamplesAtCustomer: out_.Count, SamplesOverdue: out_.Count(r => r is { } d && d < today));
     }
 
     private static decimal? Avg(IEnumerable<decimal> values)

@@ -636,6 +636,9 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
         TimeZoneInfo.ConvertTimeBySystemTimeZoneId(utc,
             await db.Organizations.AsNoTracking().Where(o => o.Id == org).Select(o => o.TimeZoneId).SingleAsync(ct));
 
+    internal static async Task<DateOnly> LocalTodayAsync(IKnitErpDbContext db, long org, DateTime utc, CancellationToken ct) =>
+        DateOnly.FromDateTime(await LocalNowAsync(db, org, utc, ct));
+
     internal async Task<DevSettings> SettingsAsync(long org, CancellationToken ct) =>
         await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
 

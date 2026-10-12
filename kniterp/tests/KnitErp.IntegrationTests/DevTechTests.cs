@@ -4,6 +4,7 @@ using KnitErp.Application.Common;
 using KnitErp.Application.Development;
 using KnitErp.Application.Organizations;
 using KnitErp.Domain.Access;
+using KnitErp.Domain.Audit;
 using KnitErp.Domain.Catalog;
 using KnitErp.Domain.Common;
 using KnitErp.Domain.Development;
@@ -606,6 +607,89 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await Assert.ThrowsAsync<NotFoundException>(() => k.Costs.CostingAsync(model));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Costs.SaveAsync(model, new DevCostScenario()));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Costs.AddAccessoryAsync(model, tag, 1m));
+        }
+    }
+
+    /// <summary>D723: образец у заказчика — передача, срок возврата, напоминание, закрытие; права и чужая организация.</summary>
+    [SqlFact]
+    public async Task Sample_at_customer_is_tracked_until_returned()
+    {
+        var org = await CreateOrganizationAsync();
+        var other = await CreateOrganizationAsync();
+        long model, late, onTime, knitting;
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            model = await k.Models.CreateAsync(Header("Свитер «Образец»"));
+            late = await k.Shop.CreateSampleAsync(model, null);
+            onTime = await k.Shop.CreateSampleAsync(model, null);
+            knitting = await k.Shop.CreateSampleAsync(model, null);
+            foreach (var id in new[] { late, onTime })
+            {
+                var rv = (await k.Shop.SamplesAsync(model)).Samples.Single(x => x.Id == id).RowVersion;
+                await k.Shop.DecideSampleAsync(id, DevSampleStatus.Accepted, null, rv);
+            }
+
+            byte[] Rv(DevSamplesDto d, long id) => d.Samples.Single(x => x.Id == id).RowVersion;
+            var data = await k.Shop.SamplesAsync(model);
+            Assert.Equal("dev.sample.custody.knitting", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.HandSampleAsync(knitting, "ООО «Пример»", new DateOnly(2026, 10, 1), null, null, Rv(data, knitting)))).Code);
+            Assert.Equal("dev.sample.custody.date", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.HandSampleAsync(late, "ООО «Пример»", new DateOnly(2026, 10, 1), new DateOnly(2026, 9, 30), null, Rv(data, late)))).Code);
+            Assert.Equal("field.required", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.HandSampleAsync(late, " ", new DateOnly(2026, 10, 1), null, null, Rv(data, late)))).Code);
+
+            await k.Shop.HandSampleAsync(late, "ООО «Пример», Иванова", new DateOnly(2026, 9, 20), new DateOnly(2026, 10, 1), "на выставку", Rv(data, late));
+            data = await k.Shop.SamplesAsync(model);
+            await k.Shop.HandSampleAsync(onTime, "ООО «Пример»", new DateOnly(2026, 10, 5), new DateOnly(2026, 11, 1), null, Rv(data, onTime));
+            // Старая версия строки — конфликт, а не повторная передача.
+            await Assert.ThrowsAsync<ConcurrencyConflictException>(() =>
+                k.Shop.HandSampleAsync(onTime, "Повтор", new DateOnly(2026, 10, 5), null, null, Rv(data, onTime)));
+
+            data = await k.Shop.SamplesAsync(model);
+            var l = data.Samples.Single(x => x.Id == late);
+            Assert.Equal((DevSampleCustody.AtCustomer, true), (l.Custody, l.ReturnOverdue));
+            Assert.False(data.Samples.Single(x => x.Id == onTime).ReturnOverdue);
+            Assert.Equal("dev.sample.custody.out", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.HandSampleAsync(late, "Ещё раз", new DateOnly(2026, 10, 2), null, null, l.RowVersion))).Code);
+
+            var report = await k.Analytics.ReportAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 9));
+            Assert.Equal(new[] { late, onTime }, report.SamplesOut!.Select(x => x.SampleId).ToArray()); // просроченный — первым
+            Assert.Contains(await k.All.Notifications.ListAsync(), n => n.Text == "Образцы не вернули к сроку: 1" && n.Href == "dev/analytics#samples-out");
+            var dash = await k.Analytics.GetAsync(k.All.Db, await new AccessGuard(k.All.Db,
+                new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress }, host.Clock).CurrentAsync(),
+                new DateOnly(2026, 10, 9), default);
+            Assert.Equal((2, 1), (dash!.SamplesAtCustomer, dash.SamplesOverdue));
+            Assert.Contains(await k.All.Db.AuditEntries.AsNoTracking().Where(e => e.OrganizationId == org.OrganizationId && e.Action == AuditActions.DevSampleCustody)
+                .Select(e => e.After).ToListAsync(), v => v != null && v.Contains("вернуть до 01.10.2026"));
+
+            Assert.Equal("dev.sample.custody.date", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.CloseSampleCustodyAsync(late, DevSampleCustody.Returned, new DateOnly(2026, 9, 1), null, l.RowVersion))).Code);
+            await k.Shop.CloseSampleCustodyAsync(late, DevSampleCustody.Returned, new DateOnly(2026, 10, 8), null, l.RowVersion);
+            data = await k.Shop.SamplesAsync(model);
+            await k.Shop.CloseSampleCustodyAsync(onTime, DevSampleCustody.Sold, new DateOnly(2026, 10, 9), "оплачен", Rv(data, onTime));
+            data = await k.Shop.SamplesAsync(model);
+            Assert.Equal(DevSampleCustody.Returned, data.Samples.Single(x => x.Id == late).Custody);
+            Assert.Equal("dev.sample.custody.not_out", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.CloseSampleCustodyAsync(onTime, DevSampleCustody.Returned, new DateOnly(2026, 10, 9), null, Rv(data, onTime)))).Code);
+            Assert.Empty((await k.Analytics.ReportAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 9))).SamplesOut!);
+            Assert.DoesNotContain(await k.All.Notifications.ListAsync(), n => n.Text.StartsWith("Образцы не вернули", StringComparison.Ordinal));
+            // Возвращённый образец можно передать снова.
+            await k.Shop.HandSampleAsync(late, "ООО «Другой»", new DateOnly(2026, 10, 9), null, null, Rv(data, late));
+        }
+
+        // Образцовщица (без права изменения) не передаёт; чужая организация — «не найдено».
+        var sampler = await InviteActiveAsync(org, SystemRoles.DevSampler);
+        await using (var k = As(sampler, org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Shop.CloseSampleCustodyAsync(late, DevSampleCustody.Returned, new DateOnly(2026, 10, 9), null, []));
+            Assert.False((await k.Shop.SamplesAsync(model)).CanHand);
+        }
+
+        await using (var k = As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.HandSampleAsync(onTime, "Чужой", new DateOnly(2026, 10, 9), null, null, []));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.CloseSampleCustodyAsync(late, DevSampleCustody.Returned, new DateOnly(2026, 10, 9), null, []));
+            Assert.Empty((await k.Analytics.ReportAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 9))).SamplesOut!);
         }
     }
 

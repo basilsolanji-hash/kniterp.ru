@@ -114,6 +114,33 @@ else
                     </div>
                 }
             </div>
+            <div class="panel" id="samples-out">
+                <h2>@L("Образцы у заказчиков")</h2>
+                @if (r.SamplesOut is not { Count: > 0 } so)
+                {
+                    <p class="muted">@L("Сейчас все образцы на фабрике.")</p>
+                }
+                else
+                {
+                    <div class="scroll">
+                        <table class="dev-matrix">
+                            <thead><tr><th>@L("Модель")</th><th>@L("Образец")</th><th>@L("Кому")</th><th>@L("Передан")</th><th>@L("Вернуть до")</th></tr></thead>
+                            <tbody>
+                                @foreach (var x in so)
+                                {
+                                    <tr>
+                                        <td><a href="dev/models/@x.ModelId?tab=samples">@x.Number</a> @x.ModelName</td>
+                                        <td class="num">№ @x.No</td>
+                                        <td>@x.Recipient</td>
+                                        <td>@x.HandedOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</td>
+                                        <td class="@(x.Overdue ? "late-text" : null)">@(x.ReturnBy?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? L("без возврата"))@(x.Overdue ? " — " + L("просрочен") : "")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
             @if (r.PlanFact is { } pf)
             {
                 <div class="panel">

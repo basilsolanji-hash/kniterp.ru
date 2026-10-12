@@ -5269,6 +5269,26 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("CreatedByUserId")
                         .HasColumnType("bigint");
 
+                    b.Property<byte>("Custody")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateOnly?>("CustodyClosedOn")
+                        .HasColumnType("date");
+
+                    b.Property<long?>("CustodyCounterpartyId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CustodyNote")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("CustodyRecipient")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateOnly?>("HandedOn")
+                        .HasColumnType("date");
+
                     b.Property<long>("ModelId")
                         .HasColumnType("bigint");
 
@@ -5280,6 +5300,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<long?>("ReasonId")
                         .HasColumnType("bigint");
+
+                    b.Property<DateOnly?>("ReturnBy")
+                        .HasColumnType("date");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -5306,6 +5329,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasIndex("OrganizationId", "CreatedAtUtc")
                         .HasDatabaseName("ix_dev_samples_created");
 
+                    b.HasIndex("OrganizationId", "Custody")
+                        .HasDatabaseName("ix_dev_samples_at_customer")
+                        .HasFilter("[Custody] = 1");
+
+                    b.HasIndex("OrganizationId", "CustodyCounterpartyId");
+
                     b.HasIndex("OrganizationId", "ReasonId");
 
                     b.HasIndex("OrganizationId", "SizeId");
@@ -5318,6 +5347,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("dev_samples", "kniterp", t =>
                         {
+                            t.HasCheckConstraint("ck_dev_samples_custody", "[Custody] BETWEEN 0 AND 4");
+
+                            t.HasCheckConstraint("ck_dev_samples_custody_closed", "[Custody] IN (0, 1) OR [CustodyClosedOn] IS NOT NULL");
+
+                            t.HasCheckConstraint("ck_dev_samples_custody_out", "[Custody] = 0 OR ([HandedOn] IS NOT NULL AND [CustodyRecipient] IS NOT NULL)");
+
                             t.HasCheckConstraint("ck_dev_samples_status", "[Status] BETWEEN 1 AND 5");
                         });
                 });
@@ -13320,6 +13355,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.Counterparty", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "CustodyCounterpartyId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_samples_custody_counterparty");
 
                     b.HasOne("KnitErp.Domain.Development.DevModel", null)
                         .WithMany()

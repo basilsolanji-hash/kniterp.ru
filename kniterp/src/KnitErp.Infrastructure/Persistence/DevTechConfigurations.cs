@@ -219,13 +219,27 @@ internal sealed class DevSampleConfiguration : IEntityTypeConfiguration<DevSampl
 {
     public void Configure(EntityTypeBuilder<DevSample> b)
     {
-        b.ToTable("dev_samples", t => t.HasCheckConstraint("ck_dev_samples_status", "[Status] BETWEEN 1 AND 5"));
+        b.ToTable("dev_samples", t =>
+        {
+            t.HasCheckConstraint("ck_dev_samples_status", "[Status] BETWEEN 1 AND 5");
+            // D723: у заказчика — с датой передачи и «кому»; закрытая передача — с датой закрытия.
+            t.HasCheckConstraint("ck_dev_samples_custody", "[Custody] BETWEEN 0 AND 4");
+            t.HasCheckConstraint("ck_dev_samples_custody_out",
+                "[Custody] = 0 OR ([HandedOn] IS NOT NULL AND [CustodyRecipient] IS NOT NULL)");
+            t.HasCheckConstraint("ck_dev_samples_custody_closed", "[Custody] IN (0, 1) OR [CustodyClosedOn] IS NOT NULL");
+        });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Comment).HasMaxLength(DevSample.CommentMaxLength);
+        b.Property(x => x.Custody).HasConversion<byte>();
+        b.Property(x => x.CustodyRecipient).HasMaxLength(DevSample.RecipientMaxLength);
+        b.Property(x => x.CustodyNote).HasMaxLength(DevSample.CustodyNoteMaxLength);
         b.Property(x => x.RowVersion).IsRowVersion();
         DevKeys.Org(b);
         DevKeys.ToModel(b, "fk_dev_samples_model");
+        b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustodyCounterpartyId })
+            .HasPrincipalKey(c => new { c.OrganizationId, c.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_custody_counterparty");
+        b.HasIndex(x => new { x.OrganizationId, x.Custody }).HasFilter("[Custody] = 1").HasDatabaseName("ix_dev_samples_at_customer");
         b.HasOne<DevModelSize>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SizeId }).HasPrincipalKey(s => new { s.OrganizationId, s.Id })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_size");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);

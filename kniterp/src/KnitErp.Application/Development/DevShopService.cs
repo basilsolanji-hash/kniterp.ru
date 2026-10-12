@@ -402,6 +402,10 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var reasons = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.ReworkReason)
             .OrderBy(l => l.SortOrder).ThenBy(l => l.Name).Select(l => new { l.Id, l.Name, l.IsArchived }).ToListAsync(ct);
         var reasonNames = reasons.ToDictionary(r => r.Id, r => r.Name);
+        var today = await DevTechService.LocalTodayAsync(db, org, clock.UtcNow, ct);
+        var customer = model.CustomerId is { } cid
+            ? await db.Counterparties.AsNoTracking().Where(c => c.Id == cid && c.OrganizationId == org).Select(c => c.Name).SingleOrDefaultAsync(ct)
+            : null;
         return new DevSamplesDto(samples.Select(x =>
             {
                 var s = x.s;
@@ -421,11 +425,13 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
                         return new DevSampleMeasureDto(m.Id, m.Name, p, m.Tolerance, fact, null, false);
                     }).ToList(),
-                    s.RowVersion, s.ReasonId is { } rid ? reasonNames.GetValueOrDefault(rid) : null);
+                    s.RowVersion, s.ReasonId is { } rid ? reasonNames.GetValueOrDefault(rid) : null, s.Custody, s.CustodyRecipient, s.HandedOn, s.ReturnBy,
+                    s.CustodyClosedOn, s.CustodyNote, DevSample.IsReturnOverdue(s.Custody, s.ReturnBy, today));
             }).ToList(),
             sizes, ctx.Permissions.Has(Permissions.DevEdit) && !DevStages.IsFinal(model.Stage),
             ctx.Permissions.Has(Permissions.DevSample) && !DevStages.IsFinal(model.Stage), (await tech.SettingsAsync(org, ct)).FactTolerancePercent,
-            reasons.Where(r => !r.IsArchived).Select(r => new DevOptionDto(r.Id, r.Name)).ToList());
+            reasons.Where(r => !r.IsArchived).Select(r => new DevOptionDto(r.Id, r.Name)).ToList(), customer, today,
+            ctx.Permissions.Has(Permissions.DevEdit) && model.Stage != DevStage.Cancelled, ctx.Permissions.Has(Permissions.DevEdit));
     }
 
     /// <summary>Новый образец (№ следующий в модели) в размере сетки.</summary>
@@ -484,6 +490,69 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             Audit(ctx, nameof(DevModel), s.ModelId, before, DevSample.StatusName(s.Status), $"{model.Number}: образец № {s.No}{(reason is null || s.ReasonId is null ? "" : ", причина: " + reason)}{(s.Comment is null ? "" : ": " + s.Comment)}");
             await db.SaveOrConflictAsync(ct);
         });
+    }
+
+    /// <summary>
+    /// Передать образец заказчику (D723): кому, дата передачи, «вернуть до». Контрагент — заказчик модели. Отменённой модели — нельзя;
+    /// у переданной в производство — можно (образец для продаж). Журнал — запись «Образец у заказчика».
+    /// </summary>
+    public async Task HandSampleAsync(long sampleId, string? recipient, DateOnly on, DateOnly? returnBy, string? note, byte[] rowVersion,
+        CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var model = await db.DevModels.AsNoTracking().Where(m => m.Id == s.ModelId && m.OrganizationId == ctx.OrganizationId)
+                .Select(m => new { m.Number, m.Stage, m.CustomerId }).SingleAsync(ct);
+            if (model.Stage == DevStage.Cancelled)
+            {
+                throw new BusinessRuleException("dev.model.cancelled", "Модель отменена — сначала верните её в работу.");
+            }
+
+            s.HandToCustomer(model.CustomerId, recipient, on, returnBy, note);
+            Audit(ctx, nameof(DevModel), s.ModelId, null,
+                $"передан: {s.CustodyRecipient}, {on:dd.MM.yyyy}" + (returnBy is { } r ? $", вернуть до {r:dd.MM.yyyy}" : ", без возврата"),
+                $"{model.Number}: образец № {s.No}", AuditActions.DevSampleCustody);
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>Образец вернули, оставили у заказчика или продали ему (D723). Возможно и после передачи модели в производство или отмены.</summary>
+    public async Task CloseSampleCustodyAsync(long sampleId, DevSampleCustody result, DateOnly on, string? note, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var number = await db.DevModels.AsNoTracking().Where(m => m.Id == s.ModelId && m.OrganizationId == ctx.OrganizationId).Select(m => m.Number).SingleAsync(ct);
+            var before = DevSample.CustodyName(s.Custody);
+            s.CloseCustody(result, on, note);
+            Audit(ctx, nameof(DevModel), s.ModelId, before, $"{DevSample.CustodyName(s.Custody)}, {on:dd.MM.yyyy}", $"{number}: образец № {s.No}",
+                AuditActions.DevSampleCustody);
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>Образцы у заказчиков сейчас (D723): по всем моделям, сначала просроченные; для аналитики и напоминаний.</summary>
+    public async Task<IReadOnlyList<DevSampleOutDto>> SamplesOutAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        return await SamplesOut(db, ctx.OrganizationId, await DevTechService.LocalTodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct), ct);
+    }
+
+    internal static async Task<IReadOnlyList<DevSampleOutDto>> SamplesOut(IKnitErpDbContext db, long org, DateOnly today, CancellationToken ct)
+    {
+        var rows = await (from s in db.DevSamples.AsNoTracking()
+                          join m in db.DevModels.AsNoTracking() on s.ModelId equals m.Id
+                          where s.OrganizationId == org && m.OrganizationId == org && s.Custody == DevSampleCustody.AtCustomer
+                          select new { s.Id, s.No, s.ModelId, m.Number, m.Name, s.CustodyRecipient, s.HandedOn, s.ReturnBy })
+            .Take(500).ToListAsync(ct);
+        return rows.Select(x => new DevSampleOutDto(x.Id, x.No, x.ModelId, x.Number, x.Name, x.CustodyRecipient ?? "", x.HandedOn!.Value, x.ReturnBy,
+                DevSample.IsReturnOverdue(DevSampleCustody.AtCustomer, x.ReturnBy, today)))
+            .OrderByDescending(x => x.Overdue).ThenBy(x => x.ReturnBy ?? DateOnly.MaxValue).ThenBy(x => x.HandedOn).ToList();
     }
 
     /// <summary>

@@ -97,13 +97,21 @@ public sealed record DevSampleMeasureDto(long MeasureId, string Name, decimal? P
 public sealed record DevSampleDto(
     long Id, int No, long? SizeId, string? Size, DevSampleStatus Status, string? Comment, DateTime CreatedAtUtc, string CreatedBy,
     IReadOnlyList<(string Detail, DevFactDto? Fact, int? PlanKnitSeconds, decimal? PlanWeightGrams)> Details,
-    IReadOnlyList<DevSampleMeasureDto> Measures, byte[] RowVersion, string? Reason = null)
+    IReadOnlyList<DevSampleMeasureDto> Measures, byte[] RowVersion, string? Reason = null, DevSampleCustody Custody = DevSampleCustody.AtFactory,
+    string? CustodyRecipient = null, DateOnly? HandedOn = null, DateOnly? ReturnBy = null, DateOnly? CustodyClosedOn = null, string? CustodyNote = null,
+    bool ReturnOverdue = false)
 {
     public string StatusName => DevSample.StatusName(Status);
+    public string CustodyName => DevSample.CustodyName(Custody);
 }
 
+/// <summary>Образец у заказчика (D723) — строка списка «Образцы у заказчиков».</summary>
+public sealed record DevSampleOutDto(long SampleId, int No, long ModelId, string Number, string ModelName, string Recipient, DateOnly HandedOn, DateOnly? ReturnBy,
+    bool Overdue);
+
 public sealed record DevSamplesDto(IReadOnlyList<DevSampleDto> Samples, IReadOnlyList<DevSizeDto> Sizes, bool CanEdit, bool CanRecord,
-    int FactTolerancePercent = DevSettings.DefaultTolerance, IReadOnlyList<DevOptionDto>? Reasons = null);
+    int FactTolerancePercent = DevSettings.DefaultTolerance, IReadOnlyList<DevOptionDto>? Reasons = null, string? CustomerName = null, DateOnly? Today = null,
+    bool CanHand = false, bool CanCloseCustody = false);
 
 public sealed record DevOperationTypeDto(long Id, string Name, string Unit, decimal? Price, decimal? NormMinutes, byte? ProductionStage, bool IsArchived,
     byte[] RowVersion);
