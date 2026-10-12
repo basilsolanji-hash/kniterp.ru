@@ -327,6 +327,10 @@ internal sealed class CrmDealOrderConfiguration : IEntityTypeConfiguration<CrmDe
             .HasConstraintName("fk_crm_deal_orders_created_by");
         b.HasIndex(x => x.SalesOrderId).IsUnique().HasDatabaseName("ux_crm_deal_orders_sales_order");
         b.HasIndex(x => new { x.OrganizationId, x.DealId }).HasDatabaseName("ix_crm_deal_orders_deal");
+        b.HasOne<CrmOffer>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.OfferId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_crm_deal_orders_offer");
+        b.HasIndex(x => new { x.OrganizationId, x.OfferId }).HasFilter("[OfferId] IS NOT NULL").HasDatabaseName("ix_crm_deal_orders_offer");
     }
 }
 
