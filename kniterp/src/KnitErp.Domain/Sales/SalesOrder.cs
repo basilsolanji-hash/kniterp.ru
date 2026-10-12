@@ -158,7 +158,7 @@ public sealed class SalesOrder
         line.Set(quantity, price, vatPercent, discountPercent, PricesIncludeVat);
     }
 
-    /// <summary>Скидка на весь заказ: один процент всем строкам черновика (как кнопка «Скидка» в МойСклад).</summary>
+    /// <summary>Скидка на весь заказ: один процент всем строкам черновика (как кнопка «Скидка» в МойСклад) — ручная часть скидки.</summary>
     public void SetDiscount(decimal discountPercent)
     {
         EnsureDraft();
@@ -167,6 +167,43 @@ public sealed class SalesOrder
         {
             line.Set(line.Quantity, line.Price, line.VatPercent, discountPercent, PricesIncludeVat);
         }
+    }
+
+    public const int DiscountSourcesMaxLength = 500;
+
+    /// <summary>
+    /// D1106: итоговая скидка строки черновика по правилам (соглашение, акции, по количеству и сумме) вместе с ручной; sources —
+    /// расшифровка «откуда» для показа в строке.
+    /// </summary>
+    public void SetLineDiscount(long itemId, decimal totalPercent, string? sources)
+    {
+        EnsureDraft();
+        ApplyLineDiscount(itemId, totalPercent, sources);
+    }
+
+    /// <summary>
+    /// D1106: пересчёт скидок подтверждённого заказа — только явным действием с причиной (проверяет сервис: ничего не отгружено
+    /// и счёт не выставлен).
+    /// </summary>
+    public void ReapplyDiscountsConfirmed(IReadOnlyDictionary<long, (decimal Total, string? Sources)> discounts)
+    {
+        if (Status != SalesOrderStatus.Confirmed)
+        {
+            throw new BusinessRuleException("sales.status", "Пересчёт скидок с причиной — только для подтверждённого заказа.");
+        }
+
+        foreach (var (itemId, d) in discounts)
+        {
+            ApplyLineDiscount(itemId, d.Total, d.Sources);
+        }
+    }
+
+    private void ApplyLineDiscount(long itemId, decimal totalPercent, string? sources)
+    {
+        EnsureDiscount(totalPercent);
+        var line = _lines.FirstOrDefault(l => l.ItemId == itemId)
+                   ?? throw new BusinessRuleException("sales.line_missing", "Такой строки в заказе нет.");
+        line.SetTotalDiscount(totalPercent, sources is { Length: > DiscountSourcesMaxLength } ? sources[..DiscountSourcesMaxLength] : sources, PricesIncludeVat);
     }
 
     /// <summary>Сумма скидки по заказу — разница между суммой по ценам без скидки и итогом.</summary>
@@ -376,8 +413,14 @@ public sealed class SalesOrderLine
     /// <summary>Процент НДС; null — без НДС.</summary>
     public decimal? VatPercent { get; private set; }
 
-    /// <summary>Скидка строки, % (D76). Цена — до скидки; сумма и НДС — по цене со скидкой.</summary>
+    /// <summary>Скидка строки, % (D76). Цена — до скидки; сумма и НДС — по цене со скидкой. С D1106 — итоговая (правила + ручная).</summary>
     public decimal DiscountPercent { get; private set; }
+
+    /// <summary>D1106: ручная часть скидки строки (введённая пользователем или «скидка на весь заказ»), %.</summary>
+    public decimal ManualDiscountPercent { get; private set; }
+
+    /// <summary>D1106: расшифровка итоговой скидки — «Соглашение 5%; Акция «Осень» 10%; Ручная 2%».</summary>
+    public string? DiscountSources { get; private set; }
 
     /// <summary>Сумма строки с НДС.</summary>
     public decimal Amount { get; private set; }
@@ -396,6 +439,15 @@ public sealed class SalesOrderLine
         Price = price;
         VatPercent = vatPercent;
         DiscountPercent = discountPercent;
+        ManualDiscountPercent = discountPercent;
+        DiscountSources = discountPercent > 0 ? $"Ручная {discountPercent:0.##}%" : null;
+        Recalculate(pricesIncludeVat);
+    }
+
+    internal void SetTotalDiscount(decimal totalPercent, string? sources, bool pricesIncludeVat)
+    {
+        DiscountPercent = totalPercent;
+        DiscountSources = totalPercent > 0 ? sources : null;
         Recalculate(pricesIncludeVat);
     }
 

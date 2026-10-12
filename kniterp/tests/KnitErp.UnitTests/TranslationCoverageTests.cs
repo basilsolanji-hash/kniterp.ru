@@ -146,6 +146,7 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesAgreementScope>().Select(KnitErp.Domain.Sales.SalesAgreement.ScopeName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesOrderVisibility>().Select(KnitErp.Domain.Sales.SalesRoleSettings.VisibilityName));
         keys.UnionWith(Enum.GetValues<KnitErp.Application.Sales.PriceSource>().Select(KnitErp.Application.Sales.PriceQuoteDto.SourceName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.DiscountKind>().Select(KnitErp.Domain.Sales.SalesDiscountRule.KindName));
         keys.UnionWith(["без НДС", "ещё не действует", "Без роли", "Вся организация"]);
         keys.UnionWith(KnitErp.Domain.Organizations.Countries.All.SelectMany(c => KnitErp.Domain.Catalog.VatRate.DefaultsFor(1, c.Code)).Select(r => r.Name));
         var labels = File.ReadAllText(Path.Combine(WebDir, "Components", "Shared", "Labels.cs"));

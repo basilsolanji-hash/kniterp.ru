@@ -7507,6 +7507,116 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesDiscountRule", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<long?>("ItemGroupId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<decimal?>("MinOrderAmount")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<decimal?>("MinQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Percent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("TagId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("ValidFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ValidTo")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "ItemGroupId");
+
+                    b.HasIndex("OrganizationId", "TagId");
+
+                    b.HasIndex("OrganizationId", "IsArchived", "ValidFrom")
+                        .HasDatabaseName("ix_sales_discount_rules_active");
+
+                    b.ToTable("sales_discount_rules", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_sales_discount_rules_kind", "[Kind] IN (2, 3, 4)");
+
+                            t.HasCheckConstraint("ck_sales_discount_rules_percent", "[Percent] > 0 AND [Percent] <= 100");
+
+                            t.HasCheckConstraint("ck_sales_discount_rules_period", "[ValidTo] IS NULL OR [ValidTo] >= [ValidFrom]");
+
+                            t.HasCheckConstraint("ck_sales_discount_rules_terms", "([Kind] = 2 AND [MinOrderAmount] > 0) OR ([Kind] = 3 AND [MinQuantity] > 0) OR ([Kind] = 4 AND [ItemGroupId] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesDiscountSettings", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("KindOrder")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<byte>("Mode")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_sales_discount_settings_org");
+
+                    b.ToTable("sales_discount_settings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_sales_discount_settings_mode", "[Mode] IN (1, 2)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Sales.SalesOrder", b =>
                 {
                     b.Property<long>("Id")
@@ -7683,8 +7793,17 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(5,2)")
                         .HasDefaultValue(0m);
 
+                    b.Property<string>("DiscountSources")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<long>("ItemId")
                         .HasColumnType("bigint");
+
+                    b.Property<decimal>("ManualDiscountPercent")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(5,2)")
+                        .HasDefaultValue(0m);
 
                     b.Property<long>("OrderId")
                         .HasColumnType("bigint");
@@ -7712,6 +7831,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("sales_order_lines", "kniterp", t =>
                         {
                             t.HasCheckConstraint("ck_sales_order_lines_discount", "[DiscountPercent] BETWEEN 0 AND 100");
+
+                            t.HasCheckConstraint("ck_sales_order_lines_manual_discount", "[ManualDiscountPercent] BETWEEN 0 AND 100");
 
                             t.HasCheckConstraint("ck_sales_order_lines_price", "[Price] >= 0 AND [Amount] >= 0 AND [VatAmount] >= 0");
 
@@ -11638,6 +11759,38 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_sales_agreements_warehouse");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesDiscountRule", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.ItemGroup", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ItemGroupId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_sales_discount_rules_group");
+
+                    b.HasOne("KnitErp.Domain.Tagging.Tag", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "TagId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_sales_discount_rules_tag");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Sales.SalesDiscountSettings", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Sales.SalesOrder", b =>

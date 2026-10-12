@@ -1,0 +1,52 @@
+@page "/sales-setup"
+@using KnitErp.Domain.Access
+@using KnitErp.Web.Modules
+
+<PageTitle>@L("Настройки продаж") — knitERP</PageTitle>
+<SalesStyles />
+
+<div class="sx-head"><h1>@L("Настройки продаж")</h1></div>
+<p class="sx-lead">@L("Всё, что настраивает модуль продаж под вашу организацию, — в одном месте. Права на изменение — в «Ролях и правах».")</p>
+
+<div class="sx-setup">
+    @foreach (var s in Sections.Where(s => s.Visible(CurrentAccess)))
+    {
+        <a class="sx-setup-card" href="@s.Href">
+            <b>@L(s.Title)</b>
+            <span>@L(s.Hint)</span>
+        </a>
+    }
+</div>
+
+<style>
+    .sx-setup { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+    .sx-setup-card { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px;
+        background: var(--surface-2); color: var(--text); text-decoration: none; min-width: 0; }
+    .sx-setup-card:hover { border-color: var(--accent-line); }
+    .sx-setup-card span { font-size: 12px; color: var(--muted); }
+</style>
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private sealed record Section(string Href, string Title, string Hint, Func<CurrentAccessDto, bool> Visible);
+
+    /// <summary>D1109: разделы настроек продаж. Модули добавляют сюда свои разделы строкой.</summary>
+
+    private static readonly Section[] Sections =
+    [
+        new("sales-agreements", ModuleUi.Text("Соглашения с покупателями"), ModuleUi.Text("Вид цены, скидка, срок, предоплата, отсрочка, кредитный лимит, склад по умолчанию"),
+            a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+        new("sales-agreements?tab=roles", ModuleUi.Text("Ограничения цен по ролям"), ModuleUi.Text("Максимальная скидка, нижняя граница цены, какие заказы видит роль"),
+            a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+        new("sales-discounts", ModuleUi.Text("Скидки и акции"), ModuleUi.Text("Акции на группы, скидки от количества и суммы, порядок применения и суммирование"),
+            a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+        new("catalog/settings?tab=prices", ModuleUi.Text("Виды цен"), ModuleUi.Text("Розница, опт, маркетплейс; основной вид цены"), a => a.Has(Permissions.PriceView)),
+        new("sales-order-stages", ModuleUi.Text("Этапы заказов и автосмена"), ModuleUi.Text("Свои этапы и правила «событие → этап»"), a => a.Has(Permissions.SalesView)),
+        new("sales-settings?section=channels", ModuleUi.Text("Каналы продаж"), ModuleUi.Text("Магазин, опт, маркетплейсы — для отчётов по каналам"), a => a.Has(Permissions.SalesView)),
+        new("sales-settings?section=projects", ModuleUi.Text("Проекты"), ModuleUi.Text("Группировка заказов по проектам"), a => a.Has(Permissions.SalesView)),
+        new("sales-settings?section=fields", ModuleUi.Text("Дополнительные поля заказа"), ModuleUi.Text("Свои поля: число, дата, флажок, справочник"), a => a.Has(Permissions.SalesView)),
+        new("legal-entities", ModuleUi.Text("Юрлица и счета"), ModuleUi.Text("Продавцы, реквизиты и расчётные счета для счетов и УПД"), a => a.Has(Permissions.OrganizationView)),
+    ];
+}

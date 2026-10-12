@@ -225,9 +225,10 @@ public static class SalesPricing
                 issues.Add(new PriceIssueDto(line.ItemId, item.Code, PriceIssueKind.BelowMinimum, decimal.Round(gross, 2), decimal.Round(floor, 2)));
             }
 
-            if (limits.MaxDiscountPercent is { } max && quotes!.Items.TryGetValue(line.ItemId, out var q) && q.Net is { } agreed && agreed > 0)
+            // Ручное снижение: цена строки ниже цены по прайсу и ручная скидка; скидки правил (соглашение, акции — D1106) не в счёт.
+            if (limits.MaxDiscountPercent is { } max && quotes!.Items.TryGetValue(line.ItemId, out var q) && q.Price is { } list && list > 0)
             {
-                var manual = decimal.Round((1 - line.NetPrice / agreed) * 100m, 2);
+                var manual = decimal.Round((1 - line.Price * (1 - line.ManualDiscountPercent / 100m) / list) * 100m, 2);
                 if (manual > max)
                 {
                     issues.Add(new PriceIssueDto(line.ItemId, item.Code, PriceIssueKind.DiscountTooHigh, manual, max));

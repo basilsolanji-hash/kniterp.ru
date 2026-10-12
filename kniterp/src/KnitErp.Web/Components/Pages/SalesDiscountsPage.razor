@@ -1,0 +1,310 @@
+@page "/sales-discounts"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesDiscountService Discounts
+
+<PageTitle>@L("Скидки и акции") — knitERP</PageTitle>
+<SalesStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rules is null || _settings is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Скидки и акции")</h1>
+        @if (CanEdit)
+        {
+            <button type="button" @onclick="OpenCreate" disabled="@_busy">@L("Новое правило")</button>
+        }
+    </div>
+    <p class="sx-lead">@L("Скидки в черновике заказа пересчитываются сами при каждом изменении строк; в подтверждённом — только кнопкой «Пересчитать скидки» с причиной. В каждой строке заказа видно, из чего сложилась скидка.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    <section class="panel" aria-label="@L("Порядок применения")">
+        <h2 style="margin: 0 0 6px">@L("Порядок применения")</h2>
+        <div class="sx-kv" style="margin: 0 0 6px">
+            <div>
+                <span>@L("Как сочетаются скидки")</span>
+                <span>
+                    <select @bind="_mode" disabled="@(!CanEdit)" aria-label="@L("Как сочетаются скидки")">
+                        <option value="@DiscountCombineMode.Sequential">@L("Одна за другой (по порядку)")</option>
+                        <option value="@DiscountCombineMode.Best">@L("Не суммировать — только наибольшая")</option>
+                    </select>
+                </span>
+            </div>
+        </div>
+        <ol class="sx-order">
+            @for (var i = 0; i < _order.Count; i++)
+            {
+                var index = i;
+                <li>
+                    <span>@L(SalesDiscountRule.KindName(_order[index]))</span>
+                    @if (CanEdit)
+                    {
+                        <button type="button" class="secondary" @onclick="() => Move(index, -1)" disabled="@(_busy || index == 0)" aria-label="@L("Выше: {0}", L(SalesDiscountRule.KindName(_order[index])))">↑</button>
+                        <button type="button" class="secondary" @onclick="() => Move(index, 1)" disabled="@(_busy || index == _order.Count - 1)" aria-label="@L("Ниже: {0}", L(SalesDiscountRule.KindName(_order[index])))">↓</button>
+                    }
+                </li>
+            }
+            <li class="muted">@L("Ручная скидка — всегда последней")</li>
+        </ol>
+        @if (CanEdit)
+        {
+            <button type="button" @onclick="SaveSettingsAsync" disabled="@_busy">@L("Сохранить порядок")</button>
+        }
+    </section>
+
+    @if (_form is not null && _options is not null)
+    {
+        <section class="panel" aria-label="@L("Правило скидки")">
+            <h2 style="margin: 0 0 8px">@(_editId is null ? L("Новое правило") : L("Правило: {0}", _form.Name))</h2>
+            <form class="sx-form" @onsubmit="SaveAsync">
+                <label>
+                    @L("Вид")
+                    <select @bind="_form.Kind">
+                        <option value="@DiscountKind.Promotion">@L("Акция")</option>
+                        <option value="@DiscountKind.Quantity">@L("По количеству")</option>
+                        <option value="@DiscountKind.OrderAmount">@L("По сумме заказа")</option>
+                    </select>
+                </label>
+                <label class="w2">@L("Название") <input @bind="_form.Name" maxlength="@SalesDiscountRule.NameMaxLength" required placeholder="@L("Осенняя распродажа свитеров")" /></label>
+                <label>@L("Скидка, %") <input @bind="_form.Percent" inputmode="decimal" required placeholder="10" /></label>
+                @if (_form.Kind == DiscountKind.OrderAmount)
+                {
+                    <label>@L("Сумма заказа от") <input @bind="_form.Amount" inputmode="decimal" required placeholder="50 000" /></label>
+                }
+                else
+                {
+                    @if (_form.Kind == DiscountKind.Quantity)
+                    {
+                        <label>@L("Количество в строке от") <input @bind="_form.Quantity" inputmode="decimal" required placeholder="10" /></label>
+                    }
+                    <label class="@(_form.Kind == DiscountKind.Promotion ? "w2" : null)">
+                        @L("Группа позиций")
+                        <select @bind="_form.Group">
+                            <option value="">@(_form.Kind == DiscountKind.Promotion ? L("— выберите —") : L("все позиции"))</option>
+                            @foreach (var g in _options.Groups)
+                            {
+                                <option value="@g.Id">@g.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+                <label>
+                    @L("Покупатели")
+                    <select @bind="_form.Tag">
+                        <option value="">@L("все покупатели")</option>
+                        @foreach (var t in _options.Tags)
+                        {
+                            <option value="@t.Id">@L("с тегом «{0}»", t.Name)</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Действует с") <input type="date" @bind="_form.From" required /></label>
+                <label>@L("Действует по") <input type="date" @bind="_form.To" /></label>
+                <div class="sx-actions">
+                    <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                    <button type="button" class="secondary" @onclick="() => _form = null" disabled="@_busy">@L("Отмена")</button>
+                </div>
+            </form>
+        </section>
+    }
+
+    <label class="inline"><input type="checkbox" checked="@_archived" @onchange="ToggleArchivedAsync" disabled="@_busy" /> @L("Показать архив")</label>
+    <div class="scroll">
+        <table class="sx-table compact">
+            <thead><tr><th>@L("Правило")</th><th>@L("Вид")</th><th class="num">@L("Скидка")</th><th>@L("Условие")</th><th>@L("Покупатели")</th><th>@L("Срок")</th><th>@L("Статус")</th><th></th></tr></thead>
+            <tbody>
+                @if (_rules.Count == 0)
+                {
+                    <tr><td colspan="8" class="muted">@L("Правил пока нет. Добавьте акцию на группу, скидку от количества или от суммы заказа.")</td></tr>
+                }
+                @foreach (var r in _rules)
+                {
+                    <tr class="@(r.IsArchived ? "archived" : null)">
+                        <td data-label="@L("Правило")">@r.Name</td>
+                        <td data-label="@L("Вид")">@L(r.KindName)</td>
+                        <td data-label="@L("Скидка")" class="num">@r.Percent.ToString("0.##")%</td>
+                        <td data-label="@L("Условие")">@Condition(r)</td>
+                        <td data-label="@L("Покупатели")">@(r.Tag is null ? L("все") : L("с тегом «{0}»", r.Tag))</td>
+                        <td data-label="@L("Срок")">@r.ValidFrom.ToString("dd.MM.yyyy") – @(r.ValidTo?.ToString("dd.MM.yyyy") ?? L("бессрочно"))</td>
+                        <td data-label="@L("Статус")"><span class="tag @(r.ValidToday ? "ok" : "")">@(r.IsArchived ? L("В архиве") : r.ValidToday ? L("Действует") : L("Не действует"))</span></td>
+                        <td class="sx-row-actions">
+                            @if (CanEdit)
+                            {
+                                @if (!r.IsArchived)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => OpenEdit(r)" disabled="@_busy" aria-label="@L("Изменить: {0}", r.Name)">@L("Изменить")</button>
+                                }
+                                <button type="button" class="secondary" @onclick="() => ArchiveAsync(r)" disabled="@_busy">@(r.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<style>
+    .sx-order { margin: 4px 0 8px; padding-left: 22px; display: flex; flex-direction: column; gap: 4px; }
+    .sx-order li > span { display: inline-block; min-width: 170px; }
+    .sx-order li button { padding: 0 8px; margin-left: 4px; }
+</style>
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<SalesDiscountRuleDto>? _rules;
+    private SalesDiscountSettingsDto? _settings;
+    private SalesDiscountOptionsDto? _options;
+    private List<DiscountKind> _order = [];
+    private DiscountCombineMode _mode;
+    private RuleForm? _form;
+    private long? _editId;
+    private byte[]? _editVersion;
+    private bool _archived;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private bool CanEdit => CurrentAccess.Has(Permissions.SalesDiscountEdit);
+
+    private sealed class RuleForm
+    {
+        public DiscountKind Kind { get; set; } = DiscountKind.Promotion;
+        public string Name { get; set; } = string.Empty;
+        public string? Percent { get; set; }
+        public string? Amount { get; set; }
+        public string? Quantity { get; set; }
+        public string Group { get; set; } = string.Empty;
+        public string Tag { get; set; } = string.Empty;
+        public DateTime From { get; set; } = DateTime.Today;
+        public DateTime? To { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+            _settings = await Discounts.SettingsAsync();
+            _order = [.. _settings.Order];
+            _mode = _settings.Mode;
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync() => _rules = await Discounts.ListAsync(_archived);
+
+    private void Move(int index, int delta) => (_order[index], _order[index + delta]) = (_order[index + delta], _order[index]);
+
+    private Task SaveSettingsAsync() => RunAsync(() => Discounts.SetSettingsAsync(_mode, _order), L("Порядок применения сохранён."));
+
+    private Task ToggleArchivedAsync(ChangeEventArgs e) => RunAsync(() =>
+    {
+        _archived = e.Value is true;
+        return Task.CompletedTask;
+    }, null);
+
+    private Task OpenCreate() => RunAsync(async () =>
+    {
+        _options ??= await Discounts.OptionsAsync();
+        _form = new RuleForm { From = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date };
+        _editId = null;
+    }, null);
+
+    private Task OpenEdit(SalesDiscountRuleDto r) => RunAsync(async () =>
+    {
+        _options ??= await Discounts.OptionsAsync();
+        _editId = r.Id;
+        _editVersion = r.RowVersion;
+        _form = new RuleForm
+        {
+            Kind = r.Kind, Name = r.Name, Percent = r.Percent.ToString("0.##", Ru), Amount = r.MinOrderAmount?.ToString("0.##", Ru),
+            Quantity = r.MinQuantity?.ToString("0.###", Ru), Group = r.ItemGroupId?.ToString() ?? string.Empty, Tag = r.TagId?.ToString() ?? string.Empty,
+            From = r.ValidFrom.ToDateTime(TimeOnly.MinValue), To = r.ValidTo?.ToDateTime(TimeOnly.MinValue),
+        };
+    }, null);
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var f = _form!;
+        var terms = new SalesDiscountRuleTerms(f.Kind, f.Name, Dec(f.Percent) ?? 0, Dec(f.Amount), Dec(f.Quantity), Id(f.Group), Id(f.Tag),
+            DateOnly.FromDateTime(f.From), f.To is { } to ? DateOnly.FromDateTime(to) : null);
+        if (_editId is { } id)
+        {
+            await Discounts.UpdateAsync(id, terms, _editVersion!);
+        }
+        else
+        {
+            await Discounts.CreateAsync(terms);
+        }
+
+        _form = null;
+    }, L("Правило сохранено."));
+
+    private Task ArchiveAsync(SalesDiscountRuleDto r) =>
+        RunAsync(() => Discounts.SetArchivedAsync(r.Id, !r.IsArchived, r.RowVersion), r.IsArchived ? L("Правило снова действует.") : L("Правило в архиве."));
+
+    private string Condition(SalesDiscountRuleDto r) => r.Kind switch
+    {
+        DiscountKind.OrderAmount => L("заказ от {0}", Amounts.Format(r.MinOrderAmount ?? 0)),
+        DiscountKind.Quantity => L("от {0} в строке", Quantities.Format(r.MinQuantity ?? 0)) + (r.ItemGroup is null ? "" : $" · {r.ItemGroup}"),
+        _ => r.ItemGroup ?? "—",
+    };
+
+    private static readonly System.Globalization.CultureInfo Ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+
+    private static long? Id(string? value) => long.TryParse(value, out var id) ? id : null;
+
+    private static decimal? Dec(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null
+        : Quantities.TryParse(text, out var value) ? value
+        : throw new BusinessRuleException("sales.number", L("Укажите число, например 1 220,50."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _isError = false;
+        try
+        {
+            await action();
+            if (success is not null)
+            {
+                _message = success;
+            }
+
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
