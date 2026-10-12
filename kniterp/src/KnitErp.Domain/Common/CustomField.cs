@@ -20,6 +20,15 @@ public enum CustomFieldType : byte
 
     /// <summary>Значение из своего справочника пользователя (D79); хранится номер записи.</summary>
     Catalog = 5,
+
+    /// <summary>D328: многострочный текст (состав, уход за изделием) — до 1000 символов.</summary>
+    LongText = 6,
+
+    /// <summary>D328: ссылка — только http(s) (страница товара, фото у поставщика).</summary>
+    Link = 7,
+
+    /// <summary>D328: контрагент организации (производитель, поставщик); хранится номер контрагента.</summary>
+    Counterparty = 8,
 }
 
 /// <summary>
@@ -55,7 +64,13 @@ public sealed class CustomFieldDefinition
     {
         if (!Enum.IsDefined(type) || !Enum.IsDefined(target))
         {
-            throw new BusinessRuleException("custom_field.type", "Тип поля — текст, число, дата, флажок или справочник.");
+            throw new BusinessRuleException("custom_field.type", "Тип поля — текст, многострочный текст, число, дата, флажок, ссылка, справочник или контрагент.");
+        }
+
+        // D328: новые типы — пока только у номенклатуры (карточка заказа покупателя их не показывает; сессия № 1 добавит).
+        if (target == CustomFieldTarget.SalesOrder && type > CustomFieldType.Catalog)
+        {
+            throw new BusinessRuleException("custom_field.type", "У заказа покупателя тип поля — текст, число, дата, флажок или справочник.");
         }
 
         if ((type == CustomFieldType.Catalog) != (catalogId is not null))
@@ -105,6 +120,15 @@ public sealed class CustomFieldDefinition
                 return date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             case CustomFieldType.Flag:
                 return text is "true" or "1" or "on" or "да" ? "true" : null;
+            case CustomFieldType.Link:
+                // Только абсолютная http(s)-ссылка: «javascript:» и прочие схемы в поле не попадут.
+                return text.Length <= ValueMaxLength && Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+                    ? uri.AbsoluteUri
+                    : throw new BusinessRuleException("custom_field.link", $"Поле «{Name}»: укажите ссылку, начинающуюся с https://.");
+            case CustomFieldType.Counterparty:
+                return long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var counterparty) && counterparty > 0
+                    ? counterparty.ToString(CultureInfo.InvariantCulture)
+                    : throw new BusinessRuleException("custom_field.counterparty", $"Поле «{Name}»: выберите контрагента.");
             case CustomFieldType.Catalog:
                 // Номер записи справочника; что запись из нужного справочника и не в архиве — проверяет сервис.
                 return long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var entry) && entry > 0
@@ -122,6 +146,9 @@ public sealed class CustomFieldDefinition
         CustomFieldType.Date => "Дата",
         CustomFieldType.Flag => "Флажок",
         CustomFieldType.Catalog => "Справочник",
+        CustomFieldType.LongText => "Многострочный текст",
+        CustomFieldType.Link => "Ссылка",
+        CustomFieldType.Counterparty => "Контрагент",
         _ => type.ToString(),
     };
 }

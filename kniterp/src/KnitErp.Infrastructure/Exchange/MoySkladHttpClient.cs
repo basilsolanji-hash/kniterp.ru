@@ -30,7 +30,8 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
     {
         client.BaseAddress = new Uri(MoySkladEntities.BaseUrl);
         client.Timeout = TimeSpan.FromSeconds(60);
-        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        // Значение заголовка — как в документации JSON API 1.2 («application/json;charset=utf-8»).
+        client.DefaultRequestHeaders.Accept.Add(MediaTypeWithQualityHeaderValue.Parse("application/json;charset=utf-8"));
         client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
         client.DefaultRequestHeaders.UserAgent.ParseAdd("knitERP/1.0");
     }
@@ -167,7 +168,8 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
 
                 if (status is < 200 or >= 300)
                 {
-                    throw new MoySkladException($"ответ {status}", status);
+                    // Ответ пользователю: раздел, код и текст ошибки МойСклад (например, «код 1062: …»), без токена и без адреса аккаунта.
+                    throw new MoySkladException($"{EntityTitle(entity)}: ответ {status}{await ErrorTextAsync(response, ct)}", status);
                 }
 
                 if (response.Content.Headers.ContentLength > MaxResponseBytes)
@@ -195,6 +197,45 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
             }
         }
     }
+
+    /// <summary>Текст ошибки из тела ответа МойСклад ({"errors":[{"error":"…","code":1062}]}) — до 300 символов, без управляющих.</summary>
+    private static async Task<string> ErrorTextAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            await using var limited = new LimitedStream(stream, 64 * 1024);
+            using var doc = await JsonDocument.ParseAsync(limited, cancellationToken: ct);
+            if (!doc.RootElement.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array || errors.GetArrayLength() == 0)
+            {
+                return string.Empty;
+            }
+
+            var first = errors[0];
+            var code = first.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.Number ? $"код {c.GetInt32()}: " : "";
+            var text = first.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() ?? "" : "";
+            var clean = new string((code + text).Where(ch => !char.IsControl(ch)).ToArray()).Trim();
+            return clean.Length == 0 ? string.Empty : " (" + (clean.Length > 300 ? clean[..300] + "…" : clean) + ")";
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or MoySkladException or HttpRequestException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string EntityTitle(string entity) => entity switch
+    {
+        MoySkladEntities.Organization => "проверка доступа",
+        MoySkladEntities.Uom => "единицы измерения",
+        MoySkladEntities.Country => "страны",
+        MoySkladEntities.Folder => "группы",
+        MoySkladEntities.Product => "товары",
+        MoySkladEntities.Service => "услуги",
+        MoySkladEntities.Bundle => "комплекты",
+        MoySkladEntities.Variant => "модификации",
+        MoySkladEntities.PriceTypes => "виды цен",
+        _ => entity,
+    };
 
     private static TimeSpan Backoff(int attempt) => TimeSpan.FromSeconds(Math.Pow(2, attempt));
 
