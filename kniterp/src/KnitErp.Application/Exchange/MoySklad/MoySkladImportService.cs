@@ -27,6 +27,11 @@ public sealed record PriceExportDto(int Checked, int ToChange, int Sent, IReadOn
 /// <summary>D330: проверка связи по разделу — ответил ли МойСклад и сколько записей (или текст ошибки).</summary>
 public sealed record MoySkladProbeDto(string Section, bool Ok, string Detail);
 
+/// <summary>D333: расхождение остатка позиции knitERP и МойСклад (по всем складам).</summary>
+public sealed record StockDiffDto(long ItemId, string Code, string Name, decimal KnitErp, decimal MoySklad);
+
+public sealed record StockCompareDto(int Compared, int Different, IReadOnlyList<StockDiffDto> Differences);
+
 public sealed record MoySkladPreviewDto(IReadOnlyList<PreviewLineDto> Lines, IReadOnlyList<string> Conflicts, bool Truncated);
 
 public sealed record ImportIssueDto(string Entity, string? Code, string? Name, bool IsError, string Text);
@@ -86,6 +91,7 @@ public sealed class MoySkladImportService(
             ("Услуги", c => Size(MoySkladEntities.Service, null, c)),
             ("Модификации", c => Size(MoySkladEntities.Variant, null, c)),
             ("Комплекты", c => Size(MoySkladEntities.Bundle, "components.assortment", c)),
+            ("Остатки", async c => { var p = await client.StockAsync(t, 0, 1, c); return $"записей: {p.Meta?.Size ?? p.Rows?.Count ?? 0}"; }),
         };
         foreach (var (title, call) in sections)
         {
@@ -127,6 +133,65 @@ public sealed class MoySkladImportService(
             var page = await client.ListAsync(t, entity, 0, 1, expand, c);
             return $"записей: {page.Meta?.Size ?? page.Rows?.Count ?? 0}";
         }
+    }
+
+    // ---------- Сверка остатков (D333) ----------
+
+    public const int MaxStockDifferences = 500;
+
+    /// <summary>
+    /// Остатки связанных позиций (товары и модификации): сумма движений knitERP по действующим складам против отчёта МойСклад
+    /// «Остатки» по всем складам. Только чтение; расхождения — от большего к меньшему, до 500 строк.
+    /// </summary>
+    public async Task<StockCompareDto> StockCompareAsync(CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        await guard.DemandAsync(Permissions.WarehouseReportView, ct);
+        var org = ctx.OrganizationId;
+        var token = await TokenAsync(org, ct);
+        var links = await db.ExternalLinks.AsNoTracking().Where(l => l.OrganizationId == org && l.System == Sys && l.ObjectType == ExternalObjectType.Item)
+            .ToDictionaryAsync(l => l.ExternalId, l => l.LocalId, StringComparer.Ordinal, ct);
+        var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == org && !i.IsArchived && i.Type != ItemType.Service && i.Type != ItemType.Bundle)
+            .Select(i => new { i.Id, i.Code, i.Name }).ToDictionaryAsync(i => i.Id, ct);
+        var warehouses = await db.Warehouses.AsNoTracking().Where(w => w.OrganizationId == org && !w.IsArchived).Select(w => w.Id).ToListAsync(ct);
+        var local = await db.StockMovements.AsNoTracking().Where(m => m.OrganizationId == org && warehouses.Contains(m.WarehouseId))
+            .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+
+        var remote = new Dictionary<long, decimal>();
+        try
+        {
+            for (var offset = 0; offset < 100_000; offset += MoySkladEntities.MaxBatch)
+            {
+                var rows = (await client.StockAsync(token, offset, MoySkladEntities.MaxBatch, ct)).Rows ?? [];
+                foreach (var row in rows)
+                {
+                    var id = row.Meta?.Href is { } href ? MoySkladIds.FromHref(href) : null;
+                    if (id is not null && links.TryGetValue(id, out var itemId) && items.ContainsKey(itemId))
+                    {
+                        remote[itemId] = remote.GetValueOrDefault(itemId) + (row.Stock ?? 0);
+                    }
+                }
+
+                if (rows.Count < MoySkladEntities.MaxBatch)
+                {
+                    break;
+                }
+            }
+        }
+        catch (MoySkladException ex)
+        {
+            throw new BusinessRuleException("exchange.moysklad.check", $"МойСклад не ответил: {ex.Message}");
+        }
+
+        // Сравниваются связанные позиции knitERP (кроме услуг и комплектов): нет в отчёте МойСклад — там ноль.
+        var compared = links.Values.Where(items.ContainsKey).Distinct().ToList();
+        var diffs = compared
+            .Select(id => (Id: id, Local: local.GetValueOrDefault(id), Remote: remote.GetValueOrDefault(id)))
+            .Where(x => x.Local != x.Remote)
+            .OrderByDescending(x => Math.Abs(x.Local - x.Remote)).ThenBy(x => items[x.Id].Code)
+            .ToList();
+        return new StockCompareDto(compared.Count, diffs.Count,
+            diffs.Take(MaxStockDifferences).Select(x => new StockDiffDto(x.Id, items[x.Id].Code, items[x.Id].Name, x.Local, x.Remote)).ToList());
     }
 
     // ---------- Выгрузка цен в МойСклад (D327) ----------

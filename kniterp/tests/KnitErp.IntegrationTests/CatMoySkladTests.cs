@@ -79,6 +79,16 @@ public sealed class FakeMoySkladClient : IMoySkladClient
     public Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<MsPriceType>>(PriceTypes);
 
+    /// <summary>Отчёт «Остатки» (D333): строки с meta.href позиции и stock.</summary>
+    public List<MsRow> Stock { get; } = [];
+
+    public Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default)
+    {
+        Assert.Equal(Token, token);
+        Assert.InRange(limit, 1, MoySkladEntities.MaxBatch);
+        return Task.FromResult(new MsPage<MsRow>(new MsMeta(null, null, Stock.Count, limit, offset), Stock.Skip(offset).Take(limit).ToList()));
+    }
+
     /// <summary>Отправленные изменения цен (D327) — и применены к строкам, как сделал бы МойСклад.</summary>
     public List<(string Entity, MsPriceUpdate Update)> PriceUpdates { get; } = [];
 
@@ -387,7 +397,7 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         await using var s = host.As(_user, _org);
         var ms = Service(s, fake);
         var probe = await ms.ProbeAsync("Bearer " + FakeMoySkladClient.Token);
-        Assert.Equal(9, probe.Count);
+        Assert.Equal(10, probe.Count);
         Assert.All(probe.Where(p => p.Section != "Комплекты"), p => Assert.True(p.Ok, p.Section + ": " + p.Detail));
         var bundles = probe.Single(p => p.Section == "Комплекты");
         Assert.False(bundles.Ok);
@@ -484,6 +494,43 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         Assert.False(fields.ContainsKey("Фото"));
         Assert.Null(fields["Плохая ссылка"].Value);
         Assert.Contains(await c.Nomenclature.CatalogsAsync(), x => x.Name == "Сезон");
+    }
+
+    [SqlFact]
+    public async Task Stock_compare_shows_linked_items_with_different_balances()
+    {
+        // D333: сверка остатков — только связанные позиции, отсутствующая в отчёте МойСклад — ноль; ничего не записывает.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        await using var s = host.As(_user, _org);
+        var ms = Service(s, fake);
+        await ms.ConnectAsync(FakeMoySkladClient.Token);
+        await ms.StartAsync();
+        Assert.True(await ms.ProcessNextAsync());
+
+        // В knitERP: 5 шапок на складе (поступление).
+        var hat = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1"))).Items.Single(i => i.ParentItemId is null).Id;
+        var store = await s.Warehouses.CreateWarehouseAsync("Склад", null);
+        await using (var db = host.NewDb())
+        {
+            var reason = await db.OperationReasons.Where(r => r.OrganizationId == _org && r.Kind == KnitErp.Domain.Warehousing.StockOperationKind.Receipt)
+                .Select(r => (long?)r.Id).FirstAsync();
+            var doc = await s.Documents.CreateAsync(KnitErp.Domain.Warehousing.StockOperationKind.Receipt,
+                new KnitErp.Domain.Warehousing.StockDocumentHeader(store, null, null, reason, new DateOnly(2026, 10, 1), null));
+            await s.Documents.SetLineAsync(doc, hat, 5, (await s.Documents.GetAsync(doc)).RowVersion);
+            await s.Documents.PostAsync(doc, (await s.Documents.GetAsync(doc)).RowVersion);
+        }
+
+        // В МойСклад: шапок 3 (по двум строкам отчёта не бывает — но сумма на всякий случай), шарфов 0, модификации нет в отчёте.
+        static MsRow R(string entity, string id, decimal stock) => new() { Meta = new MsMeta($"https://api.moysklad.ru/api/remap/1.2/{entity}/{id}?expand=supplier", "product", null, null, null), Stock = stock };
+        fake.Stock.AddRange([R("entity/product", "p-hat", 3), R("entity/product", "p-scarf", 0), R("entity/product", "чужой-id", 100)]);
+        var result = await ms.StockCompareAsync();
+        var diff = result.Differences.Single();
+        Assert.Equal((hat, 5m, 3m), (diff.ItemId, diff.KnitErp, diff.MoySklad));
+        Assert.Equal(1, result.Different);
+        Assert.True(result.Compared >= 3); // шапка, шарф, модификация
+        Assert.Empty(fake.PriceUpdates);
     }
 
     [SqlFact]

@@ -62,6 +62,9 @@ public sealed record MsRow
 
     /// <summary>D332: доп. поля объекта МойСклад (type: string, text, long, double, boolean, time, link, customentity, counterparty…).</summary>
     public IReadOnlyList<MsAttribute>? Attributes { get; init; }
+
+    /// <summary>D333: остаток в отчёте report/stock/all (по всем складам).</summary>
+    public decimal? Stock { get; init; }
 }
 
 public sealed record MsPriceType(string Id, string? Name, string? ExternalCode);
@@ -125,6 +128,9 @@ public interface IMoySkladClient
     Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default);
 
     /// <summary>D327: массовое изменение цен (POST entity/… массивом, до 1000 объектов). Возвращает изменённые объекты (id, updated).</summary>
+    /// <summary>D333: страница отчёта об остатках по всем складам (все позиции, и с нулевым остатком).</summary>
+    Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default);
+
     Task<IReadOnlyList<MsRow>> UpdatePricesAsync(string token, string entity, IReadOnlyList<MsPriceUpdate> updates, CancellationToken ct = default);
 }
 
@@ -141,6 +147,9 @@ public static class MoySkladEntities
     public const string Variant = "entity/variant";
     public const string PriceTypes = "context/companysettings/pricetype";
 
+    /// <summary>D333: отчёт «Остатки» по всем складам — только чтение, для сверки.</summary>
+    public const string StockAll = "report/stock/all";
+
     /// <summary>Сущности, в которые knitERP может записывать (только цены, D327).</summary>
     public static readonly IReadOnlySet<string> Writable = new HashSet<string>(StringComparer.Ordinal) { Product, Service, Bundle, Variant };
 
@@ -150,5 +159,5 @@ public static class MoySkladEntities
     public static bool IsSafeId(string? id) => id is { Length: > 0 and <= 64 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
 
     public static readonly IReadOnlySet<string> Allowed =
-        new HashSet<string>(StringComparer.Ordinal) { Organization, Uom, Country, Folder, Product, Service, Bundle, Variant, PriceTypes };
+        new HashSet<string>(StringComparer.Ordinal) { Organization, Uom, Country, Folder, Product, Service, Bundle, Variant, PriceTypes, StockAll };
 }

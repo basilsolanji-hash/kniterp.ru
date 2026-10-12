@@ -2976,5 +2976,12 @@
   "Результат": "Natija",
   "Страны": "Mamlakatlar",
   "Шаг диапазона — не меньше 0.01, например «42-56/2».": "Oraliq qadami — 0.01 dan kam emas, masalan «42-56/2».",
-  "«{0}»: контрагента «{1}» нет в knitERP — значение не перенесено.": "«{0}»: knitERPda «{1}» kontragenti yo‘q — qiymat ko‘chirilmadi."
+  "«{0}»: контрагента «{1}» нет в knitERP — значение не перенесено.": "«{0}»: knitERPda «{1}» kontragenti yo‘q — qiymat ko‘chirilmadi.",
+  "МойСклад": "MoySklad",
+  "Остатки связанных позиций: сумма по действующим складам knitERP и отчёт «Остатки» МойСклад по всем складам. Только чтение — ничего не меняется ни там, ни здесь.": "Bog‘langan pozitsiyalar qoldiqlari: knitERP faol omborlari bo‘yicha jami va barcha omborlar bo‘yicha MoySklad «Qoldiqlar» hisoboti. Faqat o‘qish — hech qayerda hech narsa o‘zgarmaydi.",
+  "Остатки совпадают (позиций: {0}).": "Qoldiqlar mos (pozitsiyalar: {0}).",
+  "Показаны {0} самых больших расхождений.": "Eng katta {0} ta farq ko‘rsatilgan.",
+  "Расходятся остатки {0} из {1} позиций.": "{1} ta pozitsiyadan {0} tasining qoldig‘i farq qiladi.",
+  "Сверить остатки": "Qoldiqlarni solishtirish",
+  "Сверка остатков с МойСклад": "MoySklad bilan qoldiqlarni solishtirish"
 }
