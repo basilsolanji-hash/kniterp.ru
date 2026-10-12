@@ -96,17 +96,16 @@ await item.fill('СВ-' + sfx); await item.blur();
 await page.waitForSelector('.sx-price-hint');
 const priceValue = await page.locator('label:has-text("Цена с НДС") input').inputValue();
 if (priceValue !== '800') throw new Error('подставлена цена ' + priceValue);
-if ((await page.locator('label:has-text("Скидка, %") input').first().inputValue()) !== '5') throw new Error('нет скидки соглашения');
-await page.locator('label:has-text("Количество") input').fill('10');
+if (!(await plainText(page.locator('.sx-price-hint'))).includes('скидка 5%')) throw new Error('нет скидки соглашения в подсказке');
+await page.locator('label:has-text("Количество") input').fill('5');
 await shot('s1-04-order-autoprice');
 await page.getByRole('button', { name: 'Добавить или изменить' }).click();
-await page.waitForSelector('td:has-text("7 600,00")');
-ok('цена 800 и скидка 5 % подставлены по соглашению, сумма 7 600');
+await page.waitForSelector('td:has-text("3 800,00")');
+ok('цена 800 и скидка 5 % подставлены по соглашению, сумма 3 800');
 
 // Цена 650 ниже минимальной 700 — предупреждение и подтверждение с причиной (у Владельца есть право).
 await page.getByRole('button', { name: 'Изменить: СВ-' + sfx }).click();
 await page.locator('label:has-text("Цена с НДС") input').fill('650');
-await page.locator('label:has-text("Скидка, %") input').first().fill('');
 await page.getByRole('button', { name: 'Добавить или изменить' }).click();
 await page.waitForSelector('.sx-issues');
 if (!(await plainText(page.locator('.sx-issues'))).includes('700')) throw new Error('нет предупреждения о минимальной цене');

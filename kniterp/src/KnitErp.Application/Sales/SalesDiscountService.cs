@@ -16,6 +16,8 @@ public sealed record SalesDiscountRuleDto(
     public string KindName => SalesDiscountRule.KindName(Kind);
 }
 
+public sealed record SalesDiscountOptionsDto(IReadOnlyList<KnitErp.Application.Structure.LookupDto> Groups, IReadOnlyList<KnitErp.Application.Structure.LookupDto> Tags);
+
 public sealed record SalesDiscountSettingsDto(DiscountCombineMode Mode, IReadOnlyList<DiscountKind> Order, byte[]? RowVersion);
 
 /// <summary>
@@ -38,6 +40,29 @@ public sealed class SalesDiscountService(IKnitErpDbContext db, IAccessGuard guar
         return rules.Select(r => new SalesDiscountRuleDto(r.Id, r.Kind, r.Name, r.Percent, r.MinOrderAmount, r.MinQuantity, r.ItemGroupId,
             r.ItemGroupId is { } g ? groups.GetValueOrDefault(g) : null, r.TagId, r.TagId is { } t ? tags.GetValueOrDefault(t) : null,
             r.ValidFrom, r.ValidTo, r.IsArchived, r.IsValidOn(today), r.RowVersion)).ToList();
+    }
+
+    /// <summary>Группы позиций (с путём «Свитеры / Зима») и теги — для формы правила.</summary>
+    public async Task<SalesDiscountOptionsDto> OptionsAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
+        var groups = await db.ItemGroups.AsNoTracking().Where(g => g.OrganizationId == ctx.OrganizationId && !g.IsArchived)
+            .Select(g => new { g.Id, g.ParentId, g.Name }).ToListAsync(ct);
+        var byId = groups.ToDictionary(g => g.Id);
+        string Path(long id)
+        {
+            var parts = new List<string>();
+            for (long? g = id; g is { } gid && byId.TryGetValue(gid, out var x) && parts.Count < 6; g = x.ParentId)
+            {
+                parts.Insert(0, x.Name);
+            }
+
+            return string.Join(" / ", parts);
+        }
+
+        var tags = await db.Tags.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId && !t.IsArchived).OrderBy(t => t.Name)
+            .Select(t => new KnitErp.Application.Structure.LookupDto(t.Id, t.Name)).ToListAsync(ct);
+        return new SalesDiscountOptionsDto(groups.Select(g => new KnitErp.Application.Structure.LookupDto(g.Id, Path(g.Id))).OrderBy(g => g.Name).ToList(), tags);
     }
 
     public async Task<long> CreateAsync(SalesDiscountRuleTerms terms, CancellationToken ct = default)

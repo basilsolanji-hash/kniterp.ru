@@ -255,6 +255,10 @@ else
     [SupplyParameterFromQuery(Name = "new")]
     public string? New { get; set; }
 
+    /// <summary>D1109: ссылка из «Настроек продаж» сразу на вкладку ограничений ролей.</summary>
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? Tab { get; set; }
+
     private enum Section
     {
         Agreements,
@@ -309,6 +313,7 @@ else
     {
         try
         {
+            _section = Tab == "roles" ? Section.Roles : Section.Agreements;
             await LoadAsync();
             if (New is not null && CanEdit)
             {

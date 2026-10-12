@@ -312,7 +312,7 @@ else
                     }
                 </select>
             </label>
-            <label>@L("Скидка, %") <input @bind="_discountText" inputmode="decimal" size="5" placeholder="0" /></label>
+            <label title="@L("Ручная скидка — сверх скидок соглашения и акций")">@L("Ручная скидка, %") <input @bind="_discountText" inputmode="decimal" size="5" placeholder="0" /></label>
             <button type="submit" disabled="@_busy">@L("Добавить или изменить")</button>
             @if (_priceHint is not null)
             {
@@ -374,7 +374,9 @@ else
                         {
                             <td class="num">@(l.Price?.ToString("#,0.00##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")))</td>
                             <td class="num">@Amounts.Vat(l.VatPercent)</td>
-                            <td class="num">@(l.DiscountPercent > 0 ? $"{l.DiscountPercent:0.##}%" : "—")</td>
+                            <td class="num" title="@l.DiscountSources">@(l.DiscountPercent > 0 ? $"{l.DiscountPercent:0.##}%" : "—")
+                                @if (l.DiscountSources is not null) { <span class="sx-sub sx-discount-src">@l.DiscountSources</span> }
+                            </td>
                             <td class="num">@Amounts.Format(l.Amount)</td>
                         }
                         @if (!draft)
@@ -423,6 +425,15 @@ else
                 <span class="@(_order.Debt > 0 ? "bad" : "")">@L("Долг покупателя:") <b>@Amounts.Format(_order.Debt)</b></span>
             }
         </div>
+    }
+
+    @if (_order.CanSeePrices && _order.Status == SalesOrderStatus.Confirmed && _order.Documents.Count == 0 && CurrentAccess.Has(Permissions.SalesDiscountEdit))
+    {
+        @* D1106: скидки подтверждённого заказа — только явным действием с причиной. *@
+        <form class="inline-form" @onsubmit="ReapplyDiscountsAsync">
+            <label>@L("Причина пересчёта скидок") <input @bind="_reapplyReason" maxlength="@SalesOrder.OverrideReasonMaxLength" size="40" placeholder="@L("Клиент попал в акцию по договорённости")" /></label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Пересчитать скидки")</button>
+        </form>
     }
 
     @if (editable && _order.PriceIssues is { Count: > 0 } issues)
@@ -806,9 +817,9 @@ else
                 if (string.IsNullOrWhiteSpace(_priceText))
                 {
                     _priceText = Amounts.Input(quoted);
-                    _discountText = q.DiscountPercent > 0 ? q.DiscountPercent.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) : string.Empty;
                 }
 
+                // D1106: скидки соглашения и акций применяются сами; в поле «Скидка» — только ручная.
                 _priceHint = L("{0}: {1}", q.PriceType ?? "", L(PriceQuoteDto.SourceName(q.Source))) + (q.DiscountPercent > 0 ? L(", скидка {0}%", q.DiscountPercent.ToString("0.##")) : "");
             }
             else if (item.Price is { } price && string.IsNullOrWhiteSpace(_priceText))
@@ -834,7 +845,7 @@ else
         _qtyText = Quantities.Format(l.Quantity);
         _priceText = l.Price?.ToString("0.####", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) ?? string.Empty;
         _vatText = l.VatPercent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
-        _discountText = l.DiscountPercent > 0 ? l.DiscountPercent.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) : string.Empty;
+        _discountText = l.ManualDiscountPercent > 0 ? l.ManualDiscountPercent.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) : string.Empty;
     }
 
     private Task SetOrderDiscountAsync() => RunAsync(async () =>
@@ -865,6 +876,15 @@ else
     {
         var changed = await Sales.RepriceOrderAsync(Id, _order!.RowVersion);
         _message = changed == 0 ? L("Цены уже актуальны.") : L("Цены пересчитаны: {0} строк.", changed);
+    }, null);
+
+    private string? _reapplyReason;
+
+    private Task ReapplyDiscountsAsync() => RunAsync(async () =>
+    {
+        var changed = await Sales.ReapplyDiscountsAsync(Id, _reapplyReason, _order!.RowVersion);
+        _reapplyReason = null;
+        _message = changed == 0 ? L("Скидки уже актуальны.") : L("Скидки пересчитаны: {0} строк.", changed);
     }, null);
 
     private Task ConfirmOverrideAsync() => RunAsync(async () =>
