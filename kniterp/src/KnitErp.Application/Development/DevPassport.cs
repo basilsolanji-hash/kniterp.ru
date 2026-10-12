@@ -14,14 +14,14 @@ public sealed record DevPassportDetail(string Name, int Quantity, string? Machin
 public sealed record DevPassportOperation(int Seq, string Name, string? Note, decimal? NormMinutes);
 
 /// <summary>
-/// Технический паспорт изделия (D725, ТЗ §9): эскиз, общие сведения, палитра и пряжа, детали с заправкой, табель мер, обработка и ВТО,
+/// Технический паспорт изделия (D725, ТЗ §9): эскиз, общие сведения, палитра и пряжа, детали с заправкой, размеры деталей, табель мер, обработка и ВТО,
 /// маркировка и уход, упаковка. Сумм нет — паспорт видят все с правом «Разработка: просмотр».
 /// </summary>
 public sealed record DevPassportDto(
     string Organization, DateOnly PrintedOn, string Number, string Name, int VersionNo, string Stage, string Category, string Audience, bool ChildSafety,
     string? Collection, string? Customer, string? Description, string? SizeRange, string? ColorRange, string? Composition, string? Labeling, string? Care,
     string? PackBox, byte[]? Sketch, IReadOnlyList<DevColorDto> Palette, IReadOnlyList<DevPassportDetail> Details, IReadOnlyList<DevSizeDto> Sizes,
-    IReadOnlyList<DevMeasureDto> Measures, IReadOnlyList<DevPassportOperation> Operations);
+    IReadOnlyList<DevMeasureDto> Measures, IReadOnlyList<DevPassportOperation> Operations, IReadOnlyList<DevDetailSizeRowDto>? DetailSizes = null);
 
 /// <summary>PDF технического паспорта (D725) — тем же механизмом, что УПД и счёт (PDFsharp/MigraDoc, встроенный шрифт).</summary>
 public interface IDevPassportRenderer
@@ -69,7 +69,7 @@ public sealed class DevPassportService(IKnitErpDbContext db, IAccessGuard guard,
         return new DevPassportDto(organization, await DevTechService.LocalTodayAsync(db, org, clock.UtcNow, ct), m.Number, m.Name, m.VersionNo,
             DevStages.Name(m.Stage), DevModel.CategoryName(m.Category), DevModel.AudienceName(m.Audience), m.ChildSafety, m.CollectionName, m.CustomerName,
             b.Description, b.SizeRange, b.ColorRange, b.Composition, b.Labeling, b.Care, sizes.PackBox, sketch, palette, details, sizes.Sizes, sizes.Measures,
-            operations);
+            operations, sizes.Details);
     }
 
     /// <summary>PDF и имя файла: «pasport-М-00001.pdf».</summary>

@@ -220,6 +220,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             Assert.Equal(new[] { 14m, 16m, 18m, 20m }, passport.Sizes.Select(z => passport.Measures.Single().Values[z.Id]));
             Assert.Equal(new[] { "Вязание", "Убрать боковые нитки", "Упаковка в короба" }, passport.Operations.Select(o => o.Name));
             Assert.Equal("40 × 30 × 30 см", passport.PackBox);
+            Assert.Equal(22.5m, passport.DetailSizes!.Single(d => d.DetailId == front).Values[passport.Sizes[3].Id].OffMachine);
             var (fileName, pdf) = await k.Passport.PdfAsync(modelId, new KnitErp.Infrastructure.Documents.DevPassportPdfRenderer());
             Assert.StartsWith("pasport-", fileName);
             Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));

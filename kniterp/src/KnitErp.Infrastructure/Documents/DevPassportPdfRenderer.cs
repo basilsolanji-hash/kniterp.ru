@@ -139,6 +139,24 @@ public sealed class DevPassportPdfRenderer : IDevPassportRenderer
             }
         }
 
+        // Размеры деталей конструктора: длина с машины, после ВТО, ширина — по размерам сетки; пустые строки не печатаются.
+        var detailRows = (p.DetailSizes ?? []).SelectMany(d => new (string Label, Func<(decimal? Off, decimal? After, decimal? Width), decimal?> Get)[]
+            {
+                ($"{d.DetailName}: длина с машины", v => v.Off), ($"{d.DetailName}: длина после ВТО", v => v.After), ($"{d.DetailName}: ширина", v => v.Width),
+            }.Select(x => (x.Label, Values: p.Sizes.Select(s => d.Values.TryGetValue(s.Id, out var v) ? x.Get(v) : null).ToList())))
+            .Where(r => r.Values.Any(v => v is not null)).ToList();
+        if (detailRows.Count > 0 && p.Sizes.Count > 0)
+        {
+            Heading(sec, "Размеры деталей, см");
+            var sizeWidth = (PageWidthMm - 68) / p.Sizes.Count;
+            var t = Grid(sec, [68, .. p.Sizes.Select(_ => sizeWidth)]);
+            Header(t, [.. new[] { "Деталь и размер" }.Concat(p.Sizes.Select(s => s.IsBase ? s.Name + "*" : s.Name))]);
+            foreach (var (label, values) in detailRows)
+            {
+                Row(t, [label, .. values.Select(v => v is { } x ? x.ToString("0.#", Ru) : "—")]);
+            }
+        }
+
         if (p.Measures.Count > 0 && p.Sizes.Count > 0)
         {
             Heading(sec, "Табель мер, см");

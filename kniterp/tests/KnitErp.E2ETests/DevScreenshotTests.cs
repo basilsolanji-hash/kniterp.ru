@@ -277,7 +277,7 @@ public sealed class DevScreenshotTests(HrAppFixture app) : IClassFixture<HrAppFi
             await Save(page, "Записать решение", "Решение записано");
             await page.GetByRole(AriaRole.Button, new() { Name = "Передать заказчику", Exact = true }).First.ClickAsync();
             await page.GetByLabel("Кому").FillAsync("ООО «Северный трикотаж», Иванова А.");
-            await page.GetByLabel("Комментарий").Last.FillAsync("для выставки");
+            await page.Locator("form", new() { HasText = "Вернуть до" }).GetByLabel("Комментарий").FillAsync("для выставки");
             await Save(page, "Передать", "Образец передан заказчику");
             await Shot(page, dir, "19-obrazec-u-zakazchika");
             var passportHref = await page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" }).GetAttributeAsync("href");
