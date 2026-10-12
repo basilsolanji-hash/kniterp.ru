@@ -6,10 +6,13 @@ set -u
 dir="$(cd "$(dirname "$0")" && pwd)"
 out="${E2E_DIR:?задайте E2E_DIR}/regress"
 mkdir -p "$out"
-# Тестовые фиды прошлых прогонов (лимит — 10 на организацию): только в базе e2e, по названиям из сценариев.
+# Тестовые фиды и шаблоны этикеток прошлых прогонов (лимиты на организацию: 10 и 30): только в базе e2e, по названиям из сценариев.
 if [ -n "${E2E_DB:-}" ]; then
   docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$KNITERP_SA_PASSWORD" -d "$E2E_DB" \
     -Q "DELETE FROM kniterp.catalog_feeds WHERE Name LIKE N'Маркет %' OR Name LIKE N'Host %'" >/dev/null || echo "очистка фидов не удалась"
+  # Шаблоны этикеток сценария cat-step5 («Ценник XXXXX», лимит — 30 на организацию); основной шаблон не трогаем.
+  docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$KNITERP_SA_PASSWORD" -d "$E2E_DB" \
+    -Q "SET QUOTED_IDENTIFIER ON; DELETE FROM kniterp.label_templates WHERE Name LIKE N'Ценник _____' AND Name NOT LIKE N'Ценник %мм%' AND IsDefault = 0" >/dev/null || echo "очистка шаблонов этикеток не удалась"
 fi
 fail=0
 for s in "$dir"/scenarios/cat-*.mjs; do
