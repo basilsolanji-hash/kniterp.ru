@@ -76,6 +76,15 @@ public sealed class SalesUpdXmlTests(SqlTestHost host) : IClassFixture<SqlTestHo
             Assert.Contains(set, p => p.Document == SalesMailDocument.Order);
             Assert.Contains(set, p => p.Document == SalesMailDocument.Upd);
 
+            // D1143: журнал «не отгружены полностью» — только подтверждённый заказ без отгрузки; отгруженные полностью и черновики — нет.
+            var pending = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, customer, store, null, null, true, null));
+            await s.Sales.SetOrderLineAsync(pending, sweater, 1, 1220m, 22m, (await s.Sales.GetOrderAsync(pending)).RowVersion);
+            var draft = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, customer, store, null, null, true, null));
+            Assert.Empty(await s.Sales.ListOrdersAsync(new SalesOrderFilter(Unshipped: true)));
+            await s.Sales.ConfirmOrderAsync(pending, (await s.Sales.GetOrderAsync(pending)).RowVersion);
+            Assert.Equal([pending], (await s.Sales.ListOrdersAsync(new SalesOrderFilter(Unshipped: true))).Select(o => o.Id));
+            Assert.Contains(draft, (await s.Sales.ListOrdersAsync(new SalesOrderFilter())).Select(o => o.Id));
+
             Assert.Equal("sales.upd_xml.inn", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Print.UpdXmlAsync(noInnShip, null, host.Clock.UtcNow))).Code);
         }
 

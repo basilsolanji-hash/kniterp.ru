@@ -5517,5 +5517,8 @@
   "Позиций: {0}. Цены {1}, валюта {2}.": "Pozitsiyalar: {0}. Narxlar {1}, valyuta {2}.",
   "Показаны первые {0} — уточните отбор.": "Birinchi {0} tasi koʻrsatildi — tanlovni aniqlashtiring.",
   "Прайс-лист": "Narxnoma",
-  "Только в наличии": "Faqat mavjudlari"
+  "Только в наличии": "Faqat mavjudlari",
+  "Не отгружено": "Joʻnatilmagan",
+  "Не отгружены полностью": "Toʻliq joʻnatilmaganlar",
+  "ост. {0}": "qold. {0}"
 }

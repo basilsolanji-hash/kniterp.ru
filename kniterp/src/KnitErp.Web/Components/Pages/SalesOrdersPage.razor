@@ -120,6 +120,7 @@ else
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, покупатель, договор")" /></label>
         <label class="inline"><input type="checkbox" @bind="_overdue" /> @L("Только просроченные")</label>
+        <label class="inline"><input type="checkbox" @bind="_unshipped" /> @L("Не отгружены полностью")</label>
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
@@ -157,7 +158,7 @@ else
                             <td class="num">@Amounts.Format(o.Invoiced)</td>
                             <td class="num @(paidFull ? "cell-good" : o.Paid > 0 ? "cell-part" : null)">@Amounts.Format(o.Paid)</td>
                             <td class="num @(o.Unpaid > 0 ? "warn-text" : null)">@Amounts.Format(o.Unpaid)</td>
-                            <td class="num @(shippedFull ? "cell-good" : o.ShippedValue > 0 ? "cell-part" : null)">@Amounts.Format(o.ShippedValue)</td>
+                            <td class="num @(shippedFull ? "cell-good" : o.ShippedValue > 0 ? "cell-part" : null)">@Amounts.Format(o.ShippedValue)@if (o.Status == SalesOrderStatus.Confirmed && !shippedFull && o.Total - o.ShippedValue is > 0 and var rest) { <div class="muted small" title="@L("Не отгружено")">@L("ост. {0}", Amounts.Format(rest))</div> }</td>
                         }
                         <td class="@(IsLate(o) ? "late" : null)">@(o.ShipDate?.ToString("dd.MM.yyyy") ?? "—")</td>
                         <td><StageChip Stage="o.Stage" /></td>
@@ -215,12 +216,16 @@ else
     [SupplyParameterFromQuery(Name = "overdue")]
     public int? OverdueQuery { get; set; }
 
+    [SupplyParameterFromQuery(Name = "unshipped")]
+    public int? UnshippedQuery { get; set; }
+
     /// <summary>D111: «?stage=…» с главного экрана — список заказов на этапе.</summary>
     [SupplyParameterFromQuery(Name = "stage")]
     public long? StageQuery { get; set; }
 
     private string _status = string.Empty;
     private bool _overdue;
+    private bool _unshipped;
     private string _stage = string.Empty;
     private IReadOnlyList<SalesStageDto> _stages = [];
     private string _search = string.Empty;
@@ -241,6 +246,7 @@ else
         try
         {
             _overdue = OverdueQuery == 1;
+            _unshipped = UnshippedQuery == 1;
             _stage = StageQuery?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             _stages = await StageList.ListAsync();
             await LoadAsync();
@@ -260,7 +266,7 @@ else
         _rows = await Sales.ListOrdersAsync(new SalesOrderFilter(
             byte.TryParse(_status, out var st) ? (SalesOrderStatus)st : null, _search,
             _from is { } f ? DateOnly.FromDateTime(f) : null, _to is { } t ? DateOnly.FromDateTime(t) : null,
-            long.TryParse(_stage, out var stage) ? stage : null, _overdue ? Today : null, _tagId));
+            long.TryParse(_stage, out var stage) ? stage : null, _overdue ? Today : null, _tagId, Unshipped: _unshipped));
         await LoadTagsAsync();
     }
 

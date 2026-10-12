@@ -24,7 +24,7 @@ public enum ShipmentState : byte
 /// <summary>StageId: null — все, 0 — без этапа, иначе — этап.</summary>
 public sealed record SalesOrderFilter(
     SalesOrderStatus? Status = null, string? Search = null, DateOnly? From = null, DateOnly? To = null, long? StageId = null,
-    DateOnly? OverdueOn = null, long? TagId = null, long? CustomerId = null);
+    DateOnly? OverdueOn = null, long? TagId = null, long? CustomerId = null, bool Unshipped = false);
 
 /// <summary>Этап заказа (D75) — название и цвет из справочника.</summary>
 public sealed record SalesStageRefDto(long Id, string Name, string Color);
@@ -192,6 +192,12 @@ public sealed partial class SalesService(
             q = q.Where(o => o.Status == SalesOrderStatus.Confirmed && o.ShipDate != null && o.ShipDate < overdueOn);
         }
 
+        // D1143 (ТЗ §4): неотгруженные — подтверждённые, отгруженные не полностью (отгруженные отсеиваются ниже).
+        if (filter.Unshipped)
+        {
+            q = q.Where(o => o.Status == SalesOrderStatus.Confirmed);
+        }
+
         var rows = from o in q
                    join s in db.Counterparties.AsNoTracking() on o.CustomerId equals s.Id
                    join w in db.Warehouses.AsNoTracking() on o.WarehouseId equals w.Id
@@ -228,7 +234,7 @@ public sealed partial class SalesService(
                 prices ? invoiced.GetValueOrDefault(o.Id) : null,
                 prices ? paid.GetValueOrDefault(o.Id) : null,
                 prices ? Money.Round(o.Lines.Sum(l => Net(moved, o.Id, l.ItemId) * (l.Quantity == 0 ? 0 : l.Amount / l.Quantity))) : null))
-            .Where(r => filter.OverdueOn is null || r.Shipped != ShipmentState.Full)
+            .Where(r => (filter.OverdueOn is null && !filter.Unshipped) || r.Shipped != ShipmentState.Full)
             .ToList();
     }
 
