@@ -68,7 +68,7 @@
                 </div>
             }
             <NavTags Route="@Navigation.ToBaseRelativePath(Navigation.Uri)" Narrow="_narrow" />
-            <button type="button" class="nav-collapse" @onclick="ToggleNarrow" title="@(_narrow ? L("Развернуть меню") : L("Свернуть меню"))">@(_narrow ? "»" : "«")</button>
+            <button type="button" class="nav-collapse" @onclick="ToggleNarrow" title="@(_narrow ? L("Развернуть меню") : L("Свернуть меню"))" aria-label="@(_narrow ? L("Развернуть меню") : L("Свернуть меню"))">@(_narrow ? "»" : "«")</button>
         }
         </div>
         @if (_access is not null)

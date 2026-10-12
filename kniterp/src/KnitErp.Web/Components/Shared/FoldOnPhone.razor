@@ -1,0 +1,13 @@
+@*
+    Аудит 12.10.2026: на телефоне длинный блок фильтров списка отодвигал сами записи на второй экран. Блок сворачивается под
+    кнопку «Фильтры» (только на узком экране; на компьютере всегда открыт). Свернуть при первом показе — kniterp.js.
+*@
+<details class="fold-phone" open>
+    <summary>@Title</summary>
+    @ChildContent
+</details>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

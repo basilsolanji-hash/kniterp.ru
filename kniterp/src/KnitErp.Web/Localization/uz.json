@@ -1257,7 +1257,6 @@
   "Что не так": "Nima notoʻgʻri",
   "Что сделать": "Nima qilish",
   "Что случилось": "Nima boʻldi",
-  "Что уже сделано, чтобы склад фабрики работал в программе. Пункты проверяются по данным; последние два — вручную. Порядок и сроки — в плане пилота (docs/pilot.md).": "Fabrika ombori dasturda ishlashi uchun nima qilingan. Bandlar maʼlumotlar boʻyicha tekshiriladi; oxirgi ikkitasi — qoʻlda. Tartib va muddatlar — pilot rejasida (docs/pilot.md).",
   "Что-то пошло не так": "Nimadir notoʻgʻri ketdi",
   "Шаблон Excel": "Excel shabloni",
   "Шаблонный импорт справочников": "Maʼlumotnomalarni shablon boʻyicha import qilish",
@@ -5610,5 +5609,10 @@
   "фото эскиза добавлено": "eskiz fotosi qo‘shildi",
   "целевая цена": "maqsadli narx",
   "Чего не хватает для полного расчёта": "To‘liq hisob uchun nima yetishmaydi",
-  "Строк расчёта пока нет — заполните то, чего не хватает (выше).": "Hisob qatorlari hozircha yo‘q — yetishmayotganini to‘ldiring (yuqorida)."
+  "Строк расчёта пока нет — заполните то, чего не хватает (выше).": "Hisob qatorlari hozircha yo‘q — yetishmayotganini to‘ldiring (yuqorida).",
+  "Не удалось загрузить главный экран. Проверьте связь и повторите.": "Bosh ekran yuklanmadi. Aloqani tekshirib, qayta urinib ko‘ring.",
+  "Перезагрузить": "Qayta yuklash",
+  "Произошла ошибка, страница перестала отвечать. Введённые и не сохранённые данные могли не сохраниться.": "Xatolik yuz berdi, sahifa javob bermayapti. Kiritilgan va saqlanmagan ma’lumotlar saqlanmagan bo‘lishi mumkin.",
+  "Что уже сделано, чтобы фабрика работала в программе. Пункты проверяются по данным; последние два — вручную, по чек-листу администратора сервера.": "Fabrika dasturda ishlashi uchun nimalar qilindi. Bandlar ma’lumotlar bo‘yicha tekshiriladi; oxirgi ikkitasi — qo‘lda, server administratorining ro‘yxati bo‘yicha.",
+  "Фильтры": "Filtrlar"
 }

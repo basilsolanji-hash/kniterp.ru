@@ -122,7 +122,9 @@
         {
             _data = await Workday.GetAsync();
         }
-        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        // Аудит 12.10.2026: вспомогательный блок не должен ронять всю вкладку — при сбое базы (таймаут, обрыв соединения) его
+        // просто нет, а не «вечная загрузка» страницы.
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _data = null;
         }

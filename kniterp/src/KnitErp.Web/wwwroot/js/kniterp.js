@@ -38,6 +38,14 @@
             });
         });
     }
+    // Аудит 12.10.2026: фильтры списков на телефоне свёрнуты при первом показе (FoldOnPhone), на компьютере открыты.
+    function fold() {
+        var phone = window.matchMedia('(max-width: 599px)').matches;
+        document.querySelectorAll('details.fold-phone:not([data-init])').forEach(function (d) {
+            d.setAttribute('data-init', '');
+            if (phone) d.open = false;
+        });
+    }
     function toggleRow(tr) {
         if (!window.matchMedia('(max-width: 599px)').matches) return;
         var open = tr.hasAttribute('data-open');
@@ -56,9 +64,9 @@
     new MutationObserver(function () {
         if (pending) return;
         pending = true;
-        requestAnimationFrame(function () { pending = false; label(); priority(); });
+        requestAnimationFrame(function () { pending = false; label(); priority(); fold(); });
     }).observe(document.documentElement, { childList: true, subtree: true });
-    document.addEventListener('DOMContentLoaded', function () { label(); priority(); });
+    document.addEventListener('DOMContentLoaded', function () { label(); priority(); fold(); });
 })();
 
 // Панель быстрого доступа: горячие клавиши, фокус в панели инструмента и обратно, буфер обмена.

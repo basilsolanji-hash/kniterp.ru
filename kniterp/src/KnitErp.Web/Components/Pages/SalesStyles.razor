@@ -13,7 +13,10 @@
         justify-items: stretch; text-align: left; }
     form.sx-form > label, .panel form.sx-form > label { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0;
         color: var(--text-2); font-size: 12px; text-align: left; }
-    form.sx-form > label > input, form.sx-form > label > select { width: 100%; max-width: none; min-width: 0; box-sizing: border-box; }
+    form.sx-form > label > input:not([type=checkbox]):not([type=radio]), form.sx-form > label > select { width: 100%; max-width: none; min-width: 0; box-sizing: border-box; }
+    /* Аудит 12.10.2026: флажки не растягиваются на всю ширину — иначе подпись уезжала за край экрана (390 px). */
+    form.sx-form > label > input[type=checkbox], form.sx-form > label > input[type=radio] { width: auto; flex: 0 0 auto; }
+    form.sx-form > label.inline { flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
     form.sx-form > .w2 { grid-column: span 2; }
     form.sx-form > .w4 { grid-column: 1 / -1; }
     form.sx-form > label.inline { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }

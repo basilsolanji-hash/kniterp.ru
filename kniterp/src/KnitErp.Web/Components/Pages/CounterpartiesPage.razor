@@ -90,6 +90,7 @@ else
                  Hint="@L("Загрузка создаёт новых контрагентов и обновляет существующих: по ИНН и КПП, а без ИНН — по наименованию.")"
                  ShownColumns="@([0, 1, 2])" Preview="s => Exchange.PreviewAsync(s)" Apply="r => Exchange.ApplyAsync(r)" Applied="ReloadAsync" />
 
+    <FoldOnPhone Title="@L("Фильтры")">
     <form class="inline-form" @onsubmit="ReloadAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
@@ -104,6 +105,7 @@ else
         <label class="inline"><input type="checkbox" @bind="_includeArchived" /> @L("Показать архив")</label>
         <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
     </form>
+    </FoldOnPhone>
 
     <div class="scroll">
         <table>
