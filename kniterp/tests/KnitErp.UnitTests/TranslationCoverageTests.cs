@@ -118,6 +118,10 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(KnitErp.Domain.Hr.DismissalGrounds.All.Select(g => g.Title));
         keys.UnionWith(KnitErp.Domain.Hr.TimesheetCodes.All.Select(c => c.Name));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.PayrollLineKind>().Select(KnitErp.Domain.Hr.PayrollRules.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Hr.EmployeeDocumentKind>().Select(KnitErp.Domain.Hr.EmployeeDocumentKinds.Name)); // D226
+        keys.UnionWith(KnitErp.Domain.Hr.EmployeeCompleteness.Of(false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
+            .Missing);
+        keys.UnionWith(KnitErp.Domain.Hr.AgreementTemplates.All.Select(KnitErp.Domain.Hr.AgreementTemplates.Title)); // D227
 
         // Модуль «Разработка» (D700–D799): стадии, категории, аудитории, приоритеты, исполнители, виды файлов и справочников, объекты тегов.
         keys.UnionWith(KnitErp.Domain.Development.DevStages.All.Select(KnitErp.Domain.Development.DevStages.Name));

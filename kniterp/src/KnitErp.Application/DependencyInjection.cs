@@ -32,6 +32,7 @@ public static class DependencyInjection
         services.AddScoped<KnitErp.Application.Hr.LeaveStatusSync>();
         services.AddScoped<KnitErp.Application.Hr.PayrollService>();
         services.AddScoped<KnitErp.Application.Hr.HrSettingsService>();
+        services.AddScoped<KnitErp.Application.Hr.EmployeeAgreementService>(); // D227: документы перед доступом
         services.AddScoped<KnitErp.Application.Hr.PayrollEnterpriseDataExport>();
         // Граница с производством: настоящая выработка регистрируется модулем производства и заменяет заглушку.
         services.TryAddScoped<KnitErp.Application.Hr.IWorkOutputSource, KnitErp.Application.Hr.EmptyWorkOutputSource>();

@@ -4,6 +4,7 @@
 @using KnitErp.Domain.Hr
 @using KnitErp.Domain.Structure
 @using KnitErp.Web.Components.Shared
+@inject EmployeeAgreementService Agreements
 @inject EmployeeService Employees
 @inject PersonalDataService PersonalData
 @inject PersonnelOrderService Orders
@@ -65,6 +66,55 @@ else
     @if (_summary.State != ConsentState.Valid)
     {
         <div class="flash error" role="alert">@L("Нет действующего согласия на обработку персональных данных (ст. 9 152-ФЗ). Получите подписанное согласие и отметьте его в карточке.")</div>
+    }
+
+    @if (_completeness is { } c)
+    {
+        @* D226: заполненность карточки — только факт наличия, без значений. *@
+        <div class="panel">
+            <h2>@L("Заполненность карточки: {0} %", c.Percent)</h2>
+            <progress value="@c.Percent" max="100" style="width: 100%" aria-label="@L("Заполненность карточки")"></progress>
+            @if (c.Missing.Count > 0)
+            {
+                <p class="muted small">@L("Не хватает:") @string.Join(", ", c.Missing.Select(m => L(m)))</p>
+            }
+        </div>
+    }
+
+    @if (_agreementStatus is { Count: > 0 } ags)
+    {
+        @* D227: документы перед доступом — подписаны ли, печать с данными сотрудника, отметка бумажной подписи. *@
+        <div class="panel">
+            <h2>@L("Документы перед доступом")</h2>
+            <ul>
+                @foreach (var a in ags)
+                {
+                    <li>
+                        @L(a.Title):
+                        @if (a.Signature is { } sig)
+                        {
+                            <span class="tag ok">@L("подписано")</span>
+                            <span class="muted small">@(sig.Method == KnitErp.Domain.Hr.AgreementMethod.Electronic ? L("электронно") : L("на бумаге")),
+                                @TimeZones.ToLocal(sig.SignedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</span>
+                            @if (!sig.TextMatches) { <span class="tag warn">@L("данные изменились после подписания")</span> }
+                        }
+                        else
+                        {
+                            <span class="tag warn">@L("не подписано")</span>
+                            @if (a.CanMarkPaper)
+                            {
+                                <button type="button" class="secondary" @onclick="() => MarkPaperAsync(a.Kind)" disabled="@_busy">@L("Подписан на бумаге")</button>
+                            }
+                        }
+                        @if (_summary.CanViewPersonalData)
+                        {
+                            <a href="print/employee-agreement/@Id/@((int)a.Kind)" target="_blank" rel="noopener">@L("Печать")</a>
+                        }
+                    </li>
+                }
+            </ul>
+            <p class="muted small">@L("Сотрудник со своей учётной записью подписывает их паролем при первом входе. Тексты — типовые: проверьте их у юриста.")</p>
+        </div>
     }
 
     <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.Employee" EntityId="e.Id" />
@@ -170,19 +220,43 @@ else
                         <button type="button" class="secondary" @onclick="RevokeConsentAsync" disabled="@_busy">@L("Отзыв согласия")</button>
                     }
                 </div>
-                <label>
-                    @L("Скан подписанного согласия (PDF, JPEG или PNG, до 3 МБ)")
-                    <InputFile OnChange="UploadScanAsync" accept=".pdf,.jpg,.jpeg,.png" disabled="@_busy" />
-                </label>
+            }
+
+            <h2>@L("Документы сотрудника")</h2>
+            @if (_pd.Scans.FirstOrDefault(d => d.Kind == EmployeeDocumentKind.Photo) is { } photo)
+            {
+                <img src="employees/consent-scans/@photo.Id" alt="@L("Фотография")" style="max-width: 160px; max-height: 200px; border-radius: 8px" />
+            }
+            @if (canEdit)
+            {
+                <div class="inline-form">
+                    <label>
+                        @L("Вид документа")
+                        <select @bind="_documentKind" disabled="@_busy">
+                            @foreach (var k in EmployeeDocumentKinds.All)
+                            {
+                                <option value="@k">@L(EmployeeDocumentKinds.Name(k))</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @(_documentKind == EmployeeDocumentKind.Photo ? L("Файл (JPEG или PNG, до 3 МБ)") : L("Файл (PDF, JPEG или PNG, до 3 МБ)"))
+                        <InputFile OnChange="UploadScanAsync" accept="@(_documentKind == EmployeeDocumentKind.Photo ? ".jpg,.jpeg,.png" : ".pdf,.jpg,.jpeg,.png")" disabled="@_busy" />
+                    </label>
+                </div>
             }
             @if (_pd.Scans.Count > 0)
             {
                 <ul>
                     @foreach (var s in _pd.Scans)
                     {
-                        <li><a href="employees/consent-scans/@s.Id" target="_blank" rel="noopener">@s.FileName</a> <span class="muted">@TimeZones.ToLocal(s.UploadedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</span></li>
+                        <li>@L(s.KindName): <a href="employees/consent-scans/@s.Id" target="_blank" rel="noopener">@s.FileName</a> <span class="muted">@TimeZones.ToLocal(s.UploadedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</span></li>
                     }
                 </ul>
+            }
+            else
+            {
+                <p class="muted">@L("Документов пока нет.")</p>
             }
         }
     }
@@ -201,6 +275,9 @@ else
     private EmployeeRowDto? _employee;
     private ConsentSummaryDto? _summary;
     private PersonalDataDto? _pd;
+    private EmployeeCompleteness? _completeness;
+    private IReadOnlyList<AgreementStatusDto>? _agreementStatus;
+    private EmployeeDocumentKind _documentKind = EmployeeDocumentKind.Passport;
     private IReadOnlyList<EmploymentRecordDto>? _history;
     private PersonalDataForm _form = new();
     private DateOnly? _consentGiven;
@@ -219,6 +296,7 @@ else
             _employee = await Employees.GetAsync(Id);
             _summary = await PersonalData.SummaryAsync(Id);
             _history = await Orders.HistoryAsync(Id);
+            await LoadCompletenessAsync();
         }
         catch (AccessDeniedException ex)
         {
@@ -266,12 +344,19 @@ else
         await ReloadPersonalDataAsync();
     });
 
+    private Task MarkPaperAsync(KnitErp.Domain.Hr.AgreementKind kind) => RunAsync(async () =>
+    {
+        await Agreements.MarkPaperAsync(Id, kind);
+        _message = L("Отмечено: подписан на бумаге.");
+        await LoadCompletenessAsync();
+    });
+
     private Task UploadScanAsync(InputFileChangeEventArgs args) => RunAsync(async () =>
     {
         var file = args.File;
         if (file.Size > ConsentScan.MaxBytes)
         {
-            throw new KnitErp.Domain.Common.BusinessRuleException("hr.consent.scan_size", "Скан согласия: файл до 3 МБ.");
+            throw new KnitErp.Domain.Common.BusinessRuleException("hr.consent.scan_size", L("{0}: файл до 3 МБ.", L(EmployeeDocumentKinds.Name(_documentKind))));
         }
 
         using var buffer = new MemoryStream();
@@ -280,8 +365,8 @@ else
             await stream.CopyToAsync(buffer);
         }
 
-        await PersonalData.AddConsentScanAsync(Id, file.Name, file.ContentType, buffer.ToArray());
-        _message = L("Скан согласия загружен.");
+        await PersonalData.AddDocumentAsync(Id, _documentKind, file.Name, file.ContentType, buffer.ToArray());
+        _message = L("Документ загружен: {0}.", L(EmployeeDocumentKinds.Name(_documentKind)));
         await ReloadPersonalDataAsync();
     });
 
@@ -290,6 +375,14 @@ else
         _pd = await PersonalData.GetAsync(Id);
         _form = PersonalDataForm.From(_pd.Values);
         _summary = await PersonalData.SummaryAsync(Id);
+        await LoadCompletenessAsync();
+    }
+
+    /// <summary>Показатель — только тем, кому он положен (иначе отказ засорит журнал).</summary>
+    private async Task LoadCompletenessAsync()
+    {
+        _completeness = _summary!.CanViewPersonalData || CurrentAccess.Has(Permissions.EmployeeEdit) ? await PersonalData.CompletenessAsync(Id) : null;
+        _agreementStatus = _summary!.CanViewPersonalData || CurrentAccess.Has(Permissions.EmployeeEdit) ? await Agreements.StatusAsync(Id) : null;
     }
 
     /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
