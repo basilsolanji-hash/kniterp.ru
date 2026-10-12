@@ -188,8 +188,15 @@ else
         case Tab.Discussion:
             <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.DevModel" TargetId="Id" />
             break;
-        default:
-            <p class="dev-placeholder">@Placeholder(_tab)</p>
+        case Tab.Cost:
+            @if (CurrentAccess.Has(Permissions.DevCostView))
+            {
+                <DevCostTab ModelId="Id" />
+            }
+            else
+            {
+                <p class="muted">@L("Себестоимость и цены видны только с правом «Разработка: себестоимость».")</p>
+            }
             break;
     }
 
@@ -264,10 +271,6 @@ else
         Tab.Files => L("Файлы"),
         _ => L("Обсуждение"),
     };
-
-    // Допущение D706: вкладка следующего этапа показана сразу, чтобы карточка не менялась от этапа к этапу; пока — с пояснением.
-    private static string Placeholder(Tab tab) =>
-        L("Расчёт себестоимости по цветам и операциям и цена — этап «Себестоимость и цена». Целевые суммы — на вкладке «Задание», итог работы — на вкладке «Операции».");
 
     private long _loadedId;
 

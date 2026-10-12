@@ -13,6 +13,10 @@
         @if (_p.TechCardId is { } card)
         {
             <h2>@L("Передано в производство")</h2>
+            @if (_message is not null)
+            {
+                <div class="flash" role="status">@_message</div>
+            }
             <div class="actions" style="margin: 0">
                 <a class="button secondary" href="catalog/items/@_p.ItemId">@L("Позиция в номенклатуре")</a>
                 <a class="button secondary" href="tech-cards/@card">@L("Черновик техкарты производства")</a>
@@ -28,7 +32,7 @@
             }
             <div class="dev-panels" style="margin: 8px 0">
                 <div>
-                    <h3>@L("Нормы пряжи на 1 шт")</h3>
+                    <h3>@L("Нормы на 1 шт: пряжа и фурнитура")</h3>
                     @if (_p.Lines.Count == 0)
                     {
                         <p class="muted">@L("Норм пока нет.")</p>
@@ -36,11 +40,11 @@
                     else
                     {
                         <table class="dev-matrix">
-                            <thead><tr><th>@L("Пряжа")</th><th class="num">@L("Норма")</th><th class="num">@L("Граммы")</th></tr></thead>
+                            <thead><tr><th>@L("Материал")</th><th class="num">@L("Норма")</th><th class="num">@L("Граммы, отходы")</th></tr></thead>
                             <tbody>
                                 @foreach (var l in _p.Lines)
                                 {
-                                    <tr><td>@l.ItemCode — @l.ItemName</td><td class="num">@l.Quantity.ToString("0.######", CultureInfo.InvariantCulture) @l.Unit</td><td class="num">@DevFormat.Grams(l.Grams)</td></tr>
+                                    <tr><td>@l.ItemCode — @l.ItemName</td><td class="num">@l.Quantity.ToString("0.######", CultureInfo.InvariantCulture) @l.Unit</td><td class="num">@(l.Grams > 0 ? DevFormat.Grams(l.Grams) : "—")@(l.WastePercent > 0 ? $" +{DevFormat.Number(l.WastePercent)} %" : "")</td></tr>
                                 }
                             </tbody>
                         </table>
@@ -77,6 +81,10 @@
                                     <label>@L("Код позиции") <input @bind="_code" maxlength="50" /></label>
                                     <label>@L("Название позиции") <input @bind="_name" maxlength="200" /></label>
                                 }
+                                <label>@L("Модификации: размеры") <input @bind="_sizes" maxlength="400" placeholder="42-52/2" /></label>
+                                <label>@L("Модификации: цвета") <input @bind="_colors" maxlength="400" placeholder="@L("молочный, красный")" /></label>
+                                <p class="muted small">@L("Позиция получит модификации «Размер × Цвет» (пусто — без модификаций).")
+                                    @(_p.HasSketchPhoto ? L("Закреплённый эскиз станет фото позиции.") : "")</p>
                                 <div class="actions"><button type="submit" disabled="@_busy">@L("Передать в производство")</button></div>
                             </fieldset>
                         </form>
@@ -103,6 +111,8 @@
     private string _item = string.Empty;
     private string? _code;
     private string? _name;
+    private string? _sizes;
+    private string? _colors;
     private bool _busy;
     private string? _message;
     private bool _isError;
@@ -122,6 +132,8 @@
         _p = await Gate.Run(() => Handoff.PreviewAsync(ModelId));
         _code ??= _p.SuggestedCode;
         _name ??= _p.SuggestedName;
+        _sizes ??= _p.SuggestedSizes;
+        _colors ??= _p.SuggestedColors;
     }
 
     private async Task HandOffAsync()
@@ -137,8 +149,9 @@
         var handed = false;
         try
         {
-            await Gate.Run(() => Handoff.HandOffAsync(ModelId, long.TryParse(_item, out var i) ? i : null, _code, _name, _p.RowVersion));
+            var r = await Gate.Run(() => Handoff.HandOffAsync(ModelId, long.TryParse(_item, out var i) ? i : null, _code, _name, _p.RowVersion, _sizes, _colors));
             handed = true;
+            _message = L("Передано: модификаций — {0}{1}.", r.Modifications, r.PhotoAdded ? ", " + L("фото эскиза добавлено") : "");
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

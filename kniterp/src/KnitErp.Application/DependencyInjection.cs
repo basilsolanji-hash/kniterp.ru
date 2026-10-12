@@ -71,6 +71,7 @@ public static class DependencyInjection
         services.AddScoped<Development.DevShopService>();
         services.AddScoped<Development.DevHandoffService>();
         services.AddScoped<Development.DevYarnService>();
+        services.AddScoped<Development.DevCostService>();
         Development.DevObjects.Register();
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();

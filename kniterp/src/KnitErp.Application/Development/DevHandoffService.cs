@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore;
 namespace KnitErp.Application.Development;
 
 /// <summary>Норма пряжи для черновика техкарты: позиция, количество в её единице и откуда взят вес.</summary>
-public sealed record DevHandoffLineDto(long ItemId, string ItemCode, string ItemName, string Unit, decimal Quantity, decimal Grams);
+public sealed record DevHandoffLineDto(long ItemId, string ItemCode, string ItemName, string Unit, decimal Quantity, decimal Grams, decimal WastePercent = 0);
 
 /// <summary>
 /// Что уйдёт в производство (D750–D752): предложенная позиция, нормы пряжи на изделие, маршрут, предупреждения. Если модель уже
@@ -22,7 +22,10 @@ public sealed record DevHandoffLineDto(long ItemId, string ItemCode, string Item
 public sealed record DevHandoffPreviewDto(
     bool CanHandOff, string? Refusal, string SuggestedCode, string SuggestedName, IReadOnlyList<DevOptionDto> Products,
     IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<string> Route, IReadOnlyList<string> Warnings, long? ItemId, long? TechCardId,
-    byte[] RowVersion);
+    byte[] RowVersion, string? SuggestedSizes = null, string? SuggestedColors = null, bool HasSketchPhoto = false);
+
+/// <summary>Итог передачи: черновик техкарты, позиция, сколько модификаций создано и добавлено ли фото эскиза (D753).</summary>
+public sealed record DevHandoffResult(long TechCardId, long ItemId, int Modifications, bool PhotoAdded);
 
 /// <summary>
 /// Передача модели в производство (D750–D752, этап 6 ТЗ): одной транзакцией через сервисы владельцев — каталог создаёт позицию
@@ -31,7 +34,8 @@ public sealed record DevHandoffPreviewDto(
 /// Право — «Разработка: утверждение» плюс права каталога на позицию и техкарту (их проверяют сервисы владельцев).
 /// </summary>
 public sealed class DevHandoffService(
-    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, CatalogService catalog, TechCardService techCards)
+    IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, CatalogService catalog, TechCardService techCards,
+    ModificationService modifications)
 {
     /// <summary>Код ОКЕИ «штука» — единица готового изделия.</summary>
     private const string PieceUnitCode = "796";
@@ -55,15 +59,20 @@ public sealed class DevHandoffService(
         var products = !ctx.Permissions.Has(Permissions.CatalogView) ? [] : await db.Items.AsNoTracking()
             .Where(i => i.OrganizationId == org && !i.IsArchived && i.Type == ItemType.Finished)
             .OrderBy(i => i.Name).Select(i => new DevOptionDto(i.Id, i.Code + " — " + i.Name)).Take(500).ToListAsync(ct);
+        var sizes = await db.DevModelSizes.AsNoTracking().Where(z => z.OrganizationId == org && z.ModelId == modelId).OrderBy(z => z.SortOrder)
+            .Select(z => z.Name).ToListAsync(ct);
+        var sketch = await SketchAsync(org, m.MainSketchFileId, ct);
         return new DevHandoffPreviewDto(refusal is null, refusal, m.Number, m.Name, products, plan.Lines,
-            plan.Route.Select(ProductionFlow.StageName).ToList(), plan.Warnings, m.ProductionItemId, m.ProductionTechCardId, m.RowVersion);
+            plan.Route.Select(ProductionFlow.StageName).ToList(), plan.Warnings, m.ProductionItemId, m.ProductionTechCardId, m.RowVersion,
+            sizes.Count == 0 ? m.SizeRange : string.Join(", ", sizes), m.ColorRange, sketch is not null);
     }
 
     /// <summary>
     /// Передать модель: <paramref name="existingItemId"/> — привязать к существующей позиции, иначе создать новую с кодом и названием.
     /// Возвращает номер черновика техкарты.
     /// </summary>
-    public async Task<long> HandOffAsync(long modelId, long? existingItemId, string? code, string? name, byte[] rowVersion, CancellationToken ct = default)
+    public async Task<DevHandoffResult> HandOffAsync(long modelId, long? existingItemId, string? code, string? name, byte[] rowVersion,
+        string? sizes = null, string? colors = null, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevApprove, ct);
         var org = ctx.OrganizationId;
@@ -108,23 +117,71 @@ public sealed class DevHandoffService(
             foreach (var line in plan.Lines)
             {
                 var card = await techCards.GetAsync(cardId, ct);
-                await techCards.SetLineAsync(cardId, line.ItemId, line.Quantity, 0, card.RowVersion, ct);
+                await techCards.SetLineAsync(cardId, line.ItemId, line.Quantity, line.WastePercent, card.RowVersion, ct);
             }
 
             await techCards.SetRouteAsync(cardId, plan.Route, (await techCards.GetAsync(cardId, ct)).RowVersion, ct);
+
+            // D753: модификации «Размер × Цвет» и фото эскиза — методами каталога; уже существующие сочетания каталог пропускает.
+            var axes = new Dictionary<long, string?>();
+            if (!string.IsNullOrWhiteSpace(sizes))
+            {
+                axes[await CharacteristicAsync("Размер", ct)] = sizes;
+            }
+
+            if (!string.IsNullOrWhiteSpace(colors))
+            {
+                axes[await CharacteristicAsync("Цвет", ct)] = colors;
+            }
+
+            var created = axes.Count == 0 ? 0 : (await modifications.CreateModificationsAsync(itemId, axes, ct)).Created;
+            var photo = false;
+            if (await SketchAsync(org, m.MainSketchFileId, ct) is { } sketch
+                && !await db.ItemPhotos.AnyAsync(p => p.OrganizationId == org && p.ItemId == itemId, ct))
+            {
+                await modifications.AddPhotoAsync(itemId, sketch, ct);
+                photo = true;
+            }
             db.DevModelStages.Add(m.HandOver(itemId, cardId, clock.UtcNow, ctx.UserId));
             db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.DevStageChanged, nameof(DevModel), modelId.ToString(),
                 DevStages.Name(DevStage.Approved), DevStages.Name(DevStage.Handed),
-                $"{m.Number}: позиция №{itemId}, черновик техкарты №{cardId}, норм пряжи — {plan.Lines.Count}", currentUser.CorrelationId));
+                $"{m.Number}: позиция №{itemId}, черновик техкарты №{cardId}, норм пряжи — {plan.Lines.Count}, модификаций — {created}"
+                + (photo ? ", фото эскиза" : ""), currentUser.CorrelationId));
             await db.SaveOrConflictAsync(ct);
             await tx.CommitAsync(ct);
-            return cardId;
+            return new DevHandoffResult(cardId, itemId, created, photo);
         }
         catch
         {
             db.DiscardChanges();
             throw;
         }
+    }
+
+    /// <summary>Характеристика каталога по названию (без учёта регистра); нет — создаётся. Архивную не используем — создаём новую.</summary>
+    private async Task<long> CharacteristicAsync(string name, CancellationToken ct)
+    {
+        var existing = (await modifications.CharacteristicsAsync(false, ct))
+            .FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+        return existing?.Id ?? await modifications.CreateCharacteristicAsync(name, ct);
+    }
+
+    /// <summary>Закреплённый эскиз, если он годится в фото позиции каталога (JPEG, PNG, WebP до 2 МБ); иначе — null.</summary>
+    private async Task<byte[]?> SketchAsync(long org, long? fileId, CancellationToken ct)
+    {
+        if (fileId is not { } id)
+        {
+            return null;
+        }
+
+        var file = await db.DevFiles.AsNoTracking().Where(f => f.Id == id && f.OrganizationId == org)
+            .Select(f => new { f.ContentType, Size = f.Content.Length }).SingleOrDefaultAsync(ct);
+        if (file is null || file.Size > ItemPhoto.MaxBytes || file.ContentType is not ("image/jpeg" or "image/png" or "image/webp"))
+        {
+            return null;
+        }
+
+        return await db.DevFiles.AsNoTracking().Where(f => f.Id == id).Select(f => f.Content).SingleAsync(ct);
     }
 
     private sealed record Plan(IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<ProductionStage> Route, IReadOnlyList<string> Warnings);
@@ -135,46 +192,29 @@ public sealed class DevHandoffService(
     /// </summary>
     private async Task<Plan> PlanAsync(long org, long modelId, CancellationToken ct)
     {
-        var details = await db.DevDetails.AsNoTracking().Where(d => d.OrganizationId == org && d.ModelId == modelId).OrderBy(d => d.SortOrder).ThenBy(d => d.Id)
-            .ToListAsync(ct);
-        var colors = await (from c in db.DevModelColors.AsNoTracking()
-                            join i in db.Items.AsNoTracking() on c.ItemId equals i.Id
-                            join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
-                            where c.OrganizationId == org && c.ModelId == modelId
-                            select new { c.Id, c.Label, ItemId = i.Id, i.Code, i.Name, Unit = u.Code, u.Symbol, u.Precision }).ToListAsync(ct);
-        var facts = await (from f in db.DevSampleDetails.AsNoTracking()
-                           join s in db.DevSamples.AsNoTracking() on f.SampleId equals s.Id
-                           where f.OrganizationId == org && s.ModelId == modelId && s.Status != DevSampleStatus.Rejected
-                           select new { f.Id, f.DetailId, f.WeightGrams, s.No, Accepted = s.Status == DevSampleStatus.Accepted }).ToListAsync(ct);
-        var best = facts.Where(f => f.WeightGrams is not null).GroupBy(f => f.DetailId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(f => f.Accepted).ThenByDescending(f => f.No).First());
-        var factIds = best.Values.Select(f => f.Id).ToList();
-        var shares = await db.DevSampleColorShares.AsNoTracking().Where(s => s.OrganizationId == org && factIds.Contains(s.SampleDetailId)).ToListAsync(ct);
-        var input = details.Select(d => best.TryGetValue(d.Id, out var f)
-            ? new DevNormDetail(d.Name, d.Quantity, f.WeightGrams, shares.Where(s => s.SampleDetailId == f.Id).ToDictionary(s => s.ColorId, s => s.Percent))
-            : new DevNormDetail(d.Name, d.Quantity, d.PlanWeightGrams, new Dictionary<long, decimal>())).ToList();
-        var warnings = new List<string>();
-        if (details.Count == 0)
-        {
-            warnings.Add("У модели нет деталей.");
-        }
-
-        var result = DevNorms.Compute(input, colors.Select(c => c.Id).ToList());
-        warnings.AddRange(result.Warnings);
+        var (norms, warnings) = await DevYarnNorms.ForModelAsync(db, org, modelId, ct);
+        var waste = (await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct))?.YarnWastePercent ?? 0;
         var lines = new List<DevHandoffLineDto>();
-        foreach (var g in colors.Where(c => result.GramsByColor.ContainsKey(c.Id)).GroupBy(c => c.ItemId))
+        foreach (var n in norms)
         {
-            var c = g.First();
-            var grams = g.Sum(x => result.GramsByColor[x.Id]);
-            if (DevNorms.ToUnit(grams, c.Unit, c.Precision) is { } qty)
+            if (DevNorms.ToUnit(n.Grams, n.UnitCode, n.Precision) is { } qty)
             {
-                lines.Add(new DevHandoffLineDto(c.ItemId, c.Code, c.Name, c.Symbol, qty, grams));
+                lines.Add(new DevHandoffLineDto(n.ItemId, n.Code, n.Name, n.Symbol, qty, n.Grams, waste));
             }
             else
             {
-                warnings.Add($"«{c.Name}»: единица «{c.Symbol}» — не кг и не г, норму введёт производство.");
+                warnings.Add($"«{n.Name}»: единица «{n.Symbol}» — не кг и не г, норму введёт производство.");
             }
         }
+
+        // D741: фурнитура и упаковка модели — тоже в техкарту, без отходов.
+        var yarnIds = lines.Select(l => l.ItemId).ToList();
+        lines.AddRange(await (from a in db.DevModelAccessories.AsNoTracking()
+                              join i in db.Items.AsNoTracking() on a.ItemId equals i.Id
+                              join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
+                              where a.OrganizationId == org && a.ModelId == modelId && !yarnIds.Contains(a.ItemId)
+                              orderby i.Name
+                              select new DevHandoffLineDto(i.Id, i.Code, i.Name, u.Symbol, a.Quantity, 0m, 0m)).ToListAsync(ct));
 
         var stages = await (from o in db.DevModelOperations.AsNoTracking()
                             join t in db.DevOperationTypes.AsNoTracking() on o.OperationTypeId equals t.Id

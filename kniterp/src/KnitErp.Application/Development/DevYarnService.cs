@@ -67,7 +67,8 @@ public sealed class DevYarnService(IKnitErpDbContext db, IAccessGuard guard, ICu
             var comment = $"Пряжа на образец № {s.No} модели {model.Number} «{model.Name}» (по факту цеха)"
                           + (warnings.Count == 0 ? "" : $"; не учтено: {warnings.Count} замеч.");
             var docId = await stock.CreateWithLinesAsync(StockOperationKind.WriteOff,
-                new StockDocumentHeader(warehouseId, null, null, reasonId, DateOnly.FromDateTime(clock.UtcNow), comment.Length > 500 ? comment[..500] : comment),
+                new StockDocumentHeader(warehouseId, null, null, reasonId,
+                    DateOnly.FromDateTime(await DevTechService.LocalNowAsync(db, ctx.OrganizationId, clock.UtcNow, ct)), comment.Length > 500 ? comment[..500] : comment),
                 lines.Select(l => (l.ItemId, l.Quantity)).ToList(), ct);
             s.LinkYarnWriteOff(docId);
             db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.DevSampleRecorded, nameof(DevModel),

@@ -232,6 +232,15 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждено");
         await Assertions.Expect(page.Locator(".dev-handoff")).ToContainTextAsync("Нет ни одной нормы пряжи");
         await AssertNoHorizontalScrollAsync(page, "передача в производство");
+
+        // D740: себестоимость — итоги плитками, строки с источником цены, без горизонтальной прокрутки на телефоне.
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
+        await Assertions.Expect(page.Locator(".dev-cost-tiles")).ToContainTextAsync("Маржа");
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Сохранить версию расчёта", Exact = true })).ToBeVisibleAsync();
+        await AssertNoHorizontalScrollAsync(page, "себестоимость");
+        await page.GotoAsync("dev/settings");
+        await Ready(page);
+        await Assertions.Expect(page.GetByLabel("Ставка работы за минуту")).ToBeVisibleAsync();
         await page.GotoAsync("dev/machines");
         await Ready(page);
         await AssertNoHorizontalScrollAsync(page, "станки");

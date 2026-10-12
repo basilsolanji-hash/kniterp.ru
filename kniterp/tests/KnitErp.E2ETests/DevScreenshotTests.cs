@@ -253,6 +253,20 @@ public sealed class DevScreenshotTests(HrAppFixture app) : IClassFixture<HrAppFi
 
             await Shot(page, dir, "16-tehnolog-operacii");
 
+            // Себестоимость (D740): цены пряжи вручную, пересчёт, версия расчёта.
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
+            await page.Locator(".dev-cost-tiles").WaitForAsync();
+            foreach (var price in await page.Locator("td.num input[type=number]").AllAsync())
+            {
+                await price.FillAsync("850");
+            }
+
+            await page.GetByRole(AriaRole.Button, new() { Name = "Пересчитать", Exact = true }).ClickAsync();
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            await page.GetByLabel("Комментарий к версии").FillAsync("хлопок 20/1, наценка по умолчанию");
+            await Save(page, "Сохранить версию расчёта", "Сохранена версия расчёта");
+            await Shot(page, dir, "17-sebestoimost");
+
             await Go(page, $"dev/tech/{detailUrl[(detailUrl.LastIndexOf('/') + 1)..]}");
             await Shot(page, dir, "10-tehkarta-vyazaniya");
             await Go(page, $"print/dev/tech/{detailUrl[(detailUrl.LastIndexOf('/') + 1)..]}");

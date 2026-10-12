@@ -69,6 +69,13 @@
     ul.dev-tiles > li.open { grid-column: 1 / -1; }
     ul.dev-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 8px; }
     .dev-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 4px 12px; }
+    .dev-cost-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; margin: 8px 0 12px; }
+    .dev-cost-tiles > div { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .dev-cost-tiles > div.hi { border-color: var(--accent); }
+    .dev-cost-tiles span { font-size: 12px; color: var(--text-2); }
+    .dev-cost-tiles b { font-size: 18px; font-variant-numeric: tabular-nums; }
+    .dev-cost-tiles small { font-size: 11px; }
+    .ok-text { color: var(--ok-text); }
     table.dev-matrix { width: auto; }
     table.dev-matrix th, table.dev-matrix td { padding-right: 10px; }
     table.dev-matrix th:first-child { min-width: 120px; }

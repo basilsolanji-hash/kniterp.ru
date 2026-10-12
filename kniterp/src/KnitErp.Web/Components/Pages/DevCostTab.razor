@@ -1,0 +1,366 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevCostService Costs
+
+@*
+    Себестоимость и цена (D740–D745): пряжа по нормам × (1 + отходы) × цена (закупка → каталог → вручную), фурнитура, работа (расценка или
+    минуты × ставка), накладные; цена от наценки или целевая, маржа, сравнение с целевой себестоимостью. Сценарий «другая пряжа» — замена
+    материала в строке. Итоги считает сервер; версия — только вставка. Видно только с правом «себестоимость».
+*@
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+@if (_c is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var c = _c;
+    <div class="dev-cost-tiles">
+        <div><span>@L("Пряжа")</span><b>@Amounts.Format(c.Yarn)</b></div>
+        <div><span>@L("Фурнитура и упаковка")</span><b>@Amounts.Format(c.Accessories)</b></div>
+        <div><span>@L("Работа")</span><b>@Amounts.Format(c.Labor)</b></div>
+        <div><span>@L("Накладные, {0} %", DevFormat.Number(c.OverheadPercent))</span><b>@Amounts.Format(c.Overhead)</b></div>
+        <div class="hi"><span>@L("Себестоимость")</span><b>@Amounts.Format(c.Cost)</b>
+            @if (c.VersusTargetCost is { } v)
+            {
+                <small class="@(v > 0 ? "late-text" : "ok-text")">@L("к целевой {0}: {1}", Amounts.Format(c.TargetCost), (v > 0 ? "+" : "") + Amounts.Format(v))</small>
+            }
+        </div>
+        <div class="hi"><span>@L("Цена")</span><b>@Amounts.Format(c.Price)</b></div>
+        <div class="hi"><span>@L("Маржа")</span><b class="@(c.Margin < 0 ? "late-text" : null)">@Amounts.Format(c.Margin)</b>
+            @if (c.MarginPercent is { } mp) { <small>@DevFormat.Number(mp) %</small> }
+        </div>
+    </div>
+
+    <form class="inline-form" @onsubmit="RecalculateAsync">
+        <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+            <label>
+                @L("Цена")
+                <select @bind="_mode">
+                    <option value="1">@L("от наценки")</option>
+                    <option value="2">@L("целевая цена")</option>
+                </select>
+            </label>
+            @if (_mode == "2")
+            {
+                <label>@L("Целевая цена") <input type="number" min="0" step="0.01" inputmode="decimal" style="max-width: 120px" @bind="_target" /></label>
+            }
+            else
+            {
+                <label>@L("Наценка, %") <input type="number" min="0" max="1000" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_markup" /></label>
+            }
+            <button type="submit" class="secondary" disabled="@_busy">@L("Пересчитать")</button>
+        </fieldset>
+    </form>
+
+    @if (c.Warnings.Count > 0)
+    {
+        <div class="panel dev-hints" role="note">
+            <b>@L("Чего не хватает для полного расчёта")</b>
+            <ul>
+                @foreach (var w in c.Warnings)
+                {
+                    <li>@w</li>
+                }
+            </ul>
+        </div>
+    }
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Статья")</th><th class="num">@L("Кол-во")</th><th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th><th class="opt">@L("Цена из")</th></tr></thead>
+            <tbody>
+                @if (c.Lines.Count == 0)
+                {
+                    <tr><td colspan="5" class="muted">@L("Строк расчёта пока нет — заполните то, чего не хватает (выше).")</td></tr>
+                }
+                @foreach (var l in c.Lines)
+                {
+                    var line = l;
+                    <tr>
+                        <td>
+                            @if (l.Kind == DevCostLineKind.Yarn && c.CanEdit && l.OriginalItemId is { } orig)
+                            {
+                                <select aria-label="@L("Пряжа")" @onchange="e => Replace(orig, e.Value as string)">
+                                    @foreach (var o in c.Materials)
+                                    {
+                                        <option value="@o.Id" selected="@(o.Id == line.ItemId)">@o.Name</option>
+                                    }
+                                </select>
+                            }
+                            else
+                            {
+                                <span class="muted small">@KindName(l.Kind)</span> @l.Name
+                            }
+                        </td>
+                        <td class="num">@l.Quantity.ToString("0.######", CultureInfo.InvariantCulture) @l.Unit@(l.WastePercent > 0 ? $" (+{DevFormat.Number(l.WastePercent)} %)" : "")</td>
+                        <td class="num">
+                            @if (l.ItemId is { } item && c.CanEdit)
+                            {
+                                <input type="number" min="0" step="0.01" inputmode="decimal" style="max-width: 100px" value="@l.UnitPrice.ToString("0.##", CultureInfo.InvariantCulture)"
+                                       @onchange="e => SetPrice(item, e.Value as string)" aria-label="@L("Цена {0}", line.Name)" />
+                            }
+                            else
+                            {
+                                @Amounts.Format(l.UnitPrice)
+                            }
+                        </td>
+                        <td class="num">@Amounts.Format(l.Amount)</td>
+                        <td class="opt muted small">@SourceName(l.PriceSource)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (c.CanEdit)
+    {
+        <form class="inline-form" @onsubmit="SaveAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                <label>@L("Комментарий к версии") <input @bind="_note" maxlength="@DevCostRun.NoteMaxLength" placeholder="@L("например: хлопок 24/1 вместо 20/1")" /></label>
+                <button type="submit" disabled="@_busy">@L("Сохранить версию расчёта")</button>
+            </fieldset>
+        </form>
+    }
+
+    <div class="dev-panels">
+        <div class="panel">
+            <h2>@L("Фурнитура и упаковка на изделие")</h2>
+            @if (c.AccessoryList.Count == 0)
+            {
+                <p class="muted">@L("Пока нет.")</p>
+            }
+            else
+            {
+                <ul class="dev-files">
+                    @foreach (var a in c.AccessoryList)
+                    {
+                        var acc = a;
+                        <li>@a.Code — @a.Name <b>@a.Quantity.ToString("0.######", CultureInfo.InvariantCulture) @a.Unit</b>
+                            @if (c.CanEdit) { <button type="button" class="secondary" @onclick="() => RemoveAccessoryAsync(acc)" disabled="@_busy">@L("Убрать")</button> }
+                        </li>
+                    }
+                </ul>
+            }
+            @if (c.CanEdit)
+            {
+                <form class="inline-form" @onsubmit="AddAccessoryAsync">
+                    <label>
+                        @L("Позиция")
+                        <select @bind="_accItem">
+                            <option value="">—</option>
+                            @foreach (var o in c.AccessoryOptions)
+                            {
+                                <option value="@o.Id">@o.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("На изделие") <input type="number" min="0.000001" step="any" inputmode="decimal" style="max-width: 90px" @bind="_accQty" /></label>
+                    <button type="submit" class="secondary" disabled="@(_busy || _accItem.Length == 0)">@L("Добавить")</button>
+                </form>
+            }
+        </div>
+        <div class="panel">
+            <h2>@L("Версии расчёта")</h2>
+            @if (c.Runs.Count == 0)
+            {
+                <p class="muted">@L("Сохранённых версий нет.")</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table class="dev-matrix">
+                        <thead><tr><th>№</th><th>@L("Когда")</th><th class="num">@L("Себестоимость")</th><th class="num">@L("Цена")</th><th class="num">@L("Маржа")</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var r in c.Runs)
+                            {
+                                var run = r;
+                                <tr>
+                                    <td>@r.Version</td>
+                                    <td>@Local(r.CreatedAtUtc) · @r.CreatedBy@if (r.Note is not null) { <div class="muted small">@r.Note</div> }</td>
+                                    <td class="num">@Amounts.Format(r.Cost)</td>
+                                    <td class="num">@Amounts.Format(r.Price)</td>
+                                    <td class="num">@Amounts.Format(r.Margin)</td>
+                                    <td><button type="button" class="secondary" @onclick="() => ToggleRunAsync(run)" disabled="@_busy">@(_runOpen == r.Id ? L("Скрыть") : L("Строки"))</button></td>
+                                </tr>
+                                @if (_runOpen == r.Id && _runLines is not null)
+                                {
+                                    <tr><td colspan="6">
+                                        <ul class="small">
+                                            @foreach (var l in _runLines)
+                                            {
+                                                <li>@l.Name — @l.Quantity.ToString("0.######", CultureInfo.InvariantCulture) @l.Unit × @Amounts.Format(l.UnitPrice) = <b>@Amounts.Format(l.Amount)</b></li>
+                                            }
+                                        </ul>
+                                    </td></tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+
+    private DevCostingDto? _c;
+    private readonly Dictionary<long, decimal> _prices = [];
+    private readonly Dictionary<long, long> _replace = [];
+    private string _mode = "1";
+    private decimal? _markup;
+    private decimal? _target;
+    private string? _note;
+    private string _accItem = string.Empty;
+    private decimal _accQty = 1;
+    private long? _runOpen;
+    private IReadOnlyList<DevCostLineDto>? _runLines;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            _prices.Clear();
+            _replace.Clear();
+            await LoadAsync(initial: true);
+        }
+    }
+
+    private static string KindName(DevCostLineKind k) => k switch
+    {
+        DevCostLineKind.Yarn => L("Пряжа"),
+        DevCostLineKind.Accessory => L("Фурнитура"),
+        _ => L("Работа"),
+    };
+
+    /// <summary>Откуда цена: сервер отдаёт русское слово-код, на экране — перевод.</summary>
+    private static string SourceName(string source) => source switch
+    {
+        "закупка" => L("закупка"),
+        "каталог" => L("каталог"),
+        "вручную" => L("вручную"),
+        "расценка" => L("расценка"),
+        "ставка" => L("ставка за минуту"),
+        "нет цены" => L("нет цены"),
+        _ => source,
+    };
+
+    private DevCostScenario Scenario() => new(new Dictionary<long, decimal>(_prices), new Dictionary<long, long>(_replace),
+        _mode == "2" ? DevPriceMode.TargetPrice : DevPriceMode.Markup, _markup, _target, _note);
+
+    private async Task LoadAsync(bool initial = false)
+    {
+        _c = await Gate.Run(() => Costs.CostingAsync(ModelId, initial ? null : Scenario()));
+        if (initial)
+        {
+            _markup = _c.MarkupPercent;
+            _target = _c.TargetPrice;
+        }
+    }
+
+    private void SetPrice(long item, string? text)
+    {
+        if (decimal.TryParse(text?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v))
+        {
+            _prices[item] = v;
+        }
+        else
+        {
+            _prices.Remove(item);
+        }
+    }
+
+    private async Task Replace(long original, string? value)
+    {
+        if (long.TryParse(value, out var to))
+        {
+            _replace[original] = to;
+            await RunAsync(() => Task.CompletedTask, null);
+        }
+    }
+
+    private Task RecalculateAsync() => RunAsync(() => Task.CompletedTask, null);
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var version = await Costs.SaveAsync(ModelId, Scenario());
+        _note = null;
+        _message = L("Сохранена версия расчёта № {0}.", version);
+    }, null);
+
+    private Task AddAccessoryAsync() => RunAsync(async () =>
+    {
+        await Costs.AddAccessoryAsync(ModelId, long.Parse(_accItem, CultureInfo.InvariantCulture), _accQty);
+        _accItem = string.Empty;
+        _accQty = 1;
+    }, L("Фурнитура добавлена."));
+
+    private Task RemoveAccessoryAsync(DevAccessoryDto a) => RunAsync(() => Costs.RemoveAccessoryAsync(a.Id), L("Фурнитура убрана."));
+
+    private async Task ToggleRunAsync(DevCostRunDto r)
+    {
+        if (_runOpen == r.Id)
+        {
+            _runOpen = null;
+            return;
+        }
+
+        _runOpen = r.Id;
+        _runLines = await Gate.Run(() => Costs.RunLinesAsync(r.Id));
+    }
+
+    /// <summary>Действие, затем пересчёт с текущими условиями (одна очередь вкладки, D718).</summary>
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await Gate.Run(action);
+            _message ??= success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+            {
+                _message = UiErrors.Message(ex);
+                _isError = true;
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

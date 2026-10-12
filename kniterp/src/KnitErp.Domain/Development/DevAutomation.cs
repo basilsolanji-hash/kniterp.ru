@@ -38,6 +38,18 @@ public sealed class DevSettings
 
     public bool LabelsOnA4 { get; private set; }
 
+    /// <summary>Отходы пряжи, % (D740): расчёт себестоимости и норма отхода в черновике техкарты производства.</summary>
+    public decimal YarnWastePercent { get; private set; }
+
+    /// <summary>Накладные расходы, % от прямых затрат (D740).</summary>
+    public decimal OverheadPercent { get; private set; }
+
+    /// <summary>Ставка работы за минуту для операций без расценки (D740), пока нет расценок модуля «Сотрудники».</summary>
+    public decimal? LaborRatePerMinute { get; private set; }
+
+    /// <summary>Наценка по умолчанию, % (D742).</summary>
+    public decimal MarkupPercent { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
 
     public const int DefaultTolerance = 10;
@@ -92,6 +104,27 @@ public sealed class DevSettings
         LabelWidthMm = labelWidthMm;
         LabelHeightMm = labelHeightMm;
         LabelsOnA4 = labelsOnA4;
+    }
+
+    /// <summary>Условия расчёта себестоимости (D740, D742): отходы пряжи, накладные, ставка за минуту, наценка по умолчанию.</summary>
+    public void SetCosting(decimal yarnWastePercent, decimal overheadPercent, decimal? laborRatePerMinute, decimal markupPercent)
+    {
+        if (yarnWastePercent is < 0 or > 100)
+        {
+            throw new BusinessRuleException("dev.cost.percent", "Отходы пряжи — от 0 до 100 %.");
+        }
+
+        DevCosting.EnsurePercent(overheadPercent, "Накладные расходы");
+        DevCosting.EnsurePercent(markupPercent, "Наценка");
+        if (laborRatePerMinute is < 0 or > 1_000_000)
+        {
+            throw new BusinessRuleException("dev.cost.rate", "Ставка за минуту — от 0 до 1 000 000.");
+        }
+
+        YarnWastePercent = yarnWastePercent;
+        OverheadPercent = overheadPercent;
+        LaborRatePerMinute = laborRatePerMinute;
+        MarkupPercent = markupPercent;
     }
 
     /// <summary>Факт больше плана сверх допуска.</summary>

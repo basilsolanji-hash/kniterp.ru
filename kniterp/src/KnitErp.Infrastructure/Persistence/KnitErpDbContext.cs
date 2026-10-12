@@ -143,6 +143,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates => Set<KnitErp.Domain.Development.DevCategoryTemplate>();
     public DbSet<KnitErp.Domain.Development.DevMachine> DevMachines => Set<KnitErp.Domain.Development.DevMachine>();
     public DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes => Set<KnitErp.Domain.Development.DevMachineNote>();
+    public DbSet<KnitErp.Domain.Development.DevModelAccessory> DevModelAccessories => Set<KnitErp.Domain.Development.DevModelAccessory>();
+    public DbSet<KnitErp.Domain.Development.DevCostRun> DevCostRuns => Set<KnitErp.Domain.Development.DevCostRun>();
+    public DbSet<KnitErp.Domain.Development.DevCostLine> DevCostLines => Set<KnitErp.Domain.Development.DevCostLine>();
     public DbSet<KnitErp.Domain.Development.DevModelColor> DevModelColors => Set<KnitErp.Domain.Development.DevModelColor>();
     public DbSet<KnitErp.Domain.Development.DevDetail> DevDetails => Set<KnitErp.Domain.Development.DevDetail>();
     public DbSet<KnitErp.Domain.Development.DevThreading> DevThreading => Set<KnitErp.Domain.Development.DevThreading>();

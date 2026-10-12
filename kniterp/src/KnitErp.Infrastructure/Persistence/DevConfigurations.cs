@@ -168,9 +168,15 @@ internal sealed class DevSettingsConfiguration : IEntityTypeConfiguration<DevSet
         b.Property(x => x.CompletenessSections).HasDefaultValue(DevCompleteness.AllSections).HasSentinel(DevCompleteness.AllSections);
         b.Property(x => x.LabelWidthMm).HasDefaultValue(DevSettings.DefaultLabelWidth).HasSentinel(DevSettings.DefaultLabelWidth);
         b.Property(x => x.LabelHeightMm).HasDefaultValue(DevSettings.DefaultLabelHeight).HasSentinel(DevSettings.DefaultLabelHeight);
+        b.Property(x => x.YarnWastePercent).HasPrecision(9, 4);
+        b.Property(x => x.OverheadPercent).HasPrecision(9, 4);
+        b.Property(x => x.MarkupPercent).HasPrecision(9, 4);
+        b.Property(x => x.LaborRatePerMinute).HasPrecision(19, 4);
         b.ToTable(t =>
         {
             t.HasCheckConstraint("ck_dev_settings_tolerance", "[FactTolerancePercent] BETWEEN 1 AND 100");
+            t.HasCheckConstraint("ck_dev_settings_costing",
+                "[YarnWastePercent] BETWEEN 0 AND 100 AND [OverheadPercent] BETWEEN 0 AND 1000 AND [MarkupPercent] BETWEEN 0 AND 1000 AND ([LaborRatePerMinute] IS NULL OR [LaborRatePerMinute] >= 0)");
             t.HasCheckConstraint("ck_dev_settings_sections", $"[CompletenessSections] BETWEEN 1 AND {DevCompleteness.AllSections}");
             t.HasCheckConstraint("ck_dev_settings_label", $"[LabelWidthMm] BETWEEN {DevSettings.MinLabelMm} AND {DevSettings.MaxLabelMm} AND [LabelHeightMm] BETWEEN {DevSettings.MinLabelMm} AND {DevSettings.MaxLabelMm}");
         });
