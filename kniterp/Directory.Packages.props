@@ -10,6 +10,8 @@
     <PackageVersion Include="Microsoft.Extensions.Identity.Core" Version="10.0.12" />
     <PackageVersion Include="ClosedXML" Version="0.104.2" />
     <PackageVersion Include="QRCoder" Version="1.6.0" />
+    <!-- D1123 (продажи): PDF документов продаж для вложений в письма (MIT). -->
+    <PackageVersion Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageVersion Include="Anthropic" Version="12.54.1" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
     <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.12" />

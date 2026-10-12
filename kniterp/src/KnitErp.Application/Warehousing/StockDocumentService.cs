@@ -422,6 +422,7 @@ public sealed class StockDocumentService(
         if (doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } shippedOrder)
         {
             await KnitErp.Application.Sales.StageAutomation.ApplyAsync(db, ctx, [shippedOrder], clock.UtcNow, currentUser.CorrelationId, ct);
+            await KnitErp.Application.Sales.SalesMailOutbox.OnShipmentPostedAsync(db, ctx, doc.Id, clock.UtcNow, ct); // D1124 (сессия «Продажи»): УПД клиенту
             await db.SaveChangesAsync(ct);
         }
 

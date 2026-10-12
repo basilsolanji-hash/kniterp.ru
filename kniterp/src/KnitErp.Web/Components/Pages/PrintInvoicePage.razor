@@ -2,11 +2,15 @@
 @layout KnitErp.Web.Components.Layout.PrintLayout
 @using System.Globalization
 @using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
 @inject PrintService Print
+@inject SalesDocumentPrintService Extras
 
 @* Счёт на оплату — российская форма, печатается по-русски (D68). *@
 <PageTitle>@(_doc is null ? "Счёт" : $"Счёт {_doc.Number}") — knitERP</PageTitle>
 <style>@@media print { @@page { size: A4 portrait; margin: 12mm; } }</style>
+<SalesPrintStyles />
 
 <div class="print-bar">
     <button type="button" data-print>@L("Печать")</button>
@@ -29,6 +33,10 @@ else
 {
     var r = _doc.Requisites;
     <div class="sheet portrait">
+        @if (_deco.Logo is { } logo)
+        {
+            <img class="sx-logo" src="@logo.DataUri" alt="" />
+        }
         @if (_doc.Cancelled)
         {
             <div class="stamp">СЧЁТ ОТМЕНЁН</div>
@@ -88,6 +96,11 @@ else
             <tr><td>Всего к оплате:</td><td class="n">@Amounts.Format(_doc.Total)</td></tr>
         </table>
 
+        @if (_qrSvg is not null)
+        {
+            @* D1121: QR для оплаты по ГОСТ Р 56042-2014 — из реквизитов юрлица, счёта и суммы. *@
+            <div class="sx-qr">@((MarkupString)_qrSvg)Оплата по QR-коду в приложении банка</div>
+        }
         <p>Всего наименований @_doc.Lines.Count, на сумму @Amounts.Format(_doc.Total) @_doc.CurrencyCode</p>
         <p class="words">@_doc.TotalInWords</p>
         @if (_doc.DueDate is { } due)
@@ -95,15 +108,19 @@ else
             <p>Оплатить не позднее @due.ToString("dd.MM.yyyy").</p>
         }
 
-        <div class="sign">
+        <div class="sign sx-sign">
             @if (r.SoleProprietor)
             {
-                <div>Индивидуальный предприниматель <span class="line"></span> @r.DirectorName</div>
+                <div>Индивидуальный предприниматель <SalesPrintSign Image="_deco.DirectorSignature" /> @r.DirectorName</div>
             }
             else
             {
-                <div>Руководитель <span class="line"></span> @r.DirectorName</div>
-                <div>Бухгалтер <span class="line"></span> @(r.AccountantName ?? r.DirectorName)</div>
+                <div>Руководитель <SalesPrintSign Image="_deco.DirectorSignature" /> @r.DirectorName</div>
+                <div>Бухгалтер <SalesPrintSign Image="@(_deco.AccountantSignature ?? _deco.DirectorSignature)" /> @(r.AccountantName ?? r.DirectorName)</div>
+            }
+            @if (_deco.Stamp is { } stamp)
+            {
+                <img class="sx-stamp" src="@stamp.DataUri" alt="" />
             }
         </div>
     </div>
@@ -114,6 +131,8 @@ else
     public long Id { get; set; }
 
     private InvoicePrintDto? _doc;
+    private SalesPrintDecorations _deco = SalesPrintDecorations.None;
+    private string? _qrSvg;
     private string? _error;
 
     private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
@@ -123,6 +142,8 @@ else
         try
         {
             _doc = await Print.InvoiceAsync(Id);
+            _deco = await Extras.DecorationsAsync(SalesMailDocument.Invoice, Id); // D1120, D1121
+            _qrSvg = _deco.PaymentQr is { } qr ? KnitErp.Infrastructure.Documents.PaymentQrImage.Svg(qr) : null;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {

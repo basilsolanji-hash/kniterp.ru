@@ -1,0 +1,124 @@
+@page "/print/sales-order/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesDocumentPrintService Extras
+
+@* D1121: печатная форма «Заказ покупателя» — российская форма, печатается по-русски (как счёт и УПД, D68). *@
+<PageTitle>@(_doc is null ? "Заказ покупателя" : $"Заказ {_doc.Number}") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 12mm; } }</style>
+<SalesPrintStyles />
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="sales-orders/@Id">@L("← К заказу")</a>
+    <a href="sales-documents/order/@(Id).pdf" download data-enhance-nav="false">@L("Скачать PDF")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_doc is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var r = _doc.Requisites;
+    <div class="sheet portrait">
+        @if (_deco.Logo is { } logo)
+        {
+            <img class="sx-logo" src="@logo.DataUri" alt="" />
+        }
+        @if (_doc.Cancelled)
+        {
+            <div class="stamp">ЗАКАЗ ОТМЕНЁН</div>
+        }
+
+        <h1>Заказ покупателя № @_doc.Number от @PrintInvoicePage.Date(_doc.Date)</h1>
+
+        <table class="plain">
+            <tr><td style="width: 140px">Поставщик:</td><td><b>@PrintInvoicePage.Party(_doc.Seller)</b></td></tr>
+            <tr><td>Покупатель:</td><td><b>@PrintInvoicePage.Party(_doc.Buyer)</b></td></tr>
+            @if (_doc.CustomerReference is { } reference)
+            {
+                <tr><td>Основание:</td><td><b>@reference</b></td></tr>
+            }
+            @if (_doc.DeliveryAddress is { } address)
+            {
+                <tr><td>Адрес доставки:</td><td><b>@address</b></td></tr>
+            }
+            <tr><td>Склад отгрузки:</td><td><b>@_doc.Warehouse</b></td></tr>
+            @if (_doc.ShipDate is { } ship)
+            {
+                <tr><td>Дата отгрузки:</td><td><b>@ship.ToString("dd.MM.yyyy")</b></td></tr>
+            }
+            <tr><td>Состояние:</td><td><b>@_doc.Status</b></td></tr>
+        </table>
+
+        <table style="margin-top: 8px">
+            <thead>
+                <tr><th>№</th><th>Товары (работы, услуги)</th><th>Кол-во</th><th>Ед.</th><th>Цена</th><th>НДС</th><th>Сумма</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var l in _doc.Lines)
+                {
+                    <tr>
+                        <td class="c">@l.No</td>
+                        <td>@l.Name</td>
+                        <td class="n">@Quantities.Format(l.Quantity)</td>
+                        <td>@l.UnitSymbol</td>
+                        <td class="n">@Amounts.Format(l.Price)</td>
+                        <td class="c">@Amounts.Vat(l.VatPercent)</td>
+                        <td class="n">@Amounts.Format(_doc.PricesIncludeVat ? l.Amount : l.AmountWithoutVat)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <table class="totals-print">
+            <tr><td>Итого:</td><td class="n">@Amounts.Format(_doc.PricesIncludeVat ? _doc.Total : _doc.Total - _doc.VatTotal)</td></tr>
+            <tr><td>@(_doc.PricesIncludeVat ? "В том числе НДС:" : "НДС:")</td><td class="n">@(_doc.VatTotal == 0 ? (r.VatExempt ? "Без налога (НДС)" : "Без НДС") : Amounts.Format(_doc.VatTotal))</td></tr>
+            <tr><td>Всего:</td><td class="n">@Amounts.Format(_doc.Total)</td></tr>
+        </table>
+
+        <p>Всего наименований @_doc.Lines.Count, на сумму @Amounts.Format(_doc.Total) @_doc.CurrencyCode</p>
+        <p class="words">@_doc.TotalInWords</p>
+        @if (_doc.Comment is { } comment)
+        {
+            <p>Комментарий: @comment</p>
+        }
+
+        <div class="sign sx-sign">
+            <div>@(r.SoleProprietor ? "Индивидуальный предприниматель" : "Руководитель") <SalesPrintSign Image="_deco.DirectorSignature" /> @r.DirectorName</div>
+            @if (_deco.Stamp is { } stamp)
+            {
+                <img class="sx-stamp" src="@stamp.DataUri" alt="" />
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private SalesOrderPrintDto? _doc;
+    private SalesPrintDecorations _deco = SalesPrintDecorations.None;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await Extras.OrderAsync(Id);
+            _deco = await Extras.DecorationsAsync(SalesMailDocument.Order, Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

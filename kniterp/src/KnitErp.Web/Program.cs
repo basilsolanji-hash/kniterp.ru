@@ -238,6 +238,7 @@ builder.Services.AddSingleton<KnitErp.Application.Catalog.IFeedPhotoLinks, KnitE
 // D1102 (продажи): вкладка «Условия продаж» в карточке контрагента — вид цены клиента, менеджер, соглашения.
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.ModuleUi.Text("Условия продаж"),
     typeof(KnitErp.Web.Components.Pages.SalesCustomerTermsTab), KnitErp.Domain.Access.Permissions.SalesView);
+KnitErp.Web.Api.SalesDocumentsSetup.AddSalesDocuments(builder); // D1120–D1125 (продажи): письма клиенту, вкладка «Почта для документов»
 
 // D616, D632 (сессия CRM): вкладка «Контакты и сделки» у контрагента и блок «CRM» главного экрана.
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("crm", KnitErp.Web.Modules.ModuleUi.Text("Контакты и сделки"),
@@ -528,6 +529,8 @@ app.MapGet("/counterparties/contract-files/{id:long}", async (long id, KnitErp.A
         return Results.NotFound();
     }
 });
+
+KnitErp.Web.Api.SalesDocumentsSetup.MapSalesDocuments(app); // D1123 (продажи): PDF заказа, счёта и УПД
 
 // Файл модели разработки (D705): право, своя организация и журнал скачивания — в сервисе; всегда вложением и без угадывания типа.
 app.MapGet("/dev/files/{id:long}", async (long id, string? inline, KnitErp.Application.Development.DevModelService models, HttpContext http, CancellationToken ct) =>

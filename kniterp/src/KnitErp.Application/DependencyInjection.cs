@@ -79,6 +79,11 @@ public static class DependencyInjection
         services.AddScoped<Sales.SalesAgreementService>();
         services.AddScoped<Sales.SalesDiscountService>();
         services.AddScoped<Sales.SalesSettingsService>();
+        // D1120–D1125 (продажи): оформление документов, письма клиенту, связанные документы.
+        services.AddScoped<Sales.SalesDocumentSettingsService>();
+        services.AddScoped<Sales.SalesDocumentPrintService>();
+        services.AddScoped<Sales.SalesOrderDocumentsService>();
+        services.AddScoped<Sales.SalesMailDispatcher>();
         // CRM (D600–D699).
         services.AddScoped<Crm.CrmSettingsService>();
         services.AddScoped<Crm.CrmLeadService>();

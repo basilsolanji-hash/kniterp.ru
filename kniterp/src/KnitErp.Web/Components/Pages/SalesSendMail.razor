@@ -1,0 +1,163 @@
+@*
+    D1122: «Отправить клиенту» — кнопка и форма письма (кому, документы, тема, текст по шаблону). Черновик грузится по нажатию кнопки,
+    а не при открытии страницы: компонент встроен в чужие карточки, у вкладки один DbContext. Письмо ставится в очередь, PDF документов
+    формируются при отправке; после постановки родитель перечитывает данные (OnSent).
+*@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesOrderDocumentsService Documents
+
+@if (_draft is null)
+{
+    <button type="button" class="@(Primary ? null : "secondary")" @onclick="OpenAsync" disabled="@_busy">@L("Отправить клиенту")</button>
+    @if (_message is not null)
+    {
+        <span class="@(_isError ? "bad" : "muted")" role="@(_isError ? "alert" : "status")">@_message</span>
+    }
+}
+else
+{
+    <form class="sx-form sx-mail-form" @onsubmit="SendAsync">
+        <div class="sx-legend">@L("Письмо клиенту")</div>
+        @if (!_draft.MailConfigured)
+        {
+            <div class="w4 sx-issues">@L("Почта сервера не настроена: письмо встанет в очередь и получит статус «Не отправлено». Настройте почту и повторите отправку.")</div>
+        }
+        <label class="w2">
+            @L("Кому (до 5 адресов через запятую)")
+            <input type="text" inputmode="email" @bind="_to" maxlength="@SalesMailMessage.RecipientsMaxLength" required placeholder="buh@example.org" />
+        </label>
+        <div class="w2 sx-mail-docs">
+            <span class="sx-hint">@L("Документы (PDF во вложении)")</span>
+            @foreach (var d in _draft.Documents)
+            {
+                <label class="inline">
+                    <input type="checkbox" checked="@_selected.Contains((d.Document, d.Id))" @onchange="e => Toggle(d, e)" />
+                    @L(d.DocumentName) @d.Number
+                </label>
+            }
+        </div>
+        <label class="w4">@L("Тема") <input @bind="_subject" maxlength="@SalesMailTemplate.SubjectMaxLength" required /></label>
+        <label class="w4">@L("Текст") <textarea rows="6" @bind="_body" maxlength="@(SalesMailTemplate.BodyMaxLength * 2)" required></textarea></label>
+        @if (_message is not null)
+        {
+            <div class="w4 @(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+        }
+        <div class="sx-actions">
+            <button type="submit" disabled="@_busy">@L("Отправить")</button>
+            <button type="button" class="secondary" @onclick="Close" disabled="@_busy">@L("Отмена")</button>
+        </div>
+    </form>
+    <style>
+        .sx-mail-form textarea { width: 100%; box-sizing: border-box; font: inherit; }
+        .sx-mail-form > label > textarea { width: 100%; }
+        .sx-mail-docs { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; min-width: 0; }
+        .sx-mail-docs label.inline { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+    </style>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long OrderId { get; set; }
+
+    /// <summary>Основной документ письма — его шаблон и отметка по умолчанию.</summary>
+    [Parameter]
+    public SalesMailDocument Document { get; set; } = SalesMailDocument.Order;
+
+    [Parameter]
+    public long? DocumentId { get; set; }
+
+    [Parameter]
+    public bool Primary { get; set; }
+
+    [Parameter]
+    public EventCallback OnSent { get; set; }
+
+    private SalesMailDraftDto? _draft;
+    private readonly HashSet<(SalesMailDocument, long)> _selected = [];
+    private string? _to;
+    private string? _subject;
+    private string? _body;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    private async Task OpenAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            _draft = await Documents.DraftAsync(OrderId, Document, DocumentId);
+            _selected.Clear();
+            foreach (var s in _draft.Selected)
+            {
+                _selected.Add((s.Document, s.Id));
+            }
+
+            (_to, _subject, _body) = (_draft.To, _draft.Subject, _draft.Body);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Toggle(SalesPrintableDto d, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            _selected.Add((d.Document, d.Id));
+        }
+        else
+        {
+            _selected.Remove((d.Document, d.Id));
+        }
+    }
+
+    private void Close()
+    {
+        _draft = null;
+        _message = null;
+    }
+
+    private async Task SendAsync()
+    {
+        if (_busy || _draft is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await Documents.SendAsync(new SalesMailRequest(OrderId, _to, _subject, _body,
+                _draft.Documents.Where(d => _selected.Contains((d.Document, d.Id))).Select(d => new SalesMailDocumentRef(d.Document, d.Id)).ToList()));
+            _draft = null;
+            _message = L("Письмо поставлено в очередь — статус виден в журнале писем заказа.");
+            _isError = false;
+            _busy = false;
+            await OnSent.InvokeAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

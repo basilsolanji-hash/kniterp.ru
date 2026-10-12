@@ -240,6 +240,15 @@ public static class AuditActions
     public const string CustomerPaymentCancelled = "sales.payment.cancelled";
     public const string CustomerInvoiceIssued = "sales.invoice.issued";
     public const string CustomerInvoiceCancelled = "sales.invoice.cancelled";
+    // D1120–D1125 (продажи): оформление документов, письма клиенту, связанные документы.
+    public const string SalesDocumentSettingsChanged = "sales.document_settings.changed";
+    public const string SalesDocumentImageChanged = "sales.document_image.changed";
+    public const string SalesMailSettingsChanged = "sales.mail_settings.changed";
+    public const string CustomerMailSettingsChanged = "sales.customer_mail.changed";
+    public const string SalesMailQueued = "sales.mail.queued";
+    public const string SalesMailChanged = "sales.mail.changed";
+    public const string SalesDocumentLinked = "sales.document.linked";
+    public const string SalesDocumentUnlinked = "sales.document.unlinked";
     public const string ReceivedVatInvoiceRegistered = "purchase.vat_invoice.registered";
     public const string ReceivedVatInvoiceCancelled = "purchase.vat_invoice.cancelled";
     public const string PeriodClosed = "period.closed";

@@ -19,16 +19,22 @@ public interface IEmailSender
 
     /// <summary>
     /// Письмо CRM (D674): текст и HTML-вариант, ответ — на почту менеджера (Reply-To), для рассылок — заголовок List-Unsubscribe.
-    /// Отправитель без поддержки HTML отправляет текст.
+    /// D1123 (сессия «Продажи»): вложения (PDF документов), получатели через запятую, имя отправителя.
+    /// Отправитель без поддержки HTML и вложений отправляет текст; письмо с вложениями такой отправитель не отправляет (false).
     /// </summary>
-    Task<bool> SendAsync(EmailMessage message, CancellationToken ct = default) => SendAsync(message.To, message.Subject, message.Text, ct);
+    Task<bool> SendAsync(EmailMessage message, CancellationToken ct = default) =>
+        message.Attachments is { Count: > 0 } ? Task.FromResult(false) : SendAsync(message.To, message.Subject, message.Text, ct);
 }
+
+/// <summary>D1123 (сессия «Продажи»): вложение письма.</summary>
+public sealed record EmailAttachment(string FileName, string ContentType, byte[] Content);
 
 /// <param name="ReplyTo">Куда пойдёт ответ клиента — почта менеджера (отправитель остаётся адресом системы, SPF/DKIM не ломаются).</param>
 /// <param name="ReplyToName">Имя менеджера для Reply-To.</param>
 /// <param name="UnsubscribeUrl">Ссылка отписки для заголовка List-Unsubscribe (RFC 2369) — почтовые сервисы показывают кнопку «Отписаться».</param>
+/// <param name="Attachments">D1123: вложения; To — адреса через запятую; SenderName — имя в поле «От».</param>
 public sealed record EmailMessage(string To, string Subject, string Text, string? Html = null, string? ReplyTo = null, string? ReplyToName = null,
-    string? UnsubscribeUrl = null);
+    string? UnsubscribeUrl = null, IReadOnlyList<EmailAttachment>? Attachments = null, string? SenderName = null);
 
 /// <param name="Url">smtps://host:465 (TLS сразу) или smtp://host:587 (STARTTLS).</param>
 /// <param name="PickupDirectory">Разработка и тесты: письма пишутся файлами в папку вместо отправки.</param>

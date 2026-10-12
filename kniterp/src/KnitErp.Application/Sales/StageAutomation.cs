@@ -76,6 +76,7 @@ internal static class StageAutomation
             db.AuditEntries.Add(AuditEntry.Create(nowUtc, org, ctx.UserId, AuditActions.SalesOrderChanged, nameof(SalesOrder), order.Id.ToString(),
                 current?.Name ?? "—", stages[target.StageId].Name, $"{order.Number}: этап, автоматически — {SalesStageAutomation.Name(target.Trigger)}",
                 correlationId));
+            await SalesMailOutbox.OnStageChangedAsync(db, ctx, order.Id, target.StageId, nowUtc, ct); // D1124: письмо о статусе заказа
         }
     }
 
