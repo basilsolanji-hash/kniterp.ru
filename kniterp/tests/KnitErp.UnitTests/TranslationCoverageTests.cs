@@ -162,6 +162,11 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesMailDocument>().Select(KnitErp.Domain.Sales.SalesMailMessage.DocumentName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesLinkKind>().Select(KnitErp.Domain.Sales.SalesDocumentLink.KindName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.CustomerInvoiceStatus>().Select(KnitErp.Domain.Sales.CustomerInvoice.StatusName));
+        // D1150–D1155 (продажи): сборка, отгрузки по нескольким заказам, доставка, качество возврата.
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.PickListStatus>().Select(KnitErp.Domain.Sales.SalesPickList.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.ShipmentGroupStatus>().Select(KnitErp.Domain.Sales.SalesShipmentGroup.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.DeliveryKind>().Select(KnitErp.Domain.Sales.SalesDeliveryMethod.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.ReturnQuality>().Select(KnitErp.Domain.Sales.SalesReturnDetails.QualityName));
         var labels = File.ReadAllText(Path.Combine(WebDir, "Components", "Shared", "Labels.cs"));
         foreach (Match m in AuditLabel().Matches(labels))
         {

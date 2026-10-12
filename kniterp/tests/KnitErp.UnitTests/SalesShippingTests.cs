@@ -38,8 +38,11 @@ public sealed class SalesShippingTests
         list.PickAll(7, DateTime.UtcNow);
         Assert.Equal(PickListStatus.Picked, list.Status);
         Assert.Throws<BusinessRuleException>(() => SalesPickList.Create(1, "СБ-2", new DateOnly(2026, 10, 9), 5, null, [], 7, DateTime.UtcNow));
-        list.Cancel();
-        Assert.Throws<BusinessRuleException>(() => list.Cancel());
+        Assert.Throws<BusinessRuleException>(() => list.Cancel()); // собранное задание не отменяется
+        var open = SalesPickList.Create(1, "СБ-3", new DateOnly(2026, 10, 9), 5, null, [(10, 100, 1m, null)], 7, DateTime.UtcNow);
+        open.Cancel();
+        Assert.Equal(PickListStatus.Cancelled, open.Status);
+        Assert.Throws<BusinessRuleException>(() => open.PickAll(7, DateTime.UtcNow));
     }
 
     [Fact]

@@ -178,13 +178,14 @@ public sealed partial class SalesService
         }
 
         var org = ctx.OrganizationId;
-        var reasons = await db.SalesReturnReasons.AsNoTracking().Where(r => r.OrganizationId == org && (!r.IsArchived || r.Id == details!.ReasonId))
+        var (reasonId, quarantineId, writeOffId) = (details?.ReasonId, details?.QuarantineWarehouseId, details?.WriteOffReasonId);
+        var reasons = await db.SalesReturnReasons.AsNoTracking().Where(r => r.OrganizationId == org && (!r.IsArchived || r.Id == reasonId))
             .OrderBy(r => r.Name).Select(r => new LookupDto(r.Id, r.Name)).ToListAsync(ct);
         var warehouses = await db.Warehouses.AsNoTracking()
-            .Where(w => w.OrganizationId == org && w.Id != doc.WarehouseId && (!w.IsArchived || w.Id == details!.QuarantineWarehouseId))
+            .Where(w => w.OrganizationId == org && w.Id != doc.WarehouseId && (!w.IsArchived || w.Id == quarantineId))
             .OrderBy(w => w.Name).Select(w => new LookupWarehouseDto(w.Id, w.Name)).ToListAsync(ct);
         var writeOffReasons = await db.OperationReasons.AsNoTracking()
-            .Where(r => r.OrganizationId == org && r.Kind == StockOperationKind.WriteOff && (!r.IsArchived || r.Id == details!.WriteOffReasonId))
+            .Where(r => r.OrganizationId == org && r.Kind == StockOperationKind.WriteOff && (!r.IsArchived || r.Id == writeOffId))
             .OrderBy(r => r.Name).Select(r => new LookupDto(r.Id, r.Name)).ToListAsync(ct);
         var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
         var items = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id))
