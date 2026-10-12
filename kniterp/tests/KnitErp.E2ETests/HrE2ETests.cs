@@ -385,8 +385,21 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.WaitForURLAsync(new Regex(@"/employees/\d+$"));
         await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
         var card = page.Url;
-        await page.GetByRole(AriaRole.Button, new() { Name = "Ссылка для заполнения данных" }).ClickAsync();
         var linkBox = page.Locator("#employee-data-link");
+        // До подключения Blazor щелчок теряется: повторяем, пока не появится ссылка (ожидание длиннее ответа сервера — новая
+        // ссылка отменяет прежнюю, второй щелчок после показа сделал бы прочитанную ссылку недействительной).
+        for (var i = 0; i < 6 && !await linkBox.IsVisibleAsync(); i++)
+        {
+            await page.GetByRole(AriaRole.Button, new() { Name = "Ссылка для заполнения данных" }).ClickAsync();
+            try
+            {
+                await linkBox.WaitForAsync(new() { Timeout = 5_000 });
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
         await Expect(linkBox).ToHaveValueAsync(new Regex("/account/employee-data\\?token="));
         var link = await linkBox.InputValueAsync();
         await Expect(page.GetByRole(AriaRole.Button, new() { Name = "Копировать ссылку" })).ToBeVisibleAsync();
