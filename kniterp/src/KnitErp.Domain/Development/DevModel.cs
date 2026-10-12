@@ -101,6 +101,12 @@ public sealed class DevModel
     public long? ConstructorUserId { get; private set; }
     public long? TechnologistUserId { get; private set; }
     public long? ProgrammerUserId { get; private set; }
+    /// <summary>Позиция «Готовая продукция», в которую передана модель (D750).</summary>
+    public long? ProductionItemId { get; private set; }
+
+    /// <summary>Черновик техкарты производства, созданный при передаче (D750).</summary>
+    public long? ProductionTechCardId { get; private set; }
+
     public DateOnly? PlannedLaunch { get; private set; }
     public DevPriority Priority { get; private set; }
 
@@ -242,6 +248,22 @@ public sealed class DevModel
         }
 
         return SetStage(to, comment, nowUtc, userId);
+    }
+
+    /// <summary>
+    /// Передача в производство (D750): только утверждённая модель; запоминает позицию и черновик техкарты, стадия — «Передано в производство».
+    /// Право «утверждение» проверяет сервис.
+    /// </summary>
+    public DevModelStageEntry HandOver(long itemId, long techCardId, DateTime nowUtc, long userId)
+    {
+        if (Stage != DevStage.Approved)
+        {
+            throw new BusinessRuleException("dev.handoff.stage", "Передать в производство можно только утверждённую модель.");
+        }
+
+        ProductionItemId = itemId;
+        ProductionTechCardId = techCardId;
+        return SetStage(DevStage.Handed, "Передано в производство", nowUtc, userId);
     }
 
     public DevModelStageEntry Cancel(string? reason, DateTime nowUtc, long userId)

@@ -151,6 +151,11 @@ else
         }
     }
 
+    @if (m.Stage is DevStage.Approved or DevStage.Handed)
+    {
+        <DevHandoffPanel ModelId="Id" OnHanded="ReloadAfterHandoffAsync" />
+    }
+
     <div class="tabs dev-tabs" role="tablist">
         @foreach (var t in Enum.GetValues<Tab>())
         {
@@ -294,6 +299,8 @@ else
             _notFound = true;
         }
     }
+
+    private Task ReloadAfterHandoffAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {

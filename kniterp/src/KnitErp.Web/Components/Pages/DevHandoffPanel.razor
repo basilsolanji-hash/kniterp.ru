@@ -1,0 +1,165 @@
+@using KnitErp.Application.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevHandoffService Handoff
+
+@*
+    Передача в производство (D750–D752): видно, что уйдёт — позиция, нормы пряжи на 1 шт, маршрут, замечания; одна кнопка делает всё
+    одной транзакцией. После передачи — ссылки на позицию и черновик техкарты производства.
+*@
+@if (_p is not null)
+{
+    <div class="panel dev-handoff">
+        @if (_p.TechCardId is { } card)
+        {
+            <h2>@L("Передано в производство")</h2>
+            <div class="actions" style="margin: 0">
+                <a class="button secondary" href="catalog/items/@_p.ItemId">@L("Позиция в номенклатуре")</a>
+                <a class="button secondary" href="tech-cards/@card">@L("Черновик техкарты производства")</a>
+            </div>
+            <p class="muted small">@L("Техкарту утверждает производство; изменения модели — новой версией модели.")</p>
+        }
+        else
+        {
+            <h2>@L("Передача в производство")</h2>
+            @if (_message is not null)
+            {
+                <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+            }
+            <div class="dev-panels" style="margin: 8px 0">
+                <div>
+                    <h3>@L("Нормы пряжи на 1 шт")</h3>
+                    @if (_p.Lines.Count == 0)
+                    {
+                        <p class="muted">@L("Норм пока нет.")</p>
+                    }
+                    else
+                    {
+                        <table class="dev-matrix">
+                            <thead><tr><th>@L("Пряжа")</th><th class="num">@L("Норма")</th><th class="num">@L("Граммы")</th></tr></thead>
+                            <tbody>
+                                @foreach (var l in _p.Lines)
+                                {
+                                    <tr><td>@l.ItemCode — @l.ItemName</td><td class="num">@l.Quantity.ToString("0.######", CultureInfo.InvariantCulture) @l.Unit</td><td class="num">@DevFormat.Grams(l.Grams)</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    <p class="small"><b>@L("Маршрут"):</b> @string.Join(" → ", _p.Route.Select(r => L(r)))</p>
+                </div>
+                <div>
+                    @if (_p.Warnings.Count > 0)
+                    {
+                        <h3>@L("Проверить")</h3>
+                        <ul class="small">
+                            @foreach (var w in _p.Warnings)
+                            {
+                                <li>@w</li>
+                            }
+                        </ul>
+                    }
+                    @if (_p.CanHandOff)
+                    {
+                        <form class="grid" @onsubmit="HandOffAsync">
+                            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                                <label>
+                                    @L("Позиция «Готовая продукция»")
+                                    <select @bind="_item">
+                                        <option value="">@L("создать новую")</option>
+                                        @foreach (var o in _p.Products)
+                                        {
+                                            <option value="@o.Id">@o.Name</option>
+                                        }
+                                    </select>
+                                </label>
+                                @if (_item.Length == 0)
+                                {
+                                    <label>@L("Код позиции") <input @bind="_code" maxlength="50" /></label>
+                                    <label>@L("Название позиции") <input @bind="_name" maxlength="200" /></label>
+                                }
+                                <div class="actions"><button type="submit" disabled="@_busy">@L("Передать в производство")</button></div>
+                            </fieldset>
+                        </form>
+                    }
+                    else
+                    {
+                        <p class="muted">@_p.Refusal</p>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    /// <summary>Вызывается после передачи — карточка перечитывает модель (стадия, история).</summary>
+    [Parameter]
+    public EventCallback OnHanded { get; set; }
+
+    private DevHandoffPreviewDto? _p;
+    private string _item = string.Empty;
+    private string? _code;
+    private string? _name;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _p = await Gate.Run(() => Handoff.PreviewAsync(ModelId));
+        _code ??= _p.SuggestedCode;
+        _name ??= _p.SuggestedName;
+    }
+
+    private async Task HandOffAsync()
+    {
+        if (_busy || _p is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        var handed = false;
+        try
+        {
+            await Gate.Run(() => Handoff.HandOffAsync(ModelId, long.TryParse(_item, out var i) ? i : null, _code, _name, _p.RowVersion));
+            handed = true;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+
+        if (handed)
+        {
+            await OnHanded.InvokeAsync();
+        }
+    }
+}

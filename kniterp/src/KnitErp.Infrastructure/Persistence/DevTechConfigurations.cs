@@ -148,6 +148,7 @@ internal sealed class DevModelSizeConfiguration : IEntityTypeConfiguration<DevMo
     public void Configure(EntityTypeBuilder<DevModelSize> b)
     {
         b.ToTable("dev_model_sizes", t => t.HasCheckConstraint("ck_dev_model_sizes_box", "[PerBox] IS NULL OR [PerBox] > 0"));
+        b.Property(x => x.RowVersion).IsRowVersion();
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Name).HasMaxLength(DevModelSize.NameMaxLength).IsRequired();
@@ -163,6 +164,7 @@ internal sealed class DevDetailSizeConfiguration : IEntityTypeConfiguration<DevD
     public void Configure(EntityTypeBuilder<DevDetailSize> b)
     {
         b.ToTable("dev_detail_sizes");
+        b.Property(x => x.RowVersion).IsRowVersion();
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.LengthOffMachineCm).HasPrecision(18, 6);
@@ -199,6 +201,7 @@ internal sealed class DevMeasureValueConfiguration : IEntityTypeConfiguration<De
     public void Configure(EntityTypeBuilder<DevMeasureValue> b)
     {
         b.ToTable("dev_measure_values");
+        b.Property(x => x.RowVersion).IsRowVersion();
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Value).HasPrecision(18, 6);
@@ -228,6 +231,9 @@ internal sealed class DevSampleConfiguration : IEntityTypeConfiguration<DevSampl
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_samples_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.No }).IsUnique().HasDatabaseName("ux_dev_samples_no");
+        // D721: черновик списания пряжи на образец — документ склада своей организации.
+        b.HasOne<KnitErp.Domain.Warehousing.StockDocument>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.YarnWriteOffDocumentId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_yarn_writeoff");
     }
 }
 
@@ -274,6 +280,7 @@ internal sealed class DevSampleMeasureConfiguration : IEntityTypeConfiguration<D
     public void Configure(EntityTypeBuilder<DevSampleMeasure> b)
     {
         b.ToTable("dev_sample_measures");
+        b.Property(x => x.RowVersion).IsRowVersion();
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Value).HasPrecision(18, 6);

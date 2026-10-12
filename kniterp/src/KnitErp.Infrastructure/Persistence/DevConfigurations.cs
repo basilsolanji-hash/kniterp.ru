@@ -43,6 +43,11 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_collection");
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustomerId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_customer");
+        // D750: позиция и черновик техкарты, в которые передана модель, — только своей организации.
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionItemId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_production_item");
+        b.HasOne<KnitErp.Domain.Production.TechCard>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionTechCardId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_production_techcard");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DesignerUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_designer");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DessinatorUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_dessinator");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ConstructorUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_constructor");

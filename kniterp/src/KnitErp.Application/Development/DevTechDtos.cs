@@ -68,6 +68,15 @@ public sealed record DevCompletenessDto(IReadOnlyList<DevSectionDto> Sections, i
 
 public sealed record DevSectionDto(string Name, bool Done);
 
+/// <summary>
+/// Изменённая ячейка таблицы (D720): строка (деталь, точка, размер для упаковки), столбец (размер; 0 — нет), поле (0 — длина с машины или
+/// значение, 1 — после ВТО, 2 — ширина), значение, которое пользователь видел (<see cref="Was"/>), и новое. Экран шлёт только изменённые ячейки.
+/// </summary>
+public sealed record DevCellEdit(long RowId, long ColumnId, int Field, decimal? Was, decimal? Value);
+
+/// <summary>Итог сохранения таблицы: сколько ячеек записано и какие пропущены — их успел изменить другой пользователь.</summary>
+public sealed record DevSaveResult(int Saved, IReadOnlyList<string> Conflicts);
+
 /// <summary>Настройки цеха и печати (D719); Sections.Done — раздел входит в показатель заполнения.</summary>
 public sealed record DevShopSettingsDto(int FactTolerancePercent, IReadOnlyList<DevSectionDto> Sections, int LabelWidthMm, int LabelHeightMm, bool LabelsOnA4,
     bool CanEdit);

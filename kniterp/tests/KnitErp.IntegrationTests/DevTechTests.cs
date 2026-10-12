@@ -20,7 +20,8 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
     private static int _innSeed = 972_000_000;
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
-    private sealed record Kit(DevModelService Models, DevTechService Tech, DevShopService Shop, DevSettingsService Settings, Services All) : IAsyncDisposable
+    private sealed record Kit(DevModelService Models, DevTechService Tech, DevShopService Shop, DevSettingsService Settings, Services All,
+        DevHandoffService Handoff, DevYarnService Yarn) : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => All.DisposeAsync();
     }
@@ -32,7 +33,9 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         var guard = new AccessGuard(all.Db, user, host.Clock);
         var models = new DevModelService(all.Db, guard, user, host.Clock);
         var tech = new DevTechService(all.Db, guard, user, host.Clock, models);
-        return new Kit(models, tech, new DevShopService(all.Db, guard, user, host.Clock, tech), new DevSettingsService(all.Db, guard, user, host.Clock), all);
+        return new Kit(models, tech, new DevShopService(all.Db, guard, user, host.Clock, tech), new DevSettingsService(all.Db, guard, user, host.Clock), all,
+            new DevHandoffService(all.Db, guard, user, host.Clock, all.Catalog, all.TechCards),
+            new DevYarnService(all.Db, guard, user, host.Clock, all.Documents));
     }
 
     private static DevModelHeader Header(string name) =>
@@ -76,12 +79,12 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var sizes = (await k.Shop.SizesAsync(modelId)).Sizes;
             Assert.Equal(new[] { "1", "2", "3", "4" }, sizes.Select(z => z.Name));
             Assert.True(sizes[1].IsBase);
-            await k.Shop.SetDetailSizesAsync(modelId, [(front, sizes[0].Id, 16m, 14m, null), (front, sizes[1].Id, 18m, 16m, null),
-                (front, sizes[2].Id, 20m, 18m, null), (front, sizes[3].Id, 22.5m, 20m, null)]);
-            await k.Shop.SetPackingAsync(modelId, new Dictionary<long, int?> { [sizes[0].Id] = 70, [sizes[1].Id] = 60, [sizes[2].Id] = 50, [sizes[3].Id] = 50 },
-                "40 × 30 × 30 см");
+            await k.Shop.SetDetailSizesAsync(modelId, Cells(front, [(sizes[0].Id, 16m, 14m), (sizes[1].Id, 18m, 16m), (sizes[2].Id, 20m, 18m),
+                (sizes[3].Id, 22.5m, 20m)]));
+            await k.Shop.SetPackingAsync(modelId, [new(sizes[0].Id, 0, 0, null, 70), new(sizes[1].Id, 0, 0, null, 60), new(sizes[2].Id, 0, 0, null, 50),
+                new(sizes[3].Id, 0, 0, null, 50)], null, "40 × 30 × 30 см");
             var length = await k.Shop.AddMeasureAsync(modelId, "Длина после ВТО", 0.5m, 2m);
-            await k.Shop.SetMeasureValuesAsync(modelId, [(length, sizes[1].Id, 16m)]);
+            await k.Shop.SetMeasureValuesAsync(modelId, [new(length, sizes[1].Id, 0, null, 16m)]);
             Assert.Equal(3, await k.Shop.GradeAsync(modelId, overwrite: false));
             var graded = (await k.Shop.SizesAsync(modelId)).Measures.Single().Values;
             Assert.Equal(new[] { 14m, 16m, 18m, 20m }, sizes.Select(z => graded[z.Id]));
@@ -176,7 +179,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var samples = await k.Shop.SamplesAsync(modelId);
             Assert.Equal(DevSampleStatus.Ready, samples.Samples.Single().Status); // факт по всем деталям — «Связан»
             // Замер образца по табелю мер, отклонение за допуском.
-            await k.Shop.SetSampleMeasuresAsync(sample, [(samples.Samples.Single().Measures.Single().MeasureId, 17m)]);
+            await k.Shop.SetSampleMeasuresAsync(sample, [new(samples.Samples.Single().Measures.Single().MeasureId, 0, 0, null, 17m)]);
             var measure = (await k.Shop.SamplesAsync(modelId)).Samples.Single().Measures.Single();
             Assert.Equal((16m, 17m, 1m, true), (measure.Plan!.Value, measure.Fact!.Value, measure.Deviation!.Value, measure.OutOfTolerance));
         }
@@ -302,6 +305,152 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await Assert.ThrowsAsync<NotFoundException>(() => k.Tech.LabelAsync(DevLabelKind.Model, model));
             await Assert.ThrowsAsync<NotFoundException>(() => k.All.Discussions.ThreadAsync(KnitErp.Domain.Tagging.TaggedEntity.DevDetail, detail));
             await Assert.ThrowsAsync<NotFoundException>(() => k.All.Discussions.AddAsync(KnitErp.Domain.Tagging.TaggedEntity.DevMachine, machine, "чужой", null));
+        }
+    }
+
+    private static List<DevCellEdit> Cells(long detail, IEnumerable<(long Size, decimal Off, decimal Steam)> values) =>
+        values.SelectMany(v => new[] { new DevCellEdit(detail, v.Size, 0, null, v.Off), new DevCellEdit(detail, v.Size, 1, null, v.Steam) }).ToList();
+
+    /// <summary>
+    /// D720: конструктор и цех правят таблицы одновременно — ячейку, которую после загрузки экрана изменил другой, не перезаписываем
+    /// (возвращаем в конфликтах с текущим значением), остальные ячейки сохраняются; чужие ячейки не затираются целой таблицей.
+    /// </summary>
+    [SqlFact]
+    public async Task Concurrent_table_edits_do_not_overwrite_each_other()
+    {
+        var org = await CreateOrganizationAsync();
+        var sampler = await InviteActiveAsync(org, SystemRoles.DevSampler);
+        long model, detail, measure, sample;
+        long s1, s2;
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            model = await k.Models.CreateAsync(Header("Носки"));
+            detail = await k.Tech.AddDetailAsync(model, "Паголенок", 1);
+            await k.Shop.SetSizeGridAsync(model, ["23", "25"], "23");
+            var sizes = (await k.Shop.SizesAsync(model)).Sizes;
+            (s1, s2) = (sizes[0].Id, sizes[1].Id);
+            measure = await k.Shop.AddMeasureAsync(model, "Длина следа", 0.5m, null);
+            sample = await k.Shop.CreateSampleAsync(model, s1);
+
+            // Первый пользователь: длина с машины 20 для размера 23.
+            var r = await k.Shop.SetDetailSizesAsync(model, [new(detail, s1, 0, null, 20m)]);
+            Assert.Equal((1, 0), (r.Saved, r.Conflicts.Count));
+        }
+
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            // Второй открыл экран раньше (видел пусто): его правка той же ячейки — конфликт, правка соседней — сохраняется.
+            var r = await k.Shop.SetDetailSizesAsync(model, [new(detail, s1, 0, null, 21m), new(detail, s2, 0, null, 22m)]);
+            Assert.Equal(1, r.Saved);
+            Assert.Contains("сейчас 20", Assert.Single(r.Conflicts));
+            var row = (await k.Shop.SizesAsync(model)).Details.Single().Values;
+            Assert.Equal((20m, 22m), (row[s1].OffMachine!.Value, row[s2].OffMachine!.Value));
+            // Правка «с актуальным значением» проходит; поле «после ВТО» той же строки не затирается.
+            await k.Shop.SetDetailSizesAsync(model, [new(detail, s1, 1, null, 18m)]);
+            Assert.Equal(1, (await k.Shop.SetDetailSizesAsync(model, [new(detail, s1, 0, 20m, 21m)])).Saved);
+            row = (await k.Shop.SizesAsync(model)).Details.Single().Values;
+            Assert.Equal((21m, 18m), (row[s1].OffMachine!.Value, row[s1].AfterSteam!.Value));
+
+            // Табель мер и упаковка — так же.
+            await k.Shop.SetMeasureValuesAsync(model, [new(measure, s1, 0, null, 23m)]);
+            Assert.Single((await k.Shop.SetMeasureValuesAsync(model, [new(measure, s1, 0, null, 24m)])).Conflicts);
+            Assert.Equal(1, (await k.Shop.SetMeasureValuesAsync(model, [new(measure, s1, 0, 23m, null)])).Saved); // очистка с актуальным значением
+            Assert.Empty((await k.Shop.SizesAsync(model)).Measures.Single().Values);
+            await k.Shop.SetPackingAsync(model, [new(s1, 0, 0, null, 12)], null, "30 × 20 × 20 см");
+            var pack = await k.Shop.SetPackingAsync(model, [new(s1, 0, 0, null, 10)], null, "другой короб");
+            Assert.Equal((0, 2), (pack.Saved, pack.Conflicts.Count));
+            Assert.Equal("30 × 20 × 20 см", (await k.Shop.SizesAsync(model)).PackBox);
+        }
+
+        // Цех и конструктор пишут замеры образца: правка цеха поверх «старого» значения конструктора — конфликт.
+        await using (var k = As(sampler, org.OrganizationId))
+        {
+            await k.Shop.SetSampleMeasuresAsync(sample, [new(measure, 0, 0, null, 22.5m)]);
+        }
+
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            var r = await k.Shop.SetSampleMeasuresAsync(sample, [new(measure, 0, 0, null, 22m)]);
+            Assert.Contains("сейчас 22.5", Assert.Single(r.Conflicts));
+            Assert.Equal(22.5m, (await k.Shop.SamplesAsync(model)).Samples.Single().Measures.Single().Fact);
+        }
+    }
+
+    /// <summary>
+    /// D750–D752, D721: передача утверждённой модели в производство (позиция, черновик техкарты с нормами пряжи по факту образца и маршрутом
+    /// из операций технолога) и списание пряжи на образец черновиком склада; повтор, права, чужая организация.
+    /// </summary>
+    [SqlFact]
+    public async Task Handoff_to_production_and_sample_yarn_write_off()
+    {
+        var org = await CreateOrganizationAsync();
+        var other = await CreateOrganizationAsync();
+        long model, sample, cotton, red, warehouse;
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            var kg = (await k.All.Catalog.ListUnitsAsync()).Single(u => u.Code == "166").Id;
+            cotton = await k.All.Catalog.CreateItemAsync(new ItemCommand("ПР-10", "Хлопок молочный", ItemType.RawMaterial, kg, null));
+            red = await k.All.Catalog.CreateItemAsync(new ItemCommand("ПР-11", "Хлопок красный", ItemType.RawMaterial, kg, null));
+            warehouse = await k.All.Warehouses.CreateWarehouseAsync("Склад пряжи", null);
+            model = await k.Models.CreateAsync(Header("Шарф в полоску"));
+            var main = await k.Tech.AddColorAsync(model, "Основной", cotton, null, null);
+            var extra = await k.Tech.AddColorAsync(model, "доп.1", red, null, null);
+            var detail = await k.Tech.AddDetailAsync(model, "Полотно", 2);
+            await k.Tech.SetKnittingAsync(detail, null, null, 180, 100m, null, (await k.Tech.DetailAsync(detail)).RowVersion);
+            var steam = await k.Shop.AddOperationTypeAsync(new DevOperationValues("Парить", "шт", null, 0.1m, 3));
+            await k.Shop.AddOperationAsync(model, steam, null, null, null);
+            sample = await k.Shop.CreateSampleAsync(model, null);
+            await k.Shop.RecordFactAsync(sample, detail, 200, 110m, [(main, 60m), (extra, 40m)]);
+
+            // Не утверждена — передать нельзя; предпросмотр уже считает нормы: 110 г × 2 шт × 60 % / 40 %.
+            var p = await k.Handoff.PreviewAsync(model);
+            Assert.False(p.CanHandOff);
+            Assert.Equal(new[] { 0.132m, 0.088m }, p.Lines.OrderBy(l => l.ItemCode).Select(l => l.Quantity));
+            Assert.Equal(new[] { "Вязание", "ВТО", "Контроль качества" }, p.Route);
+            Assert.Equal("dev.handoff.stage", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Handoff.HandOffAsync(model, null, null, null, p.RowVersion))).Code);
+
+            // Списание пряжи на образец: черновик склада, повторно — нельзя.
+            var y = await k.Yarn.PreviewAsync(sample);
+            Assert.Null(y.Refusal);
+            Assert.Equal(2, y.Lines.Count);
+            var doc = await k.Yarn.WriteOffAsync(sample, warehouse, null);
+            var d = await k.All.Documents.GetAsync(doc);
+            Assert.Equal((KnitErp.Domain.Warehousing.StockOperationKind.WriteOff, KnitErp.Domain.Warehousing.StockDocumentStatus.Draft), (d.Kind, d.Status));
+            Assert.Equal(0.22m, d.Lines.Sum(l => l.Quantity));
+            Assert.Equal("dev.yarn.done", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Yarn.WriteOffAsync(sample, warehouse, null))).Code);
+            Assert.Equal(doc, (await k.Yarn.PreviewAsync(sample)).DocumentId);
+
+            // Утвердили — передали: новая позиция, черновик техкарты с нормами и маршрутом, модель «Передано в производство».
+            await k.Models.MoveAsync(model, DevStage.Approved, null, (await k.Models.GetAsync(model)).RowVersion);
+            p = await k.Handoff.PreviewAsync(model);
+            Assert.True(p.CanHandOff, p.Refusal);
+            var cardId = await k.Handoff.HandOffAsync(model, null, "ШФ-100", null, p.RowVersion);
+            var card = await k.All.TechCards.GetAsync(cardId);
+            Assert.Equal(("ШФ-100", "Шарф в полоску", KnitErp.Domain.Production.TechCardStatus.Draft), (card.ItemCode, card.ItemName, card.Status));
+            Assert.Equal(new[] { (cotton, 0.132m), (red, 0.088m) }, card.Lines.OrderBy(l => l.ItemId).Select(l => (l.ItemId, l.Quantity)));
+            Assert.Equal(new[] { KnitErp.Domain.Production.ProductionStage.Knitting, KnitErp.Domain.Production.ProductionStage.Steaming,
+                KnitErp.Domain.Production.ProductionStage.QualityControl }, card.Route!.OrderBy(r => r));
+            var m = await k.Models.GetAsync(model);
+            Assert.Equal(DevStage.Handed, m.Stage);
+            var after = await k.Handoff.PreviewAsync(model);
+            Assert.Equal((card.ItemId, cardId, false), (after.ItemId!.Value, after.TechCardId!.Value, after.CanHandOff));
+            await Assert.ThrowsAsync<BusinessRuleException>(() => k.Handoff.HandOffAsync(model, null, null, null, after.RowVersion));
+        }
+
+        // Без права «утверждение» — отказ; чужая организация — «не найдено».
+        var sampler = await InviteActiveAsync(org, SystemRoles.DevSampler);
+        await using (var k = As(sampler, org.OrganizationId))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Handoff.HandOffAsync(model, null, null, null, []));
+        }
+
+        await using (var k = As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Handoff.PreviewAsync(model));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Handoff.HandOffAsync(model, null, null, null, []));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Yarn.PreviewAsync(sample));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Yarn.WriteOffAsync(sample, warehouse, null));
         }
     }
 

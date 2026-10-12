@@ -169,6 +169,12 @@ else
     private readonly Dictionary<(long, long, int), decimal?> _detail = [];
     private readonly Dictionary<(long, long, int), decimal?> _measure = [];
     private readonly Dictionary<long, int?> _perBox = [];
+
+    // D720: значения, которые пришли с сервера, — с ними сравниваются правки; на сервер уходят только изменённые ячейки.
+    private readonly Dictionary<(long, long, int), decimal?> _wasDetail = [];
+    private readonly Dictionary<(long, long, int), decimal?> _wasMeasure = [];
+    private readonly Dictionary<long, int?> _wasPerBox = [];
+    private string? _packBoxWas;
     private string? _grid;
     private string? _base;
     private string? _packBox;
@@ -192,38 +198,78 @@ else
         }
     }
 
-    private async Task LoadAsync()
+    [Flags]
+    private enum Part
+    {
+        None = 0,
+        Detail = 1,
+        Measure = 2,
+        Pack = 4,
+        All = Detail | Measure | Pack,
+    }
+
+    /// <summary>
+    /// Перечитать таблицы. Сохранённая часть (<paramref name="reset"/>) показывает значения сервера; в остальных несохранённые правки
+    /// пользователя остаются — сохранение упаковки не стирает начатый табель мер.
+    /// </summary>
+    private async Task LoadAsync(Part reset = Part.All)
     {
         _s = await Gate.Run(() => Shop.SizesAsync(ModelId));
         _grid = string.Join(", ", _s.Sizes.Select(z => z.Name));
         _base = _s.Sizes.FirstOrDefault(z => z.IsBase)?.Name;
-        _packBox = _s.PackBox;
-        _detail.Clear();
+        if (reset.HasFlag(Part.Pack) || _packBox == _packBoxWas)
+        {
+            _packBox = _s.PackBox;
+        }
+
+        _packBoxWas = _s.PackBox;
+        var detail = new Dictionary<(long, long, int), decimal?>();
         foreach (var d in _s.Details)
         {
             foreach (var (size, v) in d.Values)
             {
-                _detail[(d.DetailId, size, 0)] = v.OffMachine;
-                _detail[(d.DetailId, size, 1)] = v.AfterSteam;
-                _detail[(d.DetailId, size, 2)] = v.Width;
+                detail[(d.DetailId, size, 0)] = v.OffMachine;
+                detail[(d.DetailId, size, 1)] = v.AfterSteam;
+                detail[(d.DetailId, size, 2)] = v.Width;
             }
         }
 
-        _measure.Clear();
+        var measure = new Dictionary<(long, long, int), decimal?>();
         foreach (var m in _s.Measures)
         {
             foreach (var (size, v) in m.Values)
             {
-                _measure[(m.Id, size, 0)] = v;
+                measure[(m.Id, size, 0)] = v;
             }
         }
 
-        _perBox.Clear();
-        foreach (var z in _s.Sizes)
+        Merge(_detail, _wasDetail, detail, reset.HasFlag(Part.Detail));
+        Merge(_measure, _wasMeasure, measure, reset.HasFlag(Part.Measure));
+        Merge(_perBox, _wasPerBox, _s.Sizes.ToDictionary(z => z.Id, z => z.PerBox), reset.HasFlag(Part.Pack));
+    }
+
+    private static void Merge<TKey, TValue>(Dictionary<TKey, TValue?> current, Dictionary<TKey, TValue?> was, Dictionary<TKey, TValue?> fresh, bool reset)
+        where TKey : notnull
+        where TValue : struct
+    {
+        var dirty = reset ? [] : current.Where(kv => !Nullable.Equals(kv.Value, was.GetValueOrDefault(kv.Key))).ToList();
+        was.Clear();
+        current.Clear();
+        foreach (var (k, v) in fresh)
         {
-            _perBox[z.Id] = z.PerBox;
+            was[k] = v;
+            current[k] = v;
+        }
+
+        foreach (var (k, v) in dirty)
+        {
+            current[k] = v;
         }
     }
+
+    private static List<DevCellEdit> Edits(Dictionary<(long, long, int), decimal?> current, Dictionary<(long, long, int), decimal?> was) =>
+        current.Where(kv => kv.Value != was.GetValueOrDefault(kv.Key))
+            .Select(kv => new DevCellEdit(kv.Key.Item1, kv.Key.Item2, kv.Key.Item3, was.GetValueOrDefault(kv.Key), kv.Value)).ToList();
 
     private static string Cell(Dictionary<(long, long, int), decimal?> d, (long, long, int) key) =>
         d.GetValueOrDefault(key)?.ToString("0.#", CultureInfo.InvariantCulture) ?? string.Empty;
@@ -247,14 +293,28 @@ else
         return text.Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries).ToList();
     }
 
-    private Task SaveDetailSizesAsync() => RunAsync(() => Shop.SetDetailSizesAsync(ModelId, _s!.Details.SelectMany(d => _s.Sizes.Select(z =>
-        (d.DetailId, z.Id, _detail.GetValueOrDefault((d.DetailId, z.Id, 0)), _detail.GetValueOrDefault((d.DetailId, z.Id, 1)),
-            _detail.GetValueOrDefault((d.DetailId, z.Id, 2))))).ToList()), L("Размеры деталей сохранены."));
+    private Task SaveDetailSizesAsync() => SaveAsync(() => Shop.SetDetailSizesAsync(ModelId, Edits(_detail, _wasDetail)), Part.Detail,
+        L("Размеры деталей сохранены."));
 
-    private Task SavePackingAsync() => RunAsync(() => Shop.SetPackingAsync(ModelId, new Dictionary<long, int?>(_perBox), _packBox), L("Упаковка сохранена."));
+    private Task SavePackingAsync() => SaveAsync(() => Shop.SetPackingAsync(ModelId,
+        _perBox.Where(kv => kv.Value != _wasPerBox.GetValueOrDefault(kv.Key))
+            .Select(kv => new DevCellEdit(kv.Key, 0, 0, _wasPerBox.GetValueOrDefault(kv.Key), kv.Value)).ToList(), _packBoxWas, _packBox), Part.Pack,
+        L("Упаковка сохранена."));
 
-    private Task SaveMeasuresAsync() => RunAsync(() => Shop.SetMeasureValuesAsync(ModelId, _s!.Measures.SelectMany(m => _s.Sizes.Select(z =>
-        (m.Id, z.Id, _measure.GetValueOrDefault((m.Id, z.Id, 0))))).ToList()), L("Табель мер сохранён."));
+    private Task SaveMeasuresAsync() => SaveAsync(() => Shop.SetMeasureValuesAsync(ModelId, Edits(_measure, _wasMeasure)), Part.Measure, L("Табель мер сохранён."));
+
+    /// <summary>Сохранить таблицу; ячейки, которые успел изменить другой пользователь, — в сообщении, на экране — его значения (D720).</summary>
+    private async Task SaveAsync(Func<Task<DevSaveResult>> save, Part part, string success)
+    {
+        DevSaveResult? result = null;
+        await RunAsync(async () => result = await save(), success, part);
+        if (result is { Conflicts.Count: > 0 } r && !_isError)
+        {
+            _message = L("Сохранено значений: {0}. Не сохранено — уже изменил другой пользователь, показаны его значения: {1}.", r.Saved,
+                string.Join("; ", r.Conflicts));
+            _isError = true;
+        }
+    }
 
     private async Task GradeAsync(bool overwrite)
     {
@@ -275,7 +335,7 @@ else
 
     private Task RemoveMeasureAsync(DevMeasureDto m) => RunAsync(() => Shop.RemoveMeasureAsync(m.Id), L("Точка убрана."));
 
-    private async Task RunAsync(Func<Task> action, string? success)
+    private async Task RunAsync(Func<Task> action, string? success, Part reset = Part.None)
     {
         if (_busy)
         {
@@ -299,7 +359,7 @@ else
         {
             try
             {
-                await LoadAsync();
+                await LoadAsync(_isError ? Part.None : reset);
             }
             finally
             {

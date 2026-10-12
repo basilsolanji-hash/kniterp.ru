@@ -158,4 +158,28 @@ public sealed class DevTechRulesTests
         s.SetShop(20, 3, 43, 25, true);
         Assert.Equal((20, 3, 43, 25, true), (s.FactTolerancePercent, s.CompletenessSections, s.LabelWidthMm, s.LabelHeightMm, s.LabelsOnA4));
     }
+
+    [Fact]
+    public void Yarn_norms_from_weight_quantity_and_color_shares()
+    {
+        // D751: 110 г × 2 шт, доли 60/40 → 132 и 88 г; одноцветная модель без долей — вся деталь одним цветом; нет веса — замечание.
+        var r = DevNorms.Compute(
+        [
+            new DevNormDetail("Полотно", 2, 110m, new Dictionary<long, decimal> { [1] = 60m, [2] = 40m }),
+            new DevNormDetail("Резинка", 1, null, new Dictionary<long, decimal>()),
+        ], [1L, 2L]);
+        Assert.Equal((132m, 88m), (r.GramsByColor[1], r.GramsByColor[2]));
+        Assert.Single(r.Warnings);
+        var mono = DevNorms.Compute([new DevNormDetail("Шапка", 1, 95.5m, new Dictionary<long, decimal>())], [7L]);
+        Assert.Equal(95.5m, mono.GramsByColor[7]);
+        var noShares = DevNorms.Compute([new DevNormDetail("Шапка", 1, 95.5m, new Dictionary<long, decimal>())], [7L, 8L]);
+        Assert.Empty(noShares.GramsByColor);
+        Assert.Contains("долей", Assert.Single(noShares.Warnings));
+
+        // Единица: кг (166) — с округлением вверх по точности, г (163) — как есть, прочие — норму вводит производство.
+        Assert.Equal(0.133m, DevNorms.ToUnit(132.2m, "166", 3));
+        Assert.Equal(0.001m, DevNorms.ToUnit(0.2m, "166", 3));
+        Assert.Equal(133m, DevNorms.ToUnit(132.2m, "163", 0));
+        Assert.Null(DevNorms.ToUnit(10m, "006", 2));
+    }
 }
