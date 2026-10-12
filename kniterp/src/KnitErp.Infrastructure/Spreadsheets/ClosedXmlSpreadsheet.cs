@@ -23,13 +23,15 @@ public sealed class ClosedXmlSpreadsheet : ISpreadsheetFormat
     public const int MaxWideColumns = 200;
     public const long MaxWideCells = 2_000_000;
 
-    public IReadOnlyList<IReadOnlyList<string>> ReadWideSheet(Stream stream, int maxRows) => ReadSheet(stream, maxRows, null, MaxWideColumns, MaxWideCells)!;
+    // Числа и даты — без оформления ячейки («1234.5», «2026-10-05»): «3,000» в формате с разделителем тысяч иначе не отличить от «3,0».
+    public IReadOnlyList<IReadOnlyList<string>> ReadWideSheet(Stream stream, int maxRows) =>
+        ReadSheet(stream, maxRows, null, MaxWideColumns, MaxWideCells, raw: true)!;
 
     /// <summary>Лист по названию (D308: «Состав комплектов»); листа нет — null. Те же ограничения размера, что у первого листа.</summary>
     public IReadOnlyList<IReadOnlyList<string>>? ReadNamedSheet(Stream stream, string sheetName, int maxRows) => ReadSheet(stream, maxRows, sheetName);
 
     private IReadOnlyList<IReadOnlyList<string>>? ReadSheet(Stream stream, int maxRows, string? sheetName, int maxColumns = MaxColumns,
-        long maxCells = MaxCells)
+        long maxCells = MaxCells, bool raw = false)
     {
         if (!stream.CanSeek)
         {
@@ -93,7 +95,8 @@ public sealed class ClosedXmlSpreadsheet : ISpreadsheetFormat
                 var cells = new string[lastColumn];
                 for (var c = 1; c <= lastColumn; c++)
                 {
-                    cells[c - 1] = row.Cell(c).GetFormattedString().Trim();
+                    var cell = row.Cell(c);
+                    cells[c - 1] = raw ? RawText(cell) : cell.GetFormattedString().Trim();
                 }
 
                 rows.Add(cells);
@@ -102,6 +105,13 @@ public sealed class ClosedXmlSpreadsheet : ISpreadsheetFormat
             return rows;
         }
     }
+
+    private static string RawText(IXLCell cell) => cell.DataType switch
+    {
+        XLDataType.Number when Math.Abs(cell.GetDouble()) < 1e15 => ((decimal)cell.GetDouble()).ToString("0.##########", System.Globalization.CultureInfo.InvariantCulture),
+        XLDataType.DateTime => cell.GetDateTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+        _ => cell.GetFormattedString().Trim(),
+    };
 
     /// <summary>XLSX — это ZIP: сумма распакованных размеров и число частей ограничены, иначе файл отклоняется сразу.</summary>
     private static void EnsureReasonableArchive(Stream stream)

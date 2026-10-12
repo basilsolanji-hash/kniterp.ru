@@ -288,8 +288,9 @@ public sealed class MarketplaceReportService(IKnitErpDbContext db, IAccessGuard 
 
         var sample = report.Lines.FirstOrDefault(l => l.ItemId is null && l.Key == key)
                      ?? throw new BusinessRuleException("marketplace.no_unmatched", "Строк без позиции с этим товаром в отчёте нет — обновите страницу.");
-        var (_, links) = await ApplyDecisionsAsync(org, report.Marketplace, [sample], new Dictionary<string, long> { [key] = itemId }, ct);
+        await EnsureItemsAsync(org, [itemId], ct);
         var count = report.Resolve(key, itemId);
+        var links = await LinkAsync(org, report.Marketplace, sample, itemId, ct) ? 1 : 0;
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.MarketplaceReportResolved, nameof(MarketplaceReport),
             report.Id.ToString(CultureInfo.InvariantCulture), $"{sample.ExternalCode} {sample.Article} {sample.Barcode}".Trim(),
             $"позиция {itemId}, строк {count}", report.FileName, currentUser.CorrelationId));
@@ -488,14 +489,7 @@ public sealed class MarketplaceReportService(IKnitErpDbContext db, IAccessGuard 
             return (0, 0);
         }
 
-        var itemIds = decisions.Values.Distinct().ToList();
-        var known = await db.Items.AsNoTracking().Where(i => i.OrganizationId == org && itemIds.Contains(i.Id)).Select(i => i.Id).ToListAsync(ct);
-        if (known.Count != itemIds.Count)
-        {
-            throw new NotFoundException("Позиция");
-        }
-
-        var system = MarketplaceFormats.SystemOf(marketplace);
+        await EnsureItemsAsync(org, decisions.Values.Distinct().ToList(), ct);
         var links = 0;
         var resolved = 0;
         foreach (var (key, itemId) in decisions)
@@ -512,24 +506,40 @@ public sealed class MarketplaceReportService(IKnitErpDbContext db, IAccessGuard 
             }
 
             resolved += hits.Count;
-            var sample = hits[0];
-            var externalId = sample.ExternalCode ?? sample.Article;
-            if (system is not { } s || externalId is null || externalId.Length > ExternalLink.ExternalIdMaxLength)
-            {
-                continue;
-            }
-
-            var taken = await db.ExternalLinks.AnyAsync(x => x.OrganizationId == org && x.System == s && x.ObjectType == ExternalObjectType.Item
-                                                             && (x.LocalId == itemId || x.ExternalId == externalId), ct)
-                        || db.ExternalLinks.Local.Any(x => x.OrganizationId == org && x.System == s && (x.LocalId == itemId || x.ExternalId == externalId));
-            if (!taken)
-            {
-                db.ExternalLinks.Add(ExternalLink.Create(org, s, ExternalObjectType.Item, itemId, externalId, sample.Article, null, null, clock.UtcNow));
-                links++;
-            }
+            links += await LinkAsync(org, marketplace, hits[0], itemId, ct) ? 1 : 0;
         }
 
         return (resolved, links);
+    }
+
+    private async Task EnsureItemsAsync(long org, IReadOnlyList<long> itemIds, CancellationToken ct)
+    {
+        var known = await db.Items.AsNoTracking().CountAsync(i => i.OrganizationId == org && itemIds.Contains(i.Id), ct);
+        if (known != itemIds.Count)
+        {
+            throw new NotFoundException("Позиция");
+        }
+    }
+
+    /// <summary>Связь каталога с площадкой для решения (внешний id — код площадки, иначе артикул), если ни позиция, ни внешний id ещё не связаны.</summary>
+    private async Task<bool> LinkAsync(long org, MarketplaceKind marketplace, MarketplaceReportLine sample, long itemId, CancellationToken ct)
+    {
+        var externalId = sample.ExternalCode ?? sample.Article;
+        if (MarketplaceFormats.SystemOf(marketplace) is not { } s || externalId is null || externalId.Length > ExternalLink.ExternalIdMaxLength)
+        {
+            return false;
+        }
+
+        var taken = await db.ExternalLinks.AnyAsync(x => x.OrganizationId == org && x.System == s && x.ObjectType == ExternalObjectType.Item
+                                                         && (x.LocalId == itemId || x.ExternalId == externalId), ct)
+                    || db.ExternalLinks.Local.Any(x => x.OrganizationId == org && x.System == s && (x.LocalId == itemId || x.ExternalId == externalId));
+        if (taken)
+        {
+            return false;
+        }
+
+        db.ExternalLinks.Add(ExternalLink.Create(org, s, ExternalObjectType.Item, itemId, externalId, sample.Article, null, null, clock.UtcNow));
+        return true;
     }
 
     private async Task<Dictionary<long, string>> ItemNamesAsync(long org, IEnumerable<MarketplaceReportLine> lines, CancellationToken ct)
