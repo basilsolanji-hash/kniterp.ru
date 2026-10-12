@@ -159,6 +159,7 @@
             new("sales-order-stages", "Этапы заказов", a => a.Has(Permissions.SalesView)),
             new("sales-agreements", "Соглашения и цены", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("sales-discounts", "Скидки и акции", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+            new("sales-price-list", "Прайс-лист", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)), // D1142
             new("sales-setup", "Настройки продаж", a => a.Has(Permissions.SalesView)),
             new("learn/sales", "Обучение", a => true),
         ]),

@@ -46,6 +46,40 @@ public static class SalesDocumentsSetup
             }
         });
 
+    /// <summary>D1142: прайс-лист в Excel и PDF — те же права и отбор, что на экране «Прайс-лист».</summary>
+    public static void MapPriceList(this WebApplication app)
+    {
+        app.MapGet("/sales-price-list.{format}", async (string format, long? priceType, long? group, bool? stock, long? warehouse, string? q,
+            SalesPriceListService prices, ISalesPdfRenderer renderer, ISpreadsheetFormat spreadsheet, HttpContext http, CancellationToken ct) =>
+        {
+            var filter = new PriceListFilter(priceType, group, stock ?? false, warehouse, q);
+            try
+            {
+                http.Response.Headers.CacheControl = "no-store";
+                var name = $"prais-list-{DateTime.UtcNow:yyyy-MM-dd}";
+                return format switch
+                {
+                    "xlsx" => Results.File(await prices.ExcelAsync(filter, spreadsheet, id => $"{http.Request.Scheme}://{http.Request.Host}/catalog/photos/{id}", ct),
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", name + ".xlsx"),
+                    "pdf" => Results.File(renderer.PriceList(await prices.BuildAsync(filter, ct)), "application/pdf", name + ".pdf"),
+                    _ => Results.NotFound(),
+                };
+            }
+            catch (AccessDeniedException)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            catch (NotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (KnitErp.Domain.Common.BusinessRuleException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
+            }
+        });
+    }
+
     /// <summary>PDF заказа, счёта или УПД — те же права и организация, что у печатной формы; отдаётся вложением.</summary>
     public static void MapSalesDocuments(this WebApplication app) =>
         app.MapGet("/sales-documents/{document}/{id:long}.pdf", async (string document, long id, SalesOrderDocumentsService documents,

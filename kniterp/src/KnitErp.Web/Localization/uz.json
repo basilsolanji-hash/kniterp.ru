@@ -5506,5 +5506,16 @@
   "УПД, статус 1": "UPD, maqom 1",
   "УПД, статус 2": "UPD, maqom 2",
   "Форма документа": "Hujjat shakli",
-  "Формы": "Shakllar"
+  "Формы": "Shakllar",
+  "PDF для печати и отправки клиенту": "Chop etish va mijozga yuborish uchun PDF",
+  "В наличии": "Mavjud",
+  "Все группы": "Barcha guruhlar",
+  "Код, артикул, название": "Kod, artikul, nomi",
+  "Нет позиций с ценой этого вида по отбору.": "Tanlov boʻyicha ushbu turdagi narxga ega pozitsiyalar yoʻq.",
+  "Отбор «только в наличии» доступен с правами на остатки склада.": "«Faqat mavjudlari» tanlovi ombor qoldiqlariga huquq bilan mavjud.",
+  "По виду цены, группе и наличию — PDF для клиента и Excel со ссылками на фото": "Narx turi, guruh va mavjudlik boʻyicha — mijoz uchun PDF va foto havolalari bilan Excel",
+  "Позиций: {0}. Цены {1}, валюта {2}.": "Pozitsiyalar: {0}. Narxlar {1}, valyuta {2}.",
+  "Показаны первые {0} — уточните отбор.": "Birinchi {0} tasi koʻrsatildi — tanlovni aniqlashtiring.",
+  "Прайс-лист": "Narxnoma",
+  "Только в наличии": "Faqat mavjudlari"
 }
