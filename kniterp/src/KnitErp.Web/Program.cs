@@ -48,7 +48,10 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddKnitErpApplication();
 // D648 (сессия CRM): адрес MAX Bot API для чатов с клиентами; пустая строка в настройках — MAX выключен.
-builder.Services.AddSingleton(new KnitErp.Infrastructure.External.MaxOptions(builder.Configuration["Max:BaseUrl"] ?? "https://platform-api.max.ru"));
+builder.Services.AddSingleton(new KnitErp.Infrastructure.External.MessengerOptions(
+    builder.Configuration["Messengers:MaxUrl"] ?? builder.Configuration["Max:BaseUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.MaxUrl,
+    builder.Configuration["Messengers:TelegramUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.TelegramUrl,
+    builder.Configuration["Messengers:WhatsAppUrl"] ?? KnitErp.Infrastructure.External.MessengerOptions.Default.WhatsAppUrl));
 builder.Services.AddKnitErpInfrastructure(
     connectionString,
     // ИИ-помощник включается ключом из секретов сервера; без ключа он отвечает по справочному центру.
@@ -106,6 +109,7 @@ if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
 if (!builder.Configuration.GetValue<bool>("Hr:StatusWorkerDisabled"))
 {
     builder.Services.AddHostedService<KnitErp.Web.Api.HrStatusWorker>();
+    builder.Services.AddHostedService<KnitErp.Web.Crm.CrmMailWorker>(); // D675, D676: очередь рассылок и входящая почта CRM
 }
 
 // D310 (сессия 4): фоновая загрузка из МойСклад; в тестовых стендах отключается ключом MoySklad:WorkerDisabled.
@@ -195,7 +199,11 @@ builder.Services.AddRateLimiter(o =>
                                                       && !http.Request.Path.StartsWithSegments("/account/logout")
                 ? RateLimitPartition.GetFixedWindowLimiter(http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 })
-                : RateLimitPartition.GetNoLimiter("other"));
+                // D673: вебхуки мессенджеров (без входа) — 120 запросов за 10 секунд на адрес с одного IP: поток мусора не забьёт базу.
+                : http.Request.Path.StartsWithSegments("/hooks")
+                    ? RateLimitPartition.GetFixedWindowLimiter("hooks:" + (http.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                        _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromSeconds(10), QueueLimit = 0 })
+                    : RateLimitPartition.GetNoLimiter("other"));
     o.OnRejected = async (context, ct) =>
     {
         if (context.HttpContext.Request.Path.StartsWithSegments("/api"))
@@ -226,9 +234,10 @@ builder.Services.AddSingleton<KnitErp.Application.Catalog.IFeedPhotoLinks, KnitE
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.ModuleUi.Text("Условия продаж"),
     typeof(KnitErp.Web.Components.Pages.SalesCustomerTermsTab), KnitErp.Domain.Access.Permissions.SalesView);
 
-// D616 (CRM): вкладка «Контакты и сделки» в карточке контрагента — через точку подключения D117.
+// D616, D632 (сессия CRM): вкладка «Контакты и сделки» у контрагента и блок «CRM» главного экрана.
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("crm", KnitErp.Web.Modules.ModuleUi.Text("Контакты и сделки"),
     typeof(KnitErp.Web.Components.Shared.CrmCounterpartyPanel), KnitErp.Domain.Access.Permissions.CrmView);
+KnitErp.Web.Modules.ModuleUi.AddDashboardBlock("crm", typeof(KnitErp.Web.Components.Shared.CrmDashboardBlock), order: 10);
 
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);

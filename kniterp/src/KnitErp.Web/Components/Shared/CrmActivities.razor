@@ -73,6 +73,19 @@
                                 }
                             </datalist>
                         </label>
+                        @if (_templates.Count > 0)
+                        {
+                            <label>
+                                @L("Шаблон")
+                                <select @bind="_templateId" @bind:after="ApplyTemplateAsync" disabled="@_busy">
+                                    <option value="">@L("без шаблона")</option>
+                                    @foreach (var t in _templates)
+                                    {
+                                        <option value="@t.Id">@t.Name</option>
+                                    }
+                                </select>
+                            </label>
+                        }
                         <label class="wide">@L("Тема") <input @bind="_mailSubject" maxlength="@CrmActivity.SubjectMaxLength" required /></label>
                         <label class="wide">@L("Текст") <textarea rows="5" @bind="_mailText" maxlength="@CrmActivity.TextMaxLength" required></textarea></label>
                     </div>
@@ -198,6 +211,8 @@
     private bool _done;
     private string? _note;
     private string? _to;
+    private IReadOnlyList<CrmEmailTemplateDto> _templates = [];
+    private string _templateId = "";
     private string? _mailSubject;
     private string? _mailText;
 
@@ -254,6 +269,20 @@
         await using var db = Factory.Create();
         _recipients = await Service(db).RecipientsAsync(Target, TargetId);
         _to ??= _recipients.FirstOrDefault();
+        _templates = await Templates(db).ListAsync();
+    }, null);
+
+    /// <summary>D674: шаблон заполняется значениями карточки (имя, компания, менеджер, сделка, сумма) — дальше текст можно править.</summary>
+    private Task ApplyTemplateAsync() => RunAsync(async () =>
+    {
+        if (!long.TryParse(_templateId, out var id))
+        {
+            return;
+        }
+
+        await using var db = Factory.Create();
+        var rendered = await Templates(db).RenderAsync(id, Target, TargetId);
+        (_mailSubject, _mailText) = (rendered.Subject, rendered.Text);
     }, null);
 
     private Task SendMailAsync() => RunAsync(async () =>
@@ -263,7 +292,7 @@
             await Service(db).SendEmailAsync(Target, TargetId, _to, _mailSubject, _mailText);
         }
 
-        (_mailSubject, _mailText) = (null, null);
+        (_mailSubject, _mailText, _templateId) = (null, null, "");
         await LoadAsync();
     }, L("Письмо отправлено и сохранено в ленте."));
 
@@ -288,6 +317,8 @@
         _results.Remove(a.Id);
         await LoadAsync();
     }, L("Возвращено в работу."));
+
+    private CrmEmailTemplateService Templates(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock);
 
     private CrmActivityService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock, Mail);
 

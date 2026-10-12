@@ -276,4 +276,7 @@ public static class AuditActions
     public const string CrmUnsubscribed = "crm.contact.unsubscribed";
     public const string CrmImported = "crm.imported";
     public const string CrmPlanChanged = "crm.plan.changed";
+    public const string CrmMailingQueued = "crm.mailing.queued";
+    public const string CrmMailingScheduled = "crm.mailing.scheduled";
+    public const string CrmEmailReceived = "crm.email.received";
 }

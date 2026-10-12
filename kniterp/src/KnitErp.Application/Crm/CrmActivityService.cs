@@ -203,6 +203,18 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
             result.Add(new CrmAlertDto($"Лиды без действий дольше {days} дн.: {stale}", "crm/tasks", true, $"crm-stale:{stale}"));
         }
 
+        // D679: чаты, где последнее сообщение — от клиента (за неделю), по моим клиентам.
+        var weekAgo = nowUtc.AddDays(-7);
+        var lastIds = db.CrmActivities.Where(a => a.OrganizationId == ctx.OrganizationId && a.Source == CrmActivitySource.Messenger && a.Peer != null
+                                                  && a.CreatedAtUtc >= weekAgo)
+            .GroupBy(a => a.Peer).Select(g => g.Max(a => a.Id));
+        var waiting = await db.CrmActivities.AsNoTracking()
+            .CountAsync(a => lastIds.Contains(a.Id) && a.ExternalRef != null && a.AssigneeUserId == ctx.UserId, ct);
+        if (waiting > 0)
+        {
+            result.Add(new CrmAlertDto($"Клиенты ждут ответа в чатах: {waiting}", "crm/chats", true, $"crm-chats:{waiting}"));
+        }
+
         return result;
     }
 
@@ -222,7 +234,9 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
             throw new BusinessRuleException("crm.mail.not_configured", "Почта сервера не настроена — обратитесь к администратору.");
         }
 
-        if (!await mail.SendAsync(address, subj, body, ct))
+        await CrmEmailTemplateService.EnsureEmailQuotaAsync(db, ctx, clock.UtcNow, ct);
+        var (replyTo, replyName) = await CrmEmailTemplateService.ReplyToAsync(db, ctx.UserId, ct);
+        if (!await mail.SendAsync(new EmailMessage(address, subj, body, CrmEmailHtml.FromText(body), replyTo, replyName), ct))
         {
             throw new BusinessRuleException("crm.mail.failed", "Письмо не отправлено: почтовый сервер не принял его. Попробуйте позже.");
         }

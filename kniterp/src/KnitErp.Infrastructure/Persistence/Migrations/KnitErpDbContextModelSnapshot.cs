@@ -3050,6 +3050,58 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmEmailTemplate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(8000)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_email_templates_org_name");
+
+                    b.ToTable("crm_email_templates", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmExternalLink", b =>
                 {
                     b.Property<long>("Id")
@@ -3248,6 +3300,76 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailbox", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("ConnectedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("ConnectedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("CreateLeads")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Host")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("LastCheckAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("LastUid")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Login")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Password")
+                        .HasMaxLength(877)
+                        .HasColumnType("nvarchar(877)");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<long?>("UidValidity")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectedByUserId");
+
+                    b.HasIndex("OrganizationId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_mailboxes_org");
+
+                    b.ToTable("crm_mailboxes", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_mailboxes_port", "[Port] IN (0, 143, 993)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailing", b =>
                 {
                     b.Property<long>("Id")
@@ -3265,11 +3387,17 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("QueuedByUserId")
+                        .HasColumnType("bigint");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("ScheduledAtUtc")
+                        .HasColumnType("datetime2(3)");
 
                     b.Property<DateTime?>("SentAtUtc")
                         .HasColumnType("datetime2(3)");
@@ -3294,14 +3422,19 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CreatedByUserId");
 
+                    b.HasIndex("QueuedByUserId");
+
                     b.HasIndex("TagId");
 
                     b.HasIndex("OrganizationId", "CreatedAtUtc")
                         .HasDatabaseName("ix_crm_mailings_org");
 
+                    b.HasIndex("Status", "ScheduledAtUtc")
+                        .HasDatabaseName("ix_crm_mailings_queue");
+
                     b.ToTable("crm_mailings", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_crm_mailings_status", "[Status] IN (1, 2)");
+                            t.HasCheckConstraint("ck_crm_mailings_status", "[Status] IN (1, 2, 3, 4)");
                         });
                 });
 
@@ -3312,6 +3445,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("bigint");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("AttemptedAtUtc")
+                        .HasColumnType("datetime2(3)");
 
                     b.Property<long>("ContactId")
                         .HasColumnType("bigint");
@@ -3336,6 +3472,73 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ux_crm_mailing_recipients");
 
                     b.ToTable("crm_mailing_recipients", "kniterp");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMessengerChannel", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("AccountId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("AccountName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("AppSecret")
+                        .HasMaxLength(610)
+                        .HasColumnType("nvarchar(610)");
+
+                    b.Property<DateTime>("ConnectedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("ConnectedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("DisconnectedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte[]>("SecretHash")
+                        .HasColumnType("binary(32)");
+
+                    b.Property<string>("Token")
+                        .HasMaxLength(1410)
+                        .HasColumnType("nvarchar(1410)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectedByUserId");
+
+                    b.HasIndex("SecretHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_messenger_channels_secret")
+                        .HasFilter("[SecretHash] IS NOT NULL");
+
+                    b.HasIndex("OrganizationId", "Kind")
+                        .IsUnique()
+                        .HasDatabaseName("ux_crm_messenger_channels_org_kind");
+
+                    b.ToTable("crm_messenger_channels", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_messenger_channels_kind", "[Kind] IN (1, 2, 3)");
+                        });
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmOffer", b =>
@@ -3621,19 +3824,6 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long?>("LastAssignedUserId")
                         .HasColumnType("bigint");
 
-                    b.Property<DateTime?>("MaxConnectedAtUtc")
-                        .HasColumnType("datetime2(3)");
-
-                    b.Property<long?>("MaxConnectedByUserId")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("MaxSecretHash")
-                        .HasColumnType("binary(32)");
-
-                    b.Property<string>("MaxToken")
-                        .HasMaxLength(877)
-                        .HasColumnType("nvarchar(877)");
-
                     b.Property<bool>("NextStepSuggestions")
                         .HasColumnType("bit");
 
@@ -3668,13 +3858,6 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("DefaultResponsibleUserId");
-
-                    b.HasIndex("MaxConnectedByUserId");
-
-                    b.HasIndex("MaxSecretHash")
-                        .IsUnique()
-                        .HasDatabaseName("ux_crm_settings_max_secret")
-                        .HasFilter("[MaxSecretHash] IS NOT NULL");
 
                     b.HasIndex("OrganizationId")
                         .IsUnique()
@@ -10343,6 +10526,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_crm_deal_stage_history_to");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmEmailTemplate", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmExternalLink", b =>
                 {
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
@@ -10424,6 +10622,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_crm_leads_source");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailbox", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ConnectedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmMailing", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -10438,6 +10651,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("QueuedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_mailings_queued_by");
 
                     b.HasOne("KnitErp.Domain.Tagging.Tag", null)
                         .WithMany()
@@ -10459,6 +10678,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .WithMany("Recipients")
                         .HasForeignKey("MailingId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmMessengerChannel", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ConnectedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
@@ -10555,12 +10789,6 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("DefaultResponsibleUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_crm_settings_default_user");
-
-                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
-                        .WithMany()
-                        .HasForeignKey("MaxConnectedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("fk_crm_settings_max_user");
 
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
                         .WithMany()

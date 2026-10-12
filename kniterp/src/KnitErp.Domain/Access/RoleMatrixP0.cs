@@ -158,6 +158,8 @@ public static class RoleMatrixP0
         (Permissions.SalesMarkingEdit,        [Full, None, None, Scoped, Scoped, None, None, None]),
         // Допущение D310: МойСклад подключают Владелец и Администратор (ТЗ каталога, этап 4).
         (Permissions.MoySkladManage,          [Full, Full, None, None, None, None, None, None]),
+        (Permissions.CrmLeadsCreate,          [Full, None, None, None, None, None, None, None]),
+        (Permissions.CrmMailing,              [Full, None, None, None, None, None, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();

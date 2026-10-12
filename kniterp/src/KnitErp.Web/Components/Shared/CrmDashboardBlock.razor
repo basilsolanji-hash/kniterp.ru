@@ -1,0 +1,52 @@
+@using KnitErp.Application.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+
+@* D632 (сессия CRM), D117: блок «CRM» главного экрана — подключается через ModuleUi. Свой контекст базы; без crm.view — ничего. *@
+<KnitErp.Web.Components.Pages.CrmStyles />
+@if (_data is { } d)
+{
+    <section class="dash-box wide" aria-label="@L("CRM")">
+        <h2>
+            @L("CRM")
+            @if (d.OverdueActivities > 0) { <span class="tag warn">@L("просрочено: {0}", d.OverdueActivities)</span> }
+            <a class="muted small" href="crm/summary">@L("Сводка и отчёты")</a>
+        </h2>
+        <div class="crm-kpi">
+            <div><b>@d.OpenDeals</b><span><a href="crm/deals">@L("сделок в работе")</a></span></div>
+            @if (d.OpenAmount is { } open)
+            {
+                <div><b>@Amounts.Format(open)</b><span>@L("сумма в работе")</span></div>
+            }
+            @if (d.WeightedAmount is { } w)
+            {
+                <div><b>@Amounts.Format(w)</b><span>@L("с учётом вероятности")</span></div>
+            }
+            @if (d.WonThisMonth is { } won)
+            {
+                <div><b>@Amounts.Format(won)@(d.PlanThisMonth is { } plan and > 0 ? $" / {Amounts.Format(plan)}" : "")</b><span>@L("факт / план месяца")</span></div>
+            }
+            <div><b>@d.DealsWithoutNextStep</b><span><a href="crm/tasks">@L("без следующего шага")</a></span></div>
+        </div>
+    </section>
+}
+
+@code {
+    private CrmDashboardData? _data;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = Factory.Create();
+            var ctx = await new AccessGuard(db, CurrentUser, Clock).CurrentAsync();
+            var today = CrmEvents.Today(Clock.UtcNow, await CrmEvents.TimeZoneAsync(db, ctx.OrganizationId, default));
+            _data = await new CrmDashboardSource(Clock).GetAsync(db, ctx, today, default);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _data = null; // нет доступа — блока нет
+        }
+    }
+}

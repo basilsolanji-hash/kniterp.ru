@@ -177,9 +177,15 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Crm.CrmDeal> CrmDeals { get; }
     DbSet<KnitErp.Domain.Crm.CrmDealStageHistory> CrmDealStageHistory { get; }
     DbSet<KnitErp.Domain.Crm.CrmDealOrder> CrmDealOrders { get; }
+    DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements { get; }
+    DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles { get; }
+    DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings { get; }
     DbSet<KnitErp.Domain.Crm.CrmActivity> CrmActivities { get; }
     DbSet<KnitErp.Domain.Crm.CrmOffer> CrmOffers { get; }
     DbSet<KnitErp.Domain.Crm.CrmSettings> CrmSettings { get; }
+    DbSet<KnitErp.Domain.Crm.CrmMessengerChannel> CrmMessengerChannels { get; }
+    DbSet<KnitErp.Domain.Crm.CrmEmailTemplate> CrmEmailTemplates { get; }
+    DbSet<KnitErp.Domain.Crm.CrmMailbox> CrmMailboxes { get; }
     DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans { get; }
     DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings { get; }
     DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks { get; }

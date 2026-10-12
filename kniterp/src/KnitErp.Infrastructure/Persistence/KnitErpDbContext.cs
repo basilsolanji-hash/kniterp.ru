@@ -145,9 +145,15 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Crm.CrmDeal> CrmDeals => Set<KnitErp.Domain.Crm.CrmDeal>();
     public DbSet<KnitErp.Domain.Crm.CrmDealStageHistory> CrmDealStageHistory => Set<KnitErp.Domain.Crm.CrmDealStageHistory>();
     public DbSet<KnitErp.Domain.Crm.CrmDealOrder> CrmDealOrders => Set<KnitErp.Domain.Crm.CrmDealOrder>();
+    public DbSet<KnitErp.Domain.Sales.SalesAgreement> SalesAgreements => Set<KnitErp.Domain.Sales.SalesAgreement>();
+    public DbSet<KnitErp.Domain.Sales.CustomerSalesProfile> CustomerSalesProfiles => Set<KnitErp.Domain.Sales.CustomerSalesProfile>();
+    public DbSet<KnitErp.Domain.Sales.SalesRoleSettings> SalesRoleSettings => Set<KnitErp.Domain.Sales.SalesRoleSettings>();
     public DbSet<KnitErp.Domain.Crm.CrmActivity> CrmActivities => Set<KnitErp.Domain.Crm.CrmActivity>();
     public DbSet<KnitErp.Domain.Crm.CrmOffer> CrmOffers => Set<KnitErp.Domain.Crm.CrmOffer>();
     public DbSet<KnitErp.Domain.Crm.CrmSettings> CrmSettings => Set<KnitErp.Domain.Crm.CrmSettings>();
+    public DbSet<KnitErp.Domain.Crm.CrmMessengerChannel> CrmMessengerChannels => Set<KnitErp.Domain.Crm.CrmMessengerChannel>();
+    public DbSet<KnitErp.Domain.Crm.CrmEmailTemplate> CrmEmailTemplates => Set<KnitErp.Domain.Crm.CrmEmailTemplate>();
+    public DbSet<KnitErp.Domain.Crm.CrmMailbox> CrmMailboxes => Set<KnitErp.Domain.Crm.CrmMailbox>();
     public DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans => Set<KnitErp.Domain.Crm.CrmPlan>();
     public DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings => Set<KnitErp.Domain.Crm.CrmMailing>();
     public DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks => Set<KnitErp.Domain.Crm.CrmExternalLink>();

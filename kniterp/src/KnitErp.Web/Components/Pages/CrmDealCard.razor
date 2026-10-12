@@ -110,338 +110,345 @@ else
         }
     </div>
 
-    <h2>@L("Заказы покупателя")</h2>
-    @if (_deal.Orders.Count == 0 && _deal.HiddenOrders == 0)
-    {
-        <p class="muted small">@L("Заказов по сделке пока нет. Подтверждённый заказ переведёт сделку в «Выиграна».")</p>
-    }
-    else if (_deal.HiddenOrders > 0)
-    {
-        <p class="muted small">@L("Заказов по сделке: {0}. Чтобы видеть их, нужно право «Продажи: просмотр».", _deal.HiddenOrders)</p>
-    }
-    else
-    {
-        <div class="scroll">
-            <table class="compact">
-                <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th><th></th></tr></thead>
-                <tbody>
-                    @foreach (var o in _deal.Orders)
-                    {
-                        <tr>
-                            <td><a href="sales-orders/@o.Id">@o.Number</a> <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
-                            <td><span class="tag @SalesOrdersPage.StatusClass(o.Status)">@L(o.StatusName)</span></td>
-                            <td><StageChip Stage="o.Stage" /></td>
-                            <td class="num">@Amounts.Format(o.Total)</td>
-                            <td class="num">@Amounts.Format(o.Paid)</td>
-                            <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
-                            <td><div class="row-actions">
-                                @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
-                                {
-                                    <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>
-                                }
-                                else if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed && CurrentAccess.Has(Permissions.ProductionOrderEdit))
-                                {
-                                    <button type="button" class="secondary" @onclick="() => ToProductionAsync(o.Id)" disabled="@_busy">@L("В производство")</button>
-                                }
-                                <a class="small" href="sales-orders/@o.Id">@L("Открыть")</a>
-                            </div></td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-    }
-    @if (_deal.CanCreateOrder)
-    {
-        @if (_warehouses is null)
-        {
-            <button type="button" @onclick="OpenOrderAsync" disabled="@_busy">@L("Создать заказ")</button>
-        }
-        else
-        {
-            <form class="inline-form" @onsubmit="CreateOrderAsync" aria-label="@L("Создать заказ")">
-                <label>
-                    @L("Склад отгрузки")
-                    <select @bind="_warehouse" required>
-                        @foreach (var w in _warehouses)
-                        {
-                            <option value="@w.Id">@w.Name</option>
-                        }
-                    </select>
-                </label>
-                <button type="submit" disabled="@_busy">@(_orderOffer is null ? L("Создать черновик заказа") : L("Создать заказ по {0}", _orderOffer.Number))</button>
-                <button type="button" class="secondary" @onclick="() => _warehouses = null">@L("Отмена")</button>
-            </form>
-        }
-    }
-
-    @if (_deal.CanSeeAmounts)
-    {
-        <h2>@L("Коммерческие предложения")</h2>
-        @if (_offers.Count > 0)
-        {
-            <div class="scroll">
-                <table class="compact">
-                    <thead><tr><th>@L("КП")</th><th>@L("Действует до")</th><th class="num">@L("Сумма")</th><th></th></tr></thead>
-                    <tbody>
-                        @foreach (var o in _offers)
-                        {
-                            <tr>
-                                <td>@o.Number <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
-                                <td>@o.ValidUntil.ToString("dd.MM.yyyy")</td>
-                                <td class="num">@Amounts.Format(o.Amount) @o.CurrencyCode</td>
-                                <td class="row-actions">
-                                    <a class="button secondary" href="print/crm-offer/@o.Id" target="_blank" rel="noopener">@L("Печать / PDF")</a>
-                                    @if (_deal.CanEdit)
-                                    {
-                                        <button type="button" class="secondary" @onclick="() => OpenSend(o)" disabled="@_busy">@L("Отправить")</button>
-                                        @if (_deal.CanCreateOrder)
+    @* D679: на широком экране — работа по сделке слева, данные и участники справа; на телефоне — одной колонкой. *@
+    <div class="crm-layout">
+        <div class="crm-main">
+            <h2>@L("Заказы покупателя")</h2>
+            @if (_deal.Orders.Count == 0 && _deal.HiddenOrders == 0)
+            {
+                <p class="muted small">@L("Заказов по сделке пока нет. Подтверждённый заказ переведёт сделку в «Выиграна».")</p>
+            }
+            else if (_deal.HiddenOrders > 0)
+            {
+                <p class="muted small">@L("Заказов по сделке: {0}. Чтобы видеть их, нужно право «Продажи: просмотр».", _deal.HiddenOrders)</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table class="compact">
+                        <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var o in _deal.Orders)
+                            {
+                                <tr>
+                                    <td><a href="sales-orders/@o.Id">@o.Number</a> <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
+                                    <td><span class="tag @SalesOrdersPage.StatusClass(o.Status)">@L(o.StatusName)</span></td>
+                                    <td><StageChip Stage="o.Stage" /></td>
+                                    <td class="num">@Amounts.Format(o.Total)</td>
+                                    <td class="num">@Amounts.Format(o.Paid)</td>
+                                    <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
+                                    <td><div class="row-actions">
+                                        @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
                                         {
-                                            <button type="button" class="secondary" @onclick="() => OpenOfferOrderAsync(o)" disabled="@_busy">@L("Заказ по КП")</button>
+                                            <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>
                                         }
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-        @if (_sendOffer is { } so)
-        {
-            <form class="panel" @onsubmit="SendOfferAsync" aria-label="@L("Отправить КП")">
-                <h3>@L("Отправить {0}", so.Number)</h3>
-                @if (!Mail.IsConfigured)
+                                        else if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed && CurrentAccess.Has(Permissions.ProductionOrderEdit))
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => ToProductionAsync(o.Id)" disabled="@_busy">@L("В производство")</button>
+                                        }
+                                        <a class="small" href="sales-orders/@o.Id">@L("Открыть")</a>
+                                    </div></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            @if (_deal.CanCreateOrder)
+            {
+                @if (_warehouses is null)
                 {
-                    <p class="muted small">@L("Почта сервера не настроена — обратитесь к администратору. КП можно распечатать или сохранить в PDF.")</p>
+                    <button type="button" @onclick="OpenOrderAsync" disabled="@_busy">@L("Создать заказ")</button>
                 }
                 else
                 {
-                    <div class="grid">
-                        <label>@L("Кому") <input type="email" @bind="_sendTo" required /></label>
-                        <label class="wide">@L("Сопроводительный текст") <textarea rows="3" @bind="_sendText"></textarea></label>
-                    </div>
-                    <div class="actions">
-                        <button type="submit" disabled="@_busy">@L("Отправить КП")</button>
-                        <button type="button" class="secondary" @onclick="() => _sendOffer = null">@L("Отмена")</button>
-                    </div>
-                }
-            </form>
-        }
-        @if (_deal.CanEdit && open && _deal.Lines.Count > 0)
-        {
-            <form class="inline-form" @onsubmit="CreateOfferAsync" aria-label="@L("Сформировать КП")">
-                <label>
-                    @L("Цены")
-                    <select @bind="_priceType">
-                        <option value="">@L("из сделки")</option>
-                        @foreach (var pt in _priceTypes)
-                        {
-                            <option value="@pt.Id">@pt.Name</option>
-                        }
-                    </select>
-                </label>
-                <label>@L("Действует, дней") <input type="number" min="1" max="365" @bind="_offerDays" /></label>
-                <button type="submit" disabled="@_busy">@L("Сформировать КП")</button>
-            </form>
-        }
-        else if (_deal.CanEdit && open)
-        {
-            <p class="muted small">@L("Добавьте позиции ниже — из них сформируется КП.")</p>
-        }
-    }
-
-    <h2>@L("Позиции")</h2>
-    @if (_deal.Lines.Count == 0)
-    {
-        <p class="muted small">@L("Позиции каталога необязательны: из них «Создать заказ» составит строки заказа, а сумма сделки посчитается сама.")</p>
-    }
-    else
-    {
-        <div class="scroll">
-            <table class="compact">
-                <thead><tr><th>@L("Позиция")</th><th class="num">@L("Количество")</th><th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th>@if (canEdit) { <th></th> }</tr></thead>
-                <tbody>
-                    @foreach (var l in _deal.Lines)
-                    {
-                        <tr>
-                            <td>@l.Code — @l.Name</td>
-                            <td class="num">@Quantities.Format(l.Quantity) @l.UnitSymbol</td>
-                            <td class="num">@Amounts.Format(l.Price)</td>
-                            <td class="num">@Amounts.Format(l.Amount)</td>
-                            @if (canEdit)
-                            {
-                                <td><button type="button" class="secondary" @onclick="() => RemoveLineAsync(l.ItemId)" disabled="@_busy" aria-label="@L("Убрать {0}", l.Code)">×</button></td>
-                            }
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-    }
-    @if (canEdit && _options.CanSeeAmounts)
-    {
-        <form class="inline-form" @onsubmit="AddLineAsync" aria-label="@L("Добавить позицию")">
-            <label>@L("Поиск позиции") <input @bind="_itemSearch" @bind:after="SearchItemsAsync" placeholder="@L("Код, название, артикул")" /></label>
-            <label>
-                @L("Позиция")
-                <select @bind="_item" @bind:after="ItemChanged" aria-label="@L("Позиция каталога")">
-                    <option value="">—</option>
-                    @foreach (var i in _items)
-                    {
-                        <option value="@i.Id">@i.Code — @i.Name</option>
-                    }
-                </select>
-            </label>
-            <label>@L("Количество") <input inputmode="decimal" @bind="_qty" /></label>
-            <label>@L("Цена") <input inputmode="decimal" @bind="_price" /></label>
-            <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
-        </form>
-    }
-
-    <div class="panel">
-        <h2>@L("Данные сделки")</h2>
-        <form @onsubmit="SaveAsync">
-            <fieldset disabled="@(!canEdit)">
-                <div class="grid">
-                    <label class="wide">@L("Название") <input @bind="_f.Title" maxlength="@CrmDeal.TitleMaxLength" required /></label>
-                    <label>
-                        @L("Контакт")
-                        <select @bind="_f.Contact">
-                            <option value="">—</option>
-                            @foreach (var c in _contacts)
-                            {
-                                <option value="@c.Id">@c.Name</option>
-                            }
-                        </select>
-                    </label>
-                    @if (_options.CanSeeAmounts)
-                    {
-                        <label>@L("Сумма") <input inputmode="decimal" @bind="_f.Amount" disabled="@(_deal.Lines.Count > 0)" /></label>
+                    <form class="inline-form" @onsubmit="CreateOrderAsync" aria-label="@L("Создать заказ")">
                         <label>
-                            @L("Валюта")
-                            <select @bind="_f.Currency">
-                                @foreach (var c in _options.Currencies)
+                            @L("Склад отгрузки")
+                            <select @bind="_warehouse" required>
+                                @foreach (var w in _warehouses)
                                 {
-                                    <option value="@c">@c</option>
+                                    <option value="@w.Id">@w.Name</option>
                                 }
                             </select>
                         </label>
-                    }
-                    <label>@L("Плановое закрытие") <input type="date" @bind="_f.Close" /></label>
-                    <label>
-                        @L("Источник")
-                        <select @bind="_f.Source">
-                            <option value="">—</option>
-                            @foreach (var s in _options.Sources)
-                            {
-                                <option value="@s.Id">@s.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label>
-                        @L("Канал продаж")
-                        <select @bind="_f.Channel">
-                            <option value="">—</option>
-                            @foreach (var c in _options.Channels)
-                            {
-                                <option value="@c.Id">@c.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label>
-                        @L("Проект")
-                        <select @bind="_f.Project">
-                            <option value="">—</option>
-                            @foreach (var p in _options.Projects)
-                            {
-                                <option value="@p.Id">@p.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label>@L("Вероятность, %") <input type="number" min="0" max="100" step="1" @bind="_f.Probability" /></label>
-                </div>
-                @if (canEdit)
-                {
-                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                        <button type="submit" disabled="@_busy">@(_orderOffer is null ? L("Создать черновик заказа") : L("Создать заказ по {0}", _orderOffer.Number))</button>
+                        <button type="button" class="secondary" @onclick="() => _warehouses = null">@L("Отмена")</button>
+                    </form>
                 }
-            </fieldset>
-        </form>
-    </div>
-
-    <h2>@L("Участники")</h2>
-    <p>
-        @L("Ответственный:") <b>@_deal.Responsible</b>
-        @if (_deal.Participants.Count > 0)
-        {
-            <span> · @L("наблюдатели:") </span>
-            @foreach (var p in _deal.Participants)
-            {
-                <span class="tag">
-                    @p.Name
-                    @if (_deal.CanEdit)
-                    {
-                        <button type="button" class="tag-x" @onclick="() => RemoveParticipantAsync(p.Id)" disabled="@_busy" aria-label="@L("Убрать наблюдателя {0}", p.Name)">×</button>
-                    }
-                </span>
             }
-        }
-    </p>
-    @if (_deal.CanEdit)
-    {
-        <form class="inline-form" @onsubmit="AddParticipantAsync">
-            <label>
-                @L("Наблюдатель")
-                <select @bind="_participant">
-                    <option value="">—</option>
-                    @foreach (var u in _options.Users.Where(u => u.Id != v.ResponsibleUserId && _deal.Participants.All(p => p.Id != u.Id)))
-                    {
-                        <option value="@u.Id">@u.Name</option>
-                    }
-                </select>
-            </label>
-            <button type="submit" class="secondary" disabled="@_busy">@L("Добавить наблюдателя")</button>
-        </form>
-    }
-    @if (_deal.CanAll && _deal.CanEdit)
-    {
-        <form class="inline-form" @onsubmit="ReassignAsync">
-            <label>
-                @L("Новый ответственный")
-                <select @bind="_reassign">
-                    @foreach (var u in _options.Users)
-                    {
-                        <option value="@u.Id">@u.Name</option>
-                    }
-                </select>
-            </label>
-            <button type="submit" class="secondary" disabled="@_busy">@L("Переназначить")</button>
-        </form>
-    }
 
-    <details class="panel">
-        <summary>@L("История этапов") (@_deal.History.Count)</summary>
-        <div class="scroll">
-            <table class="compact">
-                <thead><tr><th>@L("Когда")</th><th>@L("Переход")</th><th class="num">@L("Дней на этапе")</th><th>@L("Кто")</th></tr></thead>
-                <tbody>
-                    @foreach (var h in _deal.History)
-                    {
-                        <tr>
-                            <td>@TimeZones.ToLocal(h.AtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</td>
-                            <td>@(h.From is null ? L("создана на этапе «{0}»", h.To) : $"{h.From} → {h.To}")</td>
-                            <td class="num">@(h.From is null ? "—" : h.DaysInStage.ToString("0.#"))</td>
-                            <td>@h.By</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+            @if (_deal.CanSeeAmounts)
+            {
+                <h2>@L("Коммерческие предложения")</h2>
+                @if (_offers.Count > 0)
+                {
+                    <div class="scroll">
+                        <table class="compact">
+                            <thead><tr><th>@L("КП")</th><th>@L("Действует до")</th><th class="num">@L("Сумма")</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var o in _offers)
+                                {
+                                    <tr>
+                                        <td>@o.Number <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
+                                        <td>@o.ValidUntil.ToString("dd.MM.yyyy")</td>
+                                        <td class="num">@Amounts.Format(o.Amount) @o.CurrencyCode</td>
+                                        <td class="row-actions">
+                                            <a class="button secondary" href="print/crm-offer/@o.Id" target="_blank" rel="noopener">@L("Печать / PDF")</a>
+                                            @if (_deal.CanEdit)
+                                            {
+                                                <button type="button" class="secondary" @onclick="() => OpenSend(o)" disabled="@_busy">@L("Отправить")</button>
+                                                @if (_deal.CanCreateOrder)
+                                                {
+                                                    <button type="button" class="secondary" @onclick="() => OpenOfferOrderAsync(o)" disabled="@_busy">@L("Заказ по КП")</button>
+                                                }
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                @if (_sendOffer is { } so)
+                {
+                    <form class="panel" @onsubmit="SendOfferAsync" aria-label="@L("Отправить КП")">
+                        <h3>@L("Отправить {0}", so.Number)</h3>
+                        @if (!Mail.IsConfigured)
+                        {
+                            <p class="muted small">@L("Почта сервера не настроена — обратитесь к администратору. КП можно распечатать или сохранить в PDF.")</p>
+                        }
+                        else
+                        {
+                            <div class="grid">
+                                <label>@L("Кому") <input type="email" @bind="_sendTo" required /></label>
+                                <label class="wide">@L("Сопроводительный текст") <textarea rows="3" @bind="_sendText"></textarea></label>
+                            </div>
+                            <div class="actions">
+                                <button type="submit" disabled="@_busy">@L("Отправить КП")</button>
+                                <button type="button" class="secondary" @onclick="() => _sendOffer = null">@L("Отмена")</button>
+                            </div>
+                        }
+                    </form>
+                }
+                @if (_deal.CanEdit && open && _deal.Lines.Count > 0)
+                {
+                    <form class="inline-form" @onsubmit="CreateOfferAsync" aria-label="@L("Сформировать КП")">
+                        <label>
+                            @L("Цены")
+                            <select @bind="_priceType">
+                                <option value="">@L("из сделки")</option>
+                                @foreach (var pt in _priceTypes)
+                                {
+                                    <option value="@pt.Id">@pt.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("Действует, дней") <input type="number" min="1" max="365" @bind="_offerDays" /></label>
+                        <button type="submit" disabled="@_busy">@L("Сформировать КП")</button>
+                    </form>
+                }
+                else if (_deal.CanEdit && open)
+                {
+                    <p class="muted small">@L("Добавьте позиции ниже — из них сформируется КП.")</p>
+                }
+            }
+
+            <h2>@L("Позиции")</h2>
+            @if (_deal.Lines.Count == 0)
+            {
+                <p class="muted small">@L("Позиции каталога необязательны: из них «Создать заказ» составит строки заказа, а сумма сделки посчитается сама.")</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table class="compact">
+                        <thead><tr><th>@L("Позиция")</th><th class="num">@L("Количество")</th><th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th>@if (canEdit) { <th></th> }</tr></thead>
+                        <tbody>
+                            @foreach (var l in _deal.Lines)
+                            {
+                                <tr>
+                                    <td>@l.Code — @l.Name</td>
+                                    <td class="num">@Quantities.Format(l.Quantity) @l.UnitSymbol</td>
+                                    <td class="num">@Amounts.Format(l.Price)</td>
+                                    <td class="num">@Amounts.Format(l.Amount)</td>
+                                    @if (canEdit)
+                                    {
+                                        <td><button type="button" class="secondary" @onclick="() => RemoveLineAsync(l.ItemId)" disabled="@_busy" aria-label="@L("Убрать {0}", l.Code)">×</button></td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            @if (canEdit && _options.CanSeeAmounts)
+            {
+                <form class="inline-form" @onsubmit="AddLineAsync" aria-label="@L("Добавить позицию")">
+                    <label>@L("Поиск позиции") <input @bind="_itemSearch" @bind:after="SearchItemsAsync" placeholder="@L("Код, название, артикул")" /></label>
+                    <label>
+                        @L("Позиция")
+                        <select @bind="_item" @bind:after="ItemChanged" aria-label="@L("Позиция каталога")">
+                            <option value="">—</option>
+                            @foreach (var i in _items)
+                            {
+                                <option value="@i.Id">@i.Code — @i.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Количество") <input inputmode="decimal" @bind="_qty" /></label>
+                    <label>@L("Цена") <input inputmode="decimal" @bind="_price" /></label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
+                </form>
+            }
+
+
+            <CrmActivities Target="CrmTarget.Deal" TargetId="Id" CanEdit="@_deal.CanEdit" Version="_feedVersion" />
+
+            <Discussion Target="TaggedEntity.CrmDeal" TargetId="Id" />
         </div>
-    </details>
+        <aside class="crm-side" aria-label="@L("Данные сделки")">
+            <div class="panel">
+                <h2>@L("Данные сделки")</h2>
+                <form @onsubmit="SaveAsync">
+                    <fieldset disabled="@(!canEdit)">
+                        <div class="grid">
+                            <label class="wide">@L("Название") <input @bind="_f.Title" maxlength="@CrmDeal.TitleMaxLength" required /></label>
+                            <label>
+                                @L("Контакт")
+                                <select @bind="_f.Contact">
+                                    <option value="">—</option>
+                                    @foreach (var c in _contacts)
+                                    {
+                                        <option value="@c.Id">@c.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            @if (_options.CanSeeAmounts)
+                            {
+                                <label>@L("Сумма") <input inputmode="decimal" @bind="_f.Amount" disabled="@(_deal.Lines.Count > 0)" /></label>
+                                <label>
+                                    @L("Валюта")
+                                    <select @bind="_f.Currency">
+                                        @foreach (var c in _options.Currencies)
+                                        {
+                                            <option value="@c">@c</option>
+                                        }
+                                    </select>
+                                </label>
+                            }
+                            <label>@L("Плановое закрытие") <input type="date" @bind="_f.Close" /></label>
+                            <label>
+                                @L("Источник")
+                                <select @bind="_f.Source">
+                                    <option value="">—</option>
+                                    @foreach (var s in _options.Sources)
+                                    {
+                                        <option value="@s.Id">@s.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                @L("Канал продаж")
+                                <select @bind="_f.Channel">
+                                    <option value="">—</option>
+                                    @foreach (var c in _options.Channels)
+                                    {
+                                        <option value="@c.Id">@c.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                @L("Проект")
+                                <select @bind="_f.Project">
+                                    <option value="">—</option>
+                                    @foreach (var p in _options.Projects)
+                                    {
+                                        <option value="@p.Id">@p.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Вероятность, %") <input type="number" min="0" max="100" step="1" @bind="_f.Probability" /></label>
+                        </div>
+                        @if (canEdit)
+                        {
+                            <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                        }
+                    </fieldset>
+                </form>
+            </div>
 
-    <CrmActivities Target="CrmTarget.Deal" TargetId="Id" CanEdit="@_deal.CanEdit" Version="_feedVersion" />
+            <h2>@L("Участники")</h2>
+            <p>
+                @L("Ответственный:") <b>@_deal.Responsible</b>
+                @if (_deal.Participants.Count > 0)
+                {
+                    <span> · @L("наблюдатели:") </span>
+                    @foreach (var p in _deal.Participants)
+                    {
+                        <span class="tag">
+                            @p.Name
+                            @if (_deal.CanEdit)
+                            {
+                                <button type="button" class="tag-x" @onclick="() => RemoveParticipantAsync(p.Id)" disabled="@_busy" aria-label="@L("Убрать наблюдателя {0}", p.Name)">×</button>
+                            }
+                        </span>
+                    }
+                }
+            </p>
+            @if (_deal.CanEdit)
+            {
+                <form class="inline-form" @onsubmit="AddParticipantAsync">
+                    <label>
+                        @L("Наблюдатель")
+                        <select @bind="_participant">
+                            <option value="">—</option>
+                            @foreach (var u in _options.Users.Where(u => u.Id != v.ResponsibleUserId && _deal.Participants.All(p => p.Id != u.Id)))
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить наблюдателя")</button>
+                </form>
+            }
+            @if (_deal.CanAll && _deal.CanEdit)
+            {
+                <form class="inline-form" @onsubmit="ReassignAsync">
+                    <label>
+                        @L("Новый ответственный")
+                        <select @bind="_reassign">
+                            @foreach (var u in _options.Users)
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Переназначить")</button>
+                </form>
+            }
 
-    <Discussion Target="TaggedEntity.CrmDeal" TargetId="Id" />
+            <details class="panel">
+                <summary>@L("История этапов") (@_deal.History.Count)</summary>
+                <div class="scroll">
+                    <table class="compact">
+                        <thead><tr><th>@L("Когда")</th><th>@L("Переход")</th><th class="num">@L("Дней на этапе")</th><th>@L("Кто")</th></tr></thead>
+                        <tbody>
+                            @foreach (var h in _deal.History)
+                            {
+                                <tr>
+                                    <td>@TimeZones.ToLocal(h.AtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>@(h.From is null ? L("создана на этапе «{0}»", h.To) : $"{h.From} → {h.To}")</td>
+                                    <td class="num">@(h.From is null ? "—" : h.DaysInStage.ToString("0.#"))</td>
+                                    <td>@h.By</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        </aside>
+    </div>
 }
 
 @code {

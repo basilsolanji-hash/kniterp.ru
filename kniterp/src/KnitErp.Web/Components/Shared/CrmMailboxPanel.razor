@@ -1,0 +1,153 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject ICrmMailboxClient Client
+
+@* D676: входящая почта CRM — ящик организации по IMAP. Пароль после сохранения не показывается. Свой контекст базы. *@
+<section class="panel" id="mailbox" aria-label="@L("Входящая почта")">
+    <h2>@L("Входящая почта")</h2>
+    <p class="muted small">@L("Подключите общий ящик отдела продаж (например, sales@): письма клиентов раз в 3 минуты попадают в ленту контакта, сделки или лида, незнакомый отправитель становится лидом. Ответы клиентов на письма из knitERP приходят менеджеру, а копию можно направить в этот ящик.")</p>
+    @if (_error is not null)
+    {
+        <div class="error" role="alert">@_error</div>
+    }
+    @if (_flash is not null)
+    {
+        <div class="flash" role="status">@_flash</div>
+    }
+    @if (_status is { Connected: true } s)
+    {
+        <p class="small">
+            <b>@s.Login</b> · @s.Host:@s.Port · @(s.CreateLeads ? L("незнакомые — новыми лидами") : L("только известные клиенты"))<br />
+            <span class="muted">@L("Подключено: {0}", s.ConnectedBy ?? "—") · @L("проверено: {0}", s.LastCheckAtUtc is { } at ? TimeZones.ToLocal(at, TimeZoneId).ToString("dd.MM.yyyy HH:mm") : L("ещё нет"))</span>
+        </p>
+        @if (s.LastError is not null)
+        {
+            <div class="flash warn" role="status">@s.LastError</div>
+        }
+    }
+    @if (CanEdit)
+    {
+        @if (_open)
+        {
+            <form @onsubmit="ConnectAsync" aria-label="@L("Подключить ящик")">
+                <div class="grid">
+                    <label>@L("Сервер IMAP") <input @bind="_host" required placeholder="imap.example.org" autocomplete="off" /></label>
+                    <label>
+                        @L("Порт")
+                        <select @bind="_port">
+                            <option value="993">@L("993 — TLS")</option>
+                            <option value="143">@L("143 — STARTTLS")</option>
+                        </select>
+                    </label>
+                    <label>@L("Логин") <input @bind="_login" required autocomplete="off" placeholder="sales@example.org" /></label>
+                    <label>@L("Пароль приложения") <input type="password" @bind="_password" required autocomplete="new-password" /></label>
+                    <label class="inline"><input type="checkbox" @bind="_createLeads" /> @L("Незнакомый отправитель — новый лид")</label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Проверить и подключить")</button>
+                    <button type="button" class="secondary" @onclick="() => _open = false">@L("Отмена")</button>
+                </div>
+            </form>
+        }
+        else
+        {
+            <div class="actions">
+                <button type="button" class="@(_status?.Connected == true ? "secondary" : null)" @onclick="Open" disabled="@_busy">@(_status?.Connected == true ? L("Изменить") : L("Подключить ящик"))</button>
+                @if (_status?.Connected == true)
+                {
+                    <button type="button" class="secondary" @onclick="CheckAsync" disabled="@_busy">@L("Проверить сейчас")</button>
+                    <ConfirmButton Class="secondary" OnConfirm="DisconnectAsync" Disabled="@_busy" Question='@L("Отключить ящик? Письма перестанут попадать в CRM.")'>@L("Отключить")</ConfirmButton>
+                }
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public string TimeZoneId { get; set; } = "Europe/Moscow";
+
+    private CrmMailboxStatusDto? _status;
+    private bool _open;
+    private string? _host;
+    private int _port = 993;
+    private string? _login;
+    private string? _password;
+    private bool _createLeads = true;
+    private string? _error;
+    private string? _flash;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => RunAsync(LoadAsync, null);
+
+    private async Task LoadAsync()
+    {
+        await using var db = Factory.Create();
+        _status = await Service(db).StatusAsync();
+    }
+
+    private void Open() =>
+        (_open, _host, _port, _login, _password, _createLeads) = (true, _status?.Host, _status?.Port ?? 993, _status?.Login, null, _status?.CreateLeads ?? true);
+
+    private Task ConnectAsync() => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).ConnectAsync(_host, _port, _login, _password, _createLeads);
+        }
+
+        (_open, _password) = (false, null);
+        await LoadAsync();
+    }, L("Ящик подключён: письма начнут приходить в течение 3 минут."));
+
+    private Task CheckAsync() => RunAsync(async () =>
+    {
+        int count;
+        await using (var db = Factory.Create())
+        {
+            count = await Service(db).CheckNowAsync();
+        }
+
+        await LoadAsync();
+        _flash = L("Новых писем в CRM: {0}.", count);
+    }, null);
+
+    private Task DisconnectAsync() => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).DisconnectAsync();
+        }
+
+        await LoadAsync();
+    }, L("Ящик отключён."));
+
+    private CrmMailboxService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock, Client);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        (_error, _flash) = (null, null);
+        try
+        {
+            await action();
+            _flash ??= success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -51,10 +51,29 @@
     .crm-chat-item.current { border-color: var(--accent); }
     .crm-chat-last { font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
     .crm-chat-view { border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-width: 0; }
-    .crm-chat-messages { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow-y: auto; }
+    .crm-chat-messages { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column-reverse; gap: 6px; max-height: 55vh; overflow-y: auto; }
     .crm-chat-messages li { max-width: 80%; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; }
     .crm-chat-messages li.out { align-self: flex-end; background: var(--accent-soft-2); }
     .crm-chat-text { white-space: pre-wrap; }
+    .crm-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 20px; margin-top: 4px; }
+    .crm-main, .crm-side { min-width: 0; }
+    .crm-main > h2, .crm-side h2 { margin: 18px 0 8px; }
+    .crm-main > h2:first-child, .crm-side > .panel:first-child h2 { margin-top: 0; }
+    .crm-main > .actions, .crm-main > form, .crm-main > .scroll { margin-bottom: 8px; }
+    @@media (min-width: 1200px) {
+        .crm-layout { grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
+        .crm-side { position: sticky; top: 72px; max-height: calc(100vh - 88px); overflow-y: auto; padding-right: 2px; }
+        .crm-side .grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+        .crm-side .grid .wide { grid-column: 1 / -1; }
+    }
+    .crm-channel { display: inline-block; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 600; color: #fff; background: #6b7280; }
+    .crm-channel-telegram { background: #229ed9; }
+    .crm-channel-whatsapp { background: #1f9d55; }
+    .crm-channel-max { background: #6a4cff; }
+    .crm-messengers { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+    .crm-messenger { border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .crm-messenger form { display: flex; flex-direction: column; gap: 6px; }
+    .crm-messenger code { overflow-wrap: anywhere; }
     .crm-chat-reply { display: flex; gap: 8px; align-items: flex-end; }
     .crm-chat-reply textarea { flex: 1 1 auto; min-width: 0; }
     @@media (max-width: 599px) {

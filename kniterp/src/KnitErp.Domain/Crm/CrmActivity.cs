@@ -121,6 +121,18 @@ public sealed class CrmActivity
 
     public void SetPeer(string? peer) => Peer = DomainText.Optional(peer, ExternalRefMaxLength, "Собеседник");
 
+    /// <summary>
+    /// Удаление ПДн по запросу (D677, 152-ФЗ ст. 21): переписка с клиентом (сообщения мессенджеров и письма) обезличивается — текст, тема
+    /// и id собеседника заменяются; факт обращения, дата и связь с карточкой остаются.
+    /// </summary>
+    public void ErasePersonalData()
+    {
+        Subject = $"{KindName(Kind)} ({CrmContact.ErasedName})";
+        Text = CrmContact.ErasedName;
+        Peer = null;
+        Result = Result is null ? null : CrmContact.ErasedName;
+    }
+
     public void Update(string? subject, string? text, DateTime? dueAtUtc, long assigneeUserId)
     {
         if (IsDone)

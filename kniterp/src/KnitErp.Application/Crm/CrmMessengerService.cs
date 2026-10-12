@@ -9,112 +9,162 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.Application.Crm;
 
+/// <summary>Реквизиты бота: токен; для WhatsApp — ещё id номера (Phone number ID).</summary>
+public sealed record CrmMessengerCredentials(string Token, string? AccountId);
+
 /// <summary>
-/// Клиент мессенджера MAX (D648): проверка токена, подписка вебхука, отправка сообщения. Реализация — в Infrastructure (HTTP к MAX Bot API);
+/// Клиент мессенджера (D670): проверка токена, подписка вебхука, отправка сообщения. Реализации — в Infrastructure (HTTP к Bot API);
 /// не настроен адрес API — IsAvailable = false.
 /// </summary>
-public interface ICrmMaxClient
+public interface ICrmMessengerClient
 {
+    CrmMessengerKind Kind { get; }
+
     bool IsAvailable { get; }
 
-    /// <summary>Имя бота по токену; null — токен не подошёл. Недоступность сервиса — ExternalServiceUnavailableException.</summary>
-    Task<string?> BotNameAsync(string token, CancellationToken ct = default);
+    /// <summary>Имя бота (номер) по реквизитам; null — реквизиты не подошли. Недоступность сервиса — ExternalServiceUnavailableException.</summary>
+    Task<string?> AccountNameAsync(CrmMessengerCredentials credentials, CancellationToken ct = default);
 
-    Task<bool> SubscribeAsync(string token, string url, string secret, CancellationToken ct = default);
+    /// <summary>Подписка вебхука. false — подписать автоматически нельзя (WhatsApp: адрес указывается в кабинете Meta).</summary>
+    Task<bool> SubscribeAsync(CrmMessengerCredentials credentials, string url, string secret, CancellationToken ct = default);
 
-    Task<bool> SendAsync(string token, string userId, string text, CancellationToken ct = default);
+    Task<bool> SendAsync(CrmMessengerCredentials credentials, string peer, string text, CancellationToken ct = default);
 }
 
-/// <summary>Входящее сообщение MAX, разобранное из вебхука (update_type = message_created).</summary>
-public sealed record CrmMaxUpdate(string UserId, string? Name, string? Username, string Text, string? MessageId);
+/// <summary>Входящее сообщение мессенджера, разобранное из вебхука. Peer — id собеседника для ответа (MAX user_id, Telegram chat_id, WhatsApp номер).</summary>
+public sealed record CrmMessengerUpdate(string Peer, string? Name, string? Username, string Text, string? MessageId, string? Phone = null);
 
 /// <summary>Диалог с клиентом в чатах CRM: собеседник, к чему привязан, последнее сообщение, ждёт ли ответа.</summary>
 public sealed record CrmChatDto(string Peer, string Channel, string Client, string Href, string LastText, DateTime LastAtUtc, bool AwaitingReply, int Messages);
 
 public sealed record CrmChatMessageDto(long Id, bool Incoming, string Text, DateTime AtUtc, string? Author);
 
-public sealed record CrmMaxStatusDto(bool Available, bool Connected, string? ConnectedBy, DateTime? ConnectedAtUtc, string? PublicUrl);
+public sealed record CrmMessengerStatusDto(CrmMessengerKind Kind, string Name, bool Available, bool Connected, string? AccountName, string? ConnectedBy,
+    DateTime? ConnectedAtUtc, bool AutoSubscribe);
+
+public sealed record CrmMessengersDto(IReadOnlyList<CrmMessengerStatusDto> Channels, string? PublicUrl)
+{
+    public bool AnyConnected => Channels.Any(c => c.Connected);
+}
 
 /// <param name="WebhookUrl">Адрес вебхука с секретом — показывается один раз, при подключении.</param>
-public sealed record CrmMaxConnectResult(string BotName, string WebhookUrl, bool Subscribed);
+/// <param name="VerifyToken">WhatsApp: «Verify token» для кабинета Meta (тот же секрет) — показывается один раз.</param>
+public sealed record CrmMessengerConnectResult(CrmMessengerKind Kind, string AccountName, string WebhookUrl, bool Subscribed, string? VerifyToken);
+
+/// <summary>Канал, найденный по секрету вебхука: для проверки подписи и обработки входящего.</summary>
+public sealed record CrmMessengerHook(long ChannelId, long OrganizationId, CrmMessengerKind Kind, long UserId, string? AppSecret);
 
 /// <summary>
-/// Мессенджер MAX в CRM (D648, запрос владельца 12.10.2026): подключение бота по токену (crm.settings), приём входящих сообщений вебхуком в
-/// ленту контакта, сделки или лида (незнакомый — новый лид, D644), ответ клиенту из ленты. Входящие обрабатываются с правами того, кто подключил
-/// бота: отозвали права или заблокировали — приём останавливается. Токен хранится зашифрованным, секрет вебхука — только хэшем.
+/// Чаты с клиентами в мессенджерах (D648, D670): подключение ботов MAX, Telegram и WhatsApp (crm.settings), приём входящих вебхуком в ленту
+/// контакта, сделки или лида (незнакомый — новый лид, D644), ответ клиенту из чатов и ленты. Входящие обрабатываются с правами того, кто
+/// подключил бота: отозвали права или заблокировали — приём останавливается. Токены хранятся зашифрованными, секрет вебхука — только хэшем.
 /// </summary>
-public sealed class CrmMessengerService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, ICrmMaxClient max, IEmailSender mail)
+public sealed class CrmMessengerService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock,
+    IEnumerable<ICrmMessengerClient> clients, IEmailSender mail)
 {
-    public const string Channel = "MAX";
+    public static readonly CrmMessengerKind[] Kinds = [CrmMessengerKind.Telegram, CrmMessengerKind.WhatsApp, CrmMessengerKind.Max];
 
-    public async Task<CrmMaxStatusDto> StatusAsync(CancellationToken ct = default)
+    public async Task<CrmMessengersDto> StatusAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CrmView, ct);
-        var s = await db.CrmSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
-        var by = s?.MaxConnectedByUserId is { } uid ? await db.Users.AsNoTracking().Where(u => u.Id == uid).Select(u => u.DisplayName).SingleOrDefaultAsync(ct) : null;
-        return new CrmMaxStatusDto(max.IsAvailable, s?.MaxConnected == true, by, s?.MaxConnectedAtUtc, mail.PublicUrl);
+        var rows = await (from c in db.CrmMessengerChannels.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId)
+                          join u in db.Users.AsNoTracking() on c.ConnectedByUserId equals u.Id
+                          select new { c.Kind, Connected = c.Token != null && c.SecretHash != null, c.AccountName, u.DisplayName, c.ConnectedAtUtc }).ToListAsync(ct);
+        return new CrmMessengersDto(Kinds.Select(k =>
+        {
+            var r = rows.SingleOrDefault(x => x.Kind == k);
+            return new CrmMessengerStatusDto(k, CrmMessengerChannel.KindName(k), Client(k)?.IsAvailable == true, r?.Connected == true,
+                r?.Connected == true ? r.AccountName : null, r?.Connected == true ? r.DisplayName : null, r?.Connected == true ? r.ConnectedAtUtc : null,
+                k != CrmMessengerKind.WhatsApp);
+        }).ToList(), mail.PublicUrl);
     }
 
-    public async Task<CrmMaxConnectResult> ConnectAsync(string? token, CancellationToken ct = default)
+    public async Task<CrmMessengerConnectResult> ConnectAsync(CrmMessengerKind kind, string? token, string? accountId = null, string? appSecret = null,
+        CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CrmSettings, ct);
         await guard.DemandAsync(Permissions.CrmEdit, ct);
+        var name = CrmMessengerChannel.KindName(kind);
         var t = token?.Trim();
         if (string.IsNullOrEmpty(t))
         {
-            throw new BusinessRuleException("crm.max.token", "Укажите токен бота MAX.");
+            throw new BusinessRuleException("crm.messenger.token", $"Укажите токен бота {name}.");
         }
 
-        if (!max.IsAvailable)
+        if (kind == CrmMessengerKind.WhatsApp && (string.IsNullOrWhiteSpace(accountId) || string.IsNullOrWhiteSpace(appSecret)))
         {
-            throw new BusinessRuleException("crm.max.unavailable", "Подключение к MAX на сервере не настроено — обратитесь к администратору.");
+            throw new BusinessRuleException("crm.messenger.whatsapp", "Для WhatsApp укажите токен, Phone number ID и секрет приложения из кабинета Meta.");
         }
 
-        string? name;
+        var client = Client(kind);
+        if (client is not { IsAvailable: true })
+        {
+            throw new BusinessRuleException("crm.messenger.unavailable", $"Подключение к {name} на сервере не настроено — обратитесь к администратору.");
+        }
+
+        var credentials = new CrmMessengerCredentials(t, accountId?.Trim());
+        string? account;
         try
         {
-            name = await max.BotNameAsync(t, ct);
+            account = await client.AccountNameAsync(credentials, ct);
         }
         catch (KnitErp.Application.Workspace.ExternalServiceUnavailableException)
         {
-            throw new BusinessRuleException("crm.max.down", "MAX сейчас недоступен — попробуйте позже.");
+            throw new BusinessRuleException("crm.messenger.down", $"{name} сейчас недоступен — попробуйте позже.");
         }
 
-        if (name is null)
+        if (account is null)
         {
-            throw new BusinessRuleException("crm.max.bad_token", "Токен не подошёл: проверьте его в настройках бота MAX.");
+            throw new BusinessRuleException("crm.messenger.bad_token", $"Токен не подошёл: проверьте его в настройках бота {name}.");
         }
 
         var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
-        var s = await db.CrmSettings.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
-        if (s is null)
+        var channel = await db.CrmMessengerChannels.SingleOrDefaultAsync(c => c.OrganizationId == ctx.OrganizationId && c.Kind == kind, ct);
+        var before = channel is { IsConnected: true } ? $"{name} подключён: {channel.AccountName}" : null;
+        if (channel is null)
         {
-            s = CrmSettings.Default(ctx.OrganizationId);
-            db.CrmSettings.Add(s);
+            channel = CrmMessengerChannel.Create(ctx.OrganizationId, kind);
+            channel.Connect(t, credentials.AccountId, appSecret?.Trim(), account, Hash(secret), ctx.UserId, clock.UtcNow);
+            db.CrmMessengerChannels.Add(channel); // добавляется только после проверки реквизитов
         }
-
-        s.ConnectMax(t, SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secret)), ctx.UserId, clock.UtcNow);
-        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmSettingsChanged, nameof(CrmSettings),
-            ctx.OrganizationId.ToString(), null, $"MAX подключён: бот {name}", "Мессенджеры", currentUser.CorrelationId));
+        else
+        {
+            CrmMessengerChannel.Create(ctx.OrganizationId, kind).Connect(t, credentials.AccountId, appSecret?.Trim(), account, Hash(secret), ctx.UserId, clock.UtcNow);
+            channel.Connect(t, credentials.AccountId, appSecret?.Trim(), account, Hash(secret), ctx.UserId, clock.UtcNow);
+        }
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmSettingsChanged, nameof(CrmMessengerChannel),
+            ctx.OrganizationId.ToString(), before, $"{name} подключён: {account}", "Мессенджеры", currentUser.CorrelationId));
         await db.SaveOrConflictAsync(ct);
-        var url = $"{mail.PublicUrl}/hooks/crm/max/{secret}";
-        var subscribed = mail.PublicUrl is not null && await max.SubscribeAsync(t, url, secret, ct);
-        return new CrmMaxConnectResult(name, url, subscribed);
+        var url = $"{mail.PublicUrl}/hooks/crm/{CrmMessengerChannel.Key(kind)}/{secret}";
+        var subscribed = mail.PublicUrl is not null && kind != CrmMessengerKind.WhatsApp && await client.SubscribeAsync(credentials, url, secret, ct);
+        return new CrmMessengerConnectResult(kind, account, url, subscribed, kind == CrmMessengerKind.WhatsApp ? secret : null);
     }
 
-    public async Task DisconnectAsync(CancellationToken ct = default)
+    public async Task DisconnectAsync(CrmMessengerKind kind, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CrmSettings, ct);
-        var s = await db.CrmSettings.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
-        if (s is null || !s.MaxConnected)
+        var channel = await db.CrmMessengerChannels.SingleOrDefaultAsync(c => c.OrganizationId == ctx.OrganizationId && c.Kind == kind, ct);
+        if (channel is not { IsConnected: true })
         {
             return;
         }
 
-        s.DisconnectMax();
-        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmSettingsChanged, nameof(CrmSettings),
-            ctx.OrganizationId.ToString(), "MAX подключён", "MAX отключён", "Мессенджеры", currentUser.CorrelationId));
+        var name = CrmMessengerChannel.KindName(kind);
+        channel.Disconnect(clock.UtcNow);
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmSettingsChanged, nameof(CrmMessengerChannel),
+            ctx.OrganizationId.ToString(), $"{name} подключён: {channel.AccountName}", $"{name} отключён", "Мессенджеры", currentUser.CorrelationId));
         await db.SaveOrConflictAsync(ct);
+    }
+
+    private ICrmMessengerClient? Client(CrmMessengerKind kind) => clients.FirstOrDefault(c => c.Kind == kind);
+
+    private static byte[] Hash(string secret) => SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secret));
+
+    /// <summary>Мессенджер по префиксу собеседника («Telegram:123»).</summary>
+    public static CrmMessengerKind? KindOf(string? peer)
+    {
+        var prefix = peer?.Split(':')[0];
+        return Kinds.Cast<CrmMessengerKind?>().FirstOrDefault(k => CrmMessengerChannel.KindName(k!.Value) == prefix);
     }
 
     /// <summary>
@@ -139,7 +189,7 @@ public sealed class CrmMessengerService(IKnitErpDbContext db, IAccessGuard guard
             };
         }
 
-        return chats.Select(c => new CrmChatDto(c.Peer!, ChannelOf(c.ExternalRef), titles[(c.Target, c.TargetId)].Item1, titles[(c.Target, c.TargetId)].Item2,
+        return chats.Select(c => new CrmChatDto(c.Peer!, c.Peer!.Split(':')[0], titles[(c.Target, c.TargetId)].Item1, titles[(c.Target, c.TargetId)].Item2,
             c.Text ?? "", c.CreatedAtUtc, c.Incoming, rows.Count(r => r.Peer == c.Peer))).ToList();
     }
 
@@ -180,9 +230,7 @@ public sealed class CrmMessengerService(IKnitErpDbContext db, IAccessGuard guard
                             || (a.Target == CrmTarget.Deal && deals.Contains(a.TargetId)) || (a.Target == CrmTarget.Contact && contacts.Contains(a.TargetId)));
     }
 
-    private static string ChannelOf(string? externalRef) => externalRef?.Split(':')[0] ?? Channel;
-
-    /// <summary>Ответ клиенту в MAX из ленты (на входящее сообщение): уходит через бота, сохраняется исходящим сообщением в той же ленте.</summary>
+    /// <summary>Ответ клиенту в мессенджер из ленты (на входящее сообщение): уходит через бота, сохраняется исходящим сообщением в той же ленте.</summary>
     public async Task ReplyAsync(long activityId, string? text, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CrmEdit, ct);
@@ -195,55 +243,59 @@ public sealed class CrmMessengerService(IKnitErpDbContext db, IAccessGuard guard
             CrmTarget.Deal => await CrmAccess.Deals(db, ctx).AnyAsync(d => d.Id == source.TargetId, ct),
             _ => await CrmAccess.Contacts(db, ctx).AnyAsync(c => c.Id == source.TargetId, ct),
         };
-        if (!visible || source.Peer is null || source.Source != CrmActivitySource.Messenger || source.ExternalRef?.StartsWith(Channel + ":", StringComparison.Ordinal) != true)
+        if (!visible || source.Peer is null || source.Source != CrmActivitySource.Messenger || KindOf(source.Peer) is not { } kind)
         {
             throw new NotFoundException("Активность");
         }
 
-        var settings = await db.CrmSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
-        if (settings is not { MaxConnected: true })
+        var name = CrmMessengerChannel.KindName(kind);
+        var channel = await db.CrmMessengerChannels.AsNoTracking().SingleOrDefaultAsync(c => c.OrganizationId == ctx.OrganizationId && c.Kind == kind, ct);
+        if (channel is not { IsConnected: true } || Client(kind) is not { IsAvailable: true } client)
         {
-            throw new BusinessRuleException("crm.max.not_connected", "MAX не подключён — подключите бота в «Настройках CRM».");
+            throw new BusinessRuleException("crm.messenger.not_connected", $"{name} не подключён — подключите бота в «Настройках CRM».");
         }
 
-        if (!await max.SendAsync(settings.MaxToken!, source.Peer, body, ct))
+        if (!await client.SendAsync(new CrmMessengerCredentials(channel.Token!, channel.AccountId), source.Peer[(source.Peer.IndexOf(':') + 1)..], body, ct))
         {
-            throw new BusinessRuleException("crm.max.failed", "Сообщение не отправлено: MAX не принял его. Попробуйте позже.");
+            throw new BusinessRuleException("crm.messenger.failed", kind == CrmMessengerKind.WhatsApp
+                ? "Сообщение не отправлено: WhatsApp принимает ответ в течение 24 часов после последнего сообщения клиента. Позже — только шаблоном из кабинета Meta."
+                : $"Сообщение не отправлено: {name} не принял его. Попробуйте позже.");
         }
 
-        var reply = CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Message, source.Target, source.TargetId, $"Ответ в {Channel}", body, null, ctx.UserId, ctx.UserId,
+        var reply = CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Message, source.Target, source.TargetId, $"Ответ в {name}", body, null, ctx.UserId, ctx.UserId,
             clock.UtcNow, done: true, result: "отправлено", source: CrmActivitySource.Messenger);
         reply.SetPeer(source.Peer);
         db.CrmActivities.Add(reply);
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmActivityCreated, nameof(CrmActivity),
-            activityId.ToString(), null, $"ответ в {Channel}", null, currentUser.CorrelationId));
+            activityId.ToString(), null, $"ответ в {name}", null, currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>
-    /// Входящее из вебхука MAX (без входа): организация — по хэшу секрета из адреса; обработка — с правами подключившего бота. Неизвестный
-    /// секрет или права отозваны — false (вебхук отвечает 404).
-    /// </summary>
-    public static async Task<bool> InboundAsync(IKnitErpDbContext db, IClock clock, string secret, CrmMaxUpdate update, CancellationToken ct = default)
+    /// <summary>Подключённый канал по мессенджеру и секрету из адреса вебхука (без входа); неизвестный — null.</summary>
+    public static async Task<CrmMessengerHook?> FindHookAsync(IKnitErpDbContext db, CrmMessengerKind kind, string? secret, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(secret) || secret.Length > 100)
         {
-            return false;
+            return null;
         }
 
-        var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secret));
-        var s = await db.CrmSettings.AsNoTracking().SingleOrDefaultAsync(x => x.MaxSecretHash == hash, ct);
-        if (s is not { MaxConnected: true, MaxConnectedByUserId: { } userId })
-        {
-            return false;
-        }
+        var hash = Hash(secret);
+        return await db.CrmMessengerChannels.AsNoTracking().Where(c => c.SecretHash == hash && c.Kind == kind && c.Token != null)
+            .Select(c => new CrmMessengerHook(c.Id, c.OrganizationId, c.Kind, c.ConnectedByUserId, c.AppSecret)).SingleOrDefaultAsync(ct);
+    }
 
-        var user = new IntegrationUser(userId, s.OrganizationId);
+    /// <summary>
+    /// Входящее из вебхука (без входа, канал уже найден по секрету и подпись проверена): обработка — с правами подключившего бота.
+    /// Права отозваны — false (вебхук отвечает 404).
+    /// </summary>
+    public static async Task<bool> InboundAsync(IKnitErpDbContext db, IClock clock, CrmMessengerHook hook, CrmMessengerUpdate update, CancellationToken ct = default)
+    {
+        var user = new IntegrationUser(hook.UserId, hook.OrganizationId);
         var integrationGuard = new AccessGuard(db, user, clock);
         try
         {
             await new CrmIntakeService(db, integrationGuard, user, clock).RegisterMessageAsync(
-                new CrmMessageEvent("max", update.UserId, update.Text, null, update.Name ?? update.Username, update.MessageId), ct);
+                new CrmMessageEvent(CrmMessengerChannel.Key(hook.Kind), update.Peer, update.Text, update.Phone, update.Name ?? update.Username, update.MessageId), ct);
         }
         catch (AccessDeniedException)
         {
@@ -253,17 +305,11 @@ public sealed class CrmMessengerService(IKnitErpDbContext db, IAccessGuard guard
         return true;
     }
 
-    public static async Task<bool> KnownSecretAsync(IKnitErpDbContext db, string secret, CancellationToken ct = default)
-    {
-        var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(secret ?? ""));
-        return await db.CrmSettings.AsNoTracking().AnyAsync(x => x.MaxSecretHash == hash, ct);
-    }
-
     /// <summary>Пользователь, от имени которого работает интеграция (подключивший бота).</summary>
     private sealed class IntegrationUser(long userId, long organizationId) : ICurrentUser
     {
         public long? UserId => userId;
         public long? OrganizationId => organizationId;
-        public string? CorrelationId => "max-webhook";
+        public string? CorrelationId => "messenger-webhook";
     }
 }

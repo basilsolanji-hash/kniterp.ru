@@ -290,6 +290,45 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         }
     });
 
+    [SqlFact]
+    public Task Templates_messengers_mailbox_and_mailing_from_template() => RunAsync("crm-mail", false, "light", async page =>
+    {
+        // D670: три мессенджера в настройках; форма подключения Telegram открывается и закрывается.
+        await OpenAsync(page, "crm/settings");
+        var messengers = page.GetByRole(AriaRole.Region, new() { Name = "Мессенджеры" });
+        foreach (var name in new[] { "Telegram", "WhatsApp", "MAX" })
+        {
+            await Assertions.Expect(messengers.GetByRole(AriaRole.Article, new() { Name = name })).ToBeVisibleAsync();
+        }
+
+        var whatsapp = messengers.GetByRole(AriaRole.Article, new() { Name = "WhatsApp" });
+        await whatsapp.GetByRole(AriaRole.Button, new() { Name = "Подключить" }).ClickAsync();
+        await Assertions.Expect(whatsapp.GetByLabel("Phone number ID")).ToBeVisibleAsync();
+        await Assertions.Expect(whatsapp.GetByLabel("Секрет приложения (App secret)")).ToBeVisibleAsync();
+        await whatsapp.GetByRole(AriaRole.Button, new() { Name = "Отмена" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Region, new() { Name = "Входящая почта" }).GetByRole(AriaRole.Button, new() { Name = "Подключить ящик" })).ToBeVisibleAsync();
+
+        // D674: шаблон письма с переменными.
+        var templates = page.GetByRole(AriaRole.Region, new() { Name = "Шаблоны писем" });
+        await templates.GetByLabel("Название").FillAsync($"Спасибо за заявку {Stamp}");
+        await templates.GetByLabel("Тема").FillAsync("{{Организация}}: заявка принята");
+        await templates.GetByLabel("Текст").FillAsync("Здравствуйте, {{Имя}}! Ваш менеджер — {{Менеджер}}.");
+        await templates.GetByRole(AriaRole.Button, new() { Name = "Добавить шаблон" }).ClickAsync();
+        await Assertions.Expect(templates.GetByRole(AriaRole.Status)).ToContainTextAsync("Шаблон сохранён");
+        await Assertions.Expect(templates.GetByRole(AriaRole.Row, new() { NameRegex = new Regex($"Спасибо за заявку {Stamp}") })).ToBeVisibleAsync();
+        await templates.ScrollIntoViewIfNeededAsync();
+        await Shot(page, "crm-09-settings-messengers-mail");
+
+        // Рассылка из шаблона: тема и текст подставились с переменными.
+        await OpenAsync(page, "crm/mailings");
+        await page.GetByLabel("Шаблон").SelectOptionAsync(new SelectOptionValue { Label = $"Спасибо за заявку {Stamp}" });
+        await Assertions.Expect(page.GetByLabel("Тема")).ToHaveValueAsync("{{Организация}}: заявка принята");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить черновик" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Черновик сохранён" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByLabel("Время отправки")).ToBeVisibleAsync();
+        await Shot(page, "crm-10-mailing-template");
+    });
+
     private static Task Shot(IPage page, string name)
     {
         var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath();

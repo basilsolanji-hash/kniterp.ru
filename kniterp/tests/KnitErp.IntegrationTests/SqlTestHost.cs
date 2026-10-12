@@ -38,10 +38,19 @@ public sealed class FakeEmailSender : IEmailSender
     public string? PublicUrl => "https://erp.test";
     public System.Collections.Concurrent.ConcurrentQueue<(string To, string Subject, string Text)> Sent { get; } = new();
 
+    /// <summary>Письма CRM целиком (HTML, Reply-To, List-Unsubscribe).</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<EmailMessage> Messages { get; } = new();
+
     public Task<bool> SendAsync(string to, string subject, string text, CancellationToken ct = default)
     {
         Sent.Enqueue((to, subject, text));
         return Task.FromResult(true);
+    }
+
+    public Task<bool> SendAsync(EmailMessage message, CancellationToken ct = default)
+    {
+        Messages.Enqueue(message);
+        return SendAsync(message.To, message.Subject, message.Text, ct);
     }
 
     /// <summary>Письмо уходит в фоне — ждём его не дольше 5 секунд.</summary>
