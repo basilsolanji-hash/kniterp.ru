@@ -220,3 +220,62 @@ public sealed class DevModelRulesTests
     public void Number_is_formatted_from_counter() =>
         Assert.Equal("М-00042", KnitErp.Application.Development.DevModelService.FormatNumber("dev.model-000042"));
 }
+
+/// <summary>D790–D798: правила автоматизации разработки.</summary>
+public sealed class DevAutomationRulesTests
+{
+    private static readonly Func<DevStage, bool> AllEnabled = _ => true;
+
+    [Fact]
+    public void Planned_launch_sums_enabled_stage_norms_and_skips_pattern_without_pattern()
+    {
+        var today = new DateOnly(2026, 10, 11);
+        // 3+3+7+5+3+5+5+7+2+3 = 43 дня по умолчанию.
+        Assert.Equal(today.AddDays(43), DevAutomationRules.PlannedLaunch(today, true, AllEnabled, DevStages.DefaultPlanDays));
+        Assert.Equal(today.AddDays(36), DevAutomationRules.PlannedLaunch(today, false, AllEnabled, DevStages.DefaultPlanDays));
+        Assert.Equal(today.AddDays(31), DevAutomationRules.PlannedLaunch(today, true, s => s is not (DevStage.Approval or DevStage.Rework),
+            DevStages.DefaultPlanDays));
+    }
+
+    [Fact]
+    public void Default_name_joins_category_collection_and_customer()
+    {
+        Assert.Equal("Свитер — Осень-зима 2026 — ООО «Пример»", DevAutomationRules.DefaultName(DevCategory.Sweater, "Осень-зима 2026", "ООО «Пример»"));
+        Assert.Equal("Шапка", DevAutomationRules.DefaultName(DevCategory.Hat, null, " "));
+        Assert.True(DevAutomationRules.DefaultName(DevCategory.Hat, new string('я', 300), null).Length <= DevModel.NameMaxLength);
+    }
+
+    [Fact]
+    public void Auto_advance_by_uploaded_file()
+    {
+        Assert.Equal(DevStage.Sample, DevAutomationRules.AutoAdvance(DevStage.Program, DevFileKind.MachineProgram, true, AllEnabled));
+        Assert.Equal(DevStage.Pattern, DevAutomationRules.AutoAdvance(DevStage.Brief, DevFileKind.Pattern, true, AllEnabled));
+        Assert.Equal(DevStage.Pattern, DevAutomationRules.AutoAdvance(DevStage.Idea, DevFileKind.Pattern, true, AllEnabled));
+        Assert.Null(DevAutomationRules.AutoAdvance(DevStage.Brief, DevFileKind.Pattern, false, AllEnabled));
+        Assert.Null(DevAutomationRules.AutoAdvance(DevStage.Sample, DevFileKind.MachineProgram, true, AllEnabled));
+        Assert.Null(DevAutomationRules.AutoAdvance(DevStage.Idea, DevFileKind.Photo, true, AllEnabled));
+        Assert.Null(DevAutomationRules.AutoAdvance(DevStage.Brief, DevFileKind.Pattern, true, s => s != DevStage.Pattern));
+    }
+
+    [Fact]
+    public void Template_fills_only_blank_fields()
+    {
+        var t = DevCategoryTemplate.Create(1, DevCategory.Sweater);
+        t.Set("42–52", "молочный", "50% шерсть", null, "ручная стирка");
+        var filled = t.FillBlanks(new DevBrief("описание", "44–50", null, 100m, null, 10, null, null, null, null));
+        Assert.Equal(("44–50", "молочный", "50% шерсть", "ручная стирка", 100m), (filled.SizeRange!, filled.ColorRange!, filled.Composition!, filled.Care!, filled.TargetCost!.Value));
+        Assert.False(t.IsEmpty);
+        t.Set(" ", null, null, null, null);
+        Assert.True(t.IsEmpty);
+    }
+
+    [Fact]
+    public void Hints_tell_what_is_missing()
+    {
+        Assert.Contains(DevAutomationRules.AllHints[0], DevAutomationRules.Hints(DevStage.Pattern, true, true, true, false, hasResponsible: false));
+        Assert.Contains(DevAutomationRules.AllHints[4], DevAutomationRules.Hints(DevStage.Program, true, true, true, hasProgram: false, true));
+        Assert.Empty(DevAutomationRules.Hints(DevStage.Program, true, true, true, true, true));
+        Assert.Empty(DevAutomationRules.Hints(DevStage.Handed, false, false, false, false, false));
+        Assert.All(DevAutomationRules.Hints(DevStage.Idea, false, false, false, false, false), h => Assert.Contains(h, DevAutomationRules.AllHints));
+    }
+}

@@ -2,6 +2,7 @@
 @using KnitErp.Application.Development
 @using KnitErp.Domain.Development
 @inject DevModelService Models
+@inject NavigationManager Navigation
 
 <PageTitle>@(_model is null ? L("Модель") : $"{_model.Number} {_model.Name}") — knitERP</PageTitle>
 <DevStyles />
@@ -38,6 +39,19 @@ else
     @if (_message is not null)
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (m.Hints is { Count: > 0 } hints && m.CanEdit)
+    {
+        <div class="panel dev-hints" aria-label="@L("Что дальше")">
+            <b>@L("Что дальше")</b>
+            <ul>
+                @foreach (var h in hints)
+                {
+                    <li>@L(h)</li>
+                }
+            </ul>
+        </div>
     }
 
     @if (_options is not null)
@@ -100,6 +114,10 @@ else
                 {
                     <button type="button" class="secondary" @onclick="() => _cancelling = true" disabled="@_busy">@L("Отменить модель")</button>
                 }
+            }
+            @if (_canEdit)
+            {
+                <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Создать похожую")</button>
             }
             @if (m.Stage == DevStage.Cancelled && _canEdit)
             {
@@ -222,8 +240,21 @@ else
         _ => L("Расчёт себестоимости по цветам рисунка и цена — этап «Себестоимость и цена». Целевые суммы — на вкладке «Задание»."),
     };
 
+    private long _loadedId;
+
     protected override async Task OnParametersSetAsync()
     {
+        if (_loadedId != Id)
+        {
+            // Переход на другую модель тем же компонентом («Создать похожую»): начинаем с вкладки «Задание», без открытых форм.
+            _loadedId = Id;
+            _tab = Tab.Brief;
+            _options = null;
+            _editingBrief = false;
+            _cancelling = false;
+            _target = string.Empty;
+        }
+
         _model = null;
         _notFound = false;
         try
@@ -318,7 +349,13 @@ else
             <p class="muted small">@L("Эскиз и образцы для вдохновения прикладываются на вкладке «Файлы».")</p>
             @if (m.CanEdit)
             {
-                <button type="button" class="secondary" @onclick="() => _editingBrief = true" disabled="@_busy">@L("Изменить задание")</button>
+                <div class="actions">
+                    <button type="button" class="secondary" @onclick="() => _editingBrief = true" disabled="@_busy">@L("Изменить задание")</button>
+                    @if (m.HasTemplate)
+                    {
+                        <button type="button" class="secondary" @onclick="FillTemplateAsync" disabled="@_busy">@L("Заполнить из шаблона категории")</button>
+                    }
+                </div>
             }
         }
     };
@@ -340,7 +377,7 @@ else
                         </select>
                     </label>
                     <label>@L("Комментарий") <input @bind="_fileComment" maxlength="@DevFile.CommentMaxLength" /></label>
-                    <label class="file-pick" title="@L("До 50 МБ")">@L("Загрузить ({0})", DevFile.Accept(_fileKind)) <InputFile OnChange="UploadAsync" accept="@DevFile.Accept(_fileKind)" disabled="@_busy" /></label>
+                    <label class="file-pick" title="@L("До 50 МБ")">@L("Загрузить ({0})", DevFile.Accept(_fileKind)) <InputFile OnChange="UploadAsync" accept="@DevFile.Accept(_fileKind)" disabled="@_busy" capture="@(_fileKind == DevFileKind.Photo ? "environment" : null)" /></label>
                 </div>
                 <p class="muted small">@L("Файл с тем же именем и видом становится новой версией — прежние версии сохраняются.")</p>
             </div>
@@ -392,6 +429,18 @@ else
         _editingBrief = false;
         _brief = BriefForm.From(_model!.Brief);
     }
+
+    private async Task CopyAsync()
+    {
+        long? id = null;
+        await RunAsync(async () => id = await Models.CopyAsync(Id), L("Создана похожая модель."));
+        if (id is { } copy && !_isError)
+        {
+            Navigation.NavigateTo($"dev/models/{copy}");
+        }
+    }
+
+    private Task FillTemplateAsync() => RunAsync(() => Models.FillBriefFromTemplateAsync(Id, _model!.RowVersion), L("Задание дополнено из шаблона категории."));
 
     private Task MoveAsync(DevStage to) => RunAsync(() => Models.MoveAsync(Id, to, null, _model!.RowVersion), L("Стадия изменена."));
 

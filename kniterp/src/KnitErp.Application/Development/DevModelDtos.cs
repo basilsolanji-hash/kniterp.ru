@@ -28,7 +28,8 @@ public sealed record DevOptionDto(long Id, string Name);
 
 /// <summary>Списки для формы модели и отборов.</summary>
 public sealed record DevModelOptionsDto(
-    IReadOnlyList<DevOptionDto> Collections, IReadOnlyList<DevOptionDto> Customers, IReadOnlyList<DevOptionDto> Users, bool CanEdit);
+    IReadOnlyList<DevOptionDto> Collections, IReadOnlyList<DevOptionDto> Customers, IReadOnlyList<DevOptionDto> Users, bool CanEdit,
+    IReadOnlyDictionary<DevRole, long?>? DefaultAssignees = null, bool AutoLaunchDate = false);
 
 public sealed record DevAssigneeDto(DevRole Role, long? UserId, string? Name)
 {
@@ -53,7 +54,8 @@ public sealed record DevModelDto(
     bool HasPattern, long? CustomerId, string? CustomerName, long? DealId, DateOnly? PlannedLaunch, DevPriority Priority, DevStage Stage,
     DateTime StageSinceUtc, int StagePlanDays, string? CancelReason, IReadOnlyList<DevAssigneeDto> Assignees, DevBrief Brief, bool CanSeeCost,
     IReadOnlyList<DevStageEntryDto> History, IReadOnlyList<DevFileDto> Files, IReadOnlyList<DevStage> MoveTargets, DevStage? NextStage,
-    bool CanEdit, bool CanApprove, bool IsLate, bool IsStageOverdue, string CreatedBy, DateTime CreatedAtUtc, byte[] RowVersion)
+    bool CanEdit, bool CanApprove, bool IsLate, bool IsStageOverdue, string CreatedBy, DateTime CreatedAtUtc, byte[] RowVersion,
+    IReadOnlyList<string>? Hints = null, bool HasTemplate = false)
 {
     public string StageName => DevStages.Name(Stage);
     public string CategoryName => DevModel.CategoryName(Category);
@@ -78,3 +80,14 @@ public sealed record DevStageSettingDto(DevStage Stage, int PlanDays, bool IsEna
 }
 
 public sealed record DevLookupDto(long Id, DevLookupKind Kind, string Name, int? Number, bool IsArchived, byte[] RowVersion);
+
+/// <summary>Шаблон задания по категории (D790).</summary>
+public sealed record DevCategoryTemplateDto(DevCategory Category, string? SizeRange, string? ColorRange, string? Composition, string? Labeling, string? Care)
+{
+    public string CategoryName => DevModel.CategoryName(Category);
+}
+
+/// <summary>Настройки автоматизации (D791, D792, D795): исполнители по умолчанию, расчёт даты запуска, автопереход, шаблоны.</summary>
+public sealed record DevAutomationDto(
+    IReadOnlyList<DevAssigneeDto> Defaults, bool AutoLaunchDate, bool AutoAdvance, IReadOnlyList<DevCategoryTemplateDto> Templates,
+    IReadOnlyList<DevOptionDto> Users, bool CanEdit);

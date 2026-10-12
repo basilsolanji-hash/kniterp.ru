@@ -10,7 +10,7 @@
 {
     <AccessDenied Message="@_denied" />
 }
-else if (_stages is null || _lookups is null)
+else if (_stages is null || _lookups is null || _auto is null)
 {
     <p class="muted">@L("Загрузка…")</p>
 }
@@ -20,6 +20,80 @@ else
     @if (_message is not null)
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <h2>@L("Автоматизация")</h2>
+    <p class="muted">@L("Меньше ручного ввода: новая модель получает исполнителей по умолчанию, дату запуска по нормативам и задание из шаблона категории; загрузка программы машины или рисунка сама переводит модель дальше.")</p>
+    <div class="panel">
+        <form @onsubmit="SaveAutomationAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !_auto.CanEdit)">
+                <div class="grid">
+                    @foreach (var d in _auto.Defaults)
+                    {
+                        var role = d.Role;
+                        <label>
+                            @L("{0} по умолчанию", L(d.RoleName))
+                            <select value="@(_defaults.GetValueOrDefault(role)?.ToString() ?? "")" @onchange="e => _defaults[role] = long.TryParse(e.Value as string, out var u) ? u : null">
+                                <option value="">—</option>
+                                @foreach (var u in _auto.Users)
+                                {
+                                    <option value="@u.Id">@u.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <label class="inline"><span><input type="checkbox" @bind="_autoLaunch" /> @L("Плановый запуск по нормативам стадий, если не указан")</span></label>
+                    <label class="inline"><span><input type="checkbox" @bind="_autoAdvance" /> @L("Автопереход стадии при загрузке программы машины или рисунка")</span></label>
+                </div>
+                @if (_auto.CanEdit)
+                {
+                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить автоматизацию")</button></div>
+                }
+            </fieldset>
+        </form>
+    </div>
+
+    <h2>@L("Шаблоны задания по категориям")</h2>
+    <p class="muted">@L("Подставляются в задание новой модели этой категории; заполненные вручную поля не меняются.")</p>
+    <div class="scroll">
+        <table>
+            <thead><tr><th>@L("Категория")</th><th class="opt">@L("Размерный ряд")</th><th class="opt">@L("Состав")</th><th class="opt">@L("Уход")</th>@if (_auto.CanEdit) { <th></th> }</tr></thead>
+            <tbody>
+                @foreach (var t in _auto.Templates)
+                {
+                    var row = t;
+                    <tr>
+                        <td>@L(row.CategoryName)</td>
+                        <td>@(row.SizeRange ?? "—")</td>
+                        <td>@(row.Composition ?? "—")</td>
+                        <td>@(row.Care ?? "—")</td>
+                        @if (_auto.CanEdit)
+                        {
+                            <td><button type="button" class="secondary" @onclick="() => _template = new TemplateForm(row)" disabled="@_busy">@L("Изменить")</button></td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @if (_template is not null)
+    {
+        <div class="panel">
+            <h3>@L("Шаблон: {0}", L(DevModel.CategoryName(_template.Category)))</h3>
+            <form @onsubmit="SaveTemplateAsync">
+                <div class="grid">
+                    <label>@L("Размерный ряд") <input @bind="_template.SizeRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label>@L("Цветовая гамма") <input @bind="_template.ColorRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label class="wide">@L("Состав") <input @bind="_template.Composition" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label class="wide">@L("Маркировка") <input @bind="_template.Labeling" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    <label class="wide">@L("Уход") <input @bind="_template.Care" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Сохранить шаблон")</button>
+                    <button type="button" class="secondary" @onclick="() => _template = null">@L("Отмена")</button>
+                </div>
+            </form>
+        </div>
     }
 
     <h2>@L("Стадии")</h2>
@@ -131,6 +205,48 @@ else
     private bool _isError;
     private string? _newName;
     private int? _newNumber;
+    private DevAutomationDto? _auto;
+    private readonly Dictionary<DevRole, long?> _defaults = [];
+    private bool _autoLaunch;
+    private bool _autoAdvance;
+    private TemplateForm? _template;
+
+    private sealed class TemplateForm(DevCategoryTemplateDto t)
+    {
+        public DevCategory Category { get; } = t.Category;
+        public string? SizeRange { get; set; } = t.SizeRange;
+        public string? ColorRange { get; set; } = t.ColorRange;
+        public string? Composition { get; set; } = t.Composition;
+        public string? Labeling { get; set; } = t.Labeling;
+        public string? Care { get; set; } = t.Care;
+
+        public DevCategoryTemplateDto ToDto() => new(Category, SizeRange, ColorRange, Composition, Labeling, Care);
+    }
+
+    private async Task LoadAutomationAsync()
+    {
+        _auto = await Settings.AutomationAsync();
+        foreach (var d in _auto.Defaults)
+        {
+            _defaults[d.Role] = d.UserId;
+        }
+
+        _autoLaunch = _auto.AutoLaunchDate;
+        _autoAdvance = _auto.AutoAdvance;
+    }
+
+    private Task SaveAutomationAsync() => RunAsync(async () =>
+    {
+        await Settings.SaveAutomationAsync(new Dictionary<DevRole, long?>(_defaults), _autoLaunch, _autoAdvance);
+        await LoadAutomationAsync();
+    }, L("Сохранено."));
+
+    private Task SaveTemplateAsync() => RunAsync(async () =>
+    {
+        await Settings.SaveTemplateAsync(_template!.ToDto());
+        _template = null;
+        await LoadAutomationAsync();
+    }, L("Шаблон сохранён."));
 
     protected override async Task OnInitializedAsync()
     {
@@ -138,6 +254,7 @@ else
         try
         {
             await LoadStagesAsync();
+            await LoadAutomationAsync();
             _lookups = await Settings.LookupsAsync(_kind, includeArchived: true);
         }
         catch (AccessDeniedException ex)

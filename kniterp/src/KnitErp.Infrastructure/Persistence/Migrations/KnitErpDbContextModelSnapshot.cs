@@ -3036,6 +3036,48 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Development.DevCategoryTemplate", b =>
+                {
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte>("Category")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Care")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("ColorRange")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Composition")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("Labeling")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SizeRange")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("OrganizationId", "Category");
+
+                    b.ToTable("dev_category_templates", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_dev_category_templates_category", "[Category] BETWEEN 1 AND 10 OR [Category] = 99");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Development.DevFile", b =>
                 {
                     b.Property<long>("Id")
@@ -3382,6 +3424,57 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSettings", b =>
+                {
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("AutoAdvance")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<bool>("AutoLaunchDate")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<long?>("DefaultConstructorUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("DefaultDesignerUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("DefaultDessinatorUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("DefaultProgrammerUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("DefaultTechnologistUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("OrganizationId");
+
+                    b.HasIndex("DefaultConstructorUserId");
+
+                    b.HasIndex("DefaultDesignerUserId");
+
+                    b.HasIndex("DefaultDessinatorUserId");
+
+                    b.HasIndex("DefaultProgrammerUserId");
+
+                    b.HasIndex("DefaultTechnologistUserId");
+
+                    b.ToTable("dev_settings", "kniterp");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevStageSetting", b =>
@@ -9178,6 +9271,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_crm_stages_pipeline");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Development.DevCategoryTemplate", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Development.DevFile", b =>
                 {
                     b.HasOne("KnitErp.Domain.Organizations.Organization", null)
@@ -9293,6 +9395,45 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_dev_model_stages_model");
 
                     b.Navigation("Model");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevSettings", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultConstructorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_settings_constructor");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultDesignerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_settings_designer");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultDessinatorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_settings_dessinator");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultProgrammerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_settings_programmer");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DefaultTechnologistUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_settings_technologist");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevStageSetting", b =>

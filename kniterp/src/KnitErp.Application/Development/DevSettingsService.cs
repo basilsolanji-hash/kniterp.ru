@@ -128,6 +128,86 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
         }
     }
 
+    /// <summary>Настройки автоматизации и шаблоны задания по категориям (D790–D795).</summary>
+    public async Task<DevAutomationDto> AutomationAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        var org = ctx.OrganizationId;
+        var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
+        var users = await (from mem in db.OrganizationMembers.AsNoTracking()
+                           join u in db.Users.AsNoTracking() on mem.UserId equals u.Id
+                           where mem.OrganizationId == org && mem.Status == KnitErp.Domain.Access.MembershipStatus.Active
+                           orderby u.DisplayName
+                           select new DevOptionDto(u.Id, u.DisplayName)).ToListAsync(ct);
+        var names = users.ToDictionary(u => u.Id, u => u.Name);
+        var templates = await db.DevCategoryTemplates.AsNoTracking().Where(t => t.OrganizationId == org).ToListAsync(ct);
+        return new DevAutomationDto(
+            DevModel.Roles.Select(r => new DevAssigneeDto(r, settings.DefaultOf(r), settings.DefaultOf(r) is { } u ? names.GetValueOrDefault(u) : null)).ToList(),
+            settings.AutoLaunchDate, settings.AutoAdvance,
+            Enum.GetValues<DevCategory>().Select(c => templates.FirstOrDefault(t => t.Category == c) is { } t
+                ? new DevCategoryTemplateDto(c, t.SizeRange, t.ColorRange, t.Composition, t.Labeling, t.Care)
+                : new DevCategoryTemplateDto(c, null, null, null, null, null)).ToList(),
+            users, ctx.Permissions.Has(Permissions.DevSettings));
+    }
+
+    public async Task SaveAutomationAsync(IReadOnlyDictionary<DevRole, long?> defaults, bool autoLaunchDate, bool autoAdvance, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
+        var org = ctx.OrganizationId;
+        var check = defaults.Values.OfType<long>().Distinct().ToList();
+        if (check.Count > 0 && await db.OrganizationMembers.CountAsync(m => m.OrganizationId == org && check.Contains(m.UserId)
+                && m.Status == KnitErp.Domain.Access.MembershipStatus.Active, ct) != check.Count)
+        {
+            throw new BusinessRuleException("dev.model.assignee", "Исполнитель должен быть активным пользователем организации.");
+        }
+
+        try
+        {
+            var settings = await db.DevSettings.SingleOrDefaultAsync(x => x.OrganizationId == org, ct);
+            var isNew = settings is null;
+            settings ??= DevSettings.Defaults(org);
+            settings.Set(defaults, autoLaunchDate, autoAdvance);
+            if (isNew)
+            {
+                db.DevSettings.Add(settings);
+            }
+
+            Audit(ctx, AuditActions.DevSettingsChanged, null, null,
+                $"исполнители по умолчанию: {defaults.Values.Count(v => v is not null)}, дата запуска — {(autoLaunchDate ? "по нормативам" : "вручную")}, "
+                + $"автопереход — {(autoAdvance ? "включён" : "выключен")}", "Автоматизация разработки");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    public async Task SaveTemplateAsync(DevCategoryTemplateDto template, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
+        try
+        {
+            var t = await db.DevCategoryTemplates.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId && x.Category == template.Category, ct);
+            var isNew = t is null;
+            t ??= DevCategoryTemplate.Create(ctx.OrganizationId, template.Category);
+            t.Set(template.SizeRange, template.ColorRange, template.Composition, template.Labeling, template.Care);
+            if (isNew)
+            {
+                db.DevCategoryTemplates.Add(t);
+            }
+
+            Audit(ctx, AuditActions.DevSettingsChanged, null, null, t.IsEmpty ? "очищен" : "сохранён", $"Шаблон задания: {DevModel.CategoryName(template.Category)}");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
     private static string Describe(int days, bool enabled) => enabled ? $"{days} дн., включена" : $"{days} дн., отключена";
 
     private void Audit(AccessContext ctx, string action, long? id, string? before, string? after, string? reason) =>

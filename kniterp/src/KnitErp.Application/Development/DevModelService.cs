@@ -81,7 +81,10 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             .Where(c => c.OrganizationId == org && c.IsCustomer && !c.IsArchived)
             .OrderBy(c => c.Name).Take(1000).Select(c => new DevOptionDto(c.Id, c.Name)).ToListAsync(ct);
         var users = await Members(org).ToListAsync(ct);
-        return new DevModelOptionsDto(collections, customers, users, ctx.Permissions.Has(Permissions.DevEdit));
+        var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
+        var activeIds = users.Select(u => u.Id).ToHashSet();
+        return new DevModelOptionsDto(collections, customers, users, ctx.Permissions.Has(Permissions.DevEdit),
+            DevModel.Roles.ToDictionary(r => r, r => settings.DefaultOf(r) is { } u && activeIds.Contains(u) ? u : (long?)null), settings.AutoLaunchDate);
     }
 
     public async Task<DevModelDto> GetAsync(long id, CancellationToken ct = default)
@@ -114,6 +117,13 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             ? DevStages.Path.Where(s => DevStages.CheckMove(m.Stage, s, m.HasPattern, canApprove, plan.IsEnabled) is null).ToList()
             : [];
         var next = DevStages.Next(m.Stage, m.HasPattern, plan.IsEnabled) is { } n && targets.Contains(n) ? n : (DevStage?)null;
+        var template = await db.DevCategoryTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.OrganizationId == ctx.OrganizationId && t.Category == m.Category, ct);
+        var hints = DevAutomationRules.Hints(m.Stage,
+            hasBrief: m.SizeRange is not null || m.RunQuantity is not null || m.Description is not null,
+            hasSketch: files.Any(f => f.Kind is DevFileKind.Sketch or DevFileKind.Inspiration),
+            hasPatternFile: files.Any(f => f.Kind == DevFileKind.Pattern),
+            hasProgram: files.Any(f => f.Kind == DevFileKind.MachineProgram),
+            hasResponsible: DevStages.ResponsibleRole(m.Stage) is not { } role || m.AssigneeOf(role) is not null);
         return new DevModelDto(m.Id, m.Number, m.Name, m.CollectionId, collection, m.Category, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, customer,
             m.DealId, m.PlannedLaunch, m.Priority, m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), m.CancelReason,
             DevModel.Roles.Select(r => new DevAssigneeDto(r, m.AssigneeOf(r), m.AssigneeOf(r) is { } u ? users.GetValueOrDefault(u) : null)).ToList(),
@@ -127,22 +137,76 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
                 users.GetValueOrDefault(f.UploadedByUserId) ?? "—")).ToList(),
             targets, next, canEdit && !DevStages.IsFinal(m.Stage), canApprove,
             DevModel.IsLate(m.Stage, m.PlannedLaunch, today), DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), clock.UtcNow),
-            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion);
+            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false });
     }
 
+    /// <summary>
+    /// Новая модель. Автоматизация (D790–D792): пустое название — «категория — коллекция — заказчик», незаполненные исполнители —
+    /// исполнители по умолчанию, не указан запуск — по нормативам стадий, задание — из шаблона категории.
+    /// </summary>
     public async Task<long> CreateAsync(DevModelHeader header, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        return await CreateCoreAsync(ctx, header, null, null, ct);
+    }
+
+    /// <summary>«Создать похожую» (D793): карточка, задание и исполнители копируются, файлы и история — нет; новая модель — на «Идее».</summary>
+    public async Task<long> CopyAsync(long id, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        var m = await db.DevModels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.OrganizationId == ctx.OrganizationId, ct)
+                ?? throw new NotFoundException("Модель");
+        var name = m.Name.Length + 8 > DevModel.NameMaxLength ? m.Name : m.Name + " (копия)";
+        var header = new DevModelHeader(name, m.CollectionId, m.Category, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, m.DealId, null, m.Priority,
+            DevModel.Roles.ToDictionary(r => r, m.AssigneeOf));
+        var brief = new DevBrief(m.Description, m.SizeRange, m.ColorRange, m.TargetCost, m.TargetPrice, m.RunQuantity, null, m.Composition, m.Labeling, m.Care);
+        return await CreateCoreAsync(ctx, header, brief, $"копия {m.Number}", ct);
+    }
+
+    /// <summary>Заполнить пустые поля задания из шаблона категории (D790).</summary>
+    public Task FillBriefFromTemplateAsync(long id, byte[] rowVersion, CancellationToken ct = default) =>
+        EditAsync(id, rowVersion, Permissions.DevEdit, async (ctx, m) =>
+        {
+            var template = await db.DevCategoryTemplates.AsNoTracking()
+                               .SingleOrDefaultAsync(t => t.OrganizationId == ctx.OrganizationId && t.Category == m.Category, ct);
+            if (template is null || template.IsEmpty)
+            {
+                throw new BusinessRuleException("dev.template.empty", "Для этой категории нет шаблона задания — заполните его в настройках разработки.");
+            }
+
+            var current = new DevBrief(m.Description, m.SizeRange, m.ColorRange, m.TargetCost, m.TargetPrice, m.RunQuantity, m.BriefDueDate, m.Composition,
+                m.Labeling, m.Care);
+            foreach (var c in m.UpdateBrief(template.FillBlanks(current)))
+            {
+                Audit(ctx, AuditActions.DevBriefChanged, id, c.Before, c.After, $"{m.Number}: {c.Field} (шаблон категории)");
+            }
+        }, ct);
+
+    /// <summary>Создание с автоматизацией; участвует во внешней транзакции (загрузка из Excel — всё или ничего).</summary>
+    internal async Task<long> CreateCoreAsync(AccessContext ctx, DevModelHeader header, DevBrief? brief, string? note, CancellationToken ct)
+    {
+        var org = ctx.OrganizationId;
+        var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
+        header = await PrepareAsync(ctx, header, settings, ct);
         await ValidateAsync(ctx, header, null, ct);
+        var template = await db.DevCategoryTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.OrganizationId == org && t.Category == header.Category, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         try
         {
-            var number = FormatNumber(await DocumentNumbers.NextAsync(db, ctx.OrganizationId, Counter, ct));
-            var (model, first) = DevModel.Create(ctx.OrganizationId, number, header, clock.UtcNow, ctx.UserId);
+            var number = FormatNumber(await DocumentNumbers.NextAsync(db, org, Counter, ct));
+            var (model, first) = DevModel.Create(org, number, header, clock.UtcNow, ctx.UserId);
+            var start = brief ?? new DevBrief(null, null, null, null, null, null, null, null, null, null);
+            var filled = template is null ? start : template.FillBlanks(start);
+            if (filled != new DevBrief(null, null, null, null, null, null, null, null, null, null))
+            {
+                model.UpdateBrief(filled);
+            }
+
             db.DevModels.Add(model);
             db.DevModelStages.Add(first);
             await db.SaveOrConflictAsync(ct);
-            Audit(ctx, AuditActions.DevModelCreated, model.Id, null, $"{model.Number} {model.Name}", null);
+            Audit(ctx, AuditActions.DevModelCreated, model.Id, null, $"{model.Number} {model.Name}",
+                note ?? (template is { IsEmpty: false } ? "задание из шаблона категории" : null));
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             return model.Id;
@@ -152,6 +216,45 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             db.DiscardChanges();
             throw;
         }
+    }
+
+    /// <summary>Подстановки D791, D792: название, исполнители по умолчанию (только активные участники), плановый запуск.</summary>
+    private async Task<DevModelHeader> PrepareAsync(AccessContext ctx, DevModelHeader h, DevSettings settings, CancellationToken ct)
+    {
+        var org = ctx.OrganizationId;
+        var assignees = DevModel.Roles.ToDictionary(r => r, r => h.Assignees.GetValueOrDefault(r));
+        var defaults = DevModel.Roles.Where(r => assignees[r] is null && settings.DefaultOf(r) is not null).ToDictionary(r => r, r => settings.DefaultOf(r)!.Value);
+        if (defaults.Count > 0)
+        {
+            var ids = defaults.Values.Distinct().ToList();
+            var active = await db.OrganizationMembers.AsNoTracking()
+                .Where(m => m.OrganizationId == org && ids.Contains(m.UserId) && m.Status == MembershipStatus.Active).Select(m => m.UserId).ToListAsync(ct);
+            foreach (var (role, user) in defaults.Where(d => active.Contains(d.Value)))
+            {
+                assignees[role] = user;
+            }
+        }
+
+        var name = h.Name;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            var collection = h.CollectionId is { } c
+                ? await db.DevLookups.AsNoTracking().Where(l => l.Id == c && l.OrganizationId == org).Select(l => l.Name).SingleOrDefaultAsync(ct)
+                : null;
+            var customer = h.CustomerId is { } k
+                ? await db.Counterparties.AsNoTracking().Where(x => x.Id == k && x.OrganizationId == org).Select(x => x.Name).SingleOrDefaultAsync(ct)
+                : null;
+            name = DevAutomationRules.DefaultName(h.Category, collection, customer);
+        }
+
+        var launch = h.PlannedLaunch;
+        if (launch is null && settings.AutoLaunchDate)
+        {
+            var plan = await DevStagePlan.LoadAsync(db, org, ct);
+            launch = DevAutomationRules.PlannedLaunch(await TodayAsync(ctx, ct), h.HasPattern, plan.IsEnabled, plan.PlanDays);
+        }
+
+        return h with { Name = name, Assignees = assignees, PlannedLaunch = launch };
     }
 
     public Task UpdateAsync(long id, DevModelHeader header, byte[] rowVersion, CancellationToken ct = default) =>
@@ -239,6 +342,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             await db.SaveOrConflictAsync(ct);
             Audit(ctx, AuditActions.DevFileAdded, modelId, null, $"{DevFile.KindName(kind)}: {file.FileName}, версия {file.Version}, {file.SizeBytes / 1024 + 1} КБ",
                 model.Number);
+            await AutoAdvanceAsync(ctx, modelId, kind, ct);
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             return file.Id;
@@ -248,6 +352,33 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             db.DiscardChanges();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Автопереход по загруженному файлу (D795): программа машины на «Программе» → следующая стадия, рисунок на «Идее»/«Задании» → «Рисунок».
+    /// Работает, если включён в настройках и переход разрешён обычными правилами; в истории — с пометкой «автоматически».
+    /// </summary>
+    private async Task AutoAdvanceAsync(AccessContext ctx, long modelId, DevFileKind kind, CancellationToken ct)
+    {
+        var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct)
+                       ?? DevSettings.Defaults(ctx.OrganizationId);
+        if (!settings.AutoAdvance)
+        {
+            return;
+        }
+
+        var model = await db.DevModels.SingleAsync(m => m.Id == modelId && m.OrganizationId == ctx.OrganizationId, ct);
+        var plan = await DevStagePlan.LoadAsync(db, ctx.OrganizationId, ct);
+        var canApprove = ctx.Permissions.Has(Permissions.DevApprove);
+        if (DevAutomationRules.AutoAdvance(model.Stage, kind, model.HasPattern, plan.IsEnabled) is not { } to
+            || DevStages.CheckMove(model.Stage, to, model.HasPattern, canApprove, plan.IsEnabled) is not null)
+        {
+            return;
+        }
+
+        var before = model.Stage;
+        db.DevModelStages.Add(model.MoveTo(to, canApprove, plan.IsEnabled, $"Автоматически: загружен файл «{DevFile.KindName(kind)}»", clock.UtcNow, ctx.UserId));
+        Audit(ctx, AuditActions.DevStageChanged, modelId, DevStages.Name(before), DevStages.Name(to), $"{model.Number}: автоматически");
     }
 
     /// <summary>Содержимое файла — только своей организации и с правом просмотра; скачивание пишется в журнал.</summary>

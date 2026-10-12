@@ -131,6 +131,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevStageSetting> DevStageSettings => Set<KnitErp.Domain.Development.DevStageSetting>();
     public DbSet<KnitErp.Domain.Development.DevFile> DevFiles => Set<KnitErp.Domain.Development.DevFile>();
     public DbSet<KnitErp.Domain.Development.DevLookup> DevLookups => Set<KnitErp.Domain.Development.DevLookup>();
+    public DbSet<KnitErp.Domain.Development.DevSettings> DevSettings => Set<KnitErp.Domain.Development.DevSettings>();
+    public DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates => Set<KnitErp.Domain.Development.DevCategoryTemplate>();
     // CRM (D600–D699).
     public DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines => Set<KnitErp.Domain.Crm.CrmPipeline>();
     public DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages => Set<KnitErp.Domain.Crm.CrmStage>();

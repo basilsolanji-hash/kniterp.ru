@@ -163,6 +163,8 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Development.DevStageSetting> DevStageSettings { get; }
     DbSet<KnitErp.Domain.Development.DevFile> DevFiles { get; }
     DbSet<KnitErp.Domain.Development.DevLookup> DevLookups { get; }
+    DbSet<KnitErp.Domain.Development.DevSettings> DevSettings { get; }
+    DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates { get; }
     // CRM (D600–D699).
     DbSet<KnitErp.Domain.Crm.CrmPipeline> CrmPipelines { get; }
     DbSet<KnitErp.Domain.Crm.CrmStage> CrmStages { get; }

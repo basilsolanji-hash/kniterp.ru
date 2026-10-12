@@ -64,7 +64,8 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.Locator("table")).ToContainTextAsync(name);
         await page.GotoAsync("dev/settings");
         await Ready(page);
-        await Assertions.Expect(page.Locator("table").First).ToContainTextAsync("Себестоимость");
+        await Assertions.Expect(page.Locator("main")).ToContainTextAsync("Себестоимость");
+        await Assertions.Expect(page.Locator("main")).ToContainTextAsync("Шаблоны задания по категориям");
     });
 
     [SqlFact]
@@ -90,6 +91,48 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GotoAsync("dev/settings");
         await Ready(page);
         await AssertNoHorizontalScrollAsync(page, "настройки");
+    });
+
+    [SqlFact]
+    public Task Automation_fills_name_brief_and_moves_stage_by_file() => RunAsync("dev-automation", false, async page =>
+    {
+        // Шаблон задания для категории «Жилет».
+        await page.GotoAsync("dev/settings");
+        await Ready(page);
+        var row = page.Locator("tr", new() { HasText = "Жилет" }).First;
+        await row.GetByRole(AriaRole.Button, new() { Name = "Изменить", Exact = true }).ClickAsync();
+        await page.GetByLabel("Размерный ряд").FillAsync("44–54");
+        await page.GetByLabel("Состав").FillAsync("100% хлопок");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить шаблон", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Шаблон сохранён");
+
+        // Модель без названия и даты: название, запуск и задание подставляются сами.
+        await page.GotoAsync("dev/models");
+        await Ready(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Новая модель", Exact = true }).ClickAsync();
+        await page.GetByLabel("Категория").SelectOptionAsync(new SelectOptionValue { Label = "Жилет" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать модель", Exact = true }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/dev/models/\d+$"));
+        await Ready(page);
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Жилет");
+        await Assertions.Expect(page.Locator("dl.facts").Last).ToContainTextAsync("44–54");
+        await Assertions.Expect(page.Locator(".dev-hints")).ToContainTextAsync("эскиз");
+
+        // Рисунок на «Идее» — модель сама переходит на «Рисунок».
+        await page.GetByRole(AriaRole.Tab, new() { NameRegex = new Regex("^Файлы") }).ClickAsync();
+        await page.GetByLabel("Вид файла").SelectOptionAsync(new SelectOptionValue { Label = "Рисунок" });
+        await page.Locator("input[type=file]").SetInputFilesAsync(new FilePayload { Name = "zhilet.png", MimeType = "image/png", Buffer = Png });
+        await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Файл загружен");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Рисунок");
+
+        // «Создать похожую» открывает новую модель на «Идее» с тем же заданием.
+        var url = page.Url;
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать похожую", Exact = true }).ClickAsync();
+        await page.WaitForURLAsync(u => u != url && Regex.IsMatch(u, @"/dev/models/\d+$"));
+        await Ready(page);
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("(копия)");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Идея");
+        await Assertions.Expect(page.Locator("dl.facts").Last).ToContainTextAsync("100% хлопок");
     });
 
     private static async Task CreateModelAsync(IPage page, string name)

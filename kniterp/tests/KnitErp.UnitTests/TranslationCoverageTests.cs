@@ -132,6 +132,7 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(KnitErp.Domain.Development.DevFile.Kinds.Select(KnitErp.Domain.Development.DevFile.KindName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevLookupKind>().Select(KnitErp.Domain.Development.DevLookup.KindName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Tagging.TaggedEntity>().Select(KnitErp.Domain.Tagging.TagColors.EntityName));
+        keys.UnionWith(KnitErp.Domain.Development.DevAutomationRules.AllHints);
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
 
         // CRM (D600–D699): статусы лидов, итоги сделок, виды справочников; готовая воронка и справочники выводятся как данные организации.
