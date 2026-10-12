@@ -1,0 +1,192 @@
+@inject SignInRestrictionService Restrictions
+@inject CircuitClientAddress ClientAddress
+
+@*
+    D127: «Ограничения входа» пользователя в этой организации — одно устройство, разрешённые сети (IP), время работы.
+    По умолчанию выключены. Сохранение — право управления пользователями и повторное подтверждение паролем (D123); правила
+    (не себе, не Владельцу) и проверка адресов — на сервере, эта панель только показывает и передаёт.
+*@
+<StepUpDialog @ref="_stepUp" />
+<section class="panel sign-in-restrictions" aria-label="@L("Ограничения входа")">
+    <style>
+        .sign-in-restrictions .days { display: flex; flex-wrap: wrap; gap: 8px; }
+        .sign-in-restrictions .days label { display: inline-flex; align-items: center; gap: 4px; }
+        .sign-in-restrictions textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
+        .sign-in-restrictions fieldset { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 10px 12px; margin: 0 0 12px; min-width: 0; }
+        .sign-in-restrictions .time-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+    </style>
+    <div class="page-head">
+        <h2>@L("Ограничения входа: {0}", _model?.Name ?? "…")</h2>
+        <button type="button" class="secondary" @onclick="OnClose">@L("Закрыть")</button>
+    </div>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    @if (_model is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else
+    {
+        @if (!_model.CanEdit)
+        {
+            <div class="flash warn" role="status">@L(_model.CannotEditReason ?? "")</div>
+        }
+        <form @onsubmit="SaveAsync">
+            <fieldset disabled="@(!_model.CanEdit || _busy)">
+                <legend>@L("Одно устройство")</legend>
+                <label><input type="checkbox" @bind="_singleDevice" data-testid="single-device" /> @L("Работать только на одном устройстве")</label>
+                <p class="muted small">@L("Вход на другом устройстве разрешён, а прежний сеанс получает предупреждение и закрывается через 30 секунд.")</p>
+            </fieldset>
+
+            <fieldset disabled="@(!_model.CanEdit || _busy)">
+                <legend>@L("Разрешённые сети (IP)")</legend>
+                <label>@L("Адреса или сети, по одному в строке (до 20). Пусто — без ограничения.")
+                    <textarea rows="4" @bind="_networks" placeholder="203.0.113.10&#10;198.51.100.0/24&#10;2001:db8:12::/48" data-testid="networks"></textarea>
+                </label>
+                <p class="muted small">
+                    @L("Браузер не сообщает имя сети Wi-Fi, поэтому «только Wi-Fi фабрики» — это внешний IP-адрес интернета фабрики: узнайте его у провайдера или откройте эту страницу с компьютера фабрики и нажмите «Добавить мой текущий адрес». Мобильный интернет и чужой Wi-Fi будут запрещены. Если у фабрики меняющийся (динамический) адрес, попросите у провайдера постоянный.")
+                </p>
+                @if (IpNetworks.SingleAddress(ClientAddress.Address) is { } mine)
+                {
+                    <p class="small">@L("Ваш текущий адрес: {0}", mine)
+                        <button type="button" class="secondary" @onclick="() => AddMine(mine)">@L("Добавить мой текущий адрес")</button>
+                    </p>
+                }
+            </fieldset>
+
+            <fieldset disabled="@(!_model.CanEdit || _busy)">
+                <legend>@L("Время работы")</legend>
+                <label><input type="checkbox" @bind="_scheduleEnabled" data-testid="schedule-enabled" /> @L("Вход только в разрешённые дни и часы")</label>
+                @if (_scheduleEnabled)
+                {
+                    <div class="days" role="group" aria-label="@L("Дни недели")">
+                        @for (var i = 0; i < 7; i++)
+                        {
+                            var bit = (byte)(1 << i);
+                            <label><input type="checkbox" checked="@((_days & bit) != 0)" @onchange="e => ToggleDay(bit, e)" /> @DayName(i)</label>
+                        }
+                    </div>
+                    <div class="time-row">
+                        <label>@L("С") <input type="time" @bind="_from" required /></label>
+                        <label>@L("По") <input type="time" @bind="_to" required /></label>
+                    </div>
+                    <p class="muted small">
+                        @L("Время — по часовому поясу организации ({0}). «По» раньше «С» — ночная смена через полночь (относится к дню начала). В конце окна открытый сеанс получает предупреждение и закрывается через 30 секунд.", _model.TimeZoneId)
+                    </p>
+                }
+            </fieldset>
+
+            @if (_model.CanEdit)
+            {
+                <label>@L("Причина") <input @bind="_reason" maxlength="500" placeholder="@L("Например: работа только на складе")" /></label>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Сохранить ограничения")</button>
+                </div>
+            }
+        </form>
+        <p class="muted small">
+            @L("Владельца и самого себя ограничить нельзя. Если администратор ошибся и пользователь не может войти, ограничения снимает другой администратор, а в крайнем случае — команда сервера emergency-access.")
+        </p>
+    }
+</section>
+
+@code {
+    private StepUpDialog? _stepUp;
+
+    [Parameter, EditorRequired]
+    public long UserId { get; set; }
+
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>Сохранено — список пользователей обновляет отметку.</summary>
+    [Parameter]
+    public EventCallback OnSaved { get; set; }
+
+    private SignInRestrictionDto? _model;
+    private bool _singleDevice;
+    private string? _networks;
+    private bool _scheduleEnabled;
+    private byte _days;
+    private TimeOnly _from;
+    private TimeOnly _to;
+    private string? _reason;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    protected override Task OnParametersSetAsync() => RunAsync(LoadAsync, null);
+
+    private async Task LoadAsync()
+    {
+        _model = await Restrictions.GetAsync(UserId);
+        _singleDevice = _model.SingleDevice;
+        _networks = string.Join("\n", _model.Networks);
+        _scheduleEnabled = _model.ScheduleEnabled;
+        _days = _model.Days;
+        _from = TimeOnly.FromTimeSpan(TimeSpan.FromMinutes(_model.StartMinute));
+        _to = TimeOnly.FromTimeSpan(TimeSpan.FromMinutes(_model.EndMinute));
+        _reason = null;
+    }
+
+    private static string DayName(int i) => i switch
+    {
+        0 => L("Пн"),
+        1 => L("Вт"),
+        2 => L("Ср"),
+        3 => L("Чт"),
+        4 => L("Пт"),
+        5 => L("Сб"),
+        _ => L("Вс"),
+    };
+
+    private void ToggleDay(byte bit, ChangeEventArgs e) =>
+        _days = e.Value is true ? (byte)(_days | bit) : (byte)(_days & ~bit);
+
+    private void AddMine(string address)
+    {
+        var lines = (_networks ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        if (!lines.Contains(address, StringComparer.OrdinalIgnoreCase) && !lines.Contains(address.Split('/')[0], StringComparer.OrdinalIgnoreCase))
+        {
+            lines.Add(address);
+        }
+
+        _networks = string.Join("\n", lines);
+    }
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        await Restrictions.SaveAsync(new SaveSignInRestrictionCommand(UserId, _singleDevice, _networks, _scheduleEnabled, _days,
+            _from.Hour * 60 + _from.Minute, _to.Hour * 60 + _to.Minute, _reason, _model?.RowVersion));
+        await LoadAsync();
+        await OnSaved.InvokeAsync();
+    }, L("Ограничения входа сохранены. Открытые сеансы пользователя проверяются по ним не позднее чем через минуту."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await (_stepUp?.RunAsync(action) ?? action()); // D123: повторное подтверждение
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

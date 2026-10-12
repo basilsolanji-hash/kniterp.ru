@@ -67,6 +67,7 @@ builder.Services.AddKnitErpInfrastructure(
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<KnitErp.Application.Workspace.IUiText, KnitErp.Web.Localization.WebUiText>();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddScoped<CircuitClientAddress>(); // D127: адрес соединения вкладки Blazor
 builder.Services.AddScoped<AuthenticationStateProvider, SessionRevalidatingAuthenticationStateProvider>();
 builder.Services.AddScoped<ICurrentUser, ClaimsCurrentUser>();
 
@@ -83,6 +84,8 @@ builder.Services.AddAuthentication(AuthSchemes.Session)
         o.ExpireTimeSpan = KnitErp.Domain.Access.SignInPolicy.SessionLifetime;
         o.SlidingExpiration = true;
         o.Events.OnValidatePrincipal = SessionValidation.OnValidatePrincipal;
+        // D127: сессия закрыта ограничением входа — страница входа объясняет почему.
+        o.Events.OnRedirectToLogin = SessionValidation.RedirectToLogin(o.Events.OnRedirectToLogin);
     })
     .AddCookie(AuthSchemes.Pending, o =>
     {

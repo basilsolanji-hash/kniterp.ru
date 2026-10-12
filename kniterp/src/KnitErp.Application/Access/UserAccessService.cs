@@ -21,7 +21,8 @@ public sealed record UserRowDto(
     string ScopeText,
     bool IsCurrentUser,
     long? DepartmentId = null,
-    long? WarehouseId = null);
+    long? WarehouseId = null,
+    bool HasSignInRestrictions = false);
 
 /// <summary>Строка итоговых прав «на человеческом языке» для блока «Было → Станет».</summary>
 public sealed record PermissionLineDto(string PermissionCode, string Label, PermissionLevel Level)
@@ -133,6 +134,9 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             .Select(a => new { a.UserId, a.DepartmentId, a.WarehouseId })
             .ToListAsync(ct);
         var names = await ScopeNamesAsync(ctx.OrganizationId, scopes.Select(a => (a.DepartmentId, a.WarehouseId)), ct);
+        // D127: отметка «есть ограничения входа» в списке.
+        var restricted = (await db.SignInRestrictions.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId).ToListAsync(ct))
+            .Where(r => !r.IsEmpty).Select(r => r.MemberId).ToHashSet();
 
         return members.Select(x =>
         {
@@ -144,7 +148,8 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
                 DescribeScope(userScopes.Select(a => (a.DepartmentId, a.WarehouseId)), names),
                 x.u.Id == ctx.UserId,
                 userScopes.Select(a => a.DepartmentId).FirstOrDefault(id => id is not null),
-                userScopes.Select(a => a.WarehouseId).FirstOrDefault(id => id is not null));
+                userScopes.Select(a => a.WarehouseId).FirstOrDefault(id => id is not null),
+                restricted.Contains(x.m.Id));
         }).ToList();
     }
 

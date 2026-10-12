@@ -1,6 +1,16 @@
 @inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthState
 
 @code {
-    protected override void OnInitialized() =>
-        Navigation.NavigateTo($"account/login?returnUrl={Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri))}", forceLoad: true);
+    protected override void OnInitialized()
+    {
+        var url = $"account/login?returnUrl={Uri.EscapeDataString(Navigation.ToBaseRelativePath(Navigation.Uri))}";
+        // D127: вкладку закрыла проверка сессии из-за ограничения входа — страница входа скажет почему.
+        if ((AuthState as KnitErp.Web.Security.SessionRevalidatingAuthenticationStateProvider)?.ClosedCode is { } closed)
+        {
+            url += "&closed=" + Uri.EscapeDataString(closed);
+        }
+
+        Navigation.NavigateTo(url, forceLoad: true);
+    }
 }

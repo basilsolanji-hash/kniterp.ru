@@ -181,11 +181,16 @@ internal sealed class UserSessionConfiguration : IEntityTypeConfiguration<UserSe
         {
             t.HasCheckConstraint("ck_user_sessions_seen", "[LastSeenAtUtc] >= [CreatedAtUtc]");
             t.HasCheckConstraint("ck_user_sessions_revoked", "[RevokedAtUtc] IS NULL OR [RevokedAtUtc] >= [CreatedAtUtc]");
+            // D127: момент закрытия и причина задаются вместе.
+            t.HasCheckConstraint("ck_user_sessions_ends",
+                "([EndsAtUtc] IS NULL AND [EndReason] IS NULL) OR ([EndsAtUtc] IS NOT NULL AND [EndReason] IN (1, 2) AND [EndsAtUtc] >= [CreatedAtUtc])");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Label).HasMaxLength(UserSession.LabelMaxLength).IsRequired();
         b.Property(x => x.AddressPrefix).HasColumnType("varchar(64)");
+        b.Property(x => x.EndsAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.EndReason).HasConversion<byte>();
         b.Property(x => x.RowVersion).IsRowVersion();
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.PublicId).IsUnique().HasDatabaseName("ux_user_sessions_public_id");
@@ -210,6 +215,37 @@ internal sealed class OrganizationMemberConfiguration : IEntityTypeConfiguration
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.UserId }).IsUnique().HasDatabaseName("ux_organization_members_org_user");
+        // D127: ключ (организация, участник) — для составного внешнего ключа ограничений входа.
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_organization_members_org_id");
+    }
+}
+
+/// <summary>D127: ограничения входа участника организации (одно устройство, сети, время работы).</summary>
+internal sealed class SignInRestrictionConfiguration : IEntityTypeConfiguration<SignInRestriction>
+{
+    public void Configure(EntityTypeBuilder<SignInRestriction> b)
+    {
+        b.ToTable("user_sign_in_restrictions", t =>
+        {
+            t.HasCheckConstraint("ck_user_sign_in_restrictions_networks", "[AllowedNetworks] IS NULL OR LEN([AllowedNetworks]) > 0");
+            t.HasCheckConstraint("ck_user_sign_in_restrictions_window",
+                "([AllowedDays] IS NULL AND [WindowStartMinute] IS NULL AND [WindowEndMinute] IS NULL) OR "
+                + "([AllowedDays] BETWEEN 1 AND 127 AND [WindowStartMinute] BETWEEN 0 AND 1439 AND [WindowEndMinute] BETWEEN 0 AND 1439)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.AllowedNetworks).HasColumnType($"varchar({SignInRestriction.NetworksMaxLength})");
+        b.Property(x => x.UpdatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.IsEmpty);
+        b.Ignore(x => x.Networks);
+        b.Ignore(x => x.Window);
+        b.HasOne<OrganizationMember>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.MemberId })
+            .HasPrincipalKey(m => new { m.OrganizationId, m.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_user_sign_in_restrictions_member");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_user_sign_in_restrictions_updated_by");
+        b.HasIndex(x => new { x.OrganizationId, x.MemberId }).IsUnique().HasDatabaseName("ux_user_sign_in_restrictions_member");
     }
 }
 

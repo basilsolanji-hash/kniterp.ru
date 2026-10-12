@@ -57,6 +57,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_organization_members_org_id");
+
                     b.HasIndex("UserId");
 
                     b.HasIndex("OrganizationId", "UserId")
@@ -257,6 +260,63 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Access.SignInRestriction", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<byte?>("AllowedDays")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("AllowedNetworks")
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<long>("MemberId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<bool>("SingleDevice")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("UpdatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<short?>("WindowEndMinute")
+                        .HasColumnType("smallint");
+
+                    b.Property<short?>("WindowStartMinute")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.HasIndex("OrganizationId", "MemberId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_user_sign_in_restrictions_member");
+
+                    b.ToTable("user_sign_in_restrictions", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_user_sign_in_restrictions_networks", "[AllowedNetworks] IS NULL OR LEN([AllowedNetworks]) > 0");
+
+                            t.HasCheckConstraint("ck_user_sign_in_restrictions_window", "([AllowedDays] IS NULL AND [WindowStartMinute] IS NULL AND [WindowEndMinute] IS NULL) OR ([AllowedDays] BETWEEN 1 AND 127 AND [WindowStartMinute] BETWEEN 0 AND 1439 AND [WindowEndMinute] BETWEEN 0 AND 1439)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Access.TrustedDevice", b =>
                 {
                     b.Property<long>("Id")
@@ -412,6 +472,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2(3)");
 
+                    b.Property<byte?>("EndReason")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime?>("EndsAtUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<string>("Label")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -452,6 +518,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("user_sessions", "kniterp", t =>
                         {
+                            t.HasCheckConstraint("ck_user_sessions_ends", "([EndsAtUtc] IS NULL AND [EndReason] IS NULL) OR ([EndsAtUtc] IS NOT NULL AND [EndReason] IN (1, 2) AND [EndsAtUtc] >= [CreatedAtUtc])");
+
                             t.HasCheckConstraint("ck_user_sessions_revoked", "[RevokedAtUtc] IS NULL OR [RevokedAtUtc] >= [CreatedAtUtc]");
 
                             t.HasCheckConstraint("ck_user_sessions_seen", "[LastSeenAtUtc] >= [CreatedAtUtc]");
@@ -5414,9 +5482,18 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
 
+                    b.Property<decimal?>("MinMarginPercent")
+                        .HasPrecision(9, 4)
+                        .HasColumnType("decimal(9,4)");
+
                     b.Property<decimal>("OverheadPercent")
                         .HasPrecision(9, 4)
                         .HasColumnType("decimal(9,4)");
+
+                    b.Property<bool>("RequireCostForApproval")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -5442,7 +5519,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("dev_settings", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_dev_settings_costing", "[YarnWastePercent] BETWEEN 0 AND 100 AND [OverheadPercent] BETWEEN 0 AND 1000 AND [MarkupPercent] BETWEEN 0 AND 1000 AND ([LaborRatePerMinute] IS NULL OR [LaborRatePerMinute] >= 0)");
+                            t.HasCheckConstraint("ck_dev_settings_costing", "[YarnWastePercent] BETWEEN 0 AND 100 AND [OverheadPercent] BETWEEN 0 AND 1000 AND [MarkupPercent] BETWEEN 0 AND 1000 AND ([LaborRatePerMinute] IS NULL OR [LaborRatePerMinute] >= 0) AND ([MinMarginPercent] IS NULL OR [MinMarginPercent] BETWEEN -100 AND 100)");
 
                             t.HasCheckConstraint("ck_dev_settings_label", "[LabelWidthMm] BETWEEN 20 AND 150 AND [LabelHeightMm] BETWEEN 20 AND 150");
 
@@ -11077,6 +11154,23 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("RoleId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Access.SignInRestriction", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_user_sign_in_restrictions_updated_by");
+
+                    b.HasOne("KnitErp.Domain.Access.OrganizationMember", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MemberId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_user_sign_in_restrictions_member");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Access.TrustedDevice", b =>

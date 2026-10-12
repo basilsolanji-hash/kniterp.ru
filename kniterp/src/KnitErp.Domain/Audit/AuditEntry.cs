@@ -131,6 +131,15 @@ public static class AuditActions
     public const string StepUpConfirmed = "auth.stepup.confirmed";
     public const string StepUpFailed = "auth.stepup.failed";
     public const string SessionRevoked = "auth.session.revoked";
+
+    /// <summary>D127: изменены ограничения входа участника (до и после).</summary>
+    public const string SignInRestrictionsChanged = "access.sign_in_restrictions.changed";
+
+    /// <summary>D127: вход или сессия отклонены ограничением (адрес, время работы).</summary>
+    public const string SignInRestricted = "auth.sign_in.restricted";
+
+    /// <summary>D127: сессия закроется через 30 с (вход с другого устройства, конец времени работы).</summary>
+    public const string SessionEnding = "auth.session.ending";
     public const string PasswordResetIssued = "access.password_reset.issued";
     public const string EmergencyAccess = "access.emergency";
     public const string DepartmentCreated = "structure.department.created";

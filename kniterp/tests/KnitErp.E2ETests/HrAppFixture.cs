@@ -133,6 +133,33 @@ public sealed class HrAppFixture : IAsyncLifetime
         return workday;
     }
 
+    /// <summary>
+    /// D127: сотрудник с паролем этого набора и включённым ограничением «одно устройство» (сохраняет Владелец через сервис).
+    /// Возвращает почту для входа в браузере.
+    /// </summary>
+    public async Task<string> CreateSingleDeviceWorkerAsync()
+    {
+        var email = $"single-{Guid.NewGuid():N}@e2e.local";
+        KnitErp.Application.Access.InvitationResult invitation;
+        await using (var s = _host.As(_org!.OwnerUserId, _org.OrganizationId))
+        {
+            invitation = await s.Access.InviteAsync(new KnitErp.Application.Access.InviteUserCommand(email, "Сменщица Одна", SystemRoles.Employee, null));
+        }
+
+        await using (var s = _host.As(null, null))
+        {
+            await s.SignIn.AcceptInvitationAsync(invitation.SetupToken, Password, Password);
+        }
+
+        await using (var s = _host.As(_org.OwnerUserId, _org.OrganizationId))
+        {
+            await s.Restrictions.SaveAsync(new KnitErp.Application.Access.SaveSignInRestrictionCommand(
+                invitation.UserId, true, null, false, 0, 0, 0, "e2e", null));
+        }
+
+        return email;
+    }
+
     /// <summary>Вымышленный ИНН юрлица с верной контрольной цифрой.</summary>
     private static string TestInn()
     {
