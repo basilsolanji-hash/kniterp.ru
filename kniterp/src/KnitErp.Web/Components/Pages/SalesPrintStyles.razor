@@ -1,0 +1,11 @@
+@* D1120, D1121: логотип, факсимиле подписей, печать и QR для оплаты на печатных формах продаж (стили только этих элементов). *@
+<style>
+    .sheet .sx-logo { display: block; max-height: 64px; max-width: 260px; margin: 0 0 8px; }
+    .sheet .sx-sign { position: relative; }
+    .sheet .sx-sig { position: relative; display: inline-block; min-width: 140px; height: 14px; border-bottom: 1px solid #000; margin: 0 6px; vertical-align: bottom; }
+    .sheet .sx-sig img { position: absolute; left: 50%; bottom: -12px; transform: translateX(-50%); max-height: 48px; max-width: 150px; }
+    .sheet .sx-stamp { position: absolute; left: 36%; top: -44px; width: 150px; height: 150px; object-fit: contain; opacity: .92; pointer-events: none; }
+    .sheet .sx-stamp-upd { position: relative; left: 0; top: 0; width: 130px; height: 130px; display: block; }
+    .sheet .sx-qr { float: right; width: 136px; margin: 4px 0 6px 14px; text-align: center; font-size: 9px; }
+    .sheet .sx-qr svg { display: block; width: 128px; height: 128px; margin: 0 auto 2px; }
+</style>

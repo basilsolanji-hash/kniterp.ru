@@ -85,6 +85,11 @@ public sealed class SalesOrder
     public string? PriceOverrideReason { get; private set; }
 
     public long? PriceOverrideByUserId { get; private set; }
+
+    /// <summary>D1137: причина отмены из справочника и пояснение.</summary>
+    public long? CancelReasonId { get; private set; }
+
+    public string? CancelComment { get; private set; }
     public DateTime? PriceOverrideAtUtc { get; private set; }
 
     public string? Comment { get; private set; }
@@ -340,6 +345,14 @@ public sealed class SalesOrder
         }
 
         Status = SalesOrderStatus.Cancelled;
+    }
+
+    /// <summary>D1137: отмена с причиной из справочника (проверяет сервис) и необязательным пояснением.</summary>
+    public void Cancel(long reasonId, string? comment)
+    {
+        Cancel();
+        CancelReasonId = reasonId;
+        CancelComment = DomainText.Optional(comment, CommentMaxLength, "Пояснение к отмене");
     }
 
     /// <summary>Цена единицы с НДС — по ней оценивается отгрузка и возврат по заказу.</summary>

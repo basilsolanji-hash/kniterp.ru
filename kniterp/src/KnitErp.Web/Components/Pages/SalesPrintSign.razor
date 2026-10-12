@@ -1,0 +1,15 @@
+@* D1120: место подписи на печатной форме — линия, а если загружено и включено факсимиле — изображение подписи над линией. *@
+@using KnitErp.Application.Sales
+@if (Image is { } image)
+{
+    <span class="sx-sig"><img src="@image.DataUri" alt="" /></span>
+}
+else
+{
+    <span class="line"></span>
+}
+
+@code {
+    [Parameter]
+    public SalesPrintImage? Image { get; set; }
+}

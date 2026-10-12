@@ -1127,6 +1127,10 @@ internal sealed class SalesOrderConfiguration : IEntityTypeConfiguration<SalesOr
             .HasConstraintName("fk_sales_orders_agreement");
         b.HasIndex(x => new { x.OrganizationId, x.AgreementId }).HasFilter("[AgreementId] IS NOT NULL").HasDatabaseName("ix_sales_orders_org_agreement");
         b.Property(x => x.PriceOverrideReason).HasMaxLength(SalesOrder.OverrideReasonMaxLength);
+        // D1137: причина отмены — из справочника своей организации.
+        b.HasOne<SalesCancelReason>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CancelReasonId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_sales_orders_cancel_reason");
+        b.Property(x => x.CancelComment).HasMaxLength(SalesOrder.CommentMaxLength);
         b.Property(x => x.PriceOverrideAtUtc).HasColumnType("datetime2(3)");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.PriceOverrideByUserId).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_sales_orders_price_override_user");

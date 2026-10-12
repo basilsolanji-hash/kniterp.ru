@@ -46,7 +46,7 @@ else
                     <div class="grid">
                         <label>
                             @L("Покупатель")
-                            <select @bind="_customer">
+                            <select @bind="_customer" @bind:after="ApplyDefaultsAsync">
                                 @foreach (var s in _options.Customers)
                                 {
                                     <option value="@s.Id">@s.Name</option>
@@ -79,6 +79,11 @@ else
                         <label>@L("Договор покупателя") <input @bind="_invoice" maxlength="@SalesOrder.InvoiceMaxLength" placeholder="@L("Договор № 7 от 01.10.2026")" /></label>
                         <label class="inline"><input type="checkbox" @bind="_withVat" /> @L("Цены включают НДС")</label>
                     </div>
+                    @if (_defaults is { } d && (d.Agreement is not null || d.PaymentTerms is not null))
+                    {
+                        @* D1134 (А5): условия из соглашения покупателя. *@
+                        <p class="muted" style="margin: 4px 0 0">@L("Соглашение:") @(d.Agreement ?? "—")@(d.PaymentTerms is null ? "" : " · " + d.PaymentTerms)</p>
+                    }
                     <div class="actions">
                         <button type="submit" disabled="@_busy">@L("Создать черновик")</button>
                         <button type="button" class="secondary" @onclick="() => _options = null">@L("Отмена")</button>
@@ -277,7 +282,34 @@ else
         _expected = null;
         _invoice = null;
         _withVat = true;
+        await ApplyDefaultsCoreAsync();
     });
+
+    private KnitErp.Application.Sales.SalesOrderDefaultsDto? _defaults;
+
+    private Task ApplyDefaultsAsync() => RunAsync(ApplyDefaultsCoreAsync);
+
+    /// <summary>D1134 (А5): склад, юрлицо, договор — из соглашения и последнего заказа выбранного покупателя.</summary>
+    private async Task ApplyDefaultsCoreAsync()
+    {
+        _defaults = long.TryParse(_customer, out var c) ? await Sales.DefaultsForCustomerAsync(c) : null;
+        if (_defaults is not { } d)
+        {
+            return;
+        }
+
+        if (d.WarehouseId is { } w && _options!.Warehouses.Any(x => x.Id == w))
+        {
+            _warehouse = w.ToString();
+        }
+
+        if (d.LegalEntityId is { } le && _options!.LegalEntities?.Any(x => x.Id == le) == true)
+        {
+            _entity = le.ToString();
+        }
+
+        _invoice = d.CustomerReference ?? _invoice;
+    }
 
     private Task CreateAsync() => RunAsync(async () =>
     {
