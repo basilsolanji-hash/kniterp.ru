@@ -7,6 +7,9 @@
 @inject ModificationService Modifications
 @inject CatalogSettingsService Settings
 @inject ItemCodesService Codes
+@inject GroupDefaultsService GroupDefaults
+@inject CatalogService Catalog
+@inject VatRateService VatRates
 
 <PageTitle>@L("Настройки номенклатуры") — knitERP</PageTitle>
 
@@ -96,6 +99,7 @@ else
                                             @if (!g.IsArchived)
                                             {
                                                 <button type="button" class="secondary" @onclick="() => StartEdit(g.Id, g.Name, g.ParentId?.ToString())" disabled="@_busy">@L("Изменить")</button>
+                                                <button type="button" class="secondary" @onclick="() => OpenDefaultsAsync(g.Id)" disabled="@_busy">@L("По умолчанию")</button>
                                                 <ConfirmButton Class="secondary" OnConfirm='() => Run(() => Nomenclature.SetGroupArchivedAsync(g.Id, true, g.RowVersion), L("Группа в архиве."))' Disabled="@_busy" Question='@L("Отправить в архив?")'>@L("В архив")</ConfirmButton>
                                             }
                                             else
@@ -110,6 +114,68 @@ else
                     </tbody>
                 </table>
             </div>
+            @if (_defaultsGroup is { } dg && _defaults is not null)
+            {
+                @* D317: значения по умолчанию группы — новая позиция в группе получает их сама; пустое — как у родительской группы. *@
+                <form class="panel" @onsubmit="SaveDefaultsAsync" style="margin-top: 12px">
+                    <h3>@L("Значения по умолчанию: {0}", _groups!.FirstOrDefault(g => g.Id == dg)?.Path ?? "")</h3>
+                    <p class="muted small">@L("Новая позиция в этой группе и её подгруппах получит их сама. Пусто — как у родительской группы (в скобках — что будет на деле).")</p>
+                    <fieldset disabled="@(!CanEdit)">
+                        <div class="grid">
+                            <label>
+                                @L("Тип") <span class="muted small">(@(_defaults.Effective.Type is { } et ? L(ItemTypes.Name(et)) : "—"))</span>
+                                <select @bind="_dType">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var t in ItemTypes.All)
+                                    {
+                                        <option value="@((byte)t)">@L(ItemTypes.Name(t))</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                @L("Единица")
+                                <select @bind="_dUnit">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var u in _unitOptions)
+                                    {
+                                        <option value="@u.Id">@u.Name (@u.Symbol)</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>
+                                @L("Ставка НДС")
+                                <select @bind="_dVat">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var r in _vatOptions)
+                                    {
+                                        <option value="@r.Id">@L(r.Name)</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>@L("Код ТН ВЭД") <span class="muted small">(@(_defaults.Effective.TnVedCode ?? "—"))</span> <input @bind="_dTnVed" maxlength="10" inputmode="numeric" /></label>
+                            <label>@L("Страна (код ОКСМ)") <span class="muted small">(@(_defaults.Effective.OriginCountryCode ?? "—"))</span> <input @bind="_dCountry" maxlength="3" inputmode="numeric" placeholder="643" /></label>
+                            <label>@L("Страна — краткое наименование") <input @bind="_dCountryName" maxlength="100" placeholder="@L("Россия")" /></label>
+                            <label>
+                                @L("Маркировка")
+                                <select @bind="_dTracking">
+                                    <option value="">@L("как у родителя")</option>
+                                    @foreach (var m in Marking.All)
+                                    {
+                                        <option value="@((byte)m)">@(m == TrackingType.None ? L("без маркировки") : L(Marking.Name(m)))</option>
+                                    }
+                                </select>
+                            </label>
+                        </div>
+                    </fieldset>
+                    <div class="actions">
+                        @if (CanEdit)
+                        {
+                            <button type="submit" disabled="@_busy">@L("Сохранить значения")</button>
+                        }
+                        <button type="button" class="secondary" @onclick="() => _defaultsGroup = null">@L("Закрыть")</button>
+                    </div>
+                </form>
+            }
             break;
 
         case Tab.Prices:
@@ -683,6 +749,40 @@ else
         CustomFieldType.Catalog => L("Справочник"),
         _ => L("Текст"),
     };
+
+    // D317: значения по умолчанию группы.
+    private long? _defaultsGroup;
+    private GroupDefaultsDto? _defaults;
+    private IReadOnlyList<UnitDto> _unitOptions = [];
+    private IReadOnlyList<VatRateDto> _vatOptions = [];
+    private string _dType = "", _dUnit = "", _dVat = "", _dTracking = "";
+    private string? _dTnVed, _dCountry, _dCountryName;
+
+    private Task OpenDefaultsAsync(long groupId) => Run(async () =>
+    {
+        _defaults = await GroupDefaults.GetAsync(groupId);
+        _defaultsGroup = groupId;
+        if (_unitOptions.Count == 0)
+        {
+            _unitOptions = await Catalog.ListUnitsAsync();
+            _vatOptions = await VatRates.ActiveAsync();
+        }
+
+        var o = _defaults.Own;
+        _dType = o.Type is { } t ? ((byte)t).ToString() : "";
+        _dUnit = o.UnitId?.ToString() ?? "";
+        _dVat = o.VatRateId?.ToString() ?? "";
+        _dTracking = o.Tracking is { } m ? ((byte)m).ToString() : "";
+        (_dTnVed, _dCountry, _dCountryName) = (o.TnVedCode, o.OriginCountryCode, o.OriginCountryName);
+    }, null);
+
+    private Task SaveDefaultsAsync() => Run(async () =>
+    {
+        var values = new GroupDefaultValues(byte.TryParse(_dType, out var t) ? (ItemType)t : null, long.TryParse(_dUnit, out var u) ? u : null,
+            long.TryParse(_dVat, out var v) ? v : null, _dTnVed, _dCountry, _dCountryName, byte.TryParse(_dTracking, out var m) ? (TrackingType)m : null);
+        await GroupDefaults.SaveAsync(_defaultsGroup!.Value, values, _defaults!.RowVersion);
+        _defaults = await GroupDefaults.GetAsync(_defaultsGroup.Value);
+    }, L("Значения по умолчанию группы сохранены."));
 
     private void StartEdit(long id, string name, string? parent)
     {

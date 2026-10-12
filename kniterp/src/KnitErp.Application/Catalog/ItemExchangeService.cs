@@ -366,6 +366,38 @@ public sealed partial class ItemExchangeService(
 
         var bundlesChanged = await ApplyBundlesAsync(ctx, plan.Bundles, ct); // D308
 
+        // D317 (сессия 4): новым позициям с группой — незаданные в файле НДС, ТН ВЭД, страна и маркировка из значений по умолчанию группы.
+        var defaultsByGroup = new Dictionary<long, GroupDefaultValues>();
+        foreach (var item in created.Where(i => !i.IsModification && i.GroupId is not null))
+        {
+            var gid = item.GroupId!.Value;
+            if (!defaultsByGroup.TryGetValue(gid, out var d))
+            {
+                defaultsByGroup[gid] = d = await GroupDefaultsService.ResolveAsync(db, ctx.OrganizationId, gid, ct);
+            }
+
+            if (d.IsEmpty)
+            {
+                continue;
+            }
+
+            if (item.VatRateId is null && d.VatRateId is { } vat)
+            {
+                item.SetVatRate(vat);
+            }
+
+            item.SetDetails(item.Details with
+            {
+                TnVedCode = item.TnVedCode ?? d.TnVedCode,
+                OriginCountryCode = item.OriginCountryCode ?? d.OriginCountryCode,
+                OriginCountryName = item.OriginCountryCode is null ? d.OriginCountryName : item.OriginCountryName,
+            });
+            if (d.Tracking is { } tracking && !item.IsMarked && ItemTypes.IsStocked(item.Type))
+            {
+                item.SetTrade(item.Trade with { IsMarked = tracking != TrackingType.None, TrackingType = tracking });
+            }
+        }
+
         foreach (var item in created)
         {
             Audit(ctx, AuditActions.CatalogCreated, nameof(Item), item.Id.ToString(), null, $"{item.Code} {item.Name}", "Импорт");

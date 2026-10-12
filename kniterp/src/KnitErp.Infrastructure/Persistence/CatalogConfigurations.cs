@@ -315,3 +315,28 @@ internal sealed class LabelTemplateConfiguration : IEntityTypeConfiguration<Labe
         b.HasOne<PriceType>().WithMany().HasForeignKey(x => x.PriceTypeId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_label_templates_price_type");
     }
 }
+
+/// <summary>D317: значения по умолчанию группы — одна строка на группу; единица и НДС — своей организации (составные FK).</summary>
+internal sealed class ItemGroupDefaultsConfiguration : IEntityTypeConfiguration<ItemGroupDefaults>
+{
+    public void Configure(EntityTypeBuilder<ItemGroupDefaults> b)
+    {
+        b.ToTable("item_group_defaults");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.Type).HasConversion<byte?>();
+        b.Property(x => x.Tracking).HasConversion<byte?>();
+        b.Property(x => x.TnVedCode).HasColumnType("varchar(10)");
+        b.Property(x => x.OriginCountryCode).HasColumnType("char(3)");
+        b.Property(x => x.OriginCountryName).HasMaxLength(100);
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Ignore(x => x.Values);
+        b.HasIndex(x => x.GroupId).IsUnique().HasDatabaseName("ux_item_group_defaults_group");
+        b.HasOne<ItemGroup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.GroupId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_item_group_defaults_group");
+        b.HasOne<UnitOfMeasure>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.UnitId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_item_group_defaults_unit");
+        b.HasOne<VatRate>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.VatRateId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_item_group_defaults_vat");
+    }
+}

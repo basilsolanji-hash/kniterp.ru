@@ -71,6 +71,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<CatalogSettings> CatalogSettings { get; }
     DbSet<CatalogFeed> CatalogFeeds { get; }
     DbSet<LabelTemplate> LabelTemplates { get; }
+    DbSet<ItemGroupDefaults> ItemGroupDefaults { get; }
     DbSet<KnitErp.Domain.Finance.MoneyOperation> MoneyOperations { get; }
     DbSet<KnitErp.Domain.Integrations.ApiToken> ApiTokens { get; }
     DbSet<KnitErp.Domain.Integrations.WebhookSubscription> WebhookSubscriptions { get; }

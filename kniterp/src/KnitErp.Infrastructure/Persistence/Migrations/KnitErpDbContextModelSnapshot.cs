@@ -1304,6 +1304,63 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Catalog.ItemGroupDefaults", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("GroupId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("OriginCountryCode")
+                        .HasColumnType("char(3)");
+
+                    b.Property<string>("OriginCountryName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("TnVedCode")
+                        .HasColumnType("varchar(10)");
+
+                    b.Property<byte?>("Tracking")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte?>("Type")
+                        .HasColumnType("tinyint");
+
+                    b.Property<long?>("UnitId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("VatRateId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_item_group_defaults_group");
+
+                    b.HasIndex("OrganizationId", "GroupId");
+
+                    b.HasIndex("OrganizationId", "UnitId");
+
+                    b.HasIndex("OrganizationId", "VatRateId");
+
+                    b.ToTable("item_group_defaults", "kniterp");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPack", b =>
                 {
                     b.Property<long>("Id")
@@ -5667,6 +5724,31 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_item_groups_parent");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Catalog.ItemGroupDefaults", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Catalog.ItemGroup", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "GroupId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_item_group_defaults_group");
+
+                    b.HasOne("KnitErp.Domain.Catalog.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "UnitId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_item_group_defaults_unit");
+
+                    b.HasOne("KnitErp.Domain.Catalog.VatRate", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "VatRateId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_item_group_defaults_vat");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Catalog.ItemPack", b =>

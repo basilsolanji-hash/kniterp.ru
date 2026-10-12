@@ -12,6 +12,8 @@
 @inject CatalogService Catalog
 @inject CatalogSettingsService CatalogSettings
 @inject ItemCodesService Codes
+@inject ItemCopyService Copies
+@inject NavigationManager Nav
 
 <PageTitle>@(_item?.Name ?? L("Позиция")) — knitERP</PageTitle>
 
@@ -368,7 +370,21 @@ else
     <div class="actions" style="margin-top: 8px">
         @* D316: печать этикеток по шаблону организации. *@
         <a class="button secondary" href="catalog/labels/print?ids=@Id" target="_blank" rel="noopener">@L("Печать этикеток")</a>
+        @if (editable && _variants?.Parent is null)
+        {
+            <button type="button" class="secondary" @onclick="ToggleCopy" disabled="@_busy">@L("Создать по образцу")</button>
+        }
     </div>
+    @if (_copyOpen && editable)
+    {
+        @* D319: копия карточки — сведения, цены, упаковки, поставщики, состав комплекта; без штрихкодов, GTIN и артикула. *@
+        <form class="inline-form panel" @onsubmit="CopyAsync">
+            <label>@L("Код новой позиции") <input @bind="_copyCode" maxlength="40" placeholder="@L("пусто — по автокоду")" /></label>
+            <label>@L("Наименование") <input @bind="_copyName" maxlength="300" required /></label>
+            <button type="submit" disabled="@_busy">@L("Создать копию")</button>
+            <span class="muted small">@L("Скопируются сведения, цены, упаковки, поставщики и состав комплекта. Штрихкоды, GTIN и артикул — новые.")</span>
+        </form>
+    }
 
     @if (_item.IsStocked && _settings.Shows(CardBlocks.Packs))
     {
@@ -792,6 +808,28 @@ else
 
     // D312: блоки, скрытые настройками каталога организации (только отображение).
     private CatalogSettingsDto _settings = new(true, true, null, 5, 1, ItemType.Finished, null, false, []);
+
+    private bool _copyOpen;
+    private string? _copyCode;
+    private string? _copyName;
+
+    private void ToggleCopy()
+    {
+        _copyOpen = !_copyOpen;
+        _copyName = L("{0} (копия)", _item?.Name ?? "");
+        _copyCode = null;
+    }
+
+    private async Task CopyAsync()
+    {
+        long? id = null;
+        await RunAsync(async () => id = await Copies.CopyAsync(Id, _copyCode, string.IsNullOrWhiteSpace(_copyName) ? null : _copyName), null);
+        if (id is { } created)
+        {
+            _copyOpen = false;
+            Nav.NavigateTo($"catalog/items/{created}");
+        }
+    }
 
     private Task GenerateBarcodeAsync() => RunAsync(async () =>
     {
