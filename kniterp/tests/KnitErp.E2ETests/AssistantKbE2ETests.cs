@@ -25,11 +25,19 @@ public sealed class AssistantKbE2ETests(HrAppFixture app) : IClassFixture<HrAppF
             await page.GotoAsync("");
             await page.WaitForSelectorAsync("nav", new() { Timeout = 30_000 });
             var input = page.GetByLabel("Вопрос");
-            // Персонаж открывает чат событием knit:action; до подключения Blazor событие теряется — повторяем.
-            for (var i = 0; i < 80 && !await input.IsVisibleAsync(); i++)
+            // Персонаж открывает чат событием knit:action; до подключения Blazor событие теряется — ждём, пока приложение
+            // подключит обработчики (kniterp.hotkeysReady), а не угадываем время: под нагрузкой это занимало больше 40 с.
+            await page.WaitForFunctionAsync("() => window.kniterp && window.kniterp.hotkeysReady === true", null, new() { Timeout = 60_000 });
+            for (var i = 0; i < 5 && !await input.IsVisibleAsync(); i++)
             {
                 await page.EvaluateAsync("() => document.dispatchEvent(new Event('knit:action'))");
-                await page.WaitForTimeoutAsync(500);
+                try
+                {
+                    await input.WaitForAsync(new() { Timeout = 5_000 });
+                }
+                catch (TimeoutException)
+                {
+                }
             }
 
             await input.FillAsync(question);
