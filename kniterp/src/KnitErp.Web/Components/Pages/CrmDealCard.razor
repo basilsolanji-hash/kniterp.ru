@@ -134,7 +134,7 @@ else
                             <td class="num">@Amounts.Format(o.Total)</td>
                             <td class="num">@Amounts.Format(o.Paid)</td>
                             <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
-                            <td>
+                            <td><div class="row-actions">
                                 @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
                                 {
                                     <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>
@@ -144,7 +144,7 @@ else
                                     <button type="button" class="secondary" @onclick="() => ToProductionAsync(o.Id)" disabled="@_busy">@L("В производство")</button>
                                 }
                                 <a class="small" href="sales-orders/@o.Id">@L("Открыть")</a>
-                            </td>
+                            </div></td>
                         </tr>
                     }
                 </tbody>

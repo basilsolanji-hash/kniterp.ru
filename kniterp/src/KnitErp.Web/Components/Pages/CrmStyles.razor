@@ -3,6 +3,8 @@
     высоты касания; на телефоне 390 px колонки канбана идут одна под другой, без горизонтальной прокрутки страницы.
 *@
 <style>
+    /* fieldset по умолчанию не уже содержимого (min-width: min-content) — на 390 px форма вылезала за экран. */
+    fieldset { min-width: 0; }
     .crm-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; align-items: start; }
     .crm-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 120px; }
     .crm-col.drop { outline: 2px dashed var(--accent-line); }

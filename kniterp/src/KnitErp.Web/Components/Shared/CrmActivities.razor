@@ -175,7 +175,17 @@
 
     private CrmFeedPageDto? _feed;
     private IReadOnlyList<string> _recipients = [];
-    private readonly Dictionary<long, string?> _results = [];
+    private readonly ResultInputs _results = new();
+
+    /// <summary>Поля «Результат» по активностям; новая активность (например, задача, созданная автоматически) читается как пустая.</summary>
+    private sealed class ResultInputs : Dictionary<long, string?>
+    {
+        public new string? this[long id]
+        {
+            get => TryGetValue(id, out var v) ? v : null;
+            set => base[id] = value;
+        }
+    }
     private int _page;
     private int _loadedVersion = -1;
     private bool _busy;
