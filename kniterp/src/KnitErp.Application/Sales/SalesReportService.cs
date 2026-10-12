@@ -277,7 +277,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
             .Select(g => new { g.Key, Orders = g.Select(x => x.OrderId).Distinct().Count(), Customers = g.Select(x => x.CustomerId).Distinct().Count() })
             .ToDictionaryAsync(x => x.Key ?? long.MinValue, ct);
         var perCustomer = await keyed.GroupBy(k => k.CustomerId).Select(g => g.Select(x => x.OrderId).Distinct().Count()).ToListAsync(ct);
-        var totalOrders = await keyed.Select(k => k.OrderId).Distinct().CountAsync(ct);
+        var totalOrders = perCustomer.Sum(); // заказ — одного покупателя: заказов всего = сумма заказов покупателей
 
         IReadOnlyDictionary<long, (decimal Cost, CostSource Source)> costs = new Dictionary<long, (decimal, CostSource)>();
         if (amounts && sums.Count > 0)
