@@ -1781,6 +1781,78 @@ public sealed class ProductionOrderTests(SqlTestHost host) : IClassFixture<SqlTe
         }
     }
 
+    [SqlFact]
+    public async Task Less_manual_input_prefills_plans_carries_remainder_and_suggests_reasons()
+    {
+        // D413: план задания по свободному количеству, «По заданию» на терминале, перенос недовыполненного, подсказки причин и виновника.
+        var f = await SetUpAsync();
+        var (worker, employee) = await AddWorkerAsync(f, grant: true);
+        var (_, colleague) = await AddWorkerAsync(f, grant: true, "0103", "Сидорова");
+        long order;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            order = await s.ProductionOrders.CreateAsync(Command(f, f.Sweater, 20));
+            await s.ProductionOrders.ReleaseAsync(order, (await s.ProductionOrders.GetAsync(order)).RowVersion);
+            var option = (await s.ShiftTasks.BoardAsync()).Orders.Single(o => o.Id == order);
+            Assert.Equal((ProductionStage.Knitting, 20m, "шт"), (option.Stages![0].Stage, option.Stages[0].Available, option.Stages[0].UnitSymbol));
+            Assert.Equal(0m, option.Stages.Single(x => x.Stage == ProductionStage.Assembly).Available);
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, employee, order, ProductionStage.Knitting, 10, "до обеда"));
+            await s.ShiftTasks.AssignAsync(new ShiftTaskCommand(Day, colleague, order, ProductionStage.Knitting, 2, null));
+        }
+
+        await using (var s = host.As(worker, f.Org.OrganizationId))
+        {
+            Assert.Equal(10m, (await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting)).MyTaskRemaining);
+            await s.ShopFloor.MarkAsync(order, ProductionStage.Knitting, new ShopMarkCommand(6, "Поломка оборудования", null));
+            Assert.Equal(4m, (await s.ShopFloor.OperationAsync(order, ProductionStage.Knitting)).MyTaskRemaining);
+            Assert.Null((await s.ShopFloor.OperationAsync(order, ProductionStage.Assembly)).MyTaskRemaining);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            Assert.Equal(14m, (await s.ShiftTasks.BoardAsync()).Orders.Single(o => o.Id == order).Stages!.Single(x => x.Stage == ProductionStage.Knitting).Available);
+            await s.Floor.RecordAsync(order, Mark(ProductionStage.Knitting, 2));
+            foreach (var stage in new[] { ProductionStage.Assembly, ProductionStage.Steaming })
+            {
+                await s.Floor.RecordAsync(order, Mark(stage, 8));
+            }
+
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Defect, 1, null, "спущенные петли", Day));
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Defect, 1, null, "спущенные петли", Day));
+            await s.Floor.RecordAsync(order, new ProductionOperationCommand(ProductionStage.QualityControl, ProductionOperationKind.Defect, 1, null, "пятно", Day));
+            var progress = await s.Floor.ProgressAsync(order);
+            Assert.Equal(["спущенные петли", "пятно"], progress.DefectReasons);
+            // Кто работал по заказу — первым в списке виновника; сам виновник не подставляется.
+            Assert.Equal((employee, true), (progress.Employees![0].Id, progress.Employees[0].WorkedOnOrder));
+            Assert.False(progress.Employees.Single(e => e.Id == colleague).WorkedOnOrder);
+        }
+
+        var other = await CreateOrgAsync();
+        await using (var foreign = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            // Подсказки и списки — только своей организации: чужой заказ не найден.
+            await Assert.ThrowsAsync<NotFoundException>(() => foreign.Floor.ProgressAsync(order));
+        }
+
+        host.Clock.UtcNow = host.Clock.UtcNow.AddDays(1);
+        try
+        {
+            await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+            // Перенос: у Петровой остаток 10 − 6 = 4; у Сидоровой (2 из 2 не отмечено ею — факт 0) — 2.
+            Assert.Equal(new ShiftCopyResult(2, 0), await s.ShiftTasks.CopyAsync(Day, Day.AddDays(1), remainderOnly: true));
+            var moved = (await s.ShiftTasks.BoardAsync(Day.AddDays(1))).Tasks.ToDictionary(t => t.EmployeeId, t => (t.Planned, t.Comment));
+            Assert.Equal((4m, "до обеда"), moved[employee]);
+            Assert.Equal(2m, moved[colleague].Planned);
+            await using var db = host.NewDb();
+            Assert.Contains(await db.AuditEntries.Where(e => e.OrganizationId == f.Org.OrganizationId && e.Action == "production.shift.assigned")
+                .Select(e => e.After).ToListAsync(), a => a!.Contains("перенос недовыполненного"));
+        }
+        finally
+        {
+            host.Clock.UtcNow = host.Clock.UtcNow.AddDays(-1);
+        }
+    }
+
     /// <summary>Рабочий «Сотрудник» с карточкой сотрудника (вязальщица) и, если нужно, отдельной выдачей права отмечать этапы.</summary>
     private async Task<(long User, long Employee)> AddWorkerAsync(Fixture f, bool grant, string? personnelNumber = null, string lastName = "Петрова")
     {

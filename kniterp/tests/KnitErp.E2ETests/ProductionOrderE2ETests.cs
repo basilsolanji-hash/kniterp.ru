@@ -89,6 +89,8 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
         await Assertions.Expect(page.GetByText("Отмечено.")).ToBeVisibleAsync();
         var knitting = page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Вязание" });
         await Assertions.Expect(knitting).ToContainTextAsync("6 шт");
+        // D413: после отметки количество подставлено само — сколько ещё можно отметить на этапе.
+        await Assertions.Expect(page.GetByLabel("Количество", new() { Exact = true })).ToHaveValueAsync("4");
 
         await page.GetByLabel("Этап", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Сборка" });
         await page.GetByLabel("Количество", new() { Exact = true }).FillAsync("7");
@@ -399,6 +401,10 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
 
             await Assertions.Expect(assigned).ToBeVisibleAsync();
             await Assertions.Expect(page.GetByRole(AriaRole.Row).Filter(new() { HasText = "Петрова А. С." }).Last).ToContainTextAsync("0%");
+            // D413: после выбора заказа этап и план подставлены по свободному количеству.
+            await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync("");
+            await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync(order.ToString());
+            await Assertions.Expect(page.GetByLabel("План на смену")).ToHaveValueAsync("10");
             // Повтор заданий прошлого дня: вчера заданий нет — ничего не скопировано, сообщение понятное.
             await page.GetByRole(AriaRole.Button, new() { Name = "Повторить задания прошлого дня" }).ClickAsync();
             await page.GetByRole(AriaRole.Button, new() { Name = "Да", Exact = true }).ClickAsync();
