@@ -440,6 +440,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("LastSeenAtUtc")
+                        .HasDatabaseName("ix_user_sessions_last_seen");
+
                     b.HasIndex("PublicId")
                         .IsUnique()
                         .HasDatabaseName("ux_user_sessions_public_id");

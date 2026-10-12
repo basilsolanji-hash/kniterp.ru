@@ -105,6 +105,12 @@ if (!builder.Configuration.GetValue<bool>("Webhooks:Disabled"))
     builder.Services.AddHostedService<KnitErp.Web.Api.WebhookWorker>();
 }
 
+// D126: старые записи сессий удаляются раз в сутки; в тестовых стендах отключается ключом Auth:SessionCleanupDisabled.
+if (!builder.Configuration.GetValue<bool>("Auth:SessionCleanupDisabled"))
+{
+    builder.Services.AddHostedService<KnitErp.Web.Api.SessionCleanupWorker>();
+}
+
 // Модуль «Сотрудники»: статус «В отпуске» по приказам Т-6 (D210).
 if (!builder.Configuration.GetValue<bool>("Hr:StatusWorkerDisabled"))
 {

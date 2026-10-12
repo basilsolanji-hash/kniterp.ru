@@ -190,6 +190,7 @@ internal sealed class UserSessionConfiguration : IEntityTypeConfiguration<UserSe
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.PublicId).IsUnique().HasDatabaseName("ux_user_sessions_public_id");
         b.HasIndex(x => new { x.UserId, x.RevokedAtUtc }).HasDatabaseName("ix_user_sessions_user");
+        b.HasIndex(x => x.LastSeenAtUtc).HasDatabaseName("ix_user_sessions_last_seen"); // D126: очистка старых сессий
     }
 }
 
