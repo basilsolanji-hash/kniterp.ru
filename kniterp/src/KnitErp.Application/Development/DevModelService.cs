@@ -364,11 +364,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             await db.LockAsync($"kniterp.dev.files.{ctx.OrganizationId}.{modelId}", ct);
             var used = await db.DevFiles.AsNoTracking().Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId)
                 .GroupBy(_ => 1).Select(g => new { Count = g.Count(), Bytes = g.Sum(f => (long)f.SizeBytes) }).SingleOrDefaultAsync(ct);
-            if (used is not null && (used.Count >= DevFile.MaxFilesPerModel || used.Bytes + content.Length > DevFile.MaxBytesPerModel))
-            {
-                throw new BusinessRuleException("dev.file.quota",
-                    $"У модели исчерпан предел файлов: не больше {DevFile.MaxFilesPerModel} файлов и {DevFile.MaxBytesPerModel / 1024 / 1024 / 1024} ГБ вместе с версиями.");
-            }
+            DevFile.EnsureQuota(used?.Count ?? 0, used?.Bytes ?? 0, content.Length);
 
             var last = await db.DevFiles.AsNoTracking()
                 .Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId && f.Kind == kind && f.FileName == name)

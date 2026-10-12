@@ -278,4 +278,13 @@ public sealed class DevAutomationRulesTests
         Assert.Empty(DevAutomationRules.Hints(DevStage.Handed, false, false, false, false, false));
         Assert.All(DevAutomationRules.Hints(DevStage.Idea, false, false, false, false, false), h => Assert.Contains(h, DevAutomationRules.AllHints));
     }
+
+    [Fact]
+    public void File_quota_limits_count_and_total_size_per_model()
+    {
+        DevFile.EnsureQuota(0, 0, DevFile.MaxBytes);
+        DevFile.EnsureQuota(DevFile.MaxFilesPerModel - 1, DevFile.MaxBytesPerModel - 10, 10);
+        Assert.Equal("dev.file.quota", Assert.Throws<BusinessRuleException>(() => DevFile.EnsureQuota(DevFile.MaxFilesPerModel, 0, 1)).Code);
+        Assert.Equal("dev.file.quota", Assert.Throws<BusinessRuleException>(() => DevFile.EnsureQuota(1, DevFile.MaxBytesPerModel - 10, 11)).Code);
+    }
 }
