@@ -63,6 +63,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
 
     /// <summary>D122: серверные сессии входа.</summary>
     DbSet<UserSession> UserSessions { get; }
+
+    /// <summary>D127: ограничения входа участников организации.</summary>
+    DbSet<SignInRestriction> SignInRestrictions { get; }
     DbSet<Characteristic> Characteristics { get; }
     DbSet<ItemCharacteristicValue> ItemCharacteristicValues { get; }
     DbSet<ItemPhoto> ItemPhotos { get; }

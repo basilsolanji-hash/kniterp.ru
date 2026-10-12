@@ -211,6 +211,12 @@ else
         <UserRightsPanel UserId="rightsUser" OnClose="() => _rightsUser = null" @key="rightsUser" />
     }
 
+    @if (_restrictUser is { } restrictUser)
+    {
+        @* D127: ограничения входа пользователя в этой организации. *@
+        <SignInRestrictionsPanel UserId="restrictUser" OnClose="() => _restrictUser = null" OnSaved="ReloadAsync" @key="restrictUser" />
+    }
+
     <div class="scroll">
         <table>
             <thead>
@@ -235,6 +241,10 @@ else
                             {
                                 <span class="tag">2FA</span>
                             }
+                            @if (u.HasSignInRestrictions)
+                            {
+                                <span class="tag warn" title="@L("Вход ограничен: устройство, сети или время работы")">@L("ограничен вход")</span>
+                            }
                         </td>
                         @if (CanManage)
                         {
@@ -249,6 +259,7 @@ else
                                     <div class="row-actions">
                                         <button type="button" class="secondary" @onclick="() => _rightsUser = u.UserId" disabled="@(_mode != Mode.None)">@L("Права")</button>
                                         <button type="button" class="secondary" @onclick="() => OpenChangeRoleAsync(u)" disabled="@(_mode != Mode.None)">@L("Изменить роль")</button>
+                                        <button type="button" class="secondary" @onclick="() => OpenRestrictions(u)" disabled="@(_mode != Mode.None)">@L("Ограничения входа")</button>
                                         @if (u.MembershipStatus == MembershipStatus.Active)
                                         {
                                             <button type="button" class="secondary" @onclick="() => Open(Mode.Block, u)" disabled="@(_mode != Mode.None)">@L("Заблокировать")</button>
@@ -288,6 +299,15 @@ else
 
     /// <summary>D112: открыта панель прав этого пользователя.</summary>
     private long? _rightsUser;
+
+    /// <summary>D127: открыта панель ограничений входа этого пользователя.</summary>
+    private long? _restrictUser;
+
+    private void OpenRestrictions(UserRowDto user)
+    {
+        _rightsUser = null;
+        _restrictUser = user.UserId;
+    }
 
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;

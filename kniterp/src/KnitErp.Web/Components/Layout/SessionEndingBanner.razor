@@ -1,0 +1,99 @@
+@*
+    D127: предупреждение на устройстве, сессия которого закроется: вход с другого устройства («одно устройство») или конец
+    разрешённого времени работы. Закрыть баннер нельзя. Момент закрытия хранит и проверяет сервер (user_sessions.EndsAtUtc):
+    вкладка сверяется с ним раз в 10 с и ровно в этот момент; отсчёт здесь — только подсказка.
+*@
+@implements IDisposable
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Navigation
+
+@if (_notice is { } notice)
+{
+    <style>
+        .session-ending { position: fixed; top: 0; left: 0; right: 0; z-index: 1100; padding: 10px 16px; text-align: center;
+                          background: #b42318; color: #fff; font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+    </style>
+    <div class="session-ending" role="alert" aria-live="assertive" data-testid="session-ending">
+        @if (notice.Reason == KnitErp.Domain.Access.SessionEndReason.Schedule)
+        {
+            @L("Разрешённое время работы закончилось. Этот сеанс закроется через {0} с", Seconds(notice))
+        }
+        else
+        {
+            @L("Выполнен вход с другого устройства. Этот сеанс закроется через {0} с", Seconds(notice))
+        }
+    </div>
+}
+
+@code {
+    private SessionRevalidatingAuthenticationStateProvider? _provider;
+    private SessionNotice? _notice;
+    private Timer? _timer;
+    private bool _left;
+
+    protected override void OnInitialized()
+    {
+        _provider = AuthState as SessionRevalidatingAuthenticationStateProvider;
+        if (_provider is not null)
+        {
+            _notice = _provider.Notice;
+            _provider.NoticeChanged += OnNoticeChanged;
+        }
+
+        StartTimer();
+    }
+
+    /// <summary>Отсчёт идёт, только пока есть предупреждение.</summary>
+    private void StartTimer()
+    {
+        if (_notice is not null && _timer is null)
+        {
+            _timer = new Timer(_ => _ = InvokeAsync(Tick), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        }
+    }
+
+    private static int Seconds(SessionNotice notice) => Math.Max(0, (int)Math.Ceiling((notice.EndsAtUtc - DateTime.UtcNow).TotalSeconds));
+
+    private void OnNoticeChanged() => _ = InvokeAsync(() =>
+    {
+        if (_provider?.ClosedCode is { } closed && !_left)
+        {
+            // Сервер закрыл сессию (момент закрытия наступил, чужой адрес) — сразу на вход с объяснением.
+            _left = true;
+            Navigation.NavigateTo($"account/login?closed={Uri.EscapeDataString(closed)}", forceLoad: true);
+            return;
+        }
+
+        _notice = _provider?.Notice;
+        StartTimer();
+        StateHasChanged();
+    });
+
+    private void Tick()
+    {
+        if (_notice is not { } notice || _left)
+        {
+            return;
+        }
+
+        if (DateTime.UtcNow >= notice.EndsAtUtc.AddSeconds(2))
+        {
+            // Сервер уже не примет сессию; если проверка вкладки ещё не успела — уходим на вход сами.
+            _left = true;
+            var code = notice.Reason == KnitErp.Domain.Access.SessionEndReason.Schedule ? "schedule" : "device";
+            Navigation.NavigateTo($"account/login?closed={code}", forceLoad: true);
+            return;
+        }
+
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        if (_provider is not null)
+        {
+            _provider.NoticeChanged -= OnNoticeChanged;
+        }
+    }
+}

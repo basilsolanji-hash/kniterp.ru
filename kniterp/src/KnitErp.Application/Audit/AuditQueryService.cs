@@ -63,7 +63,8 @@ public sealed class AuditQueryService(IKnitErpDbContext db, IAccessGuard guard)
         [AuditActions.SignedIn, AuditActions.SignInFailed, AuditActions.LockedOut, AuditActions.SignedOut, AuditActions.TwoFactorEnabled,
          AuditActions.RecoveryCodeUsed, AuditActions.RecoveryCodesIssued, AuditActions.TwoFactorReset, AuditActions.EmergencyAccess,
          AuditActions.DeviceTrusted, AuditActions.DeviceRevoked, AuditActions.PasswordResetRequested, AuditActions.PasswordReset,
-         AuditActions.PasswordResetIssued, AuditActions.StepUpConfirmed, AuditActions.StepUpFailed];
+         AuditActions.PasswordResetIssued, AuditActions.StepUpConfirmed, AuditActions.StepUpFailed,
+         AuditActions.SignInRestricted, AuditActions.SessionEnding, AuditActions.SignInRestrictionsChanged];
 
     /// <summary>
     /// Журнал входов: входы, неудачные попытки, блокировки, выходы, подключение 2FA — с адресом, откуда пришёл запрос.
@@ -72,7 +73,9 @@ public sealed class AuditQueryService(IKnitErpDbContext db, IAccessGuard guard)
     public async Task<IReadOnlyList<SignInRowDto>> ListSignInsAsync(DateTime? fromUtc, DateTime? toUtc, bool failuresOnly, int take = 500, CancellationToken ct = default)
     {
         var ctx = await guard.CurrentAsync(ct);
-        var actions = failuresOnly ? [AuditActions.SignInFailed, AuditActions.LockedOut, AuditActions.StepUpFailed] : SignInActions.ToList();
+        var actions = failuresOnly
+            ? [AuditActions.SignInFailed, AuditActions.LockedOut, AuditActions.StepUpFailed, AuditActions.SignInRestricted]
+            : SignInActions.ToList();
         var query = db.AuditEntries.AsNoTracking()
             .Where(a => a.OrganizationId == ctx.OrganizationId && actions.Contains(a.Action));
         if (!ctx.Permissions.Has(Permissions.AuditLogView))
@@ -107,7 +110,8 @@ public sealed class AuditQueryService(IKnitErpDbContext db, IAccessGuard guard)
             var address = at >= 0 ? reason[(at + 6)..].Trim() : null;
             var detail = at >= 0 ? reason[..at].TrimEnd(' ', '·') : reason;
             return new SignInRowDto(e.OccurredAtUtc, names.GetValueOrDefault(userId), e.Action, e.After,
-                detail.Length == 0 ? null : detail, address, e.Action is AuditActions.SignInFailed or AuditActions.LockedOut or AuditActions.StepUpFailed);
+                detail.Length == 0 ? null : detail, address,
+                e.Action is AuditActions.SignInFailed or AuditActions.LockedOut or AuditActions.StepUpFailed or AuditActions.SignInRestricted);
         }).ToList();
     }
 
