@@ -139,7 +139,7 @@ else
                                 <td></td><td>@r.BatchLabel</td><td class="num">@Quantities.Format(r.Quantity)</td><td class="num">@KgText(r.NetKg)</td>
                                 @if (bt.CanEdit)
                                 {
-                                    <td><button type="button" class="secondary" @onclick="() => RemoveBatchAsync(r)" disabled="@_busy" aria-label="@L("Убрать партию {0}", r.BatchLabel)">@L("Убрать")</button></td>
+                                    <td><button type="button" class="secondary" @onclick="() => RemoveBatchAsync(r)" disabled="@_busy" aria-label="@L("Убрать партию {0}", r.BatchLabel)">@L("Убрать")</button><WhyDisabled When="@(_doc.Lines.Count == 0)">@L("Добавьте хотя бы одну строку")</WhyDisabled></td>
                                 }
                             </tr>
                         }
@@ -166,7 +166,7 @@ else
                     </select>
                 </label>
                 <label>@L("Количество") <input @bind="_bQty" inputmode="decimal" size="10" placeholder="@(selected is null ? "" : Quantities.Format(selected.LineQuantity - selected.Allocated))" /></label>
-                <button type="submit" disabled="@(_busy || _bItemId is null)">@L("Добавить партию")</button>
+                <button type="submit" disabled="@(_busy || _bItemId is null)" title="@((_bItemId is null) ? L("Выберите позицию") : null)">@L("Добавить партию")</button>
                 <a class="button secondary" href="stock-batches">@L("Новая партия")</a>
             </form>
         }
@@ -176,7 +176,7 @@ else
         <LabelsButton Lines="@(_doc.Lines.Select(l => (l.ItemId, l.Quantity)))" />
         @if (_doc.CanEdit)
         {
-            <button type="button" @onclick="SubmitAsync" disabled="@(_busy || _doc.Lines.Count == 0)">@L("Отправить на утверждение")</button>
+            <button type="button" @onclick="SubmitAsync" disabled="@(_busy || _doc.Lines.Count == 0)" title="@((_doc.Lines.Count == 0) ? L("Добавьте хотя бы одну строку") : null)">@L("Отправить на утверждение")</button>
             <ConfirmButton Class="secondary" OnConfirm="CancelAsync" Disabled="@_busy" Question='@L("Отменить документ?")'>@L("Отменить документ")</ConfirmButton>
         }
         @if (_doc.CanApprove)

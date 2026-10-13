@@ -558,6 +558,9 @@
         /* D320: подсказка (похожие позиции и т. п.) — не ошибка. */
         .hint.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
         .hint.warn a { color: inherit; margin-left: 6px; }
+        /* D809: причина у неактивного действия и «только просмотр». */
+        .why-disabled { display: inline-flex; align-items: baseline; gap: 4px; font-size: 12.5px; color: var(--muted); margin: 0 6px; }
+        .readonly-note { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text-2); }
         /* D318: выбор позиций в списке и панель массового изменения. */
         th.select-col, td.select-col { width: 28px; padding-right: 0; }
         .bulk-bar { margin: 8px 0; } .bulk-bar .grid { grid-template-columns: minmax(140px, auto) minmax(0, 1fr); align-items: center; }

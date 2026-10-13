@@ -19,7 +19,7 @@
         <AntiforgeryToken />
         @foreach (var o in _organizations)
         {
-            <button type="submit" name="OrganizationId" value="@o.OrganizationId" disabled="@(o.OrganizationId == _session?.OrganizationId)">
+            <button type="submit" name="OrganizationId" value="@o.OrganizationId" disabled="@(o.OrganizationId == _session?.OrganizationId)" title="@((o.OrganizationId == _session?.OrganizationId) ? L("Вы уже работаете в этой организации") : null)">
                 @o.ShortName @(o.OrganizationId == _session?.OrganizationId ? L("(текущая)") : "")
             </button>
         }

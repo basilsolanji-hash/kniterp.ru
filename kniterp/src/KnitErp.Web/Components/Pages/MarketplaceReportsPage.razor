@@ -95,7 +95,7 @@ else
                         <label class="inline w2"><input type="checkbox" @bind="_acceptErrors" /> @L("Загрузить без строк с ошибками")</label>
                     }
                     <div class="sx-actions">
-                        <button type="submit" disabled="@(_busy || p.DuplicateId is not null)">@L("Загрузить отчёт")</button>
+                        <button type="submit" disabled="@(_busy || p.DuplicateId is not null)" title="@((p.DuplicateId is not null) ? L("Этот отчёт уже загружен") : null)">@L("Загрузить отчёт")</button>
                         <button type="button" class="secondary" @onclick="ResetPreview" disabled="@_busy">@L("Отмена")</button>
                     </div>
                 </form>
@@ -169,7 +169,7 @@ else
                             </td>
                             <td>
                                 <select value="@(edit.Scheme?.ToString() ?? "")" @onchange="e => edit.Scheme = Enum.TryParse<FulfillmentScheme>(e.Value?.ToString(), out var sc) ? sc : null"
-                                        aria-label="@L("Схема канала {0}", c.Name)" disabled="@(_busy || edit.Marketplace is null)">
+                                        aria-label="@L("Схема канала {0}", c.Name)" disabled="@(_busy || edit.Marketplace is null)" title="@((edit.Marketplace is null) ? L("Выберите площадку") : null)">
                                     <option value="">—</option>
                                     <option value="@FulfillmentScheme.Fbs">@L("FBS — со своего склада")</option>
                                     <option value="@FulfillmentScheme.Fbo">@L("FBO — со склада маркетплейса")</option>

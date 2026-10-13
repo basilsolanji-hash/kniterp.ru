@@ -89,10 +89,10 @@ else
                 </select>
             </label>
             <label>@L("Сумма") <input @bind="_lineAmount" inputmode="decimal" size="12" required /></label>
-            <button type="submit" disabled="@_busy">@L("Добавить")</button>
+            <button type="submit" disabled="@_busy">@L("Добавить")</button><WhyDisabled When="@(d.Lines.Count == 0)">@L("Добавьте хотя бы одну строку")</WhyDisabled>
         </form>
         <div class="actions" style="margin-top: 12px">
-            <ConfirmButton Class="" Disabled="_busy || d.Lines.Count == 0" Question="@L("Утвердить отчёт? Строки больше не изменить.")" OnConfirm="ApproveAsync">@L("Утвердить")</ConfirmButton>
+            <ConfirmButton Class="" Disabled="_busy || d.Lines.Count == 0" Title="@((d.Lines.Count == 0) ? L("Добавьте хотя бы одну строку") : null)" Question="@L("Утвердить отчёт? Строки больше не изменить.")" OnConfirm="ApproveAsync">@L("Утвердить")</ConfirmButton>
         </div>
     }
 

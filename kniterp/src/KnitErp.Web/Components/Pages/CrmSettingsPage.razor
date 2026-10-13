@@ -18,6 +18,7 @@ else if (_data is null)
 else
 {
     <h1>@L("Настройки CRM")</h1>
+    <ReadOnlyNote When="@(!_data.CanEdit)" />
     <p class="muted small">@L("Воронки и их этапы, источники обращений, причины отказа. Ничего не удаляется — уходит в архив; сделки и лиды сохраняют ссылки.")</p>
 
     @if (_message is not null)
@@ -29,7 +30,7 @@ else
     {
         <form class="panel" @onsubmit="SaveAutomationAsync" aria-label="@L("Автоматизация")">
             <h2>@L("Автоматизация")</h2>
-            <fieldset disabled="@(!_data.CanEdit)">
+            <fieldset disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)">
                 <div class="grid">
                     <label>
                         @L("Заявки из API, телефонии и импорта")

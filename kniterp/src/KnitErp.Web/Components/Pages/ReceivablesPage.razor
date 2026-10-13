@@ -148,6 +148,9 @@ else
 }
 
 @code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
     private ReceivablesReportDto? _report;
     private bool _busy;
     private string? _denied;
@@ -169,6 +172,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        _asOf ??= TimeZones.Today(CurrentAccess.TimeZoneId); // D809: отчёт «на дату» — сегодня организации, а не пустое поле
         try
         {
             _report = await Sales.ReceivablesAsync(Filter);

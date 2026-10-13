@@ -62,7 +62,7 @@
         </table>
     </div>
     <div class="actions">
-        <button type="button" @onclick="ImportAsync" disabled="@(_busy || SelectedCount == 0)">@L("Создать оплаты: {0}", SelectedCount)</button>
+        <button type="button" @onclick="ImportAsync" disabled="@(_busy || SelectedCount == 0)" title="@((SelectedCount == 0) ? L("Отметьте строки в списке") : null)">@L("Создать оплаты: {0}", SelectedCount)</button><WhyDisabled When="@(SelectedCount == 0)">@L("Отметьте строки в списке")</WhyDisabled>
         <button type="button" class="secondary" @onclick="() => { _preview = null; _content = null; }" disabled="@_busy">@L("Отмена")</button>
     </div>
 }

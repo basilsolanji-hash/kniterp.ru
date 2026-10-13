@@ -77,7 +77,7 @@ else
             </label>
         </div>
         <label class="check"><input type="checkbox" @bind="_onlyAvailable" /> @L("Только позиции в наличии")</label>
-        <div class="actions"><button type="submit" disabled="@(_busy || _options.PriceTypes.Count == 0)">@L("Создать фид")</button></div>
+        <div class="actions"><button type="submit" disabled="@(_busy || _options.PriceTypes.Count == 0)" title="@((_options.PriceTypes.Count == 0) ? L("Сначала создайте вид цены: Настройки → Каталог") : null)">@L("Создать фид")</button><WhyDisabled When="@(_options.PriceTypes.Count == 0)">@L("Сначала создайте вид цены: Настройки → Каталог")</WhyDisabled></div>
     </form>
 
     <div class="scroll">

@@ -79,7 +79,7 @@ else
                         </tbody>
                     </table>
                 </div>
-                <div class="sx-actions"><button type="submit" disabled="@(_busy || _selected.Count == 0)">@L("Создать отгрузку ({0})", _selected.Count)</button></div>
+                <div class="sx-actions"><button type="submit" disabled="@(_busy || _selected.Count == 0)" title="@((_selected.Count == 0) ? L("Отметьте строки в списке") : null)">@L("Создать отгрузку ({0})", _selected.Count)</button><WhyDisabled When="@(_selected.Count == 0)">@L("Отметьте строки в списке")</WhyDisabled></div>
             </form>
         </section>
     }

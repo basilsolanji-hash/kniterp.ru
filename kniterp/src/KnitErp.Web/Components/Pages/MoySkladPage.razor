@@ -53,7 +53,7 @@ else
             </details>
             <div class="actions">
                 <button type="button" class="secondary" @onclick="() => ProbeAsync(null)" disabled="@_busy">@L("Проверить связь по разделам")</button>
-                <ConfirmButton Class="secondary" Disabled="@(_busy || Active is not null)" Question="@L("Отключить МойСклад? Токен будет удалён из knitERP; загруженные позиции и их связи останутся.")"
+                <ConfirmButton Class="secondary" Disabled="@(_busy || Active is not null)" Title="@((Active is not null) ? L("Идёт загрузка — дождитесь её окончания") : null)" Question="@L("Отключить МойСклад? Токен будет удалён из knitERP; загруженные позиции и их связи останутся.")"
                                OnConfirm="DisconnectAsync">@L("Отключить")</ConfirmButton>
             </div>
         </div>
@@ -65,7 +65,7 @@ else
             <label>@L("Токен МойСклад") <input type="password" autocomplete="off" @bind="_token" @bind:event="oninput" maxlength="@ExternalConnection.TokenMaxLength" required style="width: 100%" /></label>
             <div class="actions">
                 <button type="submit" disabled="@_busy">@L("Проверить и подключить")</button>
-                <button type="button" class="secondary" @onclick="() => ProbeAsync(_token)" disabled="@(_busy || string.IsNullOrWhiteSpace(_token))">@L("Проверить связь по разделам")</button>
+                <button type="button" class="secondary" @onclick="() => ProbeAsync(_token)" disabled="@(_busy || string.IsNullOrWhiteSpace(_token))" title="@((string.IsNullOrWhiteSpace(_token)) ? L("Вставьте токен") : null)">@L("Проверить связь по разделам")</button>
             </div>
         </form>
     }
@@ -115,9 +115,9 @@ else
                 }
                 else
                 {
-                    <button type="button" class="secondary" @onclick="PreviewAsync" disabled="@(_busy || Active is not null)">@L("Предпросмотр")</button>
+                    <button type="button" class="secondary" @onclick="PreviewAsync" disabled="@(_busy || Active is not null)" title="@((Active is not null) ? L("Идёт загрузка — дождитесь её окончания") : null)">@L("Предпросмотр")</button>
                 }
-                <button type="button" @onclick="StartAsync" disabled="@(_busy || Active is not null)">@L("Загрузить")</button>
+                <button type="button" @onclick="StartAsync" disabled="@(_busy || Active is not null)" title="@((Active is not null) ? L("Идёт загрузка — дождитесь её окончания") : null)">@L("Загрузить")</button><WhyDisabled When="@(Active is not null)">@L("Идёт загрузка — дождитесь её окончания")</WhyDisabled>
             </div>
         </div>
 
@@ -162,10 +162,10 @@ else
         <div class="panel">
             <p class="muted small">@L("Цены продажи видов, связанных при загрузке, и закупочная цена позиций, связанных с МойСклад. Отправляются только отличающиеся; прочие поля МойСклад не меняются, цена, которой нет в knitERP, остаётся как была.")</p>
             <div class="actions">
-                <button type="button" class="secondary" @onclick="PriceExportPreviewAsync" disabled="@(_busy || Active is not null)">@L("Проверить цены")</button>
+                <button type="button" class="secondary" @onclick="PriceExportPreviewAsync" disabled="@(_busy || Active is not null)" title="@((Active is not null) ? L("Идёт загрузка — дождитесь её окончания") : null)">@L("Проверить цены")</button>
                 @if (_priceExport is { ToChange: > 0, Sent: 0 } pe)
                 {
-                    <ConfirmButton Disabled="@(_busy || Active is not null)" Question="@L("Отправить в МойСклад цены {0} позиций?", pe.ToChange)" OnConfirm="ExportPricesAsync">@L("Выгрузить цены ({0})", pe.ToChange)</ConfirmButton>
+                    <ConfirmButton Disabled="@(_busy || Active is not null)" Title="@((Active is not null) ? L("Идёт загрузка — дождитесь её окончания") : null)" Question="@L("Отправить в МойСклад цены {0} позиций?", pe.ToChange)" OnConfirm="ExportPricesAsync">@L("Выгрузить цены ({0})", pe.ToChange)</ConfirmButton>
                 }
             </div>
             @if (_priceExport is { } x)
@@ -189,7 +189,7 @@ else
             <p class="muted small">@L("Остатки связанных позиций: сумма по действующим складам knitERP и отчёт «Остатки» МойСклад по всем складам. Только чтение — ничего не меняется ни там, ни здесь.")</p>
             <div class="actions">
                 <label class="check"><input type="checkbox" @bind="_stockPerWarehouse" disabled="@_busy" /> @L("По складам (склады с одинаковым названием)")</label>
-                <button type="button" class="secondary" @onclick="StockCompareAsync" disabled="@(_busy || Active is not null)">@L("Сверить остатки")</button>
+                <button type="button" class="secondary" @onclick="StockCompareAsync" disabled="@(_busy || Active is not null)" title="@((Active is not null) ? L("Идёт загрузка — дождитесь её окончания") : null)">@L("Сверить остатки")</button>
             </div>
             @if (_stock is { } st)
             {
@@ -259,7 +259,7 @@ else
                                 }
                                 @if (r.Status == ImportRunStatus.Failed)
                                 {
-                                    <button type="button" @onclick="() => ResumeAsync(r)" disabled="@(_busy || Active is not null || !_status.Connected)">@L("Продолжить")</button>
+                                    <button type="button" @onclick="() => ResumeAsync(r)" disabled="@(_busy || Active is not null || !_status.Connected)" title="@((Active is not null) ? L("Идёт загрузка — дождитесь её окончания") : (!_status.Connected) ? L("Сначала подключите МойСклад") : null)">@L("Продолжить")</button>
                                 }
                                 <button type="button" class="secondary" @onclick="() => IssuesAsync(r)" disabled="@_busy">@L("Замечания")</button>
                                 <a class="button secondary" href="exchange/moysklad/runs/@r.Id/report.xlsx" download data-enhance-nav="false">@L("Отчёт .xlsx")</a>

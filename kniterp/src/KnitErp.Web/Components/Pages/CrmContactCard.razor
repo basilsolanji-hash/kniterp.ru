@@ -33,6 +33,8 @@ else
             <button type="button" class="secondary" @onclick="ToggleArchiveAsync" disabled="@_busy">@(_contact.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
         }
     </div>
+    <ReadOnlyNote When="@(!_contact.CanEdit)" />
+    <ReadOnlyNote When="@(_contact.CanEdit && _contact.IsArchived)" Text="@L("Контакт в архиве: верните его из архива, чтобы изменить.")" />
     <TagPicker Entity="TaggedEntity.CrmContact" EntityId="Id" ReadOnly="@(!_contact.CanEdit)" />
 
     @if (_message is not null)
@@ -50,7 +52,7 @@ else
     <div class="panel">
         <h2>@L("Данные контакта")</h2>
         <form @onsubmit="SaveAsync">
-            <fieldset disabled="@(!canEdit)">
+            <fieldset disabled="@(!canEdit)" title="@((!canEdit) ? L("Нет права на изменение") : null)">
                 <div class="grid">
                     <label>@L("ФИО") <input @bind="_f.Name" maxlength="@CrmContact.NameMaxLength" required /></label>
                     <label>@L("Должность") <input @bind="_f.Position" maxlength="@CrmContact.PositionMaxLength" /></label>
@@ -118,7 +120,7 @@ else
         <div class="panel">
             <h2>@L("Персональные данные (152-ФЗ)")</h2>
             <form @onsubmit="SaveConsentAsync">
-                <fieldset disabled="@(!canEdit)">
+                <fieldset disabled="@(!canEdit)" title="@((!canEdit) ? L("Нет права на изменение") : null)">
                     <div class="grid">
                         <label>
                             @L("Основание обработки")

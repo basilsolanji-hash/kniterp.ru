@@ -23,6 +23,7 @@ else
             <button type="button" @onclick="OpenCreate" disabled="@_busy">@L("Новое правило")</button>
         }
     </div>
+    <ReadOnlyNote When="@(!CanEdit)" />
     <p class="sx-lead">@L("Скидки в черновике заказа пересчитываются сами при каждом изменении строк; в подтверждённом — только кнопкой «Пересчитать скидки» с причиной. В каждой строке заказа видно, из чего сложилась скидка.")</p>
 
     @if (_message is not null)
@@ -36,7 +37,7 @@ else
             <div>
                 <span>@L("Как сочетаются скидки")</span>
                 <span>
-                    <select @bind="_mode" disabled="@(!CanEdit)" aria-label="@L("Как сочетаются скидки")">
+                    <select @bind="_mode" disabled="@(!CanEdit)" title="@((!CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("Как сочетаются скидки")">
                         <option value="@DiscountCombineMode.Sequential">@L("Одна за другой (по порядку)")</option>
                         <option value="@DiscountCombineMode.Best">@L("Не суммировать — только наибольшая")</option>
                     </select>

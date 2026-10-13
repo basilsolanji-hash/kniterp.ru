@@ -16,7 +16,7 @@
             </span>
             <span class="mp-search">
                 <select value="@(Decisions.TryGetValue(u.Key, out var chosen) ? chosen.ToString() : "")" @onchange="e => Choose(u.Key, e.Value?.ToString())"
-                        aria-label="@L("Позиция")" disabled="@(Busy || !Options.ContainsKey(u.Key))">
+                        aria-label="@L("Позиция")" disabled="@(Busy || !Options.ContainsKey(u.Key))" title="@((!Options.ContainsKey(u.Key)) ? L("Выберите позицию") : null)">
                     <option value="">@(Options.TryGetValue(u.Key, out var list) && list.Count == 0 ? L("не найдено") : "—")</option>
                     @if (Options.TryGetValue(u.Key, out var found))
                     {
@@ -28,7 +28,7 @@
                 </select>
                 @if (OnResolve.HasDelegate)
                 {
-                    <button type="button" @onclick="() => OnResolve.InvokeAsync((u.Key, Decisions[u.Key]))" disabled="@(Busy || !Decisions.ContainsKey(u.Key))">@L("Сопоставить")</button>
+                    <button type="button" @onclick="() => OnResolve.InvokeAsync((u.Key, Decisions[u.Key]))" disabled="@(Busy || !Decisions.ContainsKey(u.Key))" title="@((!Decisions.ContainsKey(u.Key)) ? L("Выберите решение") : null)">@L("Сопоставить")</button>
                 }
             </span>
         </div>

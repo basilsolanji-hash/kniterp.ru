@@ -239,6 +239,9 @@ public static class TimeZones
 
     public static string Label(string id) => Russian.FirstOrDefault(z => z.Id == id).Label ?? id;
 
+    /// <summary>D809: «сегодня» по часовому поясу организации (а не сервера) — для дат по умолчанию в полях отчётов.</summary>
+    public static DateTime Today(string timeZoneId) => ToLocal(DateTime.UtcNow, timeZoneId).Date;
+
     public static DateTime ToLocal(DateTime utc, string timeZoneId) =>
         TimeZoneInfo.TryFindSystemTimeZoneById(timeZoneId, out var tz)
             ? TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), tz)

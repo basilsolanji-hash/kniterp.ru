@@ -40,15 +40,20 @@
 <p class="muted small">@L("Сторнированные документы не выгружаются. Если такой документ уже был загружен в 1С раньше, пометьте его на удаление в 1С вручную.")</p>
 
 @code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
     private IReadOnlyList<LegalEntityOptionDto> _entities = [];
-    private DateTime _from = new(DateTime.Today.Year, DateTime.Today.Month, 1);
-    private DateTime _to = DateTime.Today;
+    private DateTime _from;
+    private DateTime _to;
     private long? _entity;
 
     private string Href => $"exchange/enterprise-data.xml?from={_from:yyyy-MM-dd}&to={_to:yyyy-MM-dd}" + (_entity is { } e ? $"&entity={e}" : "");
 
     protected override async Task OnInitializedAsync()
     {
+        var today = TimeZones.Today(CurrentAccess.TimeZoneId); // D809: период по часовому поясу организации, а не сервера
+        (_from, _to) = (new DateTime(today.Year, today.Month, 1), today);
         try
         {
             _entities = await LegalEntities.OptionsAsync();
