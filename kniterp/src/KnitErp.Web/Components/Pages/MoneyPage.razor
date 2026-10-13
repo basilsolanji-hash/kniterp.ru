@@ -201,7 +201,9 @@ else
             <tbody>
                 @if (_rows!.Count == 0)
                 {
-                    <tr><td colspan="8" class="muted">@L("Операций за период нет.")</td></tr>
+                    <EmptyRow Colspan="8" Text="@L("Операций за период нет.")" Hint="@L("Приходы и расходы денег по счетам и кассам; остатки считаются по этим операциям.")"
+                              Filtered="@(_filterAccount != "")"
+                              CreateHref="@(CanEdit ? "money?new=in" : null)" CreateText="@L("Записать приход")" />
                 }
                 @foreach (var r in _rows)
                 {

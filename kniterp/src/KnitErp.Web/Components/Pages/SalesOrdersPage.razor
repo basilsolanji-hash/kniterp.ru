@@ -145,7 +145,9 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="11" class="muted">@L("Заказов нет.")</td></tr>
+                    <EmptyRow Colspan="11" Text="@L("Заказов покупателей пока нет.")" Hint="@L("Здесь — заказы покупателей: что, кому и к какому сроку отгрузить. По заказу выставляют счёт, собирают и отгружают.")"
+                              Filtered="@(_status != "" || _search != "" || _from is not null || _to is not null || _stage != "" || _overdue || _unshipped || _tagId is not null)"
+                              CreateHref="@(CanEdit ? "sales-orders?new=1" : null)" CreateText="@L("Создать заказ")" />
                 }
                 @foreach (var o in _rows)
                 {

@@ -316,11 +316,34 @@ new MutationObserver(function () {
     // запрос к базе параллельно первому (у вкладки один DbContext — схема Blazor падает). Запоминание фильтров — через адрес
     // страницы (параметры запроса), по экранам (D816).
 
+    // Чек-лист 4.1 (D819): открытая пользователем форма — курсор сразу в первом поле. Только мышь/клавиатура (на телефоне фокус
+    // открыл бы клавиатуру) и не если пользователь уже вводит текст в другом поле.
+    var seenForms = new WeakSet(), userAt = 0, userPath = '';
+    // Форма открыта пользователем, если появилась вскоре после его нажатия; догрузившиеся со страницей формы фокус не забирают.
+    document.addEventListener('pointerdown', function () { userAt = Date.now(); userPath = location.pathname; }, true);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { userAt = Date.now(); userPath = location.pathname; } }, true);
+    function autofocus() {
+        var byUser = Date.now() - userAt < 1500 && userPath === location.pathname; // переход на другую страницу — не «открыл форму»
+        document.querySelectorAll('main form').forEach(function (form) {
+            if (seenForms.has(form)) return;
+            seenForms.add(form);
+            if (!byUser || form.hasAttribute('data-autosubmit') || !primarySubmit(form)) return;
+            if (!window.matchMedia('(pointer: fine)').matches) return;
+            var active = document.activeElement;
+            // Не мешаем набору текста; флажок или кнопка в фокусе не в счёт.
+            if (active && active.matches && active.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), select, textarea, [contenteditable]')) return;
+            var first = Array.prototype.find.call(form.querySelectorAll('input, select, textarea'), function (el) {
+                return !el.disabled && !el.readOnly && el.type !== 'hidden' && el.type !== 'checkbox' && el.type !== 'radio' && el.offsetParent !== null;
+            });
+            if (first) first.focus({ preventScroll: true });
+        });
+    }
+
     var queued = false;
     new MutationObserver(function () {
         if (queued) return;
         queued = true;
-        requestAnimationFrame(function () { queued = false; markRows(); });
+        requestAnimationFrame(function () { queued = false; markRows(); autofocus(); });
     }).observe(document.documentElement, { childList: true, subtree: true });
 
     window.kniterp = window.kniterp || {};

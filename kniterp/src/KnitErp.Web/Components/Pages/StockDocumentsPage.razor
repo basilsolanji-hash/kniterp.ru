@@ -113,7 +113,9 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="8" class="muted">@L("Документов нет.")</td></tr>
+                    <EmptyRow Colspan="8" Text="@L("Складских документов пока нет.")" Hint="@L("Поступления, списания, перемещения и отгрузки: проведённый документ меняет остатки на складе.")"
+                              Filtered="@(_status != "" || _search != "" || _from is not null || _to is not null || _warehouse != "" || _tagId is not null)"
+                              CreateHref="@(CurrentAccess.Has(Permissions.WarehouseDocumentCreate) && byte.TryParse(_kind, out var ek) ? $"stock-documents?kind={ek}&new={ek}" : null)" CreateText="@L("Создать документ")" />
                 }
                 @foreach (var d in _rows)
                 {

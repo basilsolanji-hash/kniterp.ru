@@ -37,7 +37,7 @@
         <tr><td style="width: 38%">Наименование груза</td><td>@cargo</td></tr>
         <tr><td>Количество грузовых мест, маркировка, вид упаковки</td><td>&nbsp;</td></tr>
         <tr><td>Масса груза брутто, кг</td><td>&nbsp;</td></tr>
-        <tr><td>Масса груза нетто, кг</td><td>@(Form.TotalNetKg is { } kg ? Quantities.Format(kg) : "")</td></tr>
+        <tr><td>Масса груза нетто, кг</td><td class="n">@(Form.TotalNetKg is { } kg ? Quantities.Format(kg) : "")</td></tr>
         <tr><td>Размеры (высота, ширина, длина), м; объём, м³</td><td>&nbsp;</td></tr>
         <tr><td>Опасный груз: класс, номер ООН</td><td>не является опасным</td></tr>
     </table>

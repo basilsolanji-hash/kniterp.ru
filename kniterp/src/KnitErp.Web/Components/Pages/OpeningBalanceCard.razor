@@ -83,7 +83,7 @@ else
                 <tbody>
                     @foreach (var r in _import.Rows.Where(r => r.Errors.Count > 0).Take(500))
                     {
-                        <tr><td>@r.RowNumber</td><td>@r.Code</td><td>@r.QuantityText</td><td>@string.Join(" ", r.Errors)</td></tr>
+                        <tr><td>@r.RowNumber</td><td>@r.Code</td><td class="num">@r.QuantityText</td><td>@string.Join(" ", r.Errors)</td></tr>
                     }
                 </tbody>
             </table>

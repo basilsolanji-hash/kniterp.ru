@@ -88,7 +88,9 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="8" class="muted">@L("Инвентаризаций пока нет.")</td></tr>
+                    <EmptyRow Colspan="8" Text="@L("Инвентаризаций пока нет.")" Hint="@L("Пересчёт склада: фактические количества сравниваются с учётом, разница проводится оприходованием или списанием.")"
+                              Filtered="@(_filterWarehouse != "" || _from is not null || _to is not null)"
+                              CreateHref="@(CurrentAccess.Has(Permissions.WarehouseDocumentCreate) ? "inventory?new=1" : null)" CreateText="@L("Начать инвентаризацию")" />
                 }
                 @foreach (var d in _rows)
                 {

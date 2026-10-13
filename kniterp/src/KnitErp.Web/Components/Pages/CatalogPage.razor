@@ -402,7 +402,9 @@ else
             <tbody>
                 @if (_list.Items.Count == 0)
                 {
-                    <tr><td colspan="10" class="muted">@L("Позиций не найдено.")</td></tr>
+                    <EmptyRow Colspan="10" Text="@L("Позиций пока нет.")" Hint="@L("Номенклатура — всё, что вы покупаете, производите и продаёте: товары, материалы, полуфабрикаты, услуги.")"
+                              Filtered="@(_search != "" || _kindFilter != "" || _typeFilter != "" || _tagId is not null)"
+                              CreateHref="@(_list.CanEdit ? "catalog?new=1" : null)" CreateText="@L("Добавить позицию")" />
                 }
                 @foreach (var i in _list.Items)
                 {

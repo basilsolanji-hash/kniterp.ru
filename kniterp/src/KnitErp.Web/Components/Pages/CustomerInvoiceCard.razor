@@ -23,7 +23,7 @@ else
     var issued = _invoice.Status == CustomerInvoiceStatus.Issued;
     <p><a href="customer-invoices">@L("← Счета покупателям")</a></p>
     <div class="page-head">
-        <h1>@L("Счёт покупателю") @_invoice.Number
+        <h1>@L("Счёт покупателю") @_invoice.Number <CopyButton Text="@_invoice.Number" What="@L("номер")" />
             @if (issued)
             {
                 <span class="tag @CustomerInvoicesPage.StateClass(_invoice.PaymentState)">@CustomerInvoicesPage.StateName(_invoice.PaymentState)</span>

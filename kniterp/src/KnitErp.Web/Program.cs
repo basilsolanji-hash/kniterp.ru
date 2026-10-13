@@ -184,6 +184,7 @@ if (!string.IsNullOrWhiteSpace(proxyNetwork))
 
 builder.Services.AddScoped<KnitErp.Web.Exports.ReportExports>();
 builder.Services.AddScoped<KnitErp.Web.Components.Pages.DevGate>(); // D718: очередь запросов разработки в вкладке
+builder.Services.AddScoped<KnitErp.Web.Components.Shared.TabLoadGate>(); // D820: загрузка главной и переход не одновременно
 builder.Services.AddScoped<KnitErp.Web.Components.Pages.DevListState>(); // D732: фильтры списков разработки на время вкладки
 builder.Services.AddHealthChecks().AddCheck<KnitErp.Web.Security.DatabaseHealthCheck>("database");
 

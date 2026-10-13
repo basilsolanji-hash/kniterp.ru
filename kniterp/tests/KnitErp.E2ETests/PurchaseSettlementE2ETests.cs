@@ -62,7 +62,7 @@ public sealed class PurchaseSettlementE2ETests(HrAppFixture app) : IClassFixture
         await page.WaitForFunctionAsync("() => window.Blazor !== undefined");
         await page.WaitForTimeoutAsync(300);
         await page.GetByLabel("Наименование").FillAsync(name);
-        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Поставщик" }).CheckAsync();
+        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Поставщик", Exact = true }).CheckAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить" }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = name })).ToBeVisibleAsync();
         await page.GetByRole(AriaRole.Link, new() { Name = name }).ClickAsync();

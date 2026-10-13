@@ -1,0 +1,43 @@
+@*
+    D819 (чек-лист 4.1 «Пустые состояния»): пустой список говорит, что это за экран, и предлагает одно действие — создать.
+    Если пусто из-за отбора — так и сказано (создавать «первый» тогда неуместно).
+*@
+<tr class="empty-row">
+    <td colspan="@Colspan">
+        <div class="empty-state">
+            <b>@(Filtered ? L("По этому отбору ничего нет.") : Text)</b>
+            @if (!Filtered && Hint is not null)
+            {
+                <span class="muted">@Hint</span>
+            }
+            @if (CreateHref is not null && CreateText is not null)
+            {
+                <a class="button" href="@CreateHref">@CreateText</a>
+            }
+        </div>
+    </td>
+</tr>
+
+@code {
+    [Parameter, EditorRequired]
+    public int Colspan { get; set; }
+
+    /// <summary>Что пусто: «Заказов покупателей пока нет.»</summary>
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>Что это за экран и зачем он — одной фразой.</summary>
+    [Parameter]
+    public string? Hint { get; set; }
+
+    /// <summary>Отбор задан — «по этому отбору ничего нет» вместо приглашения создать первый.</summary>
+    [Parameter]
+    public bool Filtered { get; set; }
+
+    /// <summary>Создание: адрес формы (…?new=1) и подпись; нет права — не передаётся.</summary>
+    [Parameter]
+    public string? CreateHref { get; set; }
+
+    [Parameter]
+    public string? CreateText { get; set; }
+}

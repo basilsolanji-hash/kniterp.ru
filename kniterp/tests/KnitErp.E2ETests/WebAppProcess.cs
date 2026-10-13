@@ -34,7 +34,7 @@ public sealed class WebAppProcess : IAsyncDisposable
         {
             lock (_log)
             {
-                return string.Join("\n", _log.TakeLast(40));
+                return string.Join("\n", _log.TakeLast(400));
             }
         }
     }

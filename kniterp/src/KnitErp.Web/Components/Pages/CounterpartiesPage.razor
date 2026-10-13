@@ -108,17 +108,34 @@ else
     </form>
     </FoldOnPhone>
 
+    @if (_selected.Count > 0)
+    {
+        @* D818 (раздел 0 п. 7): массовые действия над отмеченными строками — по одному вызову сервиса подряд (у вкладки один DbContext). *@
+        <div class="bulk-bar" role="region" aria-label="@L("Действия с отмеченными")">
+            <span>@L("Отмечено: {0}", _selected.Count)</span>
+            <ConfirmButton Class="secondary" OnConfirm="() => BulkAsync(archive: true)" Disabled="@(_busy || _mode != Mode.None)"
+                           Question='@L("Отправить отмеченных в архив?")'>@L("В архив")</ConfirmButton>
+            <button type="button" class="secondary" @onclick="() => BulkAsync(archive: false)" disabled="@(_busy || _mode != Mode.None)">@L("Вернуть из архива")</button>
+            <button type="button" class="link" @onclick="() => _selected.Clear()">@L("Снять отметку")</button>
+        </div>
+    }
     <div class="scroll">
         <table>
-            <thead><tr><th>@L("Наименование")</th><th>@L("Налоговый номер")</th><th>@L("Роль")</th>@if (_list.CanEdit || _list.CanArchive) { <th>@L("Действия")</th> }</tr></thead>
+            <thead><tr>@if (_list.CanArchive) { <th class="select-col"><input type="checkbox" checked="@AllSelected" @onchange="ToggleAll" aria-label="@L("Выбрать все")" /></th> }<th>@L("Наименование")</th><th>@L("Налоговый номер")</th><th>@L("Роль")</th>@if (_list.CanEdit || _list.CanArchive) { <th>@L("Действия")</th> }</tr></thead>
             <tbody>
                 @if (_list.Counterparties.Count == 0)
                 {
-                    <tr><td colspan="4" class="muted">@L("Контрагентов не найдено.")</td></tr>
+                    <EmptyRow Colspan="5" Text="@L("Контрагентов пока нет.")" Hint="@L("Покупатели и поставщики: реквизиты, договоры, контакты. Их выбирают в заказах, счетах и документах.")"
+                              Filtered="@(_search != "" || _role != "" || _tagId is not null)"
+                              CreateHref="@(_list.CanEdit ? "counterparties?new=1" : null)" CreateText="@L("Добавить контрагента")" />
                 }
                 @foreach (var c in _list.Counterparties)
                 {
                     <tr class="@(c.IsArchived ? "archived" : null)">
+                        @if (_list.CanArchive)
+                        {
+                            <td class="select-col"><input type="checkbox" checked="@_selected.Contains(c.Id)" @onchange="e => Toggle(c.Id, e.Value is true)" aria-label="@L("Выбрать: {0}", c.Name)" /></td>
+                        }
                         <td><a href="counterparties/@c.Id">@c.Name</a><TagDots Tags="@_tagMap.GetValueOrDefault(c.Id)" /> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }@if (c.Comment is not null) { <div class="muted">@c.Comment</div> }</td>
                         <td>@if (c.Inn is not null) { <span class="muted">@c.Country.TaxIdName </span>@c.Inn } else { <span>—</span> }@if (c.Kpp is not null) { <span class="muted"> / @c.Kpp</span> }@if (c.CountryCode != _orgCountry) { <div class="muted">@c.Country.Name</div> }</td>
                         <td>@L(c.RolesText)</td>
@@ -336,6 +353,85 @@ else
     private Task ArchiveAsync(CounterpartyDto c) => RunAsync(() => Counterparties.ArchiveAsync(c.Id, c.RowVersion), L("Контрагент «{0}» в архиве.", c.Name));
 
     private Task RestoreAsync(CounterpartyDto c) => RunAsync(() => Counterparties.RestoreAsync(c.Id, c.RowVersion), L("Контрагент «{0}» возвращён из архива.", c.Name));
+
+    private readonly HashSet<long> _selected = [];
+
+    private bool AllSelected => _list is { Counterparties.Count: > 0 } && _list.Counterparties.All(c => _selected.Contains(c.Id));
+
+    private void Toggle(long id, bool on)
+    {
+        if (on)
+        {
+            _selected.Add(id);
+        }
+        else
+        {
+            _selected.Remove(id);
+        }
+    }
+
+    private void ToggleAll(ChangeEventArgs e)
+    {
+        _selected.Clear();
+        if (e.Value is true)
+        {
+            _selected.UnionWith(_list!.Counterparties.Select(c => c.Id));
+        }
+    }
+
+    /// <summary>В архив или из архива все отмеченные: подряд, по одному, тем же методом, что и кнопка в строке; итог — одним сообщением.</summary>
+    private async Task BulkAsync(bool archive)
+    {
+        if (_busy || _list is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _flash = null;
+        _flashIsError = false;
+        var done = 0;
+        var failed = new List<string>();
+        try
+        {
+            foreach (var c in _list.Counterparties.Where(c => _selected.Contains(c.Id) && c.IsArchived != archive).ToList())
+            {
+                try
+                {
+                    if (archive)
+                    {
+                        await Counterparties.ArchiveAsync(c.Id, c.RowVersion);
+                    }
+                    else
+                    {
+                        await Counterparties.RestoreAsync(c.Id, c.RowVersion);
+                    }
+
+                    done++;
+                }
+                catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+                {
+                    failed.Add($"{c.Name}: {UiErrors.Message(ex)}");
+                }
+            }
+
+            _selected.Clear();
+            _flash = (archive ? L("В архиве: {0}.", done) : L("Возвращено из архива: {0}.", done))
+                     + (failed.Count > 0 ? " " + L("Не получилось: {0}", string.Join("; ", failed)) : "");
+            _flashIsError = failed.Count > 0;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
 
     /// <summary>Одна операция за раз, затем свежие данные: у вкладки один DbContext.</summary>
     private async Task RunAsync(Func<Task> action, string? success)

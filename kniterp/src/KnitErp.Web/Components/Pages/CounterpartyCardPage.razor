@@ -46,7 +46,7 @@ else
 
     <dl class="facts">
         <dt>@L("Страна")</dt><dd>@c.Country.Name</dd>
-        <dt>@c.Country.TaxIdName</dt><dd>@(c.Inn ?? "—")@if (c.Kpp is not null) { <span class="muted"> / @L("КПП") @c.Kpp</span> }</dd>
+        <dt>@c.Country.TaxIdName</dt><dd>@(c.Inn ?? "—")@if (c.Inn is not null) { <CopyButton Text="@c.Inn" What="@c.Country.TaxIdName" /> }@if (c.Kpp is not null) { <span class="muted"> / @L("КПП") @c.Kpp</span> }</dd>
         <dt>@L("Адрес")</dt><dd>@(c.Address ?? "—")</dd>
         @if (c.Comment is not null)
         {

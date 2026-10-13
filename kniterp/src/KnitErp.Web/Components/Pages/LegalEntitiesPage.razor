@@ -74,7 +74,7 @@ else
                 var sole = e.Kind == LegalEntityKind.SoleProprietor;
                 <dl class="facts">
                     <dt>@L("Полное наименование")</dt><dd>@e.Name</dd>
-                    <dt>@(sole ? L("ИНН") : L("ИНН/КПП"))</dt><dd>@e.Inn@(e.Kpp is null ? "" : " / " + e.Kpp)</dd>
+                    <dt>@(sole ? L("ИНН") : L("ИНН/КПП"))</dt><dd>@e.Inn@(e.Kpp is null ? "" : " / " + e.Kpp) <CopyButton Text="@e.Inn" What="@L("ИНН")" /></dd>
                     <dt>@(sole ? L("ОГРНИП") : L("ОГРН"))</dt><dd>@(e.Ogrn ?? "—")</dd>
                     <dt>@L("Юридический адрес")</dt><dd>@(e.LegalAddress ?? "—")</dd>
                     @if (sole)
@@ -114,7 +114,7 @@ else
                                 {
                                     <td>@a.BankName @if (a.IsDefault) { <span class="tag ok">@L("основной")</span> } @if (a.IsArchived) { <span class="tag">@L("архив")</span> }</td>
                                     <td>@a.Bic</td>
-                                    <td>@a.Account</td>
+                                    <td>@a.Account <CopyButton Text="@a.Account" What="@L("расчётный счёт")" /></td>
                                     <td>@(a.CorrAccount ?? "—")</td>
                                     <td class="num">@Opening(a)</td>
                                     @if (CanEdit)

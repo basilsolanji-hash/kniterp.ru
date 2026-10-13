@@ -560,6 +560,16 @@
         /* D320: подсказка (похожие позиции и т. п.) — не ошибка. */
         .hint.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
         .hint.warn a { color: inherit; margin-left: 6px; }
+        /* D819: пустой список — пояснение и одно действие. */
+        tr.empty-row > td { padding: 20px 12px; }
+        .empty-state { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+        .empty-state .button { margin-top: 4px; }
+        /* D818: кнопка «Копировать» рядом со значением. */
+        .copy-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; padding: 0 6px; margin-left: 4px;
+                    background: none; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 14px; font-weight: 400; vertical-align: middle; }
+        .copy-btn:hover { color: var(--text); border-color: var(--accent); }
+        .copy-note { font-size: 12.5px; color: var(--muted); margin-left: 6px; font-weight: 400; }
+        @@media (pointer: coarse) { .copy-btn { min-width: 44px; min-height: 44px; } }
         /* D816: строка таблицы открывает объект нажатием в любом месте. */
         main .scroll table tbody tr[data-row-link] { cursor: pointer; }
         main .scroll table tbody tr[data-row-link]:hover > td { background: var(--accent-soft-2, var(--field)); }
@@ -576,6 +586,7 @@
         .readonly-note { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text-2); }
         /* D318: выбор позиций в списке и панель массового изменения. */
         th.select-col, td.select-col { width: 28px; padding-right: 0; }
+        .bulk-bar:not(:has(.grid)) { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } /* D818 */
         .bulk-bar { margin: 8px 0; } .bulk-bar .grid { grid-template-columns: minmax(140px, auto) minmax(0, 1fr); align-items: center; }
         /* D316: конструктор этикеток — шаблоны, редактор и предпросмотр; на узком экране — друг под другом. */
         .label-designer { display: grid; gap: 16px; grid-template-columns: 1fr; }

@@ -33,6 +33,19 @@ public sealed class ConveniencesE2ETests(HrAppFixture app) : IClassFixture<HrApp
             await row.Locator("td").Nth(2).ClickAsync();
             await page.WaitForURLAsync(new Regex(@"/counterparties/\d+$"));
 
+            // D818: массовое действие — отметить строку и отправить в архив одним нажатием (с подтверждением).
+            await OpenAsync(page, "counterparties");
+            await page.GetByRole(AriaRole.Checkbox, new() { Name = $"Выбрать: {name}" }).CheckAsync();
+            await Assertions.Expect(page.GetByText("Отмечено: 1")).ToBeVisibleAsync();
+            await page.Locator(".bulk-bar").GetByRole(AriaRole.Button, new() { Name = "В архив" }).ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "Да", Exact = true }).ClickAsync();
+            await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("В архиве: 1.");
+
+            // D819: открытая пользователем форма — курсор сразу в первом поле.
+            await page.GetByRole(AriaRole.Button, new() { Name = "Добавить контрагента" }).ClickAsync();
+            await Assertions.Expect(page.GetByLabel("Наименование")).ToBeFocusedAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "Отмена" }).First.ClickAsync();
+
             // Несохранённая форма: «Отмена» в вопросе оставляет на странице, «ОК» — уходит.
             await OpenAsync(page, "counterparties?new=1");
             await page.GetByLabel("Наименование").FillAsync($"Черновик {Stamp}");
@@ -59,13 +72,19 @@ public sealed class ConveniencesE2ETests(HrAppFixture app) : IClassFixture<HrApp
             await page.Locator(".side a.nav-single", new() { HasText = "Главная" }).First.ClickAsync();
             await page.WaitForURLAsync(new Regex(@"/$"));
             // Ждём, пока главная загрузится: уход со страницы во время её загрузки — отдельная находка (docs/sessions/ui.md, сессии № 1).
-            await page.Locator("main h1").First.WaitForAsync();
-            await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-            await page.WaitForTimeoutAsync(1000);
+            // D820: «Назад» сразу, не дожидаясь данных главной, — переход ждёт конца её загрузки, вкладка не падает.
             await page.GoBackAsync();
             await page.WaitForURLAsync(new Regex(@"/stock-documents\?"));
             await Assertions.Expect(status).ToHaveValueAsync(chosen);
             Assert.Empty(errors);
+        }
+        catch
+        {
+            var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath();
+            Directory.CreateDirectory(dir);
+            await page.ScreenshotAsync(new() { Path = Path.Combine(dir, "conveniences-failure.png"), FullPage = true });
+            await File.WriteAllTextAsync(Path.Combine(dir, "conveniences-app.log"), app.AppLog);
+            throw;
         }
         finally
         {

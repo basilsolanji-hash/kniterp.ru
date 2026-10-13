@@ -23,6 +23,9 @@ public sealed class HrAppFixture : IAsyncLifetime
     private long _employee;
 
     public string BaseUrl => _app?.BaseUrl ?? string.Empty;
+
+    /// <summary>Последние строки журнала приложения — для сообщения об ошибке теста.</summary>
+    public string AppLog => _app?.Log ?? string.Empty;
     public string Password { get; } = "E2e-" + Guid.NewGuid().ToString("N")[..16] + "!a";
     public IBrowser Browser { get; private set; } = default!;
 

@@ -116,8 +116,8 @@ public sealed class CounterpartyCardE2ETests(HrAppFixture app) : IClassFixture<H
         await page.WaitForFunctionAsync("() => window.Blazor !== undefined");
         await page.WaitForTimeoutAsync(300);
         await page.GetByLabel("Наименование").FillAsync(name);
-        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Поставщик" }).UncheckAsync();
-        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Покупатель" }).CheckAsync();
+        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Поставщик", Exact = true }).UncheckAsync();
+        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Покупатель", Exact = true }).CheckAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить" }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = name })).ToBeVisibleAsync();
         await page.GetByRole(AriaRole.Link, new() { Name = name }).ClickAsync();

@@ -1,0 +1,47 @@
+@inject IJSRuntime JS
+@*
+    D818 (раздел 0 п. 7): «Копировать» рядом с номером документа, ИНН, счётом — одно нажатие вместо выделения мышью.
+    Подтверждение «Скопировано» видно 2 секунды и читается скринридером.
+*@
+<button type="button" class="copy-btn" @onclick="CopyAsync" title="@L("Копировать: {0}", What)" aria-label="@L("Копировать: {0}", What)">
+    @if (_done == true)
+    {
+        <span aria-hidden="true">✓</span>
+    }
+    else
+    {
+        <span aria-hidden="true">⧉</span>
+    }
+</button>
+@if (_done is not null)
+{
+    <span class="copy-note" role="status">@(_done == true ? L("Скопировано") : L("Не удалось скопировать — выделите и скопируйте вручную"))</span>
+}
+
+@code {
+    /// <summary>Что копируется.</summary>
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>Название для подсказки и скринридера: «номер», «ИНН»…</summary>
+    [Parameter, EditorRequired]
+    public string What { get; set; } = string.Empty;
+
+    private bool? _done;
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            _done = await JS.InvokeAsync<bool>("kniterp.copy", Text);
+        }
+        catch (JSException)
+        {
+            _done = false;
+        }
+
+        StateHasChanged();
+        await Task.Delay(2000);
+        _done = null;
+    }
+}

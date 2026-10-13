@@ -6,6 +6,7 @@
 @inject NotificationService Notifications
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject KnitErp.Web.Components.Shared.TabLoadGate LoadGate
 
 <CascadingValue Value="_assistant">
 <div class="shell @(_narrow ? "narrow" : "")">
@@ -659,6 +660,8 @@
 
     private async Task ConfirmLeaveAsync(LocationChangingContext context)
     {
+        // D820: тяжёлая страница ещё грузится — переход ждёт её (не дольше 10 с), иначе две страницы обратятся к базе разом.
+        await LoadGate.WaitIdleAsync(TimeSpan.FromSeconds(10));
         try
         {
             if (await JS.InvokeAsync<bool>("kniterp.isDirty")

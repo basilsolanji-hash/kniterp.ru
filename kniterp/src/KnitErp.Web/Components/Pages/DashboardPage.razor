@@ -4,6 +4,7 @@
 @using KnitErp.Domain.Organizations
 @using KnitErp.Application.Workspace
 @using KnitErp.Web.Components.Shared
+@inject KnitErp.Web.Components.Shared.TabLoadGate LoadGate
 @inject DashboardService Dashboard
 @inject PersonalToolsService Personal
 @inject ILogger<DashboardPage> Log
@@ -222,7 +223,7 @@ else
     {
         try
         {
-            _data = await Dashboard.GetAsync();
+            _data = await LoadGate.Run(() => Dashboard.GetAsync());
         }
         catch (AccessDeniedException ex)
         {
@@ -241,7 +242,7 @@ else
         _busy = true;
         try
         {
-            _data = await Dashboard.GetAsync(refresh: true);
+            _data = await LoadGate.Run(() => Dashboard.GetAsync(refresh: true));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -254,7 +255,7 @@ else
         }
     }
 
-    private Task RefreshAsync() => RunAsync(async () => _data = await Dashboard.GetAsync(refresh: true));
+    private Task RefreshAsync() => RunAsync(async () => _data = await LoadGate.Run(() => Dashboard.GetAsync(refresh: true)));
 
     private void ToggleSetup()
     {
@@ -303,14 +304,14 @@ else
             rows.Where(r => !r.Visible).Select(r => r.Key).ToList(),
             _actionSetup!.Where(r => r.Visible).Select(r => r.Key).ToList()));
         _setup = null;
-        _data = await Dashboard.GetAsync();
+        _data = await LoadGate.Run(() => Dashboard.GetAsync());
     });
 
     private Task ResetSetupAsync() => RunAsync(async () =>
     {
         await Personal.ResetDashboardLayoutAsync();
         _setup = null;
-        _data = await Dashboard.GetAsync();
+        _data = await LoadGate.Run(() => Dashboard.GetAsync());
     });
 
     /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>

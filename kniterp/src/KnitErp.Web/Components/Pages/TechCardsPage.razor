@@ -89,7 +89,7 @@ else
                         <td>@c.ItemCode</td>
                         <td><a href="tech-cards/@c.Id">@c.ItemName</a></td>
                         <td class="num">@c.Version</td>
-                        <td>@Quantities.Format(c.OutputQuantity) @c.UnitSymbol</td>
+                        <td class="num">@Quantities.Format(c.OutputQuantity) @c.UnitSymbol</td>
                         <td class="num">@c.LineCount</td>
                         <td><span class="tag @StatusClass(c.Status)">@L(c.StatusName)</span></td>
                         <td>@c.CreatedBy</td>
