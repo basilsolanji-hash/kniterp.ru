@@ -41,31 +41,15 @@ public sealed class PurchaseSettlementE2ETests(HrAppFixture app) : IClassFixture
         await page.GotoAsync("settings/purchases");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Настройки закупок" })).ToBeVisibleAsync();
         var percent = page.GetByLabel("Допуск поступления сверх заказа, %");
-        var saved = page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Настройки сохранены." });
-        // Значение, введённое до подключения Blazor, теряется, а «Сохранить» сохраняет прежнее (находка для ТЗ интерфейса D8xx) —
-        // повторяем, пока после перезагрузки не увидим 5.
+        // D811: кнопки «Сохранить» нет — значение сохраняется, как только поле изменено (уход из поля).
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Сохранить" })).ToHaveCountAsync(0);
+        await percent.FillAsync("5");
+        await percent.PressAsync("Tab");
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Сохранено." })).ToBeVisibleAsync();
+
         var stored = new Regex("^5([.,]0+)?$");
-        for (var attempt = 0; attempt < 10; attempt++)
-        {
-            await percent.FillAsync("5");
-            await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить" }).ClickAsync();
-            try
-            {
-                await saved.WaitForAsync(new() { Timeout = 1500 });
-            }
-            catch (TimeoutException)
-            {
-                continue;
-            }
-
-            await page.ReloadAsync();
-            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Настройки закупок" })).ToBeVisibleAsync();
-            if (stored.IsMatch(await percent.InputValueAsync()))
-            {
-                break;
-            }
-        }
-
+        await page.ReloadAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Настройки закупок" })).ToBeVisibleAsync();
         await Assertions.Expect(percent).ToHaveValueAsync(stored);
         Assert.True(await page.EvaluateAsync<bool>("() => document.documentElement.scrollWidth <= window.innerWidth + 1"));
     });

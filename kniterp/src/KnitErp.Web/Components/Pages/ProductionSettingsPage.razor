@@ -25,19 +25,19 @@ else
     <form class="panel" @onsubmit="SaveAsync">
         <h2>@L("Материалы")</h2>
         <label>@L("Допуск отклонения расхода от нормы, %")
-            <input @bind="_tolerance" inputmode="decimal" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("Допуск отклонения расхода от нормы, %")" /></label>
+            <input @bind="_tolerance" @bind:after="SaveAsync" inputmode="decimal" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("Допуск отклонения расхода от нормы, %")" /></label>
         <p class="muted">@L("Если расход с отходами отличается от нормы больше допуска, карточка заказа и отчёт по производству предупреждают. От 0 до 50%.")</p>
 
         <h2>@L("Баллы за качество и дисциплину")</h2>
-        <label><input type="checkbox" @bind="_enabled" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Считать баллы (видят сотрудник на терминале и мастер)")</label>
+        <label><input type="checkbox" @bind="_enabled" @bind:after="SaveAsync" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Считать баллы (видят сотрудник на терминале и мастер)")</label>
         <label>@L("За выполненное сменное задание")
-            <input type="number" min="-100" max="100" step="1" @bind="_done" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За выполненное сменное задание")" /></label>
+            <input type="number" min="-100" max="100" step="1" @bind="_done" @bind:after="SaveAsync" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За выполненное сменное задание")" /></label>
         <label>@L("За невыполненное задание с причиной")
-            <input type="number" min="-100" max="100" step="1" @bind="_withReason" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За невыполненное задание с причиной")" /></label>
+            <input type="number" min="-100" max="100" step="1" @bind="_withReason" @bind:after="SaveAsync" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За невыполненное задание с причиной")" /></label>
         <label>@L("За невыполненное задание без причины")
-            <input type="number" min="-100" max="100" step="1" @bind="_noReason" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За невыполненное задание без причины")" /></label>
+            <input type="number" min="-100" max="100" step="1" @bind="_noReason" @bind:after="SaveAsync" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За невыполненное задание без причины")" /></label>
         <label>@L("За каждую единицу брака по вине сотрудника")
-            <input type="number" min="-100" max="100" step="1" @bind="_defect" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За каждую единицу брака по вине сотрудника")" /></label>
+            <input type="number" min="-100" max="100" step="1" @bind="_defect" @bind:after="SaveAsync" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("За каждую единицу брака по вине сотрудника")" /></label>
         <p class="muted">@L("Целые числа от −100 до 100; минус — штраф. Задание выполнено, если факт не меньше плана; не выполнено — если день прошёл, а факт меньше. Виновника брака указывает контролёр на контроле качества.")</p>
         <p class="muted">@L("Задания в дни отсутствия по табелю кадров (отпуск, болезнь, выходной), кроме прогула, баллов и среднего процента не меняют.")</p>
         @if (_s.UpdatedAtUtc is { } at)
@@ -46,7 +46,8 @@ else
         }
         @if (_s.CanEdit)
         {
-            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+            @* D811 (запрос владельца 13.10, п. 3): без кнопки «Сохранить» — каждое изменение сохраняется сразу. *@
+            <p class="muted small" aria-live="polite">@(_busy ? L("Сохраняется…") : L("Изменения сохраняются сразу."))</p>
         }
     </form>
 }
@@ -87,10 +88,18 @@ else
         (_done, _withReason, _noReason, _defect) = (s.PointsTaskDone, s.PointsTaskMissedWithReason, s.PointsTaskMissedNoReason, s.PointsPerDefectUnit);
     }
 
+    private bool _again;
+
     private async Task SaveAsync()
     {
-        if (_busy || _s is null)
+        if (_s is null || !_s.CanEdit)
         {
+            return;
+        }
+
+        if (_busy)
+        {
+            _again = true; // изменение во время сохранения — сохраним следом, не потеряем
             return;
         }
 
@@ -105,8 +114,17 @@ else
             }
 
             await Settings.SaveAsync(new ProductionSettingsCommand(tolerance, _enabled, _done, _withReason, _noReason, _defect), _s.RowVersion);
-            Fill(await Settings.GetAsync());
-            _message = L("Настройки сохранены.");
+            var fresh = await Settings.GetAsync();
+            if (_again)
+            {
+                _s = fresh; // поля не перезаписываем: пользователь уже изменил их снова
+            }
+            else
+            {
+                Fill(fresh);
+            }
+
+            _message = L("Сохранено.");
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
         {
@@ -116,6 +134,12 @@ else
         finally
         {
             _busy = false;
+        }
+
+        if (_again)
+        {
+            _again = false;
+            await SaveAsync();
         }
     }
 }

@@ -745,7 +745,6 @@
   "Ошибку в проведённом документе исправляет «Сторнировать» с причиной и новый документ. Документы не удаляются.": "Oʻtkazilgan hujjatdagi xato sabab koʻrsatilgan «Storno qilish» va yangi hujjat bilan tuzatiladi. Hujjatlar oʻchirilmaydi.",
   "П": "П",
   "Панель быстрого доступа": "Tezkor kirish paneli",
-  "Панель сохранена — она будет такой же на других устройствах.": "Panel saqlandi — u boshqa qurilmalarda ham shunday boʻladi.",
   "Пароли не совпадают.": "Parollar mos kelmadi.",
   "Пароль": "Parol",
   "Пароль должен быть не длиннее {0} символов.": "Parol {0} belgidan uzun boʻlmasligi kerak.",
@@ -3052,7 +3051,6 @@
   "Изменены настройки производства": "Ishlab chiqarish sozlamalari o‘zgartirildi",
   "Мои показатели за месяц": "Oylik ko‘rsatkichlarim",
   "Настройки производства": "Ishlab chiqarish sozlamalari",
-  "Настройки сохранены.": "Sozlamalar saqlandi.",
   "Не выполнено (с причиной / без)": "Bajarilmadi (sababli / sababsiz)",
   "Не выполнено с причиной": "Sababli bajarilmadi",
   "Период — от одного дня до трёх месяцев.": "Davr — bir kundan uch oygacha.",
@@ -3450,7 +3448,6 @@
   "Сверхурочные: первые 2 часа, ×": "Ish vaqtidan tashqari: dastlabki 2 soat, ×",
   "Сверхурочные: следующие часы, ×": "Ish vaqtidan tashqari: keyingi soatlar, ×",
   "Составьте и закройте табели месяца; отметки выработки ведёт производство (терминал цеха).": "Oy tabellarini tuzing va yoping; ishlab chiqarish belgilarini ishlab chiqarish yuritadi (sex terminali).",
-  "Сохранить кадровые правила": "Kadrlar qoidalarini saqlash",
   "Сохранить параметры заработка": "Ish haqi parametrlarini saqlash",
   "Часовая тарифная ставка сдельщиков — больше нуля или пусто.": "Ishbay ishchilarning soatlik tarif stavkasi — noldan katta yoki boʻsh.",
   "Часовая тарифная ставка сдельщиков, руб. (для доплат; пусто — сдельный заработок / часы)": "Ishbay ishchilarning soatlik tarif stavkasi, rubl (qoʻshimcha toʻlovlar uchun; boʻsh — ishbay ish haqi / soatlar)",
@@ -6482,5 +6479,9 @@
   "Укажите дату и время отправки": "Yuborish sanasi va vaqtini ko‘rsating",
   "Этап в архиве": "Bosqich arxivda",
   "Этот отчёт уже загружен": "Bu hisobot allaqachon yuklangan",
-  "Таблица — прокрутка стрелками": "Jadval — strelkalar bilan aylantirish"
+  "Таблица — прокрутка стрелками": "Jadval — strelkalar bilan aylantirish",
+  "Добавить заметку": "Eslatma qo‘shish",
+  "Изменения сохраняются сразу.": "O‘zgarishlar darhol saqlanadi.",
+  "Сохранено — панель будет такой же на других устройствах.": "Saqlandi — panel boshqa qurilmalarda ham shunday bo‘ladi.",
+  "Сохраняется…": "Saqlanmoqda…"
 }

@@ -6,7 +6,7 @@
         <textarea @bind="_text" rows="4" maxlength="5000" placeholder="@L("Видна только вам")"></textarea>
     </label>
     <div class="actions">
-        <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+        <button type="submit" disabled="@_busy">@(_editId is null ? L("Добавить заметку") : L("Сохранить"))</button>
         @if (_editId is not null)
         {
             <button type="button" class="secondary" @onclick="Cancel">@L("Отмена")</button>

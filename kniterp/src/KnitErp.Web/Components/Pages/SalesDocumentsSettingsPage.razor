@@ -82,16 +82,17 @@ else
 
                 <form class="sx-form" @onsubmit="SaveFlagsAsync">
                     <div class="sx-legend">@L("Что выводить в документах")</div>
-                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnInvoice" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Логотип в счёте")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnOrder" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Логотип в заказе")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.QrOnInvoice" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("QR для оплаты в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnInvoice" @bind:after="SaveFlagsAsync" disabled="@(!_data.CanEdit || _busy)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Логотип в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnOrder" @bind:after="SaveFlagsAsync" disabled="@(!_data.CanEdit || _busy)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Логотип в заказе")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.QrOnInvoice" @bind:after="SaveFlagsAsync" disabled="@(!_data.CanEdit || _busy)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("QR для оплаты в счёте")</label>
                     <span></span>
-                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnInvoice" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в счёте")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnUpd" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в УПД")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnOrder" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в заказе")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnInvoice" @bind:after="SaveFlagsAsync" disabled="@(!_data.CanEdit || _busy)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnUpd" @bind:after="SaveFlagsAsync" disabled="@(!_data.CanEdit || _busy)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в УПД")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnOrder" @bind:after="SaveFlagsAsync" disabled="@(!_data.CanEdit || _busy)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в заказе")</label>
                     @if (_data.CanEdit)
                     {
-                        <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                        @* D811: флажки оформления сохраняются сразу. *@
+                        <p class="muted small" aria-live="polite">@(_busy ? L("Сохраняется…") : L("Изменения сохраняются сразу."))</p>
                     }
                 </form>
 

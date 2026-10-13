@@ -69,14 +69,15 @@ else
     <div class="panel">
         <h2>@L("Кадровые правила")</h2>
         <fieldset disabled="@(!_data.CanEditRules || _busy)" title="@((!_data.CanEditRules) ? L("Нет права на изменение") : null)" style="border: 0; padding: 0; margin: 0; min-width: 0">
-            <label class="inline"><input type="checkbox" @bind="_r.HrOfficerClosesTimesheet" /> @L("Кадровик может закрывать табель (иначе закрывает руководитель подразделения)")</label>
-            <label class="inline"><input type="checkbox" @bind="_r.LeaveOnlyByOrder" /> @L("Отпуск только по приказу Т-6 (без кнопки «В отпуск» на карточке)")</label>
-            <label class="inline"><input type="checkbox" @bind="_r.BlockPersonalDataWithoutConsent" /> @L("Не вводить персональные данные без действующего согласия сотрудника")</label>
-            <label class="inline"><input type="checkbox" @bind="_r.RequireAgreements" /> @L("Перед доступом сотрудник подписывает согласие на обработку ПДн, правила работы и обязательство о конфиденциальности")</label>
+            <label class="inline"><input type="checkbox" @bind="_r.HrOfficerClosesTimesheet" @bind:after="SaveRulesAsync" /> @L("Кадровик может закрывать табель (иначе закрывает руководитель подразделения)")</label>
+            <label class="inline"><input type="checkbox" @bind="_r.LeaveOnlyByOrder" @bind:after="SaveRulesAsync" /> @L("Отпуск только по приказу Т-6 (без кнопки «В отпуск» на карточке)")</label>
+            <label class="inline"><input type="checkbox" @bind="_r.BlockPersonalDataWithoutConsent" @bind:after="SaveRulesAsync" /> @L("Не вводить персональные данные без действующего согласия сотрудника")</label>
+            <label class="inline"><input type="checkbox" @bind="_r.RequireAgreements" @bind:after="SaveRulesAsync" /> @L("Перед доступом сотрудник подписывает согласие на обработку ПДн, правила работы и обязательство о конфиденциальности")</label>
         </fieldset>
         @if (_data.CanEditRules)
         {
-            <div class="actions"><button type="button" @onclick="SaveRulesAsync" disabled="@_busy">@L("Сохранить кадровые правила")</button></div>
+            @* D811: правило сохраняется сразу при нажатии на флажок; пока идёт сохранение, флажки неактивны (нажатие не потеряется). *@
+            <p class="muted small" aria-live="polite">@(_busy ? L("Сохраняется…") : L("Изменения сохраняются сразу."))</p>
         }
         else
         {

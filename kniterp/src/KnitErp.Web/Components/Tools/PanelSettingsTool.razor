@@ -16,9 +16,9 @@
         <li>
             <span class="pin-icon"><Icon Name="@tool.Id" /></span>
             <span class="pin-title">@L(tool.Title)</span>
-            <button type="button" class="secondary icon" @onclick="() => Move(index, -1)" disabled="@(index == 0)" aria-label="@L("Выше: {0}", L(tool.Title))" title="@L("Выше")">↑</button>
-            <button type="button" class="secondary icon" @onclick="() => Move(index, 1)" disabled="@(index == _pinned.Count - 1)" aria-label="@L("Ниже: {0}", L(tool.Title))" title="@L("Ниже")">↓</button>
-            <button type="button" class="secondary icon" @onclick="() => _pinned.RemoveAt(index)" aria-label="@L("Открепить: {0}", L(tool.Title))" title="@L("Открепить")">✕</button>
+            <button type="button" class="secondary icon" @onclick="() => ChangeAsync(() => Move(index, -1))" disabled="@(index == 0)" aria-label="@L("Выше: {0}", L(tool.Title))" title="@L("Выше")">↑</button>
+            <button type="button" class="secondary icon" @onclick="() => ChangeAsync(() => Move(index, 1))" disabled="@(index == _pinned.Count - 1)" aria-label="@L("Ниже: {0}", L(tool.Title))" title="@L("Ниже")">↓</button>
+            <button type="button" class="secondary icon" @onclick="() => ChangeAsync(() => _pinned.RemoveAt(index))" aria-label="@L("Открепить: {0}", L(tool.Title))" title="@L("Открепить")">✕</button>
         </li>
     }
 </ol>
@@ -30,7 +30,7 @@
         <li>
             <span class="pin-icon"><Icon Name="@tool.Id" /></span>
             <span class="pin-title">@tool.Title <span class="muted">— @tool.Hint</span></span>
-            <button type="button" class="secondary icon" @onclick="() => _pinned.Add(tool.Id)" aria-label="@L("Закрепить: {0}", L(tool.Title))" title="@L("Закрепить")">+</button>
+            <button type="button" class="secondary icon" @onclick="() => ChangeAsync(() => _pinned.Add(tool.Id))" aria-label="@L("Закрепить: {0}", L(tool.Title))" title="@L("Закрепить")">+</button>
         </li>
     }
 </ul>
@@ -39,9 +39,10 @@
 {
     <div class="@(_isError ? "flash error" : "flash")" role="status">@_message</div>
 }
+@* D811 (запрос владельца 13.10, п. 3): без «Сохранить» — каждое изменение панели сохраняется сразу. *@
 <div class="actions">
-    <button type="button" @onclick="SaveAsync" disabled="@_busy">@L("Сохранить")</button>
-    <button type="button" class="secondary" @onclick="Reset" disabled="@_busy">@L("Как было по умолчанию")</button>
+    <span class="muted small" aria-live="polite">@(_busy ? L("Сохраняется…") : L("Изменения сохраняются сразу."))</span>
+    <button type="button" class="secondary" @onclick="() => ChangeAsync(Reset)">@L("Как было по умолчанию")</button>
 </div>
 
 @code {
@@ -60,7 +61,7 @@
 
     protected override void OnParametersSet()
     {
-        if (!ReferenceEquals(_loaded, Settings))
+        if (!ReferenceEquals(_loaded, Settings) && !_busy && !_again)
         {
             _pinned = Settings.Pinned.ToList();
             _visible = Settings.Visible;
@@ -80,13 +81,33 @@
         _visible = ToolCatalog.DefaultVisible;
     }
 
+    private bool _again;
+
+    /// <summary>Изменение применяется сразу и сохраняется; изменение во время сохранения сохраняется следом.</summary>
+    private async Task ChangeAsync(Action change)
+    {
+        change();
+        if (_busy)
+        {
+            _again = true;
+            return;
+        }
+
+        do
+        {
+            _again = false;
+            await SaveAsync();
+        }
+        while (_again);
+    }
+
     private async Task SaveAsync()
     {
         _busy = true;
         try
         {
             await OnSave.InvokeAsync(new PanelSettings(_pinned.ToList(), _visible));
-            _message = L("Панель сохранена — она будет такой же на других устройствах.");
+            _message = L("Сохранено — панель будет такой же на других устройствах.");
             _isError = false;
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))
