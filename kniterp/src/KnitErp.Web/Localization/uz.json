@@ -6467,7 +6467,6 @@
   "Закрывать заказ покупателя, отгруженный и оплаченный полностью": "To‘liq jo‘natilgan va to‘langan xaridor buyurtmasini yopish",
   "Закрывать заказ поставщику, поступивший и оплаченный полностью": "To‘liq kelib tushgan va to‘langan yetkazib beruvchiga buyurtmani yopish",
   "Запомнить привязки (артикул поставщика)": "Bog‘lashlarni eslab qolish (yetkazib beruvchi artikuli)",
-  "К заказу": "Buyurtmaga",
   "Каждую неделю": "Har hafta",
   "Каждый квартал": "Har chorak",
   "Каждый месяц": "Har oy",
@@ -6553,5 +6552,18 @@
   "пропущена": "o‘tkazib yuborildi",
   "— привязать к позиции заказа —": "— buyurtma pozitsiyasiga bog‘lash —",
   "— прочие —": "— boshqalar —",
-  "Нет счёта или кассы — добавьте их в разделе «Юрлица, счета и кассы», затем создайте шаблон.": "Hisob yoki kassa yo‘q — ularni «Yuridik shaxslar, hisoblar va kassalar» bo‘limida qo‘shing, keyin shablon yarating."
+  "Нет счёта или кассы — добавьте их в разделе «Юрлица, счета и кассы», затем создайте шаблон.": "Hisob yoki kassa yo‘q — ularni «Yuridik shaxslar, hisoblar va kassalar» bo‘limida qo‘shing, keyin shablon yarating.",
+  "Валюта закупочной цены": "Xarid narxi valyutasi",
+  "Валюта цен в файле": "Fayldagi narxlar valyutasi",
+  "Валюта: {0}": "Valyuta: {0}",
+  "Загрузка курсов ЦБ на сервере выключена — введите курс вручную.": "Serverda MB kurslarini yuklash o‘chirilgan — kursni qo‘lda kiriting.",
+  "Курсы ЦБ на {0} загружены: {1}.": "{0} sanadagi MB kurslari yuklandi: {1}.",
+  "Курсы ЦБ только что загружались — повторите через минуту.": "MB kurslari hozirgina yuklandi — bir daqiqadan keyin takrorlang.",
+  "Нет курса {0} на {1:dd.MM.yyyy}: цену в валюте нельзя перевести — введите курс в «Курсах валют».": "{1:dd.MM.yyyy} sanaga {0} kursi yo‘q: valyutadagi narxni o‘tkazib bo‘lmaydi — kursni «Valyuta kurslari»da kiriting.",
+  "Обновить курсы ЦБ сейчас": "MB kurslarini hozir yangilash",
+  "Сайт ЦБ сейчас недоступен — повторите позже или введите курс вручную.": "MB sayti hozir mavjud emas — keyinroq takrorlang yoki kursni qo‘lda kiriting.",
+  "Цена в валюте по курсу ЦБ на дату заказа": "Buyurtma sanasidagi MB kursi bo‘yicha valyutadagi narx",
+  "Цена позиции {0} — в {1}, а курса этой валюты нет: введите курс в «Курсах валют» или цену вручную в рублях.": "{0} pozitsiyasi narxi — {1} da, bu valyuta kursi yo‘q: kursni «Valyuta kurslari»da yoki narxni rublda qo‘lda kiriting.",
+  "Цена позиции {0} — в {1}, а курса этой валюты нет: введите курс в «Курсах валют».": "{0} pozitsiyasi narxi — {1} da, bu valyuta kursi yo‘q: kursni «Valyuta kurslari»da kiriting.",
+  "✕ Закрыть": "✕ Yopish"
 }

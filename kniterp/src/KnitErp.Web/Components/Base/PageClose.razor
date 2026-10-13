@@ -1,0 +1,36 @@
+@inject NavigationManager Nav
+
+@*
+    D152 (сессия № 1): кнопки «Назад» и «Закрыть» на страницах, которые открываются из другого раздела. «Назад» — шаг в истории браузера;
+    «Закрыть» — туда, откуда открыли (параметр back=… в адресе, только свой адрес без схемы и хоста — не уводит на чужой сайт),
+    иначе в родительский раздел (Fallback). Общие стили и Shared/* не трогаются — обычные классы кнопок.
+*@
+<span class="page-close">
+    <button type="button" class="secondary" onclick="history.length > 1 ? history.back() : location.assign('@Target')">@L("← Назад")</button>
+    <a class="button secondary" href="@Target" aria-label="@L("Закрыть")">@L("✕ Закрыть")</a>
+</span>
+
+@code {
+    /// <summary>Родительский раздел, если адрес возврата не передан.</summary>
+    [Parameter, EditorRequired]
+    public string Fallback { get; set; } = string.Empty;
+
+    private string Target => Safe(QueryBack()) ?? Fallback;
+
+    private string? QueryBack()
+    {
+        var query = new Uri(Nav.Uri).Query.TrimStart('?');
+        foreach (var part in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = part.Split('=', 2);
+            if (kv[0] == "back" && kv.Length == 2)
+            {
+                return Uri.UnescapeDataString(kv[1]);
+            }
+        }
+
+        return null;
+    }
+
+    private static string? Safe(string? back) => KnitErp.Application.Common.ReturnPath.Safe(back);
+}

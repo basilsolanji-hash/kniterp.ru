@@ -8,9 +8,8 @@ namespace KnitErp.Web.Automation;
 /// загруженная дата не скачивается повторно. Нет сети — предупреждение в журнал, в организации курс вводится вручную. Отключается
 /// ключом Automation:CbrRates:Enabled = false; адрес — Automation:CbrRates:Url.
 /// </summary>
-public sealed class CbrRateWorker(IServiceScopeFactory scopes, IHttpClientFactory http, IConfiguration config, ILogger<CbrRateWorker> log) : BackgroundService
+public sealed class CbrRateWorker(IServiceScopeFactory scopes, ICbrRateSource source, ILogger<CbrRateWorker> log) : BackgroundService
 {
-    public const string DefaultUrl = "https://www.cbr.ru/scripts/XML_daily.asp";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -26,16 +25,7 @@ public sealed class CbrRateWorker(IServiceScopeFactory scopes, IHttpClientFactor
                 foreach (var date in new[] { moscow, moscow.AddDays(1) })
                 {
                     await using var db = sp.GetRequiredService<IKnitErpDbContextFactory>().Create();
-                    var client = http.CreateClient(nameof(CbrRateWorker));
-                    var url = $"{config["Automation:CbrRates:Url"] ?? DefaultUrl}?date_req={date:dd'/'MM'/'yyyy}";
-                    using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stoppingToken);
-                    response.EnsureSuccessStatusCode();
-                    if (response.Content.Headers.ContentLength > CbrRateImporter.MaxBytes)
-                    {
-                        throw new InvalidOperationException("Ответ ЦБ больше 1 МБ.");
-                    }
-
-                    var content = await response.Content.ReadAsByteArrayAsync(stoppingToken);
+                    var content = await source.FetchAsync(date, stoppingToken);
                     var (rateDate, changed) = await new CbrRateImporter(db, clock).ImportAsync(content, stoppingToken);
                     if (changed > 0)
                     {
@@ -65,5 +55,41 @@ public sealed class CbrRateWorker(IServiceScopeFactory scopes, IHttpClientFactor
         {
             return false;
         }
+    }
+}
+
+/// <summary>D146, D152: XML курсов ЦБ с сайта cbr.ru (адрес — Automation:CbrRates:Url), ответ не больше 1 МБ.</summary>
+public sealed class HttpCbrRateSource(IHttpClientFactory http, IConfiguration config) : ICbrRateSource
+{
+    public const string DefaultUrl = "https://www.cbr.ru/scripts/XML_daily.asp";
+
+    public bool Enabled => !config.GetValue<bool>("Automation:WorkerDisabled") && config.GetValue("Automation:CbrRates:Enabled", true);
+
+    public async Task<byte[]> FetchAsync(DateOnly date, CancellationToken ct)
+    {
+        var client = http.CreateClient(nameof(CbrRateWorker));
+        var url = $"{config["Automation:CbrRates:Url"] ?? DefaultUrl}?date_req={date:dd'/'MM'/'yyyy}";
+        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength > CbrRateImporter.MaxBytes)
+        {
+            throw new InvalidOperationException("Ответ ЦБ больше 1 МБ.");
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct)) > 0)
+        {
+            if (buffer.Length + read > CbrRateImporter.MaxBytes)
+            {
+                throw new InvalidOperationException("Ответ ЦБ больше 1 МБ.");
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
     }
 }

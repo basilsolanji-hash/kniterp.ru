@@ -395,14 +395,22 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var priceType = ctx.Permissions.Has(Permissions.PriceView)
             ? await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId && t.IsDefault).Select(t => (long?)t.Id).FirstOrDefaultAsync(ct)
             : null;
-        return await (from i in db.Items.AsNoTracking()
-                      join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
-                      where i.OrganizationId == ctx.OrganizationId && !i.IsArchived
-                            && (i.Code.Contains(text) || i.Name.Contains(text) || (i.Article != null && i.Article.Contains(text)))
-                      orderby i.Code
-                      select new CrmItemOptionDto(i.Id, i.Code, i.Name, u.Symbol,
-                          priceType == null ? null : db.ItemPrices.Where(p => p.ItemId == i.Id && p.PriceTypeId == priceType).Select(p => (decimal?)p.Price).FirstOrDefault()))
+        var rows = await (from i in db.Items.AsNoTracking()
+                          join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
+                          where i.OrganizationId == ctx.OrganizationId && !i.IsArchived
+                                && (i.Code.Contains(text) || i.Name.Contains(text) || (i.Article != null && i.Article.Contains(text)))
+                          orderby i.Code
+                          select new
+                          {
+                              i.Id, i.Code, i.Name, u.Symbol,
+                              Price = priceType == null ? null : db.ItemPrices.Where(p => p.ItemId == i.Id && p.PriceTypeId == priceType)
+                                  .Select(p => new { p.Price, p.CurrencyCode }).FirstOrDefault(),
+                          })
             .Take(20).ToListAsync(ct);
+        // D151 (сессия № 1): цена в валюте организации по курсу на сегодня; без курса — без подсказки цены.
+        var converted = await (await KnitErp.Application.Finance.PriceConversion.TodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct))
+            .ToOrganizationAsync(rows.Where(r => r.Price != null).Select(r => (r.Id, r.Price!.Price, r.Price.CurrencyCode)), ct);
+        return rows.Select(r => new CrmItemOptionDto(r.Id, r.Code, r.Name, r.Symbol, converted.TryGetValue(r.Id, out var p) ? decimal.Round(p, 2) : null)).ToList();
     }
 
     /// <summary>Покупатели для сделки: поиск по названию и ИНН, до 20.</summary>

@@ -68,8 +68,11 @@ public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, IC
                 throw new NotFoundException("Вид цен");
             }
 
-            prices = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.PriceTypeId == pt)
-                .ToDictionaryAsync(p => p.ItemId, p => p.Price, ct);
+            // D151 (сессия № 1): цена в валюте — в валюту организации по курсу на сегодня; без курса — как без цены.
+            var rows = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.PriceTypeId == pt)
+                .Select(p => new { p.ItemId, p.Price, p.CurrencyCode }).ToListAsync(ct);
+            prices = await (await KnitErp.Application.Finance.PriceConversion.TodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct))
+                .ToOrganizationAsync(rows.Select(r => (r.ItemId, r.Price, r.CurrencyCode)), ct);
         }
 
         var itemIds = deal.Lines.Select(l => l.ItemId).ToList();

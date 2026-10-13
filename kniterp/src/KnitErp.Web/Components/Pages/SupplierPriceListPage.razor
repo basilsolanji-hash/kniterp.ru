@@ -47,6 +47,14 @@ else
                     </select>
                 </label>
                 <label class="check"><input type="checkbox" @bind="_withVat" disabled="@_busy" /> @L("Цены в файле с НДС (пересчитать без НДС по ставке позиции)")</label>
+                @* D151: валюта цен прайса — закупочная цена запоминается в ней, в заказ поставщику — по курсу ЦБ на дату заказа. *@
+                <label>@L("Валюта цен в файле")
+                    <select @bind="_currency" disabled="@_busy">
+                        @foreach (var c in KnitErp.Domain.Catalog.PriceCurrencies.All)
+                        {
+                            <option value="@c">@c</option>
+                        }
+                    </select></label>
                 <label>@L("Файл .xlsx") <InputFile OnChange="PreviewAsync" accept=".xlsx" disabled="@_busy" /></label>
             </div>
         }
@@ -105,6 +113,7 @@ else
     private IReadOnlyList<SupplierOptionDto>? _suppliers;
     private long _supplierId;
     private bool _withVat;
+    private string _currency = KnitErp.Domain.Catalog.PriceCurrencies.Default;
     private PriceListPlanDto? _plan;
     private bool _busy;
     private string? _denied;
@@ -150,7 +159,7 @@ else
         using var buffer = new MemoryStream();
         await upload.CopyToAsync(buffer);
         buffer.Position = 0;
-        _plan = await PriceLists.PreviewAsync(_supplierId, buffer, _withVat);
+        _plan = await PriceLists.PreviewAsync(_supplierId, buffer, _withVat, default, _currency);
     }, null);
 
     private Task ApplyAsync() => RunAsync(async () =>

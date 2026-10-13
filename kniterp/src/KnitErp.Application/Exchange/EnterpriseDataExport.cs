@@ -139,10 +139,11 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
         var componentIds = docs.SelectMany(d => d.Lines).Where(l => l.BundleItemId != null).Select(l => l.ItemId).Distinct().ToList();
         var salePrices = componentIds.Count == 0
             ? []
-            : await (from pr in db.ItemPrices.AsNoTracking()
-                     join t in db.PriceTypes.AsNoTracking() on pr.PriceTypeId equals t.Id
-                     where pr.OrganizationId == org && t.IsDefault && componentIds.Contains(pr.ItemId)
-                     select new { pr.ItemId, pr.Price }).ToDictionaryAsync(x => x.ItemId, x => x.Price, ct);
+            : await (await KnitErp.Application.Finance.PriceConversion.TodayAsync(db, org, clock.UtcNow, ct)).ToOrganizationAsync( // D151: веса — в одной валюте
+                (await (from pr in db.ItemPrices.AsNoTracking()
+                        join t in db.PriceTypes.AsNoTracking() on pr.PriceTypeId equals t.Id
+                        where pr.OrganizationId == org && t.IsDefault && componentIds.Contains(pr.ItemId)
+                        select new { pr.ItemId, pr.Price, pr.CurrencyCode }).ToListAsync(ct)).Select(r => (r.ItemId, r.Price, r.CurrencyCode)), ct);
         var items = await (from i in db.Items.AsNoTracking()
                            join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
                            where itemIds.Contains(i.Id)

@@ -292,6 +292,7 @@ public sealed class AppFixture : IAsyncLifetime
         info.Environment["ASPNETCORE_URLS"] = BaseUrl;
         info.Environment["ConnectionStrings__KnitErp"] = db.Database.GetConnectionString();
         info.Environment["Webhooks__Disabled"] = "true";
+        info.Environment["Automation__WorkerDisabled"] = "true"; // D145: без автоматики и курсов ЦБ (сети нет)
         info.Environment["Kestrel__Certificates__Default__Path"] = certificate;
         info.Environment["Kestrel__Certificates__Default__Password"] = certificatePassword;
         _app = Process.Start(info) ?? throw new InvalidOperationException("Не удалось запустить KnitErp.Web.");

@@ -243,6 +243,9 @@ public sealed class CatListPerformanceTests(SqlTestHost host, ITestOutputHelper 
 
         // Этикетки на предел позиций за раз (1000) — данные для печати собираются быстро.
         var labelIds = await c.Db.Items.Where(i => i.OrganizationId == org.OrganizationId).OrderBy(i => i.Id).Take(LabelService.MaxItems).Select(i => i.Id).ToListAsync();
+        // D180 (сессия № 1): прогрев — первый вызов компилирует запросы EF и JIT-код; под нагрузкой полного прогона это добавляло секунды
+        // и тест падал не из-за скорости печати. Замеряется рабочий вызов на 1000 позиций, порог прежний.
+        await c.Labels.PrintAsync(labelIds.Take(10).ToList(), null);
         sw.Restart();
         var labels = await c.Labels.PrintAsync(labelIds, null);
         output.WriteLine($"этикетки {labelIds.Count} позиций: {sw.ElapsedMilliseconds} мс");

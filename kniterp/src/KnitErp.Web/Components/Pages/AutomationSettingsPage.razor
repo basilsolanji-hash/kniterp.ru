@@ -15,7 +15,7 @@ else if (_s is null)
 }
 else
 {
-    <div class="page-head"><h1>@L("Настройки автоматизации")</h1></div>
+    <div class="page-head"><h1>@L("Настройки автоматизации")</h1><KnitErp.Web.Components.Base.PageClose Fallback="" /></div>
     <p class="muted">@L("Автоматика ничего не проводит молча: создаёт черновики, ставит письма в очередь или закрывает то, что уже выполнено, — с записью в журнал «автоматически». Каждую можно выключить.")</p>
     @if (_message is not null)
     {
@@ -36,7 +36,7 @@ else
 
         <h2>@L("Регулярные операции")</h2>
         <label class="inline"><input type="checkbox" @bind="_f.RecurringOperationsEnabled" disabled="@(!_s.CanEdit)" /> @L("Создавать черновики регулярных операций по расписанию")</label>
-        <p class="muted"><a href="money/recurring">@L("Регулярные операции")</a> · <a href="money/currency-rates">@L("Курсы валют")</a></p>
+        <p class="muted"><a href="money/recurring?back=settings/automation">@L("Регулярные операции")</a> · <a href="money/currency-rates?back=settings/automation">@L("Курсы валют")</a></p>
 
         @if (_s.UpdatedAtUtc is { } at)
         {

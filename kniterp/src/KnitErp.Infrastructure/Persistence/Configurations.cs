@@ -486,6 +486,7 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
         b.Property(x => x.VolumeM3).HasColumnType("decimal(18,6)");
         b.Property(x => x.MinStock).HasColumnType("decimal(18,6)");
         b.Property(x => x.PurchasePrice).HasColumnType("decimal(19,4)");
+        b.Property(x => x.PurchaseCurrency).HasMaxLength(3).IsFixedLength().IsUnicode(false).HasDefaultValue(PriceCurrencies.Default).IsRequired(); // D151
         // Модификации (D82): основная позиция той же организации; набор характеристик уникален у одной основной позиции.
         b.Property(x => x.VariantKey).HasMaxLength(Variants.KeyMaxLength);
         b.Ignore(x => x.IsModification);
@@ -556,10 +557,15 @@ internal sealed class ItemPriceConfiguration : IEntityTypeConfiguration<ItemPric
 {
     public void Configure(EntityTypeBuilder<ItemPrice> b)
     {
-        b.ToTable("item_prices", t => t.HasCheckConstraint("ck_item_prices_price", "[Price] >= 0"));
+        b.ToTable("item_prices", t =>
+        {
+            t.HasCheckConstraint("ck_item_prices_price", "[Price] >= 0");
+            t.HasCheckConstraint("ck_item_prices_currency", "LEN([CurrencyCode]) = 3"); // D151
+        });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Price).HasColumnType("decimal(19,4)");
+        b.Property(x => x.CurrencyCode).HasMaxLength(3).IsFixedLength().IsUnicode(false).HasDefaultValue(PriceCurrencies.Default).IsRequired(); // D151
         b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
             .HasConstraintName("fk_item_prices_item");
@@ -1272,6 +1278,7 @@ internal sealed class SalesOrderLineConfiguration : IEntityTypeConfiguration<Sal
         // D1106: ручная часть скидки и расшифровка итоговой скидки строки.
         b.Property(x => x.ManualDiscountPercent).HasColumnType("decimal(5,2)").HasDefaultValue(0m);
         b.Property(x => x.DiscountSources).HasMaxLength(SalesOrder.DiscountSourcesMaxLength);
+        b.Property(x => x.PriceNote).HasMaxLength(SalesOrderLine.PriceNoteMaxLength); // D151
         b.Ignore(x => x.NetPrice);
         b.Ignore(x => x.DiscountAmount);
         b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);

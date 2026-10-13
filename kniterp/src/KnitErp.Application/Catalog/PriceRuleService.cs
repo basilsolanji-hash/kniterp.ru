@@ -95,7 +95,7 @@ public static class AutoPrices
             query = query.Where(i => itemIds.Contains(i.Id));
         }
 
-        var items = await query.Select(i => new { i.Id, i.PurchasePrice }).ToListAsync(ct);
+        var items = await query.Select(i => new { i.Id, i.PurchasePrice, i.PurchaseCurrency }).ToListAsync(ct);
         var ids = items.Select(i => i.Id).ToList();
         var typeIds = rules.Select(r => r.PriceTypeId).ToList();
         var changed = 0;
@@ -114,17 +114,18 @@ public static class AutoPrices
 
                     if (prices.TryGetValue((item.Id, rule.PriceTypeId), out var current))
                     {
-                        if (current.Price == price)
+                        // D151: цена по правилу — в валюте закупочной цены (наценка от неё).
+                        if (current.Price == price && current.CurrencyCode == item.PurchaseCurrency)
                         {
                             continue;
                         }
 
                         db.ItemPriceHistory.Add(ItemPriceHistory.Create(org, item.Id, rule.PriceTypeId, current.Price, price, nowUtc, userId, PriceChangeSource.Rule));
-                        current.Set(price);
+                        current.Set(price, item.PurchaseCurrency);
                     }
                     else
                     {
-                        db.ItemPrices.Add(ItemPrice.Create(org, item.Id, rule.PriceTypeId, price));
+                        db.ItemPrices.Add(ItemPrice.Create(org, item.Id, rule.PriceTypeId, price, item.PurchaseCurrency)); // D151
                         db.ItemPriceHistory.Add(ItemPriceHistory.Create(org, item.Id, rule.PriceTypeId, null, price, nowUtc, userId, PriceChangeSource.Rule));
                     }
 

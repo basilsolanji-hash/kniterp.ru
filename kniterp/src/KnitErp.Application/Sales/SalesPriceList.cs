@@ -110,7 +110,7 @@ public sealed class SalesPriceListService(IKnitErpDbContext db, IAccessGuard gua
                 join p in db.ItemPrices.AsNoTracking() on i.Id equals p.ItemId
                 join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
                 where i.OrganizationId == org && !i.IsArchived && p.OrganizationId == org && p.PriceTypeId == type.Id
-                select new { i.Id, i.GroupId, i.Code, i.Article, i.Name, Unit = u.Symbol, p.Price };
+                select new { i.Id, i.GroupId, i.Code, i.Article, i.Name, Unit = u.Symbol, p.Price, p.CurrencyCode };
         if (groupIds is not null)
         {
             var ids = groupIds.ToList();
@@ -152,8 +152,20 @@ public sealed class SalesPriceListService(IKnitErpDbContext db, IAccessGuard gua
         var groupName = groups.ToDictionary(g => g.Id, g => g.Name);
         var orgRow = await db.Organizations.AsNoTracking().Where(o => o.Id == org).Select(o => new { o.ShortName, o.CurrencyCode, o.TimeZoneId }).SingleAsync(ct);
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, orgRow.TimeZoneId));
+        // D151: прайс-лист и Excel для площадок — только в валюте организации по курсу ЦБ на сегодня; без курса — строка без цены пропускается.
+        var conversion = new KnitErp.Application.Finance.PriceConversion(db, org, today);
+        var converted = new Dictionary<long, decimal>();
+        foreach (var r in rows)
+        {
+            if (await conversion.ToOrganizationAsync(r.Price, r.CurrencyCode, ct) is { } c)
+            {
+                converted[r.Id] = decimal.Round(c.Price, 2);
+            }
+        }
+
+        rows = rows.Where(r => converted.ContainsKey(r.Id)).ToList();
         return new PriceListDto(type.Name, type.IncludesVat, orgRow.CurrencyCode, today, orgRow.ShortName, stock is not null, photos, truncated,
-            rows.Select(r => new PriceListRowDto(r.Id, r.GroupId is { } g ? groupName.GetValueOrDefault(g) : null, r.Code, r.Article, r.Name, r.Unit, r.Price,
+            rows.Select(r => new PriceListRowDto(r.Id, r.GroupId is { } g ? groupName.GetValueOrDefault(g) : null, r.Code, r.Article, r.Name, r.Unit, converted[r.Id],
                     stock is null ? null : stock.GetValueOrDefault(r.Id), photos ? photoIds.GetValueOrDefault(r.Id) is var ph and > 0 ? ph : null : null))
                 .OrderBy(r => r.Group ?? "￿", StringComparer.CurrentCulture).ThenBy(r => r.Code, StringComparer.Ordinal).ToList());
     }

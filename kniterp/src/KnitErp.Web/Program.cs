@@ -127,13 +127,14 @@ if (!builder.Configuration.GetValue<bool>("MoySklad:WorkerDisabled"))
     builder.Services.AddHostedService<KnitErp.Web.Exchange.MoySkladImportWorker>();
 }
 
+builder.Services.AddHttpClient(nameof(KnitErp.Web.Automation.CbrRateWorker), c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddSingleton<KnitErp.Application.Finance.ICbrRateSource, KnitErp.Web.Automation.HttpCbrRateSource>(); // D152: и для кнопки «Обновить»
 // D145–D150: автоматизация волны 2 (регулярные операции, автозакрытие, напоминания) и курсы ЦБ (D146); в тестовых стендах — Automation:WorkerDisabled.
 if (!builder.Configuration.GetValue<bool>("Automation:WorkerDisabled"))
 {
     builder.Services.AddHostedService<KnitErp.Web.Automation.AutomationWorker>();
     if (builder.Configuration.GetValue("Automation:CbrRates:Enabled", true))
     {
-        builder.Services.AddHttpClient(nameof(KnitErp.Web.Automation.CbrRateWorker), c => c.Timeout = TimeSpan.FromSeconds(30));
         builder.Services.AddHostedService<KnitErp.Web.Automation.CbrRateWorker>();
     }
 }

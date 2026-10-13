@@ -31,8 +31,8 @@ else
             <button type="button" @onclick="OpenFormAsync" disabled="@_busy">@L("Новая операция")</button>
         }
         @* D146, D147: курсы валют и регулярные операции (аренда, связь) — свои страницы. *@
-        <a class="button secondary" href="money/recurring">@L("Регулярные операции")</a>
-        <a class="button secondary" href="money/currency-rates">@L("Курсы валют")</a>
+        <a class="button secondary" href="money/recurring?back=money">@L("Регулярные операции")</a>
+        <a class="button secondary" href="money/currency-rates?back=money">@L("Курсы валют")</a>
     </div>
 
     @if (_message is not null)

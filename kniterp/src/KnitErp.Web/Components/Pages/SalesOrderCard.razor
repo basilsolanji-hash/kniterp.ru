@@ -392,7 +392,7 @@ else
                         <td>@l.UnitSymbol</td>
                         @if (_order.CanSeePrices)
                         {
-                            <td class="num @(l.BelowMinimum ? "cell-short" : null)" title="@(l.BelowMinimum ? L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice)) : null)">@(l.Price?.ToString("#,0.00##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")))@if (l.BelowMinimum) { <div class="muted small">@L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice))</div> }</td>
+                            <td class="num @(l.BelowMinimum ? "cell-short" : null)" title="@(l.BelowMinimum ? L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice)) : null)">@(l.Price?.ToString("#,0.00##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")))@if (l.BelowMinimum) { <div class="muted small">@L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice))</div> }@if (l.PriceNote is { } note) { <div class="muted small" title="@L("Цена в валюте по курсу ЦБ на дату заказа")">@note</div> }</td>
                             <td class="num">@Amounts.Vat(l.VatPercent)</td>
                             <td class="num" title="@l.DiscountSources">@(l.DiscountPercent > 0 ? $"{l.DiscountPercent:0.##}%" : "—")
                                 @if (l.DiscountSources is not null) { <span class="sx-sub sx-discount-src">@l.DiscountSources</span> }

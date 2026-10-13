@@ -147,7 +147,8 @@ else
             </label>
             <label>@L("Количество") <input @bind="_qtyText" inputmode="decimal" size="8" /></label>
             <PackCount Packs="@PackLookup.Of(_packs, FindItem()?.Id)" Precision="@(FindItem()?.Precision ?? 0)" OnQuantity="q => _qtyText = q" />
-            <label>@(_order.PricesIncludeVat ? L("Цена с НДС") : L("Цена без НДС")) <input @bind="_priceText" inputmode="decimal" size="10" /></label>
+            <label>@(_order.PricesIncludeVat ? L("Цена с НДС") : L("Цена без НДС")) <input @bind="_priceText" inputmode="decimal" size="10" />
+                @if (_priceNote is { } note) { <span class="muted small">@note</span> }</label>
             <label>
                 @L("НДС")
                 <select @bind="_vatText">
@@ -444,8 +445,12 @@ else
             {
                 _priceText = Amounts.Input(Amounts.Reprice(price, false, _order!.PricesIncludeVat, item.VatPercent));
             }
+
+            _priceNote = item.PriceNote; // D151: «12 $ по 92,15» или «нет курса USD»
         }
     }
+
+    private string? _priceNote;
 
     private PurchaseItemOptionDto? FindItem()
     {

@@ -63,7 +63,39 @@ public sealed class ItemGroup
 /// </summary>
 public sealed record ItemDetails(
     long? GroupId, string? Article, string? OriginCountryCode, string? OriginCountryName, string? CustomsDeclaration, string? TnVedCode,
-    decimal? WeightKg, decimal? VolumeM3, decimal? MinStock, decimal? PurchasePrice);
+    decimal? WeightKg, decimal? VolumeM3, decimal? MinStock, decimal? PurchasePrice, string PurchaseCurrency = PriceCurrencies.Default);
+
+/// <summary>
+/// D151: валюты цен номенклатуры — из справочника валют стран (D60) и основных валют закупок. По умолчанию рубль. Цены в документах,
+/// фидах и на площадках — всегда в валюте организации по курсу ЦБ (D146) на дату документа или выгрузки.
+/// </summary>
+public static class PriceCurrencies
+{
+    public const string Default = "RUB";
+
+    public static readonly IReadOnlyList<string> All = ["RUB", "BYN", "KZT", "UZS", "USD", "EUR", "CNY", "TRY"];
+
+    /// <summary>Пусто — рубль; иначе код из списка (регистр не важен), неизвестный — понятный отказ.</summary>
+    public static string Normalize(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return Default;
+        }
+
+        var c = code.Trim().ToUpperInvariant();
+        return All.Contains(c) ? c : throw new BusinessRuleException("catalog.price.currency", $"Валюта цены «{code.Trim()}» не из справочника: {string.Join(", ", All)}.");
+    }
+
+    public static string Symbol(string code) => code switch
+    {
+        "RUB" => "₽",
+        "USD" => "$",
+        "EUR" => "€",
+        "CNY" => "¥",
+        _ => code,
+    };
+}
 
 public static class ItemDetailRules
 {
@@ -311,10 +343,18 @@ public sealed class ItemPrice
     public long PriceTypeId { get; private set; }
     public decimal Price { get; private set; }
 
-    public static ItemPrice Create(long organizationId, long itemId, long priceTypeId, decimal price) =>
-        new() { OrganizationId = organizationId, ItemId = itemId, PriceTypeId = priceTypeId, Price = Check(price) };
+    /// <summary>D151: валюта цены (по умолчанию рубль). В документы цена попадает в валюте организации по курсу на дату документа.</summary>
+    public string CurrencyCode { get; private set; } = PriceCurrencies.Default;
 
-    public void Set(decimal price) => Price = Check(price);
+    public static ItemPrice Create(long organizationId, long itemId, long priceTypeId, decimal price, string? currency = null) =>
+        new() { OrganizationId = organizationId, ItemId = itemId, PriceTypeId = priceTypeId, Price = Check(price), CurrencyCode = PriceCurrencies.Normalize(currency) };
+
+    /// <summary>Новая цена; валюта — прежняя, если не указана.</summary>
+    public void Set(decimal price, string? currency = null)
+    {
+        Price = Check(price);
+        CurrencyCode = currency is null ? CurrencyCode : PriceCurrencies.Normalize(currency);
+    }
 
     public static decimal Check(decimal price)
     {

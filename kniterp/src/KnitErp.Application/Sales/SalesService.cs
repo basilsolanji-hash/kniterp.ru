@@ -51,7 +51,7 @@ public sealed record SalesOrderLineDto(
     long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Price, decimal? VatPercent,
     decimal? Amount, decimal? VatAmount, decimal Shipped, decimal Returned, decimal DiscountPercent = 0, decimal Stock = 0, decimal ReservedByOthers = 0,
     bool Stocked = true, bool IsBundle = false, decimal ManualDiscountPercent = 0, string? DiscountSources = null, decimal? MinPrice = null,
-    bool PricesIncludeVat = true, bool MinPriceIncludesVat = true)
+    bool PricesIncludeVat = true, bool MinPriceIncludesVat = true, string? PriceNote = null)
 {
     public decimal Left => Math.Max(0, Quantity - Shipped + Returned);
 
@@ -317,7 +317,8 @@ public sealed partial class SalesService(
                 l.DiscountPercent, onHand, reserved, !services.Contains(l.ItemId) || bundles.Contains(l.ItemId), bundles.Contains(l.ItemId),
                 l.ManualDiscountPercent, prices ? l.DiscountSources : null,
                 prices ? item.MinPrice : null, // D350: минимальная цена — только с правом на цены
-                order.PricesIncludeVat, minIncludesVat); // D142
+                order.PricesIncludeVat, minIncludesVat, // D142
+                prices ? l.PriceNote : null); // D151
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);
@@ -369,13 +370,19 @@ public sealed partial class SalesService(
         StockEntry.EnsurePrecision(item, quantity);
         var quote = (await SalesPricing.QuoteAsync(db, ctx.OrganizationId, order.CustomerId, order.OrderDate, order.PricesIncludeVat, [itemId], order.AgreementId, ct))
             .Items[itemId];
+        if (quote.NoRate)
+        {
+            throw new BusinessRuleException("currency.rate.missing",
+                $"Цена позиции {item.Code} — в {quote.Conversion}, а курса этой валюты нет: введите курс в «Курсах валют» или цену вручную в рублях.");
+        }
+
         if (quote.Price is not { } price)
         {
             throw new BusinessRuleException("sales.price.missing", $"У позиции {item.Code} нет цены ни в одном виде цены — введите цену вручную.");
         }
 
         var existing = order.Lines.FirstOrDefault(l => l.ItemId == itemId);
-        order.SetLine(itemId, (existing?.Quantity ?? 0) + quantity, price, quote.VatPercent, existing?.ManualDiscountPercent ?? 0);
+        order.SetLine(itemId, (existing?.Quantity ?? 0) + quantity, price, quote.VatPercent, existing?.ManualDiscountPercent ?? 0, quote.Conversion);
         await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct); // D1106: скидки по правилам — до подтверждения сами
         var line = order.Lines.Single(l => l.ItemId == itemId);
         Audit(ctx, AuditActions.SalesOrderChanged, nameof(SalesOrder), id, null,
@@ -395,7 +402,7 @@ public sealed partial class SalesService(
         {
             if (quotes.Items.TryGetValue(line.ItemId, out var q) && q.Price is { } price && price != line.Price)
             {
-                order.SetLine(line.ItemId, line.Quantity, price, line.VatPercent, line.ManualDiscountPercent);
+                order.SetLine(line.ItemId, line.Quantity, price, line.VatPercent, line.ManualDiscountPercent, q.Conversion);
             }
         }
 

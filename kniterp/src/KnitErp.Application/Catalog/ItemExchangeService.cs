@@ -75,12 +75,15 @@ public sealed partial class ItemExchangeService(
     public const string ParentColumn = "Основная позиция (код)";
     public const string VariantColumn = "Характеристики";
     public const string PricePrefix = "Цена: ";
+    public const string CurrencyColumn = "Валюта"; // D151: валюта цен по видам в строке
+    public const string PurchaseCurrencyColumn = "Валюта закупочной цены"; // D151
 
     /// <summary>Необязательные столбцы в порядке выгрузки; цены по видам — после них.</summary>
     public static readonly IReadOnlyList<string> ExtraColumns =
     [
         ArticleColumn, GroupColumn, BarcodesColumn, CountryColumn, DeclarationColumn, TnVedColumn, WeightColumn, VolumeColumn, MinStockColumn,
-        PurchasePriceColumn, ParentColumn, VariantColumn, PaymentSubjectColumn, MarkingColumn, GtinColumn, MinPriceColumn, PacksColumn,
+        PurchasePriceColumn, PurchaseCurrencyColumn, ParentColumn, VariantColumn, PaymentSubjectColumn, MarkingColumn, GtinColumn, MinPriceColumn, PacksColumn,
+        CurrencyColumn,
     ];
 
     private static readonly string[] DetailColumns =
@@ -124,6 +127,7 @@ public sealed partial class ItemExchangeService(
                 [CountryColumn, "Цифровой код по ОКСМ: 643 — Россия, 156 — Китай."],
                 [ParentColumn + ", " + VariantColumn, "Для модификации: код основной позиции и «Цвет: красный; Размер: 48»."],
                 [PricePrefix + "…", "Цена по виду цен, как в карточке позиции (нужно право «Цены и суммы»)."],
+                [CurrencyColumn + ", " + PurchaseCurrencyColumn, $"Валюта цен по видам и закупочной цены: {string.Join(", ", PriceCurrencies.All)}; пусто — рубль. В документы и на площадки цена идёт в рублях по курсу ЦБ на дату."],
                 [PaymentSubjectColumn, "«Товар», «Подакцизный товар» или «Услуга» (у услуги — всегда «Услуга»)."],
                 [MarkingColumn, "Вид продукции «Честного ЗНАКа» с листа «Допустимые значения» или «нет»."],
                 [GtinColumn, "14 цифр с контрольной (или EAN-13 — дополнится нулём); уникален в организации."],
@@ -170,6 +174,8 @@ public sealed partial class ItemExchangeService(
                 [VolumeColumn] = Number(i.VolumeM3),
                 [MinStockColumn] = Number(i.MinStock),
                 [PurchasePriceColumn] = prices ? Number(i.PurchasePrice) : "",
+                [PurchaseCurrencyColumn] = prices ? i.PurchaseCurrency : "",
+                [CurrencyColumn] = prices ? itemPrices?[i.Id].Select(x => x.CurrencyCode).FirstOrDefault() ?? PriceCurrencies.Default : "",
                 [ParentColumn] = i.ParentItemId is { } p && codes.TryGetValue(p, out var parentCode) ? parentCode : "",
                 [VariantColumn] = VariantText(values[i.Id].Select(v => (characteristicName.GetValueOrDefault(v.CharacteristicId, "?"), v.Value))),
             };
@@ -437,7 +443,7 @@ public sealed partial class ItemExchangeService(
     /// <summary>Разобранные необязательные столбцы строки. null у поля — столбца нет, поле не меняется.</summary>
     private sealed record Parsed(
         ItemDetails? Details, IReadOnlyList<(BarcodeType Type, string Code)>? Barcodes, IReadOnlyDictionary<long, decimal?>? Prices,
-        string? ParentCode, IReadOnlyDictionary<long, string>? Values, TradeSpec? Trade = null)
+        string? ParentCode, IReadOnlyDictionary<long, string>? Values, TradeSpec? Trade = null, string? PriceCurrency = null)
     {
         public static readonly Parsed None = new(null, null, null, null, null);
     }
@@ -487,7 +493,8 @@ public sealed partial class ItemExchangeService(
             {
                 var old = current.GetValueOrDefault(typeId);
                 var before = old?.Price; // до изменения: old.Set меняет цену на месте
-                if (before == price)
+                var currency = p.PriceCurrency ?? old?.CurrencyCode ?? PriceCurrencies.Default; // D151
+                if (before == price && (price is null || currency == old?.CurrencyCode))
                 {
                     continue;
                 }
@@ -498,11 +505,11 @@ public sealed partial class ItemExchangeService(
                 }
                 else if (old is null)
                 {
-                    db.ItemPrices.Add(ItemPrice.Create(ctx.OrganizationId, item.Id, typeId, price.Value));
+                    db.ItemPrices.Add(ItemPrice.Create(ctx.OrganizationId, item.Id, typeId, price.Value, currency));
                 }
                 else
                 {
-                    old.Set(price.Value);
+                    old.Set(price.Value, currency);
                 }
 
                 db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, item.Id, typeId, before, price, clock.UtcNow, ctx.UserId,
@@ -911,6 +918,11 @@ public sealed partial class ItemExchangeService(
                 d = d with { PurchasePrice = Try(() => Decimals.Parse(Text(PurchasePriceColumn), PurchasePriceColumn)) };
             }
 
+            if (Has(PurchaseCurrencyColumn) && canSeePrices)
+            {
+                d = d with { PurchaseCurrency = Try(() => PriceCurrencies.Normalize(Text(PurchaseCurrencyColumn))) ?? PriceCurrencies.Default };
+            }
+
             details = Try(() => ItemDetailRules.Normalize(d));
             if (details is not null && (current is null || details != ItemDetailRules.Normalize(current.Details)))
             {
@@ -958,7 +970,8 @@ public sealed partial class ItemExchangeService(
             }
         }
 
-        // Цены по видам.
+        // Цены по видам; D151: «Валюта» — валюта всех цен строки (пусто — рубль), нет столбца — прежняя.
+        string? priceCurrency = Has(CurrencyColumn) && canSeePrices ? Try(() => PriceCurrencies.Normalize(Text(CurrencyColumn))) : null;
         Dictionary<long, decimal?>? prices = null;
         foreach (var (name, typeId) in lookups.PriceTypes)
         {
@@ -970,13 +983,14 @@ public sealed partial class ItemExchangeService(
             prices ??= [];
             var price = Try(() => Decimals.Parse(Text(PricePrefix + name), PricePrefix + name) is { } v ? ItemPrice.Check(v) : (decimal?)null);
             prices[typeId] = price;
-            if (currentPrices.FirstOrDefault(x => x.PriceTypeId == typeId)?.Price != price)
+            var currentPrice = currentPrices.FirstOrDefault(x => x.PriceTypeId == typeId);
+            if (currentPrice?.Price != price || price is not null && priceCurrency is not null && currentPrice?.CurrencyCode != priceCurrency)
             {
                 changed = true;
             }
         }
 
-        return (new Parsed(details, barcodes, prices, parentCode, values), changed);
+        return (new Parsed(details, barcodes, prices, parentCode, values, PriceCurrency: priceCurrency), changed);
     }
 
     /// <summary>«Цвет: красный; Размер: 48» → номер характеристики → значение. Неизвестная характеристика — ошибка.</summary>
@@ -1016,11 +1030,12 @@ public sealed partial class ItemExchangeService(
         .Select(b => b.Replace(" ", string.Empty, StringComparison.Ordinal));
 
     private static bool IsPriceColumn(string column) =>
-        column == PurchasePriceColumn || column == MinPriceColumn || column.StartsWith(PricePrefix, StringComparison.Ordinal);
+        column == PurchasePriceColumn || column == MinPriceColumn || column == CurrencyColumn || column == PurchaseCurrencyColumn
+        || column.StartsWith(PricePrefix, StringComparison.Ordinal);
 
     private static IReadOnlyList<string> HeaderFor(bool prices, IEnumerable<string> priceTypes) =>
     [
-        .. Columns, .. ExtraColumns.Where(c => prices || (c != PurchasePriceColumn && c != MinPriceColumn)), .. prices ? priceTypes.Select(t => PricePrefix + t) : [],
+        .. Columns, .. ExtraColumns.Where(c => prices || !IsPriceColumn(c)), .. prices ? priceTypes.Select(t => PricePrefix + t) : [],
     ];
 
     private static string Number(decimal? value) =>

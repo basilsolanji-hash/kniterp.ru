@@ -23,7 +23,7 @@ else
         {
             <button type="button" @onclick="NewForm" disabled="@_busy">@L("Новый шаблон")</button>
         }
-        <a class="button secondary" href="money">@L("Касса и счета")</a>
+        <KnitErp.Web.Components.Base.PageClose Fallback="money" />
     </div>
     <p class="muted">@L("Аренда, связь, зарплатные авансы: по расписанию создаётся черновик, деньги списываются только после «Провести». Пропущенный черновик — с причиной.")</p>
     @if (_data.CanEdit && _data.Accounts.Count == 0)
@@ -32,7 +32,7 @@ else
     }
     @if (!_data.Enabled)
     {
-        <div class="flash error" role="alert">@L("Регулярные операции выключены в настройках автоматизации — черновики не создаются.") <a href="settings/automation">@L("Настройки автоматизации")</a></div>
+        <div class="flash error" role="alert">@L("Регулярные операции выключены в настройках автоматизации — черновики не создаются.") <a href="settings/automation?back=money/recurring">@L("Настройки автоматизации")</a></div>
     }
     @if (_message is not null)
     {

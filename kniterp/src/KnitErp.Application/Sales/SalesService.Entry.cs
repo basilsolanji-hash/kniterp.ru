@@ -77,11 +77,11 @@ public sealed partial class SalesService
 
             if (!quotes.Items.TryGetValue(line.ItemId, out var q) || q.Price is not { } price)
             {
-                skipped.Add($"{item.Code}: нет цены");
+                skipped.Add(q?.NoRate == true ? $"{item.Code}: нет курса {q.Conversion}" : $"{item.Code}: нет цены"); // D151
                 continue;
             }
 
-            order.SetLine(line.ItemId, line.Quantity, price, q.VatPercent, line.ManualDiscountPercent);
+            order.SetLine(line.ItemId, line.Quantity, price, q.VatPercent, line.ManualDiscountPercent, q.Conversion);
         }
 
         await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct);
@@ -154,7 +154,7 @@ public sealed partial class SalesService
             }
 
             order.SetLine(r.ItemId.Value, (existing?.Quantity ?? 0) + r.Quantity!.Value, price, existing?.VatPercent ?? q.VatPercent,
-                existing?.ManualDiscountPercent ?? 0);
+                existing?.ManualDiscountPercent ?? 0, r.Price is null ? q.Conversion : null);
             result.Add(r with { Price = price });
         }
 
@@ -369,9 +369,12 @@ public sealed partial class SalesService
         {
             StockEntry.EnsurePrecision(item, wanted[item.Id]);
             var q = quotes.Items[item.Id];
-            var price = q.Price ?? throw new BusinessRuleException("sales.price.missing", $"У позиции {item.Code} нет цены ни в одном виде цены — введите цену вручную.");
+            var price = q.Price ?? throw (q.NoRate
+                ? new BusinessRuleException("currency.rate.missing", $"Цена позиции {item.Code} — в {q.Conversion}, а курса этой валюты нет: введите курс в «Курсах валют».")
+                : new BusinessRuleException("sales.price.missing", $"У позиции {item.Code} нет цены ни в одном виде цены — введите цену вручную."));
             var existing = order.Lines.FirstOrDefault(l => l.ItemId == item.Id);
-            order.SetLine(item.Id, (existing?.Quantity ?? 0) + wanted[item.Id], price, existing?.VatPercent ?? q.VatPercent, existing?.ManualDiscountPercent ?? 0);
+            order.SetLine(item.Id, (existing?.Quantity ?? 0) + wanted[item.Id], price, existing?.VatPercent ?? q.VatPercent, existing?.ManualDiscountPercent ?? 0,
+                q.Conversion);
         }
 
         await SalesDiscounts.ApplyAsync(db, ctx.OrganizationId, order, ct);

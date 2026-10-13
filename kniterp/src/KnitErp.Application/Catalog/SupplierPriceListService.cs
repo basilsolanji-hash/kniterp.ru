@@ -22,7 +22,8 @@ public sealed record PriceListRowDto(
     int RowNumber, string? Article, string? Name, string? Barcode, decimal? FilePrice, long? ItemId, string? ItemCode, string? ItemName, string? MatchedBy,
     decimal? OldPurchasePrice, decimal? NewPurchasePrice, PriceListAction Action, string? Error);
 
-public sealed record PriceListPlanDto(long SupplierId, bool PricesIncludeVat, IReadOnlyList<PriceListRowDto> Rows)
+/// <remarks>D151: Currency — валюта цен прайса (одна на файл), по умолчанию рубль.</remarks>
+public sealed record PriceListPlanDto(long SupplierId, bool PricesIncludeVat, IReadOnlyList<PriceListRowDto> Rows, string Currency = PriceCurrencies.Default)
 {
     public int ToUpdate => Rows.Count(r => r.Action == PriceListAction.Update);
     public int NotFound => Rows.Count(r => r.Action == PriceListAction.NotFound);
@@ -53,8 +54,9 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
     private static readonly string[] NameHeaders = ["наименование", "название", "товар", "name"];
     private static readonly string[] BarcodeHeaders = ["штрихкод", "штрих-код", "ean", "barcode", "шк"];
 
-    public async Task<PriceListPlanDto> PreviewAsync(long supplierId, Stream file, bool pricesIncludeVat, CancellationToken ct = default)
+    public async Task<PriceListPlanDto> PreviewAsync(long supplierId, Stream file, bool pricesIncludeVat, CancellationToken ct = default, string? currency = null)
     {
+        var priceCurrency = PriceCurrencies.Normalize(currency); // D151
         var ctx = await DemandAsync(ct);
         var org = ctx.OrganizationId;
         await RequireSupplierAsync(org, supplierId, ct);
@@ -68,7 +70,7 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
         var byBarcode = await db.ItemBarcodes.AsNoTracking().Where(b => b.OrganizationId == org).ToDictionaryAsync(b => b.Code, b => b.ItemId, ct);
         var items = await (from i in db.Items.AsNoTracking()
                            where i.OrganizationId == org && !i.IsArchived
-                           select new { i.Id, i.Code, i.Name, i.PurchasePrice, i.VatRateId, i.Type }).ToDictionaryAsync(i => i.Id, ct);
+                           select new { i.Id, i.Code, i.Name, i.PurchasePrice, i.PurchaseCurrency, i.VatRateId, i.Type }).ToDictionaryAsync(i => i.Id, ct);
         // D129 (аудит 12.10.2026, п. 8): ставка НДС «на сегодня» — по дате организации, а не UTC (в Ташкенте до 05:00 UTC уже завтра).
         var today = await KnitErp.Application.Sales.SalesDiscounts.TodayAsync(db, org, clock, ct);
         var rates = (await db.VatRates.AsNoTracking().Include(r => r.Periods).Where(r => r.OrganizationId == org).ToListAsync(ct)).ToDictionary(r => r.Id, r => r.PercentOn(today));
@@ -129,10 +131,10 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
             var percent = pricesIncludeVat && item.VatRateId is { } v ? rates.GetValueOrDefault(v) ?? 0 : 0;
             var newPrice = decimal.Round(filePrice / (1 + percent / 100m), 2, MidpointRounding.AwayFromZero);
             result.Add(new PriceListRowDto(line, article, title, code, filePrice, id, item.Code, item.Name, matchedBy, item.PurchasePrice, newPrice,
-                item.PurchasePrice == newPrice ? PriceListAction.Unchanged : PriceListAction.Update, null));
+                item.PurchasePrice == newPrice && item.PurchaseCurrency == priceCurrency ? PriceListAction.Unchanged : PriceListAction.Update, null));
         }
 
-        return new PriceListPlanDto(supplierId, pricesIncludeVat, result);
+        return new PriceListPlanDto(supplierId, pricesIncludeVat, result, priceCurrency);
     }
 
     /// <summary>Применить план предпросмотра: закупочные цены, запоминание артикула поставщика, автоцены — одной транзакцией.</summary>
@@ -163,7 +165,7 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
                     continue;
                 }
 
-                foreach (var c in item.SetDetails(item.Details with { PurchasePrice = r.NewPurchasePrice }))
+                foreach (var c in item.SetDetails(item.Details with { PurchasePrice = r.NewPurchasePrice, PurchaseCurrency = PriceCurrencies.Normalize(plan.Currency) }))
                 {
                     db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.CatalogChanged, nameof(Item), item.Id.ToString(CultureInfo.InvariantCulture),
                         c.Before, c.After, $"Прайс-лист «{supplier}»: {c.Field}", currentUser.CorrelationId));

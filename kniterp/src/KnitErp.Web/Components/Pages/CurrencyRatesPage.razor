@@ -17,7 +17,7 @@ else if (_data is null)
 }
 else
 {
-    <div class="page-head"><h1>@L("Курсы валют")</h1><a class="button secondary" href="money">@L("Касса и счета")</a></div>
+    <div class="page-head"><h1>@L("Курсы валют")</h1><KnitErp.Web.Components.Base.PageClose Fallback="money" /></div>
     <p class="muted">@L("Официальные курсы ЦБ РФ загружаются каждый день сами. Если сети нет или нужной валюты нет у ЦБ — введите курс вручную: на ту же дату он важнее курса ЦБ. Курс на дату — последний известный не позже неё.")</p>
     @if (_message is not null)
     {
@@ -27,6 +27,10 @@ else
     <div class="inline-form">
         <label>@L("Курсы на дату") <input type="date" value="@_date.ToString("yyyy-MM-dd")" @onchange="DateChangedAsync" disabled="@_busy" /></label>
         <span class="muted">@(_data.LastCbrDate is { } last ? L("Последняя загрузка ЦБ: курс на {0}", last.ToString("dd.MM.yyyy")) : L("Курсы ЦБ ещё не загружались."))</span>
+        @if (_data.CanEdit && Rates.CanRefresh)
+        {
+            <button type="button" class="secondary" @onclick="RefreshAsync" disabled="@_busy">@L("Обновить курсы ЦБ сейчас")</button>
+        }
     </div>
 
     <div class="scroll">
@@ -109,6 +113,33 @@ else
         {
             _date = d;
             _data = await Rates.ListAsync(_date);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            var (date, changed) = await Rates.RefreshAsync();
+            _data = await Rates.ListAsync(_date);
+            _message = L("Курсы ЦБ на {0} загружены: {1}.", date.ToString("dd.MM.yyyy"), changed);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
         }
         finally
         {

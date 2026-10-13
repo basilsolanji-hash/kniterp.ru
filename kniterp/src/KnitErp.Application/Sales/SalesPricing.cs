@@ -22,7 +22,10 @@ public enum PriceSource : byte
 /// Цена позиции для заказа. Price — в базе документа (с НДС или без — как цены заказа), до скидки; DiscountPercent — скидка
 /// соглашения; Net — цена со скидкой. PriceType — название вида цены, из которого взята цена.
 /// </summary>
-public sealed record PriceQuoteDto(long ItemId, decimal? Price, decimal DiscountPercent, decimal? VatPercent, PriceSource Source, string? PriceType)
+/// <remarks>D151: цена в валюте переводится в валюту организации по курсу на дату; Conversion — «12 $ по 92,15», NoRate — курса нет (цены нет),
+/// StaleRate — курс не на дату документа.</remarks>
+public sealed record PriceQuoteDto(long ItemId, decimal? Price, decimal DiscountPercent, decimal? VatPercent, PriceSource Source, string? PriceType,
+    string? Conversion = null, bool NoRate = false, bool StaleRate = false)
 {
     public decimal? Net => Price is { } p ? p * (1 - DiscountPercent / 100m) : null;
 
@@ -113,8 +116,9 @@ public static class SalesPricing
             itemQuery = itemQuery.Where(i => itemIds.Contains(i.Id));
         }
 
-        var prices = (await priceQuery.Select(p => new { p.ItemId, p.PriceTypeId, p.Price }).ToListAsync(ct))
-            .ToDictionary(p => (p.ItemId, p.PriceTypeId), p => p.Price);
+        var prices = (await priceQuery.Select(p => new { p.ItemId, p.PriceTypeId, p.Price, p.CurrencyCode }).ToListAsync(ct))
+            .ToDictionary(p => (p.ItemId, p.PriceTypeId), p => (p.Price, p.CurrencyCode));
+        var conversion = new KnitErp.Application.Finance.PriceConversion(db, org, date); // D151
         var items = await itemQuery.Select(i => new { i.Id, i.VatRateId }).ToListAsync(ct);
         var vat = await VatAsync(db, org, date, ct);
         var discount = agreement?.DiscountPercent ?? 0;
@@ -128,7 +132,18 @@ public static class SalesPricing
                 if (prices.TryGetValue((item.Id, typeId), out var price))
                 {
                     var type = types[typeId];
-                    quote = quote with { Price = Reprice(price, type.IncludesVat, docIncludesVat, itemVat), Source = source, PriceType = type.Name };
+                    if (await conversion.ToOrganizationAsync(price.Price, price.CurrencyCode, ct) is not { } converted)
+                    {
+                        // D151: курса нет вовсе — подстановка запрещена (цену вводят вручную), следующий вид цены не берётся.
+                        quote = quote with { Source = source, PriceType = type.Name, NoRate = true, Conversion = price.CurrencyCode };
+                        break;
+                    }
+
+                    quote = quote with
+                    {
+                        Price = Reprice(converted.Price, type.IncludesVat, docIncludesVat, itemVat), Source = source, PriceType = type.Name,
+                        Conversion = converted.Converted ? converted.Describe() : null, StaleRate = converted.Stale,
+                    };
                     break;
                 }
             }

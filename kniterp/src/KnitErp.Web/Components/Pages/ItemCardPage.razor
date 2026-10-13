@@ -127,6 +127,14 @@ else
                 @if (_item.CanSeePrices)
                 {
                     <label>@L("Закупочная цена, без НДС") <input @bind="_form.PurchasePrice" inputmode="decimal" disabled="@(!editable)" /></label>
+                    @* D151: валюта закупочной цены — в заказ поставщику по курсу ЦБ на дату заказа. *@
+                    <label>@L("Валюта закупочной цены")
+                        <select @bind="_form.PurchaseCurrency" disabled="@(!editable)">
+                            @foreach (var c in PriceCurrencies.All)
+                            {
+                                <option value="@c">@c</option>
+                            }
+                        </select></label>
                 }
                 @foreach (var f in _item.CustomFields.Where(f => !f.IsArchived))
                 {
@@ -610,7 +618,7 @@ else
         <form @onsubmit="SavePricesAsync">
             <div class="scroll">
                 <table class="compact">
-                    <thead><tr><th>@L("Вид цены")</th><th>@L("НДС")</th><th class="num">@L("Цена")</th></tr></thead>
+                    <thead><tr><th>@L("Вид цены")</th><th>@L("НДС")</th><th class="num">@L("Цена")</th><th>@L("Валюта")</th></tr></thead>
                     <tbody>
                         @foreach (var p in _item.Prices)
                         {
@@ -627,6 +635,23 @@ else
                                     else
                                     {
                                         @(p.Price is { } v ? Amounts.Format(v) : "—")
+                                    }
+                                </td>
+                                <td>
+                                    @* D151: валюта цены; в документы и на площадки — в валюте организации по курсу ЦБ. *@
+                                    @if (editable)
+                                    {
+                                        <select value="@_currencies.GetValueOrDefault(price.PriceTypeId, PriceCurrencies.Default)"
+                                                @onchange="e => _currencies[price.PriceTypeId] = e.Value?.ToString() ?? PriceCurrencies.Default" aria-label="@L("Валюта: {0}", p.PriceType)">
+                                            @foreach (var c in PriceCurrencies.All)
+                                            {
+                                                <option value="@c">@c</option>
+                                            }
+                                        </select>
+                                    }
+                                    else
+                                    {
+                                        @p.CurrencyCode
                                     }
                                 </td>
                             </tr>
@@ -915,6 +940,7 @@ else
     private IReadOnlyDictionary<long, IReadOnlyList<UserCatalogEntryDto>> _entries = new Dictionary<long, IReadOnlyList<UserCatalogEntryDto>>();
     private DetailsForm _form = new();
     private Dictionary<long, string?> _prices = [];
+    private Dictionary<long, string> _currencies = [];
     private string? _barcode;
     private string _barcodeType = string.Empty;
     private bool _busy;
@@ -936,6 +962,7 @@ else
         public string? Volume { get; set; }
         public string? MinStock { get; set; }
         public string? PurchasePrice { get; set; }
+        public string PurchaseCurrency { get; set; } = PriceCurrencies.Default;
         public Dictionary<long, string?> Values { get; } = [];
     }
 
@@ -1009,6 +1036,7 @@ else
             Group = d.GroupId?.ToString() ?? string.Empty, Article = d.Article, Country = d.OriginCountryCode, CountryName = d.OriginCountryName,
             Declaration = d.CustomsDeclaration, TnVed = d.TnVedCode, Weight = N(d.WeightKg), Volume = N(d.VolumeM3), MinStock = N(d.MinStock),
             PurchasePrice = N(d.PurchasePrice),
+            PurchaseCurrency = d.PurchaseCurrency,
         };
         foreach (var f in _item.CustomFields.Where(f => !f.IsArchived))
         {
@@ -1016,6 +1044,7 @@ else
         }
 
         _prices = _item.Prices.ToDictionary(p => p.PriceTypeId, p => p.Price is { } v ? Amounts.Input(v) : null);
+        _currencies = _item.Prices.ToDictionary(p => p.PriceTypeId, p => p.CurrencyCode);
         _variants = await Modifications.VariantsAsync(Id);
         _photos = await Modifications.PhotosAsync(Id);
         _characteristics = await Modifications.CharacteristicsAsync(includeArchived: true);
@@ -1084,7 +1113,7 @@ else
         var f = _form;
         var details = new ItemDetails(long.TryParse(f.Group, out var g) ? g : null, f.Article, f.Country, f.CountryName, f.Declaration, f.TnVed,
             Decimals.Parse(f.Weight, L("Вес")), Decimals.Parse(f.Volume, L("Объём")), Decimals.Parse(f.MinStock, L("Неснижаемый остаток")),
-            Decimals.Parse(f.PurchasePrice, L("Закупочная цена")));
+            Decimals.Parse(f.PurchasePrice, L("Закупочная цена")), f.PurchaseCurrency);
         await Nomenclature.SaveItemDetailsAsync(Id, details, f.Values, _item!.RowVersion);
     }, L("Сведения сохранены."));
 
@@ -1099,7 +1128,7 @@ else
     private Task SavePricesAsync() => RunAsync(async () =>
     {
         var prices = _prices.ToDictionary(p => p.Key, p => Decimals.Parse(p.Value, L("Цена")));
-        await Nomenclature.SetPricesAsync(Id, prices);
+        await Nomenclature.SetPricesAsync(Id, prices, default, _currencies);
     }, L("Цены сохранены."));
 
     /// <summary>Одна операция за раз, затем свежая карточка: у вкладки один DbContext.</summary>

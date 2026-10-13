@@ -78,10 +78,12 @@ public sealed class BundleService(IKnitErpDbContext db, IAccessGuard guard, ICur
         {
             // Цена основного вида (D79): у компонентов — для суммы, у комплекта — его собственная.
             var ids = componentIds.Append(bundleId).ToList();
-            salePrices = await db.ItemPrices.AsNoTracking()
+            var raw = await db.ItemPrices.AsNoTracking()
                 .Where(p => p.OrganizationId == ctx.OrganizationId && ids.Contains(p.ItemId))
-                .Join(db.PriceTypes.AsNoTracking().Where(t => t.IsDefault), p => p.PriceTypeId, t => t.Id, (p, t) => new { p.ItemId, p.Price })
-                .ToDictionaryAsync(x => x.ItemId, x => x.Price, ct);
+                .Join(db.PriceTypes.AsNoTracking().Where(t => t.IsDefault), p => p.PriceTypeId, t => t.Id, (p, t) => new { p.ItemId, p.Price, p.CurrencyCode })
+                .ToListAsync(ct);
+            salePrices = await (await KnitErp.Application.Finance.PriceConversion.TodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct)) // D151
+                .ToOrganizationAsync(raw.Select(r => (r.ItemId, r.Price, r.CurrencyCode)), ct);
             hint = BundleExpansion.PriceHint(bundleId, specs, salePrices.Where(p => p.Key != bundleId).ToDictionary(), salePrices.TryGetValue(bundleId, out var own) ? own : null);
             // Себестоимость компонентов — та же оценка, что в отчёте «Прибыльность» (D69): закупки, затем техкарты.
             var unitCosts = await new SalesAnalyticsService(db, guard).CostsAsync(ctx, DateOnly.FromDateTime(clock.UtcNow), componentIds, ct);

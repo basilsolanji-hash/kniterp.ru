@@ -36,6 +36,9 @@ public sealed class HrAppFixture : IAsyncLifetime
 
     public byte[] UpdXml { get; private set; } = [];
 
+    /// <summary>D151: позиция «ПР-E2E» — для валюты цены в карточке.</summary>
+    public long UpdItemId { get; private set; }
+
     private readonly string _orgInn = TestInn();
 
     public async Task InitializeAsync()
@@ -245,6 +248,7 @@ public sealed class HrAppFixture : IAsyncLifetime
         var yarn = await s.Catalog.CreateItemAsync(new KnitErp.Application.Catalog.ItemCommand("ПР-E2E", "Пряжа для УПД", KnitErp.Domain.Catalog.ItemType.RawMaterial, kg, null));
         var supplier = await s.Counterparties.CreateAsync(new KnitErp.Application.Catalog.CounterpartyCommand("ИП Петров (пряжа)", supplierInn, null, true, false, null));
         await s.Suppliers.SetAsync(yarn, supplier, "E2E-ART", null, true);
+        UpdItemId = yarn;
         UpdOrderId = await s.Purchases.CreateOrderAsync(new KnitErp.Domain.Purchasing.PurchaseOrderHeader(DateOnly.FromDateTime(DateTime.UtcNow), supplier, store, null, null, true, null));
         await s.Purchases.SetOrderLineAsync(UpdOrderId, yarn, 4, 500m, null, (await s.Purchases.GetOrderAsync(UpdOrderId)).RowVersion);
         await s.Purchases.ConfirmOrderAsync(UpdOrderId, (await s.Purchases.GetOrderAsync(UpdOrderId)).RowVersion);

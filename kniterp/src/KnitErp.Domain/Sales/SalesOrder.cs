@@ -133,7 +133,8 @@ public sealed class SalesOrder
     }
 
     /// <summary>Строка по позиции: новая или замена. vatPercent null — «без НДС»; discountPercent — скидка строки, 0–100 %.</summary>
-    public void SetLine(long itemId, decimal quantity, decimal price, decimal? vatPercent, decimal discountPercent = 0)
+    /// <param name="priceNote">D151: откуда цена в валюте («12 $ по 92,15 ₽»); null при той же цене — пометка сохраняется, при новой — снимается.</param>
+    public void SetLine(long itemId, decimal quantity, decimal price, decimal? vatPercent, decimal discountPercent = 0, string? priceNote = null)
     {
         EnsureDraft();
         EnsureDiscount(discountPercent);
@@ -160,7 +161,9 @@ public sealed class SalesOrder
             _lines.Add(line);
         }
 
+        var keepNote = priceNote is null && line.Price == price ? line.PriceNote : priceNote;
         line.Set(quantity, price, vatPercent, discountPercent, PricesIncludeVat);
+        line.PriceNote = keepNote is { Length: > SalesOrderLine.PriceNoteMaxLength } n ? n[..SalesOrderLine.PriceNoteMaxLength] : keepNote;
     }
 
     /// <summary>Скидка на весь заказ: один процент всем строкам черновика (как кнопка «Скидка» в МойСклад) — ручная часть скидки.</summary>
@@ -434,6 +437,11 @@ public sealed class SalesOrderLine
 
     /// <summary>D1106: расшифровка итоговой скидки — «Соглашение 5%; Акция «Осень» 10%; Ручная 2%».</summary>
     public string? DiscountSources { get; private set; }
+
+    public const int PriceNoteMaxLength = 100;
+
+    /// <summary>D151: цена подставлена из цены в валюте — исходная цена, валюта и курс на дату заказа («12 $ по 92,15»).</summary>
+    public string? PriceNote { get; internal set; }
 
     /// <summary>Сумма строки с НДС.</summary>
     public decimal Amount { get; private set; }

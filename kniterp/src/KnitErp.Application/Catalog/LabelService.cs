@@ -196,8 +196,12 @@ public sealed class LabelService(IKnitErpDbContext db, IAccessGuard guard, ICurr
         if (ctx.Permissions.Has(Permissions.PriceView))
         {
             var type = priceTypeId ?? await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == org && t.IsDefault).Select(t => (long?)t.Id).FirstOrDefaultAsync(ct);
-            prices = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == org && p.PriceTypeId == type && ids.Contains(p.ItemId))
-                .ToDictionaryAsync(p => p.ItemId, p => p.Price, ct);
+            // D151: на этикетке — цена в валюте организации по курсу на сегодня.
+            var rows = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == org && p.PriceTypeId == type && ids.Contains(p.ItemId))
+                .Select(p => new { p.ItemId, p.Price, p.CurrencyCode }).ToListAsync(ct);
+            prices = (await (await KnitErp.Application.Finance.PriceConversion.TodayAsync(db, org, clock.UtcNow, ct))
+                    .ToOrganizationAsync(rows.Select(r => (r.ItemId, r.Price, r.CurrencyCode)), ct))
+                .ToDictionary(p => p.Key, p => decimal.Round(p.Value, 2));
         }
 
         var byId = items.ToDictionary(i => i.Id);

@@ -87,7 +87,9 @@ public sealed record RevaluationRequest(
     string? Search = null);
 
 /// <summary>Строка предпросмотра: NewPrice null — пропущена (нет текущей или закупочной цены); BelowMinimum — новая цена ниже минимальной.</summary>
-public sealed record RevaluationRowDto(long ItemId, string Code, string Name, decimal? OldPrice, decimal? NewPrice, bool BelowMinimum)
+/// <remarks>D151: Currency — валюта новой цены: от закупки — валюта закупочной цены, ± % — прежняя валюта цены.</remarks>
+public sealed record RevaluationRowDto(long ItemId, string Code, string Name, decimal? OldPrice, decimal? NewPrice, bool BelowMinimum,
+    string Currency = PriceCurrencies.Default)
 {
     public bool Changes => NewPrice is { } n && n != OldPrice;
 }
@@ -151,11 +153,11 @@ public sealed class RevaluationService(IKnitErpDbContext db, IAccessGuard guard,
             {
                 if (current.TryGetValue(row.ItemId, out var price))
                 {
-                    price.Set(row.NewPrice!.Value);
+                    price.Set(row.NewPrice!.Value, row.Currency);
                 }
                 else
                 {
-                    db.ItemPrices.Add(ItemPrice.Create(ctx.OrganizationId, row.ItemId, type.Id, row.NewPrice!.Value));
+                    db.ItemPrices.Add(ItemPrice.Create(ctx.OrganizationId, row.ItemId, type.Id, row.NewPrice!.Value, row.Currency));
                 }
 
                 db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, row.ItemId, type.Id, row.OldPrice, row.NewPrice, clock.UtcNow, ctx.UserId,
@@ -240,12 +242,15 @@ public sealed class RevaluationService(IKnitErpDbContext db, IAccessGuard guard,
 
         var items = await query
             .GroupJoin(db.ItemPrices.AsNoTracking().Where(p => p.PriceTypeId == type.Id), i => i.Id, p => p.ItemId, (i, p) => new { i, p })
-            .SelectMany(x => x.p.DefaultIfEmpty(), (x, p) => new { x.i.Id, x.i.Code, x.i.Name, x.i.PurchasePrice, x.i.MinPrice, Price = p == null ? (decimal?)null : p.Price })
+            .SelectMany(x => x.p.DefaultIfEmpty(), (x, p) => new { x.i.Id, x.i.Code, x.i.Name, x.i.PurchasePrice, x.i.PurchaseCurrency, x.i.MinPrice,
+                Price = p == null ? (decimal?)null : p.Price, Currency = p == null ? null : p.CurrencyCode })
             .ToListAsync(ct);
         var rows = items.Select(i =>
         {
             var newPrice = Revaluation.NewPrice(request.Mode, request.Value, request.Rounding, i.Price, i.PurchasePrice);
-            return new RevaluationRowDto(i.Id, i.Code, i.Name, i.Price, newPrice, newPrice is { } n && TradeRules.BelowMinimum(n, i.MinPrice));
+            var currency = request.Mode == RevaluationMode.FromPurchase ? i.PurchaseCurrency : i.Currency ?? PriceCurrencies.Default;
+            return new RevaluationRowDto(i.Id, i.Code, i.Name, i.Price, newPrice,
+                newPrice is { } n && currency == PriceCurrencies.Default && TradeRules.BelowMinimum(n, i.MinPrice), currency);
         }).ToList();
         return (type, rows);
     }

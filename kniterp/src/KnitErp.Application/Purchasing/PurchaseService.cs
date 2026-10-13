@@ -85,7 +85,7 @@ public sealed record PurchaseOrderDto(
 /// <summary>Позиция для строки заказа поставщику. Price — закупочная цена без НДС из карточки (D79), только тем, кто видит цены.</summary>
 public sealed record PurchaseItemOptionDto(
     long Id, string Code, string Name, string UnitSymbol, byte Precision, decimal? VatPercent, decimal? Price = null, string? Article = null,
-    string? Barcodes = null, string? SupplierArticle = null);
+    string? Barcodes = null, string? SupplierArticle = null, string? PriceNote = null);
 
 public sealed record VatOptionDto(string Name, decimal? Percent);
 
@@ -295,7 +295,7 @@ public sealed partial class PurchaseService(
             .Where(r => r.OrganizationId == ctx.OrganizationId && !r.IsArchived).ToListAsync(ct);
         var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && !i.IsArchived).OrderBy(i => i.Code)
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision, i.VatRateId, i.Article,
-                i.PurchasePrice })
+                i.PurchasePrice, i.PurchaseCurrency })
             .ToListAsync(ct);
         var standard = rates.FirstOrDefault(r => r.Kind == VatRateKind.Standard)?.PercentOn(date);
         var seePrices = ctx.Permissions.Has(Permissions.PriceView);
@@ -325,11 +325,21 @@ public sealed partial class PurchaseService(
             }
         }
 
+        // D151: закупочная цена в валюте — в валюту организации по курсу на дату заказа (подсказка в форме строки); курса нет — без подсказки.
+        var conversion = new KnitErp.Application.Finance.PriceConversion(db, ctx.OrganizationId, date);
+        var cardPrices = new Dictionary<long, (decimal? Price, string? Note)>();
+        foreach (var i in items.Where(i => seePrices && i.PurchasePrice is not null && !lastPrices.ContainsKey(i.Id)))
+        {
+            var c = await conversion.ToOrganizationAsync(i.PurchasePrice!.Value, i.PurchaseCurrency, ct);
+            cardPrices[i.Id] = c is null ? (null, $"нет курса {i.PurchaseCurrency}") : (Money.Round(c.Price), c.Converted ? c.Describe() : null);
+        }
+
         return new PurchaseOptionsDto(suppliers, warehouses,
             items.Select(i => new PurchaseItemOptionDto(i.Id, i.Code, i.Name, i.Symbol, i.Precision,
                 i.VatRateId is { } rid && rates.FirstOrDefault(r => r.Id == rid) is { } rate ? rate.PercentOn(date) : standard,
-                seePrices ? (lastPrices.TryGetValue(i.Id, out var last) ? last : i.PurchasePrice) : null, i.Article,
-                barcodes.TryGetValue(i.Id, out var codes) ? codes : null, supplierArticles.GetValueOrDefault(i.Id))).ToList(),
+                seePrices ? (lastPrices.TryGetValue(i.Id, out var last) ? last : cardPrices.GetValueOrDefault(i.Id).Price) : null, i.Article,
+                barcodes.TryGetValue(i.Id, out var codes) ? codes : null, supplierArticles.GetValueOrDefault(i.Id),
+                cardPrices.GetValueOrDefault(i.Id).Note)).ToList(),
             rates.OrderBy(r => r.Kind).ThenBy(r => r.Name).Select(r => new VatOptionDto(r.Name, r.PercentOn(date)))
                 .Where(r => r.Percent is not null || rates.Any(x => x.Kind == VatRateKind.Exempt && x.Name == r.Name))
                 .DistinctBy(r => r.Percent).ToList(),

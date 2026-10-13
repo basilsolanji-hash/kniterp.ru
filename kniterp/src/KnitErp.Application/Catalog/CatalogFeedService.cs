@@ -180,13 +180,25 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
                             select new
                             {
                                 i.Id, i.Code, i.Name, i.Type, i.Description, i.Article, i.GroupId, i.ParentItemId, i.OriginCountryName, i.WeightKg, i.Gtin,
-                                p.Price,
+                                p.Price, p.CurrencyCode,
                             }).Take(MaxOffers + 1).ToListAsync(ct);
+        // D151: цена на площадке — только в валюте организации по курсу ЦБ на дату выгрузки; без курса валюты позиция в фид не идёт.
+        var conversion = new KnitErp.Application.Finance.PriceConversion(db, org,
+            DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, organization.TimeZoneId)));
+        var feedPrices = new Dictionary<long, decimal>();
+        foreach (var p in priced)
+        {
+            if (await conversion.ToOrganizationAsync(p.Price, p.CurrencyCode, ct) is { } c)
+            {
+                feedPrices[p.Id] = c.Price;
+            }
+        }
+
         var parentsWithVariants = priced.Where(i => i.ParentItemId is not null).Select(i => i.ParentItemId!.Value).ToHashSet();
         var parentGroups = await db.Items.AsNoTracking().Where(i => parentsWithVariants.Contains(i.Id)).Select(i => new { i.Id, i.GroupId })
             .ToDictionaryAsync(x => x.Id, x => x.GroupId, ct);
         var rows = priced
-            .Where(i => !parentsWithVariants.Contains(i.Id)) // продаются модификации, а не основная позиция
+            .Where(i => !parentsWithVariants.Contains(i.Id) && feedPrices.ContainsKey(i.Id)) // продаются модификации, а не основная позиция
             .Select(i => new { Item = i, GroupId = i.ParentItemId is { } pid ? parentGroups.GetValueOrDefault(pid) ?? i.GroupId : i.GroupId })
             .Where(x => groupFilter is null || x.GroupId is { } gid && groupFilter.Contains(gid))
             .ToList();
@@ -310,7 +322,7 @@ public sealed class CatalogFeedService(IKnitErpDbContext db, IAccessGuard guard,
                     }
                 }
 
-                x.WriteElementString("price", i.Price.ToString("0.##", CultureInfo.InvariantCulture));
+                x.WriteElementString("price", Money.Round(feedPrices[i.Id]).ToString("0.##", CultureInfo.InvariantCulture));
                 x.WriteElementString("currencyId", currency);
                 if (o.GroupId is { } gid && usedGroups.Contains(gid))
                 {

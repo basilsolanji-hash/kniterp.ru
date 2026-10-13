@@ -1490,6 +1490,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("tinyint")
                         .HasDefaultValue((byte)1);
 
+                    b.Property<string>("PurchaseCurrency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("char(3)")
+                        .HasDefaultValue("RUB")
+                        .IsFixedLength();
+
                     b.Property<decimal?>("PurchasePrice")
                         .HasColumnType("decimal(19,4)");
 
@@ -1863,6 +1872,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("char(3)")
+                        .HasDefaultValue("RUB")
+                        .IsFixedLength();
+
                     b.Property<long>("ItemId")
                         .HasColumnType("bigint");
 
@@ -1887,6 +1905,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("item_prices", "kniterp", t =>
                         {
+                            t.HasCheckConstraint("ck_item_prices_currency", "LEN([CurrencyCode]) = 3");
+
                             t.HasCheckConstraint("ck_item_prices_price", "[Price] >= 0");
                         });
                 });
@@ -11804,6 +11824,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.Property<decimal>("Price")
                         .HasColumnType("decimal(19,4)");
+
+                    b.Property<string>("PriceNote")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<decimal>("Quantity")
                         .HasColumnType("decimal(18,6)");

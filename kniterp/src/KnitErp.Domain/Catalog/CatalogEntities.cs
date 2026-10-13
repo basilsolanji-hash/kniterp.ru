@@ -272,6 +272,9 @@ public sealed class Item
     /// <summary>Закупочная цена по умолчанию — подставляется в заказ поставщику.</summary>
     public decimal? PurchasePrice { get; private set; }
 
+    /// <summary>D151: валюта закупочной цены (по умолчанию рубль); в заказ поставщику — по курсу на дату заказа.</summary>
+    public string PurchaseCurrency { get; private set; } = PriceCurrencies.Default;
+
     /// <summary>Основная позиция, если это модификация (D82): «Свитер» → «Свитер, красный, 48».</summary>
     public long? ParentItemId { get; private set; }
 
@@ -350,6 +353,7 @@ public sealed class Item
             ("Страна происхождения", OriginCountryCode, d.OriginCountryCode), ("Номер декларации", CustomsDeclaration, d.CustomsDeclaration),
             ("Код ТН ВЭД", TnVedCode, d.TnVedCode), ("Вес, кг", N(WeightKg), N(d.WeightKg)), ("Объём, м³", N(VolumeM3), N(d.VolumeM3)),
             ("Неснижаемый остаток", N(MinStock), N(d.MinStock)), ("Закупочная цена", N(PurchasePrice), N(d.PurchasePrice)),
+            ("Валюта закупочной цены", PurchaseCurrency, PriceCurrencies.Normalize(d.PurchaseCurrency)),
         ];
         GroupId = d.GroupId;
         Article = d.Article;
@@ -361,11 +365,12 @@ public sealed class Item
         VolumeM3 = d.VolumeM3;
         MinStock = d.MinStock;
         PurchasePrice = d.PurchasePrice;
+        PurchaseCurrency = PriceCurrencies.Normalize(d.PurchaseCurrency);
         return pairs.Where(p => p.Before != p.After).Select(p => new FieldChange(p.Field, p.Before, p.After)).ToList();
     }
 
     public ItemDetails Details => new(GroupId, Article, OriginCountryCode, OriginCountryName, CustomsDeclaration, TnVedCode, WeightKg, VolumeM3,
-        MinStock, PurchasePrice);
+        MinStock, PurchasePrice, PurchaseCurrency);
 
     /// <summary>
     /// Модификация (D82): тип, единица, НДС, группа и сведения карточки — как у основной позиции; код, название, остаток,

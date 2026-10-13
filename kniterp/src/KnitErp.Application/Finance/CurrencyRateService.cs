@@ -25,9 +25,62 @@ public sealed record EffectiveRate(string CurrencyCode, decimal PerUnit, DateOnl
 /// курса ЦБ на ту же дату. Курс на дату — последний известный не позже неё. Смотреть — любой участник организации; вводить вручную —
 /// «Цены и суммы» и право продаж или закупок (как денежные операции). Ввод и изменение — в журнал аудита.
 /// </summary>
-public sealed class CurrencyRateService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)
+public sealed class CurrencyRateService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, ICbrRateSource? cbr = null)
 {
     public const string Rub = "RUB";
+
+    /// <summary>Кнопка «Обновить курсы ЦБ сейчас» видна, если загрузка курсов включена на сервере.</summary>
+    public bool CanRefresh => cbr is { Enabled: true };
+
+    /// <summary>
+    /// D152: загрузить курсы ЦБ сейчас (на сегодня и завтра по Москве) — если служба ещё не успела. Права — как ручной ввод курса.
+    /// Не чаще раза в минуту на сервер (ЦБ не любит частых запросов); нет сети — понятный отказ «введите курс вручную».
+    /// </summary>
+    public async Task<(DateOnly Date, int Changed)> RefreshAsync(CancellationToken ct = default)
+    {
+        var ctx = await DemandEditAsync(ct);
+        if (cbr is not { Enabled: true })
+        {
+            throw new BusinessRuleException("currency.cbr.disabled", "Загрузка курсов ЦБ на сервере выключена — введите курс вручную.");
+        }
+
+        lock (RefreshGate)
+        {
+            if (clock.UtcNow - _lastRefreshUtc < TimeSpan.FromMinutes(1))
+            {
+                throw new BusinessRuleException("currency.cbr.too_often", "Курсы ЦБ только что загружались — повторите через минуту.");
+            }
+
+            _lastRefreshUtc = clock.UtcNow;
+        }
+
+        var moscow = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, "Europe/Moscow"));
+        (DateOnly Date, int Changed) last = (moscow, 0);
+        var total = 0;
+        foreach (var date in new[] { moscow, moscow.AddDays(1) })
+        {
+            byte[] content;
+            try
+            {
+                content = await cbr.FetchAsync(date, ct);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
+            {
+                throw new BusinessRuleException("currency.cbr.unavailable", "Сайт ЦБ сейчас недоступен — повторите позже или введите курс вручную.");
+            }
+
+            last = await new CbrRateImporter(db, clock).ImportAsync(content, ct);
+            total += last.Changed;
+        }
+
+        db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CurrencyRateChanged, nameof(CurrencyRate), "ЦБ",
+            null, $"загружено курсов: {total}", $"Курсы ЦБ на {last.Date:dd.MM.yyyy} — загрузка по кнопке", currentUser.CorrelationId));
+        await db.SaveChangesAsync(ct);
+        return (last.Date, total);
+    }
+
+    private static readonly object RefreshGate = new();
+    private static DateTime _lastRefreshUtc = DateTime.MinValue;
 
     public async Task<CurrencyRatesDto> ListAsync(DateOnly date, CancellationToken ct = default)
     {
@@ -160,6 +213,14 @@ public sealed class CurrencyRateService(IKnitErpDbContext db, IAccessGuard guard
         db.CurrencyRates.AsNoTracking()
             .Where(r => r.CurrencyCode == code && r.RateDate <= date && (r.OrganizationId == null || r.OrganizationId == org))
             .OrderByDescending(r => r.RateDate).ThenByDescending(r => r.OrganizationId != null);
+}
+
+/// <summary>D146, D152: источник XML курсов ЦБ (сайт cbr.ru в приложении; в тестах — без сети).</summary>
+public interface ICbrRateSource
+{
+    bool Enabled { get; }
+
+    Task<byte[]> FetchAsync(DateOnly date, CancellationToken ct);
 }
 
 /// <summary>Строка ежедневного XML ЦБ РФ (XML_daily.asp): буквенный код, номинал, курс.</summary>

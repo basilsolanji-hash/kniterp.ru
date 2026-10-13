@@ -73,6 +73,37 @@ public sealed class AutomationE2ETests(HrAppFixture app) : IClassFixture<HrAppFi
         await Assertions.Expect(page.GetByText("E2E-1").First).ToBeVisibleAsync();
     });
 
+    [SqlFact]
+    public Task Item_price_currency_is_saved_on_card() => RunAsync("item-price-currency", async page =>
+    {
+        await page.GotoAsync($"catalog/items/{app.UpdItemId}");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Цены" })).ToBeVisibleAsync();
+        await page.WaitForFunctionAsync("() => window.Blazor !== undefined");
+        var currency = page.Locator("select[aria-label^='Валюта:']").First;
+        var row = page.Locator("tr").Filter(new() { Has = currency });
+        await RetryAsync(page, async () =>
+        {
+            await row.Locator("input[inputmode=decimal]").FillAsync("12,5");
+            await currency.SelectOptionAsync("USD");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить цены" }).ClickAsync();
+        }, page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Цены сохранены." }));
+        await page.ReloadAsync();
+        await Assertions.Expect(page.Locator("select[aria-label^='Валюта:']").First).ToHaveValueAsync("USD");
+    });
+
+    [SqlFact]
+    public Task Close_button_returns_where_page_was_opened_from() => RunAsync("page-close", async page =>
+    {
+        await OpenAsync(page, "money/currency-rates?back=settings/automation", "Курсы валют");
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Закрыть" })).ToHaveAttributeAsync("href", "settings/automation");
+        await RetryAsync(page, () => page.GetByRole(AriaRole.Link, new() { Name = "Закрыть" }).ClickAsync(),
+            page.GetByRole(AriaRole.Heading, new() { Name = "Настройки автоматизации", Exact = true }));
+
+        // Чужой адрес возврата не принимается — «Закрыть» ведёт в родительский раздел.
+        await OpenAsync(page, "money/recurring?back=https://evil.test", "Регулярные операции");
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Закрыть" })).ToHaveAttributeAsync("href", "money");
+    });
+
     private static async Task OpenAsync(IPage page, string url, string heading)
     {
         await page.GotoAsync(url);

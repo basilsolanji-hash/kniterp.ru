@@ -276,10 +276,13 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
         // Цены: вручную → последняя закупка (без НДС) → основной вид цены каталога → нет цены (0, замечание).
         var itemIds = input.Where(x => x.Line.ItemId is not null).Select(x => x.Line.ItemId!.Value).Distinct().ToList();
         var purchases = await LastPurchasePricesAsync(org, itemIds, ct);
-        var catalog = await (from p in db.ItemPrices.AsNoTracking()
-                             join t in db.PriceTypes.AsNoTracking() on p.PriceTypeId equals t.Id
-                             where p.OrganizationId == org && t.IsDefault && itemIds.Contains(p.ItemId)
-                             select new { p.ItemId, p.Price }).ToDictionaryAsync(x => x.ItemId, x => x.Price, ct);
+        var catalogRows = await (from p in db.ItemPrices.AsNoTracking()
+                                 join t in db.PriceTypes.AsNoTracking() on p.PriceTypeId equals t.Id
+                                 where p.OrganizationId == org && t.IsDefault && itemIds.Contains(p.ItemId)
+                                 select new { p.ItemId, p.Price, p.CurrencyCode }).ToListAsync(ct);
+        // D151 (сессия № 1): цена каталога в валюте — в валюту организации по курсу на сегодня; без курса — «нет цены».
+        var catalog = await (await KnitErp.Application.Finance.PriceConversion.TodayAsync(db, org, clock.UtcNow, ct))
+            .ToOrganizationAsync(catalogRows.Select(r => (r.ItemId, r.Price, r.CurrencyCode)), ct);
         var priced = new List<(DevCostInputLine Line, long? Original, string Source)>();
         foreach (var (line, original) in input)
         {

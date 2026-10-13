@@ -8,10 +8,7 @@
 
 <div class="page-head">
     <h1>@L("Загрузка УПД поставщика")</h1>
-    @if (OrderId is { } back)
-    {
-        <a class="button secondary" href="purchase-orders/@back">@L("К заказу")</a>
-    }
+    <KnitErp.Web.Components.Base.PageClose Fallback="@(OrderId is { } back ? $"purchase-orders/{back}" : "purchase-orders")" />
 </div>
 <p class="muted">@L("Выберите XML-файл УПД (формат ФНС 5.03), полученный по ЭДО. Программа найдёт поставщика по ИНН, сопоставит строки с позициями и создаст черновик поступления по заказу — проводит его кладовщик. Файл не сохраняется.")</p>
 

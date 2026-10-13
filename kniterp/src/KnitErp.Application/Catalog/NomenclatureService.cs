@@ -18,7 +18,7 @@ public sealed record ItemBarcodeDto(long Id, BarcodeType Type, string Code)
 
 public sealed record PriceTypeDto(long Id, string Name, bool IncludesVat, bool IsDefault, bool IsArchived, int Prices, byte[] RowVersion);
 
-public sealed record ItemPriceDto(long PriceTypeId, string PriceType, bool IncludesVat, bool IsDefault, decimal? Price);
+public sealed record ItemPriceDto(long PriceTypeId, string PriceType, bool IncludesVat, bool IsDefault, decimal? Price, string CurrencyCode = PriceCurrencies.Default);
 
 /// <summary>
 /// Карточка позиции (D79). Цены и закупочная цена — только с правом «Цены и суммы» (иначе null / пусто).
@@ -322,13 +322,15 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
     /// D344 (ответ заказчика): при одновременной правке сохраняется последнее изменение, без конфликта. В историю цен пишется
     /// настоящая прежняя цена из базы; одновременная вставка цены того же вида (уникальный индекс) — повтор поверх неё.
     /// </summary>
-    public async Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct = default)
+    /// <param name="currencies">D151: валюта цены по виду цены; нет в словаре — прежняя (у новой цены — рубль).</param>
+    public async Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct = default,
+        IReadOnlyDictionary<long, string>? currencies = null)
     {
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                await SetPricesCoreAsync(itemId, prices, ct);
+                await SetPricesCoreAsync(itemId, prices, currencies ?? new Dictionary<long, string>(), ct);
                 return;
             }
             catch (DbUpdateException) when (attempt == 1)
@@ -343,7 +345,7 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         }
     }
 
-    private async Task SetPricesCoreAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct)
+    private async Task SetPricesCoreAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, IReadOnlyDictionary<long, string> currencies, CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         await guard.DemandAsync(Permissions.PriceView, ct);
@@ -377,7 +379,9 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             var type = types.GetValueOrDefault(typeId) ?? throw new NotFoundException("Вид цены");
             var existing = current.GetValueOrDefault(typeId);
             var before = existing?.Price; // до изменения: existing.Set меняет цену на месте
-            if (before == price)
+            var beforeCurrency = existing?.CurrencyCode ?? PriceCurrencies.Default;
+            var currency = currencies.TryGetValue(typeId, out var c) ? PriceCurrencies.Normalize(c) : beforeCurrency; // D151
+            if (before == price && (price is null || currency == beforeCurrency))
             {
                 continue;
             }
@@ -396,29 +400,34 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             }
             else if (existing is null)
             {
-                db.ItemPrices.Add(ItemPrice.Create(ctx.OrganizationId, itemId, typeId, price.Value));
+                db.ItemPrices.Add(ItemPrice.Create(ctx.OrganizationId, itemId, typeId, price.Value, currency));
             }
             else
             {
-                existing.Set(price.Value);
+                existing.Set(price.Value, currency);
             }
 
             db.ItemPriceHistory.Add(ItemPriceHistory.Create(ctx.OrganizationId, itemId, typeId, before, price, clock.UtcNow, ctx.UserId,
                 PriceChangeSource.Manual)); // D305: история цен
-            Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, before?.ToString("0.00##"), price?.ToString("0.00##"),
-                $"{item.Code}: {type.Name}");
+            Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, Text(before, beforeCurrency), Text(price, currency), $"{item.Code}: {type.Name}");
         }
 
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>Цена для журнала: рубли — как раньше («1500.00»), валюта — с кодом («12.00 USD»).</summary>
+    private static string? Text(decimal? price, string currency) =>
+        price is not { } p ? null : currency == PriceCurrencies.Default ? p.ToString("0.00##") : $"{p:0.00##} {currency}";
+
     private async Task<IReadOnlyList<ItemPriceDto>> PricesAsync(long organizationId, long itemId, CancellationToken ct)
     {
-        var prices = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == organizationId && p.ItemId == itemId)
-            .ToDictionaryAsync(p => p.PriceTypeId, p => p.Price, ct);
+        var rows = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == organizationId && p.ItemId == itemId)
+            .ToDictionaryAsync(p => p.PriceTypeId, p => new { p.Price, p.CurrencyCode }, ct);
+        var prices = rows.ToDictionary(r => r.Key, r => r.Value.Price);
         var types = await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == organizationId && (!t.IsArchived || prices.Keys.Contains(t.Id)))
             .OrderByDescending(t => t.IsDefault).ThenBy(t => t.SortOrder).ThenBy(t => t.Id).ToListAsync(ct);
-        return types.Select(t => new ItemPriceDto(t.Id, t.Name, t.IncludesVat, t.IsDefault, prices.TryGetValue(t.Id, out var p) ? p : null)).ToList();
+        return types.Select(t => new ItemPriceDto(t.Id, t.Name, t.IncludesVat, t.IsDefault, prices.TryGetValue(t.Id, out var p) ? p : null,
+            rows.TryGetValue(t.Id, out var r) ? r.CurrencyCode : PriceCurrencies.Default)).ToList();
     }
 
     // ---------- Виды цен ----------
