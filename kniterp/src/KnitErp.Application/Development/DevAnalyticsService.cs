@@ -24,7 +24,11 @@ public sealed record DevAnalyticsDto(
     DateOnly From, DateOnly To, int InWork, int Overdue, int Late, int Handed, int Cancelled, decimal? AvgDevelopmentDays, decimal? AvgPatternDays,
     decimal? SamplesPerModel, int SamplesAccepted, int SamplesRework, int SamplesRejected, int SamplesWaiting, IReadOnlyList<DevStageStatDto> Stages,
     IReadOnlyList<DevReasonDto> ReworkReasons, IReadOnlyList<DevLoadDto> Load, IReadOnlyList<DevPlanFactDto>? PlanFact,
-    IReadOnlyList<DevSampleOutDto>? SamplesOut = null);
+    IReadOnlyList<DevSampleOutDto>? SamplesOut = null, decimal? PatternVersionsPerModel = null, IReadOnlyList<DevPatternReuseDto>? PatternReuse = null,
+    int SamplesToCustomers = 0, int SamplesKeptBySoldTo = 0, int SamplesReturned = 0);
+
+/// <summary>Рисунок, использованный в нескольких моделях (ТЗ §12 «повторное использование рисунков из библиотеки»).</summary>
+public sealed record DevPatternReuseDto(long PatternId, string Number, string Name, int Models);
 
 /// <summary>Данные модуля разработки для главного экрана (ТЗ §12): в работе, просрочено, образцы ждут решения, у заказчиков и не возвращены к сроку (D723).</summary>
 public sealed record DevDashboardData(int InWork, int Overdue, int SamplesWaiting, string Href = "dev/models", int SamplesAtCustomer = 0,
@@ -40,9 +44,9 @@ public interface IDevelopmentDashboardSource
 }
 
 /// <summary>
-/// Аналитика разработки (D760–D766, этап 7 ТЗ). Смотреть — `dev.view`; суммы плана-факта — только с `dev.cost.view`. Повторное
-/// использование рисунков и фактическая себестоимость производственных заказов не считаются: библиотеки рисунков и факта затрат
-/// по заказам в системе пока нет (в отчёте — «нет данных»).
+/// Аналитика разработки (D760–D766, этап 7 ТЗ). Смотреть — `dev.view`; суммы плана-факта — только с `dev.cost.view`. Версии и повторное
+/// использование рисунков — по библиотеке рисунков (D726). Фактическая себестоимость производственных заказов не считается: факта затрат
+/// по заказам в системе пока нет.
 /// </summary>
 public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard, IClock clock, ISpreadsheetFormat spreadsheet) : IDevelopmentDashboardSource
 {
@@ -127,12 +131,36 @@ public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard
         }
 
         var withSamples = samples.Select(s => s.ModelId).Distinct().Count();
+
+        // D726: версий рисунка на модель — у моделей с образцами или переходами за период, где выбран рисунок; повторное использование —
+        // рисунки, выбранные в двух и более моделях (за всё время).
+        var activeIds = samples.Select(s => s.ModelId).Concat(entries.Select(e => e.ModelId)).Distinct().ToList();
+        var versionsPerModel = await (from m in db.DevModels.AsNoTracking()
+                                      join p in db.DevPatterns.AsNoTracking() on m.PatternId equals p.Id
+                                      where m.OrganizationId == org && activeIds.Contains(m.Id)
+                                      select p.CurrentVersion).ToListAsync(ct);
+        var patternVersions = Avg(versionsPerModel.Select(v => (decimal)v));
+        var reuse = await (from m in db.DevModels.AsNoTracking()
+                           join p in db.DevPatterns.AsNoTracking() on m.PatternId equals p.Id
+                           where m.OrganizationId == org
+                           group m by new { p.Id, p.Number, p.Name } into g
+                           where g.Count() > 1
+                           orderby g.Count() descending
+                           select new DevPatternReuseDto(g.Key.Id, g.Key.Number, g.Key.Name, g.Count())).Take(50).ToListAsync(ct);
+
+        // D723: образцы, переданные заказчикам за период, и чем закончилось.
+        var periodFrom = from;
+        var periodTo = to;
+        var custody = await db.DevSamples.AsNoTracking()
+            .Where(s => s.OrganizationId == org && s.HandedOn != null && s.HandedOn >= periodFrom && s.HandedOn <= periodTo)
+            .Select(s => new { s.Custody }).ToListAsync(ct);
         return new DevAnalyticsDto(from, to, open.Count, open.Count(m => Overdue(m.Stage, m.StageSinceUtc)), open.Count(m => Late(m.Stage, m.PlannedLaunch)),
             handedIds.Count, entries.Where(e => e.ToStage == DevStage.Cancelled).Select(e => e.ModelId).Distinct().Count(), Avg(devDays),
             avgDays.GetValueOrDefault(DevStage.Pattern), withSamples == 0 ? null : Math.Round((decimal)samples.Count / withSamples, 1),
             samples.Count(s => s.Status == DevSampleStatus.Accepted), samples.Count(s => s.Status == DevSampleStatus.Rework),
             samples.Count(s => s.Status == DevSampleStatus.Rejected), samples.Count(s => s.Status is DevSampleStatus.Knitting or DevSampleStatus.Ready),
-            stages, reasons, load, planFact, await DevShopService.SamplesOut(db, org, today, ct));
+            stages, reasons, load, planFact, await DevShopService.SamplesOut(db, org, today, ct), patternVersions, reuse,
+            custody.Count, custody.Count(c => c.Custody is DevSampleCustody.Kept or DevSampleCustody.Sold), custody.Count(c => c.Custody == DevSampleCustody.Returned));
     }
 
     /// <summary>Выгрузка отчёта в Excel (ТЗ §12): лист на каждый раздел; суммы — только с правом на себестоимость.</summary>
@@ -149,7 +177,11 @@ public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard
                 ["Среднее время разработки, дн.", N(r.AvgDevelopmentDays)], ["Среднее время рисунка, дн.", N(r.AvgPatternDays)],
                 ["Образцов на модель", N(r.SamplesPerModel)], ["Образцы: приняты", $"{r.SamplesAccepted}"], ["Образцы: на доработку", $"{r.SamplesRework}"],
                 ["Образцы: отклонены", $"{r.SamplesRejected}"], ["Образцы: ждут решения", $"{r.SamplesWaiting}"],
+                ["Версий рисунка на модель", N(r.PatternVersionsPerModel)], ["Образцов передано заказчикам", $"{r.SamplesToCustomers}"],
+                ["Оставлены у заказчиков или проданы", $"{r.SamplesKeptBySoldTo}"], ["Возвращены", $"{r.SamplesReturned}"],
             ]),
+            new("Повторное использование рисунков", ["Рисунок", "Название", "Моделей"],
+                (r.PatternReuse ?? []).Select(x => (IReadOnlyList<string>)[x.Number, x.Name, $"{x.Models}"]).ToList(), new HashSet<int> { 2 }),
             new("Стадии", ["Стадия", "В работе", "Дольше нормы", "Просрочен запуск", "Среднее, дн."],
                 r.Stages.Select(s => (IReadOnlyList<string>)[s.Name, $"{s.Open}", $"{s.Overdue}", $"{s.Late}", N(s.AvgDays)]).ToList(), new HashSet<int> { 1, 2, 3, 4 }),
             new("Причины доработок", ["Причина", "Образцов"], r.ReworkReasons.Select(x => (IReadOnlyList<string>)[x.Reason, $"{x.Count}"]).ToList(), new HashSet<int> { 1 }),
