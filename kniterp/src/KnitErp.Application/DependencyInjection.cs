@@ -81,6 +81,10 @@ public static class DependencyInjection
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();
         services.AddScoped<Purchasing.PurchaseSettingsService>(); // D133
+        services.AddScoped<Automation.AutomationSettingsService>(); // D145
+        services.AddScoped<Finance.CurrencyRateService>(); // D146
+        services.AddScoped<Finance.RecurringOperationService>(); // D147
+        services.AddScoped<Purchasing.SupplierUpdImportService>(); // D149
         services.AddScoped<Sales.SalesService>();
         services.AddScoped<Sales.CustomerInvoiceService>();
         services.AddScoped<Sales.SalesStageService>();

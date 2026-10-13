@@ -1,0 +1,147 @@
+@page "/money/currency-rates"
+@using KnitErp.Application.Finance
+@using KnitErp.Domain.Finance
+@using KnitErp.Domain.Catalog
+@inject CurrencyRateService Rates
+
+@* D146: курсы валют к рублю на дату — ЦБ РФ (загружаются сами каждый день) и ручные курсы организации (нет сети, другая валюта). *@
+<PageTitle>@L("Курсы валют") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head"><h1>@L("Курсы валют")</h1><a class="button secondary" href="money">@L("Касса и счета")</a></div>
+    <p class="muted">@L("Официальные курсы ЦБ РФ загружаются каждый день сами. Если сети нет или нужной валюты нет у ЦБ — введите курс вручную: на ту же дату он важнее курса ЦБ. Курс на дату — последний известный не позже неё.")</p>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="inline-form">
+        <label>@L("Курсы на дату") <input type="date" value="@_date.ToString("yyyy-MM-dd")" @onchange="DateChangedAsync" disabled="@_busy" /></label>
+        <span class="muted">@(_data.LastCbrDate is { } last ? L("Последняя загрузка ЦБ: курс на {0}", last.ToString("dd.MM.yyyy")) : L("Курсы ЦБ ещё не загружались."))</span>
+    </div>
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Валюта")</th><th>@L("Дата курса")</th><th class="num">@L("Номинал")</th><th class="num">@L("Курс, руб.")</th><th class="num">@L("За 1 ед.")</th><th>@L("Источник")</th></tr></thead>
+            <tbody>
+                @if (_data.Rates.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Курсов на эту дату нет.")</td></tr>
+                }
+                @foreach (var r in _data.Rates)
+                {
+                    <tr @key="r.Id">
+                        <td><b>@r.CurrencyCode</b></td>
+                        <td>@r.Date.ToString("dd.MM.yyyy")</td>
+                        <td class="num">@r.Nominal</td>
+                        <td class="num">@r.Value.ToString("#,0.0000", Ru)</td>
+                        <td class="num">@r.PerUnit.ToString("#,0.0000", Ru)</td>
+                        <td>@(r.Source == CurrencyRateSource.Cbr ? L("ЦБ РФ") : L("вручную: {0}", r.UpdatedBy ?? "—"))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_data.CanEdit)
+    {
+        <form class="panel" @onsubmit="SaveAsync">
+            <h2>@L("Ввести курс вручную")</h2>
+            <label>@L("Валюта (USD, EUR, CNY)") <input @bind="_code" maxlength="3" disabled="@_busy" /></label>
+            <label>@L("Дата курса") <input type="date" @bind="_rateDate" disabled="@_busy" /></label>
+            <label>@L("Номинал") <input type="number" min="1" step="1" @bind="_nominal" disabled="@_busy" /></label>
+            <label>@L("Курс, руб. за номинал") <input @bind="_value" inputmode="decimal" disabled="@_busy" /></label>
+            <button type="submit" disabled="@_busy">@L("Сохранить курс")</button>
+        </form>
+    }
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private CurrencyRatesDto? _data;
+    private DateOnly _date;
+    private DateTime _rateDate;
+    private string _code = string.Empty;
+    private int _nominal = 1;
+    private string _value = string.Empty;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+        _date = DateOnly.FromDateTime(today);
+        _rateDate = today;
+        try
+        {
+            _data = await Rates.ListAsync(_date);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task DateChangedAsync(ChangeEventArgs e)
+    {
+        if (_busy || !DateOnly.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var d))
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            _date = d;
+            _data = await Rates.ListAsync(_date);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            var value = Decimals.Parse(_value, L("Курс, руб. за номинал")) ?? throw new BusinessRuleException("currency.rate.value", L("Укажите курс."));
+            await Rates.SetManualAsync(_code, DateOnly.FromDateTime(_rateDate), _nominal, value, null);
+            _data = await Rates.ListAsync(_date);
+            _message = L("Курс сохранён.");
+            _value = string.Empty;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

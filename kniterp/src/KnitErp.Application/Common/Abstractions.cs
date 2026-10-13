@@ -263,6 +263,11 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.CustomerOpeningBalance> CustomerOpeningBalances { get; } // D1146
     DbSet<KnitErp.Domain.Purchasing.SupplierOpeningBalance> SupplierOpeningBalances { get; } // D133
     DbSet<KnitErp.Domain.Purchasing.PurchaseSettings> PurchaseSettings { get; } // D133
+    DbSet<KnitErp.Domain.Automation.AutomationSettings> AutomationSettings { get; } // D145
+    DbSet<KnitErp.Domain.Finance.CurrencyRate> CurrencyRates { get; } // D146
+    DbSet<KnitErp.Domain.Finance.RecurringOperation> RecurringOperations { get; } // D147
+    DbSet<KnitErp.Domain.Finance.RecurringOperationRun> RecurringOperationRuns { get; } // D147
+    DbSet<KnitErp.Domain.Purchasing.SupplierUpdImport> SupplierUpdImports { get; } // D149
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

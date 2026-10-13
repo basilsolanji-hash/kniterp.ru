@@ -271,6 +271,19 @@ public sealed class NotificationService(IKnitErpDbContextFactory factory, Person
                 result.Add(new(a.Text, "reports/receivables", null, NotificationLevel.Warning, a.Key));
             }
 
+            // D148: срок оплаты счетов моих заказов скоро (при включённых напоминаниях); D147: регулярные операции ждут проведения.
+            foreach (var a in await KnitErp.Application.Sales.PaymentReminders.AlertsAsync(db, ctx, today, ct))
+            {
+                result.Add(new($"Срок оплаты {PersonalToolsService.FormatDate(a.DueDate)}: счёт {a.InvoiceNumber}, {a.Customer} — {a.Outstanding:N2}",
+                    $"sales-orders/{a.OrderId}", null, NotificationLevel.Action, a.Key));
+            }
+
+            if (KnitErp.Application.Finance.RecurringOperationService.CanEdit(ctx)
+                && await KnitErp.Application.Finance.RecurringOperationService.PendingCountAsync(db, ctx.OrganizationId, ct) is var pending and > 0)
+            {
+                result.Add(new($"Регулярные операции ждут проведения: {pending}", "money/recurring", null, NotificationLevel.Action, $"recurring:{pending}"));
+            }
+
             // D107: упоминания в обсуждениях и новые ответы там, где пользователь писал.
             foreach (var a in await KnitErp.Application.Collaboration.DiscussionService.AlertsAsync(db, ctx, clock.UtcNow, ct))
             {
