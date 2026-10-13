@@ -15,6 +15,9 @@ public sealed record TagDto(long Id, string Name, TagColor Color, bool IsFavorit
     public string Css => TagColors.Css(Color);
 }
 
+/// <summary>D130: что пользователь может делать с тегами объекта — ставить и снимать (право изменения объекта) и создавать новые.</summary>
+public sealed record TagRightsDto(bool CanAssign, bool CanManage);
+
 /// <summary>Отмеченный объект: что это, как называется и куда перейти.</summary>
 public sealed record TaggedObjectDto(TaggedEntity Entity, long EntityId, string Title, string? Subtitle, string Href);
 
@@ -23,6 +26,8 @@ public sealed record TaggedObjectDto(TaggedEntity Entity, long EntityId, string 
 /// инвентаризациях; поиск всего отмеченного одним тегом. Каждый вызов — со своим контекстом базы (как быстрый поиск): виджет тегов
 /// стоит на любой карточке и не мешает операциям самой страницы. Ставить и снимать тег можно на объекте, который пользователь
 /// видит; тег без прав на объект ничего не открывает — список отмеченного фильтруется правами и областью складов.
+/// D130: справочник тегов (создать, переименовать, перекрасить, «в меню», архив) — право «Теги: управление справочником»;
+/// ставить и снимать тег — право изменения самого объекта (и его область складов или подразделений).
 /// </summary>
 public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser currentUser, IClock clock)
 {
@@ -44,14 +49,14 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
     public async Task<long> CreateAsync(string? name, TagColor color, CancellationToken ct = default)
     {
         await using var db = factory.Create();
-        var ctx = await Guard(db).CurrentAsync(ct);
+        var ctx = await Guard(db).DemandAsync(Permissions.TagManage, ct);
         return await CreateCoreAsync(db, ctx, name, color, ct);
     }
 
     public async Task UpdateAsync(long id, string? name, TagColor color, bool favorite, byte[] rowVersion, CancellationToken ct = default)
     {
         await using var db = factory.Create();
-        var ctx = await Guard(db).CurrentAsync(ct);
+        var ctx = await Guard(db).DemandAsync(Permissions.TagManage, ct);
         var tag = await LoadAsync(db, ctx, id, ct);
         tag.EnsureVersion(tag.RowVersion, rowVersion);
         var before = $"{tag.Name}, {TagColors.Name(tag.Color)}";
@@ -70,7 +75,7 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
     public async Task ArchiveAsync(long id, bool archived, byte[] rowVersion, CancellationToken ct = default)
     {
         await using var db = factory.Create();
-        var ctx = await Guard(db).CurrentAsync(ct);
+        var ctx = await Guard(db).DemandAsync(Permissions.TagManage, ct);
         var tag = await LoadAsync(db, ctx, id, ct);
         tag.EnsureVersion(tag.RowVersion, rowVersion);
         if (archived)
@@ -84,6 +89,16 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
 
         Audit(db, ctx, AuditActions.TagArchived, id, archived ? "Действует" : "В архиве", archived ? "В архиве" : "Действует", tag.Name);
         await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>D130: права на теги объекта — для виджета «+ Тег» (кнопки скрываются; проверка — в самих действиях).</summary>
+    public async Task<TagRightsDto> RightsAsync(TaggedEntity entity, long entityId, CancellationToken ct = default)
+    {
+        await using var db = factory.Create();
+        var ctx = await Guard(db).CurrentAsync(ct);
+        var manage = ctx.Permissions.Has(Permissions.TagManage);
+        var visible = (await ObjectDirectory.DescribeAsync(db, ctx, entity, [entityId], ct)).Count > 0;
+        return new TagRightsDto(visible && await CanChangeAsync(db, ctx, entity, entityId, ct), manage);
     }
 
     /// <summary>Теги объекта (без архивных).</summary>
@@ -125,6 +140,7 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
         await using var db = factory.Create();
         var ctx = await Guard(db).CurrentAsync(ct);
         await EnsureEntityAsync(db, ctx, entity, entityId, ct);
+        await EnsureCanChangeAsync(db, ctx, entity, entityId, ct);
         long id;
         if (tagId is { } existing)
         {
@@ -139,9 +155,15 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
         else
         {
             var normalized = Tag.Normalize(newName);
-            id = await db.Tags.Where(t => t.OrganizationId == ctx.OrganizationId && t.Name == normalized && !t.IsArchived)
-                     .Select(t => (long?)t.Id).SingleOrDefaultAsync(ct)
-                 ?? await CreateCoreAsync(db, ctx, newName, newColor, ct);
+            var found = await db.Tags.Where(t => t.OrganizationId == ctx.OrganizationId && t.Name == normalized && !t.IsArchived)
+                .Select(t => (long?)t.Id).SingleOrDefaultAsync(ct);
+            if (found is null && !ctx.Permissions.Has(Permissions.TagManage))
+            {
+                // D130: новый тег — пополнение общего справочника организации.
+                await Guard(db).DenyAsync(ctx, Permissions.TagManage, ct);
+            }
+
+            id = found ?? await CreateCoreAsync(db, ctx, newName, newColor, ct);
         }
 
         if (await db.TagLinks.AnyAsync(l => l.TagId == id && l.Entity == entity && l.EntityId == entityId, ct))
@@ -159,6 +181,7 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
         await using var db = factory.Create();
         var ctx = await Guard(db).CurrentAsync(ct);
         await EnsureEntityAsync(db, ctx, entity, entityId, ct);
+        await EnsureCanChangeAsync(db, ctx, entity, entityId, ct);
         var link = await db.TagLinks.SingleOrDefaultAsync(l => l.OrganizationId == ctx.OrganizationId && l.TagId == tagId && l.Entity == entity
                                                                && l.EntityId == entityId, ct);
         if (link is null)
@@ -236,6 +259,24 @@ public sealed class TagService(IKnitErpDbContextFactory factory, ICurrentUser cu
         if ((await ObjectDirectory.DescribeAsync(db, ctx, entity, [id], ct)).Count == 0)
         {
             throw new NotFoundException("Объект");
+        }
+    }
+
+    /// <summary>
+    /// D130: ставить и снимать тег — только на объекте, который пользователь вправе менять (право изменения вида объекта и его область).
+    /// Объекты модулей без объявленных прав изменения — только с правом управления тегами.
+    /// </summary>
+    private static async Task<bool> CanChangeAsync(IKnitErpDbContext db, AccessContext ctx, TaggedEntity entity, long id, CancellationToken ct) =>
+        ObjectDirectory.EditPermissions(entity).Count == 0
+            ? ctx.Permissions.Has(Permissions.TagManage)
+            : await ObjectDirectory.CanChangeAsync(db, ctx, entity, id, ct);
+
+    private async Task EnsureCanChangeAsync(IKnitErpDbContext db, AccessContext ctx, TaggedEntity entity, long id, CancellationToken ct)
+    {
+        if (!await CanChangeAsync(db, ctx, entity, id, ct))
+        {
+            var codes = ObjectDirectory.EditPermissions(entity);
+            await Guard(db).DenyAsync(ctx, codes.Count == 0 ? Permissions.TagManage : codes[0], ct);
         }
     }
 

@@ -102,6 +102,12 @@ public static class Permissions
     /// <summary>D615 (CRM): рассылки контактам с согласием на рекламу.</summary>
     public const string CrmMailing = "crm.mailing";
 
+    /// <summary>
+    /// D130: справочник тегов организации — создать, переименовать, перекрасить, показать в меню, убрать в архив и вернуть.
+    /// Ставить и снимать существующий тег на объекте — право изменения самого объекта.
+    /// </summary>
+    public const string TagManage = "tag.manage";
+
     private static readonly Dictionary<string, string> Labels = new(StringComparer.Ordinal)
     {
         [OrganizationView] = "Организация: просмотр реквизитов",
@@ -110,7 +116,7 @@ public static class Permissions
         [DepartmentEdit] = "Подразделения и должности: изменение",
         [EmployeeView] = "Сотрудники: просмотр",
         [EmployeeEdit] = "Сотрудники: изменение",
-        [PersonalDataView] = "Персональные данные сотрудников",
+        [PersonalDataView] = "Персональные данные сотрудников: просмотр",
         [PersonalDataEdit] = "Персональные данные сотрудников: изменение",
         [HrOrderCreate] = "Кадровые приказы и штатное расписание: черновик",
         [HrOrderPost] = "Кадровые приказы: проведение, штатное расписание: изменение",
@@ -166,6 +172,7 @@ public static class Permissions
         [SalesReportView] = "Продажи: отчёты и дебиторская задолженность",
         [SalesPlanEdit] = "Продажи: план продаж",
         [SalesMarkingEdit] = "Продажи: коды маркировки в отгрузке",
+        [TagManage] = "Теги: управление справочником",
     };
 
     public static IReadOnlyCollection<string> All => Labels.Keys;
@@ -186,7 +193,7 @@ public static class Permissions
         "crm" => "CRM",
         "warehouse" or "period" => "Склад",
         "finance" or "money" => "Деньги и цены",
-        "catalog" => "Справочники",
+        "catalog" or "tag" => "Справочники",
         "production" => "Производство",
         "dev" => "Разработка",
         "organization" or "structure" or "hr" => "Организация и сотрудники",

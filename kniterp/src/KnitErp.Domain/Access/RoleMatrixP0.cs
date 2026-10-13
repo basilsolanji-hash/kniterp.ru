@@ -158,6 +158,10 @@ public static class RoleMatrixP0
         (Permissions.SalesMarkingEdit,        [Full, None, None, Scoped, Scoped, None, None, None]),
         // Допущение D310: МойСклад подключают Владелец и Администратор (ТЗ каталога, этап 4).
         (Permissions.MoySkladManage,          [Full, Full, None, None, None, None, None, None]),
+        // Допущение D130: справочник тегов общий для организации — его ведут Владелец, Администратор, Руководитель подразделения,
+        // Старший кладовщик и Бухгалтер (кто отвечает за порядок в своих разделах); Кладовщик, Аудитор и Сотрудник ставят только
+        // существующие теги (на объекты, которые вправе менять). Кадровик — HrRoleMatrix, CRM и «Разработка» — свои матрицы.
+        (Permissions.TagManage,               [Full, Full, Full, Full, None, Full, None, None]),
     ];
 
     public static IReadOnlyList<string> PermissionCodes { get; } = Rows.Select(r => r.Code).ToArray();
@@ -244,6 +248,8 @@ public static class HrRoleMatrix
         [Permissions.HrOrderPost] = Full,
         [Permissions.TimesheetEdit] = Full,
         [Permissions.AuditLogView] = OwnOnly,
+        // D130: кадровик ведёт теги сотрудников («испытательный срок», «наставник») — нужен и справочник тегов.
+        [Permissions.TagManage] = Full,
     };
 
     public static PermissionLevel LevelOf(string permissionCode) => HrOfficer.TryGetValue(permissionCode, out var level) ? level : None;
@@ -288,6 +294,8 @@ public static class CrmRoleMatrix
         [Permissions.SalesDiscountEdit] = Full,
         [Permissions.SalesReportView] = Full,
         [Permissions.SalesPlanEdit] = Full,
+        // D130: руководитель продаж ведёт теги клиентов и сделок; менеджер ставит существующие.
+        [Permissions.TagManage] = Full,
     };
 
     public static IReadOnlyDictionary<string, PermissionLevel>? Of(string roleCode) => roleCode switch

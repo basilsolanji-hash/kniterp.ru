@@ -24,7 +24,7 @@ public sealed class ApiToken
     public static readonly IReadOnlySet<string> Forbidden = new HashSet<string>(StringComparer.Ordinal)
     {
         Access.Permissions.UserManage, Access.Permissions.AdminGrant, Access.Permissions.OrganizationEdit, Access.Permissions.ClosedPeriodReopen,
-        Access.Permissions.PersonalDataView,
+        Access.Permissions.PersonalDataView, Access.Permissions.PersonalDataEdit, // D130: изменение ПДн — тоже только в интерфейсе
         Access.Permissions.PriceEdit, // D306 (сессия 4): переоценка — только в интерфейсе
         Access.Permissions.MoySkladManage, // D310 (сессия 4): токен МойСклад — только в интерфейсе
     };

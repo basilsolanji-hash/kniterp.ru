@@ -287,10 +287,12 @@ public sealed class PersonalDataService(IKnitErpDbContext db, IAccessGuard guard
             pd is null ? new PersonalDataValues() : ToValues(pd), await TodayAsync(ctx, ct));
     }
 
-    /// <summary>Читать ПДн можно с правом организации или свою карточку с уровнем «С».</summary>
+    /// <summary>
+    /// Читать ПДн можно с правом организации или свою карточку. D130: свои данные сотрудник видит всегда (ст. 14 152-ФЗ — право
+    /// субъекта на доступ), без уровня «С» в роли; только явный запрет права снимает и это.
+    /// </summary>
     private static bool CanRead(AccessContext ctx, Employee employee) =>
-        ctx.Permissions.Has(Permissions.PersonalDataView)
-        || (ctx.Permissions.HasOwnOnly(Permissions.PersonalDataView) && employee.UserId == ctx.UserId);
+        Structure.EmployeeService.CanReadPersonalData(ctx, employee.UserId);
 
     /// <summary>
     /// Сотрудник своей организации и видимый пользователю (область подразделений или своя карточка); иначе «не найдено».

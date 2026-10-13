@@ -776,7 +776,6 @@
   "Период открыт": "Davr ochildi",
   "Период открыт.": "Davr ochildi.",
   "Период уже закрыт по {0:dd.MM.yyyy}. Чтобы сдвинуть границу назад, откройте период.": "Davr {0:dd.MM.yyyy} gacha allaqachon yopilgan. Chegarani orqaga surish uchun davrni oching.",
-  "Персональные данные сотрудников": "Xodimlarning shaxsiy maʼlumotlari",
   "Площадка": "Maydon",
   "Площадка «{0}» в архиве.": "«{0}» maydoni arxivda.",
   "Площадка «{0}» уже есть.": "«{0}» maydoni allaqachon bor.",
@@ -5622,5 +5621,10 @@
   "КП {0} действовало до {1} — срок истёк. Составьте новое КП с актуальными ценами.": "{0} TT {1} gacha amal qilgan — muddati o‘tgan. Dolzarb narxlar bilan yangi TT tuzing.",
   "Нельзя сторнировать: по заказу проведены возвраты {0} — {1}, а без этого документа останется {2}. Сначала сторнируйте возвраты.": "Storno qilib bo‘lmaydi: buyurtma bo‘yicha {0} qaytarishlari o‘tkazilgan — {1}, bu hujjatsiz esa {2} qoladi. Avval qaytarishlarni storno qiling.",
   "Отгрузка больше заказанного: {0} — отгружается {1}, по заказу осталось отгрузить {2}. Проверьте другие отгрузки по этому заказу.": "Jo‘natish buyurtmadan ko‘p: {0} — {1} jo‘natilmoqda, buyurtma bo‘yicha {2} jo‘natish qoldi. Ushbu buyurtma bo‘yicha boshqa jo‘natishlarni tekshiring.",
-  "Поступление больше заказанного: {0} — поступает {1}, по заказу осталось получить {2}. Лишнее оформите поступлением без заказа.": "Kirim buyurtmadan ko‘p: {0} — {1} kirmoqda, buyurtma bo‘yicha {2} olish qoldi. Ortiqchasini buyurtmasiz kirim bilan rasmiylashtiring."
+  "Поступление больше заказанного: {0} — поступает {1}, по заказу осталось получить {2}. Лишнее оформите поступлением без заказа.": "Kirim buyurtmadan ko‘p: {0} — {1} kirmoqda, buyurtma bo‘yicha {2} olish qoldi. Ortiqchasini buyurtmasiz kirim bilan rasmiylashtiring.",
+  "Найти тег": "Tegni topish",
+  "Персональные данные сотрудников: просмотр": "Xodimlarning shaxsiy ma'lumotlari: ko‘rish",
+  "Подходящих тегов нет.": "Mos teglar yo‘q.",
+  "Такого тега нет. Новые теги создаёт сотрудник с правом «Теги: управление справочником».": "Bunday teg yo‘q. Yangi teglarni «Teglar: ma'lumotnomani boshqarish» huquqiga ega xodim yaratadi.",
+  "Теги: управление справочником": "Teglar: ma'lumotnomani boshqarish"
 }
