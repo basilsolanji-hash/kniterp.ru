@@ -1,6 +1,7 @@
-@* Настройка панели: какие ярлыки закреплены, их порядок и сколько видно сразу. Хранится в профиле пользователя. *@
+@* Настройка панели: какие инструменты закреплены и их порядок. Хранится в профиле пользователя.
+   D801: все закреплённые видны сразу, со значком и подписью — меню «Ещё» и число «Видно сразу» убраны. *@
 
-<p class="muted">@L("Закреплённые значки показываются в верхней строке по порядку. Первые {0} видно сразу, остальные — в меню «Ещё». Быстрый поиск в строке всегда; обучение и поддержка — внизу меню слева. На телефоне все значки — в одном меню «Инструменты».", _visible)</p>
+<p class="muted">@L("Закреплённые инструменты видны в верхней строке по порядку — значок и подпись. Быстрый поиск в строке всегда; обучение и поддержка — внизу меню слева. На телефоне инструменты — в одном меню «Инструменты».")</p>
 
 <h3>@L("Закреплённые")</h3>
 @if (_pinned.Count == 0)
@@ -12,20 +13,15 @@
     {
         var index = i;
         var tool = ToolCatalog.Find(_pinned[index])!;
-        <li class="@(index < _visible ? "" : "pin-more")">
+        <li>
             <span class="pin-icon"><Icon Name="@tool.Id" /></span>
-            <span class="pin-title">@tool.Title @if (index >= _visible) { <span class="tag">@L("в «Ещё»")</span> }</span>
+            <span class="pin-title">@L(tool.Title)</span>
             <button type="button" class="secondary icon" @onclick="() => Move(index, -1)" disabled="@(index == 0)" aria-label="@L("Выше: {0}", L(tool.Title))" title="@L("Выше")">↑</button>
             <button type="button" class="secondary icon" @onclick="() => Move(index, 1)" disabled="@(index == _pinned.Count - 1)" aria-label="@L("Ниже: {0}", L(tool.Title))" title="@L("Ниже")">↓</button>
             <button type="button" class="secondary icon" @onclick="() => _pinned.RemoveAt(index)" aria-label="@L("Открепить: {0}", L(tool.Title))" title="@L("Открепить")">✕</button>
         </li>
     }
 </ol>
-
-<label class="tool-row">
-    @L("Видно сразу")
-    <input type="number" min="0" max="@ToolCatalog.MaxVisible" @bind="_visible" style="width: 6em" />
-</label>
 
 <h3>@L("Можно добавить")</h3>
 <ul class="plain pin-list">

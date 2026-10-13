@@ -76,7 +76,7 @@ public sealed partial class TranslationCoverageTests
             keys.Add(m.Groups[1].Value);
         }
 
-        foreach (Match m in MenuPlanned().Matches(layout))
+        foreach (Match m in MenuSubsection().Matches(layout))
         {
             keys.Add(m.Groups[1].Value);
         }
@@ -311,14 +311,15 @@ public sealed partial class TranslationCoverageTests
     [GeneratedRegex("""ModuleUi\.Text\("((?:[^"\\]|\\.)*)"\)""")]
     private static partial Regex ModuleText();
 
-    [GeneratedRegex("""\("[\w/?=&-]*", "([^"]+)", (?:a =>|Docs\))""")]
+    [GeneratedRegex("""\("[\w/?=&-]*", "([^"]+)", (?:a =>|Docs[,)])""")]
     private static partial Regex MenuItem();
 
     [GeneratedRegex("""new\("\w+", "([^"]+)",\s*\[""")]
     private static partial Regex MenuSection();
 
-    [GeneratedRegex("""Soon\("[\w-]+", "([^"]+)"\)""")]
-    private static partial Regex MenuPlanned();
+    /// <summary>D800: подзаголовки разделов меню — константы S… («Документы», «Цены», «Отчёты»…).</summary>
+    [GeneratedRegex(@"\bS[A-Z]\w* = ""([^""]+)""")]
+    private static partial Regex MenuSubsection();
 
     [GeneratedRegex(@"new DashboardTileDto\(""([^""]+)"", \w+, ""([^""]+)""")]
     private static partial Regex DashboardTile();

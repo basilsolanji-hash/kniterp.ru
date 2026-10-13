@@ -1,48 +1,29 @@
-@* Панель быстрого доступа рядом с профилем. Полный вид — закреплённые ярлыки, «Ещё», «Все инструменты», настройка и
-   профиль; компактный (телефон, узкий планшет) — одна кнопка «Инструменты» с меню и значок профиля. *@
+@* Панель быстрого доступа. Полный вид — поиск, все закреплённые инструменты с подписями, «Все инструменты» и блок пользователя
+   (D801, D802); компактный (телефон, узкий планшет) — поиск, одна кнопка «Инструменты» с меню и значок профиля. *@
 
 <div class="quickbar @(Compact ? "compact" : "")" @onkeydown="OnKeyDown">
     @if (!Compact)
     {
-        @* Только значки; название — во всплывающей подсказке и для экранного диктора. Поиск — всегда первым, поддержка — последней. *@
+        @* D801 (сессия 5): без скрытых значков — у каждого инструмента подпись рядом со значком, все закреплённые видны сразу
+           (раньше часть пряталась в «Ещё»), «Все инструменты» — кнопка с подписью; поиск — заметной кнопкой с Ctrl+K. *@
         <div class="quick-pinned" role="toolbar" aria-label="@L("Быстрый доступ")">
-            @RenderTool(ToolCatalog.Find(ToolCatalog.Search)!, asMenuItem: false)
-            <span class="quick-sep" aria-hidden="true"></span>
-            @foreach (var tool in Visible)
+            <button type="button" class="quick-search @(ActiveTool == ToolCatalog.Search ? "active" : null)" @onclick="@(() => Open(ToolCatalog.Search))"
+                    aria-label="@L("Быстрый поиск (Ctrl+K)")">
+                <Icon Name="search" /><span class="quick-text">@L("Поиск")</span><kbd aria-hidden="true">Ctrl K</kbd>
+            </button>
+            @foreach (var tool in Pinned)
             {
                 @RenderTool(tool, asMenuItem: false)
             }
-            @if (More.Count > 0)
-            {
-                <div class="menu-anchor">
-                    <button type="button" class="quick-btn" aria-haspopup="menu" aria-expanded="@Expanded("more")" @onclick="@(() => Toggle("more"))"
-                            title="@L("Ещё")" aria-label="@L("Ещё")">
-                        <Icon Name="more" />
-                    </button>
-                    @if (_menu == "more")
-                    {
-                        <div class="menu" role="menu" aria-label="@L("Ещё")">
-                            @foreach (var tool in More)
-                            {
-                                @RenderTool(tool, asMenuItem: true)
-                            }
-                        </div>
-                    }
-                </div>
-            }
             <div class="menu-anchor">
-                <button type="button" class="quick-btn" aria-haspopup="menu" aria-expanded="@Expanded("all")" @onclick="@(() => Toggle("all"))"
-                        title="@L("Все инструменты")" aria-label="@L("Все инструменты")">
-                    <Icon Name="all" />
+                <button type="button" class="quick-btn labeled" aria-haspopup="menu" aria-expanded="@Expanded("all")" @onclick="@(() => Toggle("all"))">
+                    <Icon Name="all" /><span class="quick-text">@L("Все инструменты")</span>
                 </button>
                 @if (_menu == "all")
                 {
                     @RenderAllMenu()
                 }
             </div>
-            <button type="button" class="quick-btn" @onclick="@(() => Open(SettingsId))" title="@L("Настроить панель")" aria-label="@L("Настроить панель")">
-                <Icon Name="settings" />
-            </button>
         </div>
     }
     else
@@ -88,7 +69,7 @@
     [Parameter]
     public bool Compact { get; set; }
 
-    /// <summary>Профиль в строке инструментов — только на телефоне; на компьютере он внизу меню слева.</summary>
+    /// <summary>Блок пользователя в правом краю строки инструментов (D802: и на компьютере — раньше был внизу меню слева).</summary>
     [Parameter]
     public bool ShowProfile { get; set; } = true;
 
@@ -118,26 +99,23 @@
     private List<ToolDefinition> Pinned =>
         Settings.Pinned.Select(ToolCatalog.Find).OfType<ToolDefinition>().Where(t => Available.Contains(t) && !ToolCatalog.Fixed.Contains(t.Id)).ToList();
 
-    private List<ToolDefinition> Visible => Pinned.Take(Settings.Visible).ToList();
-
-    private List<ToolDefinition> More => Pinned.Skip(Settings.Visible).ToList();
-
     private RenderFragment RenderTool(ToolDefinition tool, bool asMenuItem) => __builder =>
     {
         var active = ActiveTool == tool.Id || (tool.Mode == ToolOpenMode.Window && OpenWindows.Contains(tool.Id));
-        var css = asMenuItem ? "menu-item" : $"quick-btn{(active ? " active" : "")}";
-        var label = asMenuItem ? null : L(tool.Title);
+        var css = asMenuItem ? "menu-item" : $"quick-btn{(Compact ? "" : " labeled")}{(active ? " active" : "")}";
+        var label = asMenuItem || !Compact ? null : L(tool.Title);
+        var text = !asMenuItem && !Compact; // D801: подпись видна рядом со значком
         if (tool.Mode == ToolOpenMode.NewTab)
         {
             <a class="@css" href="@Access.WebsiteUrl" target="_blank" rel="noopener noreferrer" title="@Tip(tool)" aria-label="@label" role="@(asMenuItem ? "menuitem" : null)" @onclick="Close">
-                <Icon Name="@tool.Id" />@if (asMenuItem) { <span class="quick-label">@L(tool.Title)</span> }
+                <Icon Name="@tool.Id" />@if (asMenuItem) { <span class="quick-label">@L(tool.Title)</span> } else if (text) { <span class="quick-text">@L(tool.Title)</span> }
             </a>
         }
         else
         {
             <button type="button" class="@css" title="@Tip(tool)" aria-label="@label" role="@(asMenuItem ? "menuitem" : null)" aria-pressed="@(asMenuItem ? null : active ? "true" : "false")"
                     @onclick="@(() => Open(tool.Id))">
-                <Icon Name="@tool.Id" />@if (asMenuItem) { <span class="quick-label">@L(tool.Title)</span> }
+                <Icon Name="@tool.Id" />@if (asMenuItem) { <span class="quick-label">@L(tool.Title)</span> } else if (text) { <span class="quick-text">@L(tool.Title)</span> }
                 @if (tool.Id == ToolCatalog.Notifications && Badge > 0)
                 {
                     <span class="badge" aria-label="@L("новых: {0}", Badge)">@Badge</span>
