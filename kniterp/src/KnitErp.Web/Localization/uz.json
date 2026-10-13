@@ -5622,5 +5622,17 @@
   "КП {0} действовало до {1} — срок истёк. Составьте новое КП с актуальными ценами.": "{0} TT {1} gacha amal qilgan — muddati o‘tgan. Dolzarb narxlar bilan yangi TT tuzing.",
   "Нельзя сторнировать: по заказу проведены возвраты {0} — {1}, а без этого документа останется {2}. Сначала сторнируйте возвраты.": "Storno qilib bo‘lmaydi: buyurtma bo‘yicha {0} qaytarishlari o‘tkazilgan — {1}, bu hujjatsiz esa {2} qoladi. Avval qaytarishlarni storno qiling.",
   "Отгрузка больше заказанного: {0} — отгружается {1}, по заказу осталось отгрузить {2}. Проверьте другие отгрузки по этому заказу.": "Jo‘natish buyurtmadan ko‘p: {0} — {1} jo‘natilmoqda, buyurtma bo‘yicha {2} jo‘natish qoldi. Ushbu buyurtma bo‘yicha boshqa jo‘natishlarni tekshiring.",
-  "Поступление больше заказанного: {0} — поступает {1}, по заказу осталось получить {2}. Лишнее оформите поступлением без заказа.": "Kirim buyurtmadan ko‘p: {0} — {1} kirmoqda, buyurtma bo‘yicha {2} olish qoldi. Ortiqchasini buyurtmasiz kirim bilan rasmiylashtiring."
+  "Поступление больше заказанного: {0} — поступает {1}, по заказу осталось получить {2}. Лишнее оформите поступлением без заказа.": "Kirim buyurtmadan ko‘p: {0} — {1} kirmoqda, buyurtma bo‘yicha {2} olish qoldi. Ortiqchasini buyurtmasiz kirim bilan rasmiylashtiring.",
+  "Вложить PDF": "PDF biriktirish",
+  "Длительность звонка — от 0 до {0} секунд.": "Qo‘ng‘iroq davomiyligi — 0 dan {0} soniyagacha.",
+  "Документы клиенту": "Mijozga hujjatlar",
+  "Документы клиенту по заказу {0}": "{0} buyurtma bo‘yicha mijozga hujjatlar",
+  "Документы поставлены в очередь писем клиенту и записаны в ленту.": "Hujjatlar mijozga xatlar navbatiga qo‘yildi va lentaga yozildi.",
+  "Не больше {0} КП письмом в час от одного сотрудника. Попробуйте позже.": "Bir xodimdan soatiga xat bilan {0} tadan ortiq TT emas. Keyinroq urinib ko‘ring.",
+  "Оплачено по сделке: {0} из {1}": "Bitim bo‘yicha to‘landi: {1} dan {0}",
+  "Счёт {0}": "Hisob {0}",
+  "Счёт выставлен — его видно в строке заказа и в ленте.": "Hisob yozildi — u buyurtma qatorida va lentada ko‘rinadi.",
+  "Цикл заказов клиента": "Mijoz buyurtmalari sikli",
+  "частично": "qisman",
+  "≈ {0} дн., следующий около {1}": "≈ {0} kun, keyingisi taxminan {1}"
 }
