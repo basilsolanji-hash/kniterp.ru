@@ -689,7 +689,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var ctx = await guard.DemandAsync(Permissions.CrmEdit, ct);
         var deal = await CrmAccess.Deals(db, ctx).Include(d => d.Lines).Include(d => d.Participants).SingleOrDefaultAsync(d => d.Id == id, ct)
                    ?? throw new NotFoundException("Сделка");
-        return (ctx, deal.EnsureVersion(deal.RowVersion, rowVersion));
+        return (ctx, await CrmConflict.EnsureVersionAsync(db, ctx.OrganizationId, deal, nameof(CrmDeal), deal.Id, "Сделка", deal.RowVersion, rowVersion, ct));
     }
 
     private static string? Name(Dictionary<long, string> map, long? id) => id is { } v && map.TryGetValue(v, out var n) ? n : null;

@@ -15,6 +15,7 @@
     <button type="button" data-print>@L("Печать")</button>
     @if (_doc is not null)
     {
+        <a href="crm/offers/@(_doc.Id).pdf" download data-enhance-nav="false">@L("Скачать PDF")</a>
         <a href="crm/deals/@_doc.DealId">@L("← К сделке")</a>
     }
 </div>

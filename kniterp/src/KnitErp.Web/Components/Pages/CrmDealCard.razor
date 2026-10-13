@@ -251,7 +251,8 @@ else
                                         <td>@o.ValidUntil.ToString("dd.MM.yyyy")</td>
                                         <td class="num">@Amounts.Format(o.Amount) @o.CurrencyCode</td>
                                         <td class="row-actions">
-                                            <a class="button secondary" href="print/crm-offer/@o.Id" target="_blank" rel="noopener">@L("Печать / PDF")</a>
+                                            <a class="button secondary" href="print/crm-offer/@o.Id" target="_blank" rel="noopener">@L("Печать")</a>
+                                    <a class="button secondary" href="crm/offers/@(o.Id).pdf" download data-enhance-nav="false">PDF</a>
                                             @if (_deal.CanEdit)
                                             {
                                                 <button type="button" class="secondary" @onclick="() => OpenSend(o)" disabled="@_busy">@L("Отправить")</button>

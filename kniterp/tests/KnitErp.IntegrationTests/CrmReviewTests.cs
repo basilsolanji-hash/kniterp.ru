@@ -58,6 +58,57 @@ public sealed class CrmReviewTests(SqlTestHost host) : IClassFixture<SqlTestHost
     }
 
     [SqlFact]
+    public async Task Offer_pdf_is_rendered_and_attached_to_mail()
+    {
+        var (org, _, offerId, _) = await DealWithOfferAsync(lines: 3);
+        await using var crm = host.Crm(org.OwnerUserId, org.OrganizationId);
+        var file = await crm.Offers.PdfAsync(offerId);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.StartsWith("КП КП-", file.FileName);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(file.Content, 0, 4));
+        await crm.Offers.SendAsync(offerId, "pdf.review@example.org", null);
+        var letter = host.Mail.Messages.Last(m => m.To == "pdf.review@example.org");
+        Assert.Equal(file.FileName, Assert.Single(letter.Attachments!).FileName);
+
+        // Без права цен и из чужой организации PDF не отдаётся.
+        await using (var noPrices = host.Crm(org.OwnerUserId, org.OrganizationId, [Permissions.CrmView]))
+        {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => noPrices.Offers.PdfAsync(offerId));
+        }
+
+        var other = await host.CreateCrmOrganizationAsync();
+        await using var foreign = host.Crm(other.OwnerUserId, other.OrganizationId);
+        await Assert.ThrowsAsync<NotFoundException>(() => foreign.Offers.PdfAsync(offerId));
+    }
+
+    [SqlFact]
+    public async Task Concurrent_edit_says_who_changed_the_deal()
+    {
+        var (org, deal, _, _) = await DealWithOfferAsync();
+        var head = await host.CrmUserAsync(org, SystemRoles.SalesHead);
+        byte[] stale;
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            stale = (await crm.Deals.GetAsync(deal)).RowVersion;
+        }
+
+        await using (var h = host.Crm(head, org.OrganizationId))
+        {
+            var fresh = await h.Deals.GetAsync(deal);
+            await h.Deals.UpdateAsync(deal, fresh.Values with { Title = "Свитера ревизии — правка руководителя" }, fresh.RowVersion);
+        }
+
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            var dto = await crm.Deals.GetAsync(deal);
+            var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => crm.Deals.UpdateAsync(deal, dto.Values with { Title = "Моя правка" }, stale));
+            Assert.Equal("Сделка", ex.ObjectName);
+            Assert.Equal(SystemRoles.NameOf(SystemRoles.SalesHead), ex.ChangedBy);
+            Assert.NotNull(ex.ChangedAtLocal);
+        }
+    }
+
+    [SqlFact]
     public async Task Long_offer_mail_still_gets_a_valid_feed_record()
     {
         var (org, deal, offerId, _) = await DealWithOfferAsync(lines: 60);
