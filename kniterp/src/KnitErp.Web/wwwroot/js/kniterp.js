@@ -324,6 +324,18 @@ new MutationObserver(function () {
     }).observe(document.documentElement, { childList: true, subtree: true });
 
     window.kniterp = window.kniterp || {};
+    // D817: фильтр списка — в адресе страницы (без перехода и без повторной загрузки): «Назад» и обновление открывают тот же
+    // отбор, ссылку можно отправить коллеге. Пустые значения из адреса убираются; параметры, которых нет в списке, не трогаются.
+    window.kniterp.setQuery = function (values) {
+        try {
+            var url = new URL(location.href);
+            Object.keys(values).forEach(function (k) {
+                var v = values[k];
+                if (v === null || v === undefined || v === '') url.searchParams.delete(k); else url.searchParams.set(k, v);
+            });
+            if (url.href !== location.href) history.replaceState(history.state, '', url.href);
+        } catch (e) { }
+    };
     window.kniterp.isDirty = isDirty;
     window.kniterp.clearDirty = function () { dirty = null; };
     window.kniterp.confirmLeave = function (text) { return window.confirm(text); };

@@ -5,6 +5,7 @@
 @inject KnitErp.Application.Tagging.TagService TagLookup
 @inject StockDocumentService Documents
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@L("Складские документы") — knitERP</PageTitle>
 
@@ -178,6 +179,19 @@ else
     [SupplyParameterFromQuery(Name = "status")]
     public string? StatusQuery { get; set; }
 
+    /// <summary>D817: остальной фильтр — тоже из адреса (его пишет страница после применения), чтобы «Назад» открывал тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "warehouse")]
+    public string? WarehouseQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    public string? ToQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
     /// <summary>?order=1 — документы по заказам (приёмка), ?order=0 — без заказа (оприходования).</summary>
     [SupplyParameterFromQuery(Name = "order")]
     public string? OrderQuery { get; set; }
@@ -195,6 +209,10 @@ else
         _appliedQuery = query;
         _kind = KindQuery ?? string.Empty;
         _status = StatusQuery ?? string.Empty;
+        _warehouse = WarehouseQuery ?? string.Empty;
+        _from = DateTime.TryParse(FromQuery, System.Globalization.CultureInfo.InvariantCulture, out var from) ? from : null;
+        _to = DateTime.TryParse(ToQuery, System.Globalization.CultureInfo.InvariantCulture, out var to) ? to : null;
+        _search = SearchQuery ?? string.Empty;
         try
         {
             if (_warehouses.Count == 0)
@@ -229,7 +247,15 @@ else
         await LoadTagsAsync();
     }
 
-    private Task ReloadAsync() => RunAsync(LoadAsync);
+    private Task ReloadAsync() => RunAsync(async () =>
+    {
+        await LoadAsync();
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["kind"] = _kind, ["status"] = _status, ["warehouse"] = _warehouse, ["q"] = _search,
+            ["from"] = _from?.ToString("yyyy-MM-dd"), ["to"] = _to?.ToString("yyyy-MM-dd"), ["new"] = null,
+        });
+    });
 
     private Task OpenCreateAsync(StockOperationKind kind) => RunAsync(async () =>
     {

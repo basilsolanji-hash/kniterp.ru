@@ -31,16 +31,10 @@
         @if (r.CanEdit)
         {
             <form class="sx-form" @onsubmit="SaveDetailsAsync">
-                <label>
-                    @L("Причина возврата")
-                    <select @bind="_reason">
-                        <option value="">—</option>
-                        @foreach (var x in r.Reasons)
-                        {
-                            <option value="@x.Id">@x.Name</option>
-                        }
-                    </select>
-                </label>
+                @* D815: своя причина — «+ Добавить» здесь же (право «Продажи: изменение»). *@
+                <LookupSelect Label="@L("Причина возврата")" Options="@(r.Reasons.Select(x => new LookupSelect.Option(x.Id, x.Name)).ToList())"
+                              Value="@Id(_reason)" ValueChanged="@(v => _reason = v?.ToString())"
+                              Create="@(CurrentAccess.Has(Permissions.SalesEdit) ? name => Sales.CreateReturnReasonAsync(name) : null)" />
                 <label>
                     @L("Склад карантина (брак)")
                     <select @bind="_quarantine">
@@ -243,6 +237,9 @@
     });
 
     private Task RemoveAsync(MarkingCodeDto c) => RunAsync(() => Sales.RemoveMarkingCodeAsync(DocumentId, c.Id));
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
     private static long? Id(string? value) => long.TryParse(value, out var id) ? id : null;
 

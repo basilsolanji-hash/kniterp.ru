@@ -1,6 +1,7 @@
 @page "/counterparties"
 @using KnitErp.Application.Catalog
 @using KnitErp.Web.Components.Shared
+@inject IJSRuntime JS
 @inject KnitErp.Application.Tagging.TagService TagLookup
 @inject CounterpartyService Counterparties
 @inject CounterpartyExchangeService Exchange
@@ -197,6 +198,13 @@ else
     [SupplyParameterFromQuery(Name = "edit")]
     public long? EditQuery { get; set; }
 
+    /// <summary>D817: поиск и «показать архив» — в адресе (пишутся после применения фильтра).</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "archived")]
+    public string? ArchivedQuery { get; set; }
+
     private string? _appliedRole;
 
     protected override async Task OnParametersSetAsync()
@@ -208,6 +216,11 @@ else
 
         _appliedRole = RoleQuery;
         _role = RoleQuery switch { "supplier" => "s", "customer" => "c", _ => _role };
+        if (_list is null)
+        {
+            _search = SearchQuery ?? string.Empty;
+            _includeArchived = ArchivedQuery == "1";
+        }
         try
         {
             await LoadAsync();
@@ -233,7 +246,15 @@ else
         await LoadTagsAsync();
     }
 
-    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
+    private async Task ReloadAsync()
+    {
+        await RunAsync(() => Task.CompletedTask, null);
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["role"] = _role switch { "s" => "supplier", "c" => "customer", _ => null }, ["q"] = _search,
+            ["archived"] = _includeArchived ? "1" : null, ["new"] = null, ["edit"] = null,
+        });
+    }
 
     private void OpenCreate()
     {

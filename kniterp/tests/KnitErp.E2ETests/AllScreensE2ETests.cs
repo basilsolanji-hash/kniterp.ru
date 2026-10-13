@@ -32,8 +32,24 @@ public sealed partial class AllScreensE2ETests(HrAppFixture app) : IClassFixture
 
     private async Task WalkAsync(bool phone, string scheme, bool axe)
     {
-        var axeScript = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "axe.min.js"));
         var page = await app.OwnerPageAsync(phone);
+        List<string> problems;
+        try
+        {
+            problems = await WalkAsync(page, scheme, axe);
+        }
+        finally
+        {
+            await page.Context.CloseAsync();
+        }
+
+        Assert.True(problems.Count == 0, string.Join("\n", problems));
+    }
+
+    /// <summary>Обход всех экранов описи вошедшим пользователем (вкладка уже открыта); возвращает найденные нарушения.</summary>
+    internal static async Task<List<string>> WalkAsync(IPage page, string scheme, bool axe)
+    {
+        var axeScript = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "axe.min.js"));
         var errors = new List<string>();
         page.PageError += (_, e) => errors.Add(e);
         page.Console += (_, m) =>
@@ -54,7 +70,6 @@ public sealed partial class AllScreensE2ETests(HrAppFixture app) : IClassFixture
         await page.EvaluateAsync("t => localStorage.setItem('kniterp.theme', t)", scheme);
 
         var problems = new List<string>();
-        try
         {
             foreach (var route in Routes())
             {
@@ -114,12 +129,7 @@ public sealed partial class AllScreensE2ETests(HrAppFixture app) : IClassFixture
                 }
             }
         }
-        finally
-        {
-            await page.Context.CloseAsync();
-        }
-
-        Assert.True(problems.Count == 0, string.Join("\n", problems));
+        return problems;
     }
 
     /// <summary>Адреса без параметров из описи экранов; вход, выход и страницы без входа проверяют свои тесты.</summary>
