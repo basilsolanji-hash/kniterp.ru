@@ -240,6 +240,12 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.SalesReturnLine> SalesReturnLines { get; }
     DbSet<KnitErp.Domain.Sales.CustomerRefund> CustomerRefunds { get; }
     DbSet<KnitErp.Domain.Sales.SalesMarkingCode> SalesMarkingCodes { get; }
+    // D1107, D1162, D1168 (продажи, аналитика): план продаж, свойства каналов, отчёты маркетплейсов.
+    DbSet<KnitErp.Domain.Sales.SalesPlan> SalesPlans { get; }
+    DbSet<KnitErp.Domain.Sales.SalesChannelSettings> SalesChannelSettings { get; }
+    DbSet<KnitErp.Domain.Sales.MarketplaceReport> MarketplaceReports { get; }
+    DbSet<KnitErp.Domain.Sales.MarketplaceReportLine> MarketplaceReportLines { get; }
+    DbSet<KnitErp.Domain.Sales.MarketplaceColumnMap> MarketplaceColumnMaps { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
@@ -290,4 +296,10 @@ public interface ISpreadsheetFormat
     IReadOnlyList<IReadOnlyList<string>>? ReadNamedSheet(Stream stream, string sheetName, int maxRows);
 
     byte[] Write(IReadOnlyList<SheetData> sheets);
+
+    /// <summary>
+    /// D1168 (сессия «Продажи»): первый лист широкой выгрузки чужой системы — отчёт Wildberries содержит около 80 столбцов,
+    /// больше обычного предела шаблонов. Те же проверки архива; пределы столбцов и ячеек — шире.
+    /// </summary>
+    IReadOnlyList<IReadOnlyList<string>> ReadWideSheet(Stream stream, int maxRows) => ReadFirstSheet(stream, maxRows);
 }

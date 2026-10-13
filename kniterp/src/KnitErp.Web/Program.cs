@@ -246,6 +246,9 @@ KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("crm", KnitErp.Web.Modules.Modul
 KnitErp.Web.Modules.ModuleUi.AddDashboardBlock("crm", typeof(KnitErp.Web.Components.Shared.CrmDashboardBlock), order: 10);
 // D1114 (продажи): блок главного экрана «Просроченная дебиторка».
 KnitErp.Web.Modules.ModuleUi.AddDashboardBlock("sales-overdue", typeof(KnitErp.Web.Components.Pages.SalesOverdueBlock), order: 20);
+// D1167 (продажи): блоки главного экрана «Отгрузить сегодня» и «Продажи за месяц к плану».
+KnitErp.Web.Modules.ModuleUi.AddDashboardBlock("sales-ship-today", typeof(KnitErp.Web.Components.Pages.SalesShipTodayBlock), order: 21);
+KnitErp.Web.Modules.ModuleUi.AddDashboardBlock("sales-plan", typeof(KnitErp.Web.Components.Pages.SalesPlanBlock), order: 22);
 
 var app = builder.Build();
 app.Logger.LogInformation("Защита данных: {Source}", masterKey.Description);
@@ -595,6 +598,16 @@ app.MapGet("/reports/receivables.xlsx", (DateOnly? asOf, long? manager, KnitErp.
         CancellationToken ct) =>
     FileOrForbid(() => sales.ExportReceivablesAsync(new KnitErp.Application.Sales.ReceivablesFilter(asOf, manager), spreadsheet, ct),
         $"debitorka-{asOf ?? DateOnly.FromDateTime(DateTime.UtcNow):yyyy-MM-dd}.xlsx"));
+// D1165 (продажи): аналитика продаж одной книгой и строки отчёта маркетплейса; права — в сервисах.
+app.MapGet("/reports/sales.xlsx", (DateOnly from, DateOnly to, byte? by, byte? step, long? manager, long? channel, long? group,
+        KnitErp.Application.Sales.SalesReportService reports, ISpreadsheetFormat spreadsheet, CancellationToken ct) =>
+    FileOrForbid(() => reports.ExportAsync(new KnitErp.Application.Sales.SalesReportFilter(from, to,
+            by is { } b && Enum.IsDefined((KnitErp.Application.Sales.SalesDimension)b) ? (KnitErp.Application.Sales.SalesDimension)b : KnitErp.Application.Sales.SalesDimension.Customer,
+            step is { } st && Enum.IsDefined((KnitErp.Application.Sales.SalesPeriodStep)st) ? (KnitErp.Application.Sales.SalesPeriodStep)st : KnitErp.Application.Sales.SalesPeriodStep.Month,
+            manager, channel, null, group), spreadsheet, ct),
+        $"analitika-prodazh-{from:yyyy-MM-dd}-{to:yyyy-MM-dd}.xlsx"));
+app.MapGet("/marketplace-reports/{id:long}.xlsx", (long id, KnitErp.Application.Sales.MarketplaceReportService marketplace, CancellationToken ct) =>
+    FileOrForbid(() => marketplace.ExportAsync(id, ct), $"otchet-marketpleisa-{id}.xlsx"));
 app.MapGet("/reports/profitability.xlsx", (DateOnly from, DateOnly to, byte? group, string? customer, KnitErp.Web.Exports.ReportExports export,
         CancellationToken ct) =>
     FileOrForbid(() => export.ProfitabilityAsync(new KnitErp.Application.Sales.SalesAnalyticsFilter(from, to, customer),

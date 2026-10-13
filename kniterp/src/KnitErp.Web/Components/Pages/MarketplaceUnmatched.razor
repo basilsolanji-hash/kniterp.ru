@@ -1,0 +1,73 @@
+@using KnitErp.Application.Sales
+@*
+    D1169: товары без позиции — «нужно решение». Дочерний компонент сервисы не вызывает: поиск позиции (OnSearch) и сопоставление
+    (OnResolve) делает страница. Без OnResolve выбор записывается в Decisions — для сохранения вместе с отчётом.
+*@
+<div class="mp-unmatched">
+    @foreach (var u in Rows)
+    {
+        <div class="mp-row" @key="u.Key">
+            <span>@(u.Article ?? u.ExternalCode ?? u.Barcode)<span class="mp-note">@u.Name @Codes(u)</span></span>
+            <span>@L("{0} стр., {1} шт., {2}", u.Lines, Quantities.Format(u.Quantity), Amounts.Format(u.Amount))</span>
+            <span class="mp-search">
+                <input placeholder="@L("код, артикул, название")" value="@_search.GetValueOrDefault(u.Key)" @onchange="e => _search[u.Key] = e.Value?.ToString()"
+                       aria-label="@L("Поиск позиции для {0}", u.Article ?? u.ExternalCode ?? u.Barcode ?? "")" disabled="@Busy" />
+                <button type="button" class="secondary" @onclick="() => OnSearch.InvokeAsync((u.Key, _search.GetValueOrDefault(u.Key)))" disabled="@Busy">@L("Найти")</button>
+            </span>
+            <span class="mp-search">
+                <select value="@(Decisions.TryGetValue(u.Key, out var chosen) ? chosen.ToString() : "")" @onchange="e => Choose(u.Key, e.Value?.ToString())"
+                        aria-label="@L("Позиция")" disabled="@(Busy || !Options.ContainsKey(u.Key))">
+                    <option value="">@(Options.TryGetValue(u.Key, out var list) && list.Count == 0 ? L("не найдено") : "—")</option>
+                    @if (Options.TryGetValue(u.Key, out var found))
+                    {
+                        @foreach (var o in found)
+                        {
+                            <option value="@o.Id">@o.Code — @o.Name</option>
+                        }
+                    }
+                </select>
+                @if (OnResolve.HasDelegate)
+                {
+                    <button type="button" @onclick="() => OnResolve.InvokeAsync((u.Key, Decisions[u.Key]))" disabled="@(Busy || !Decisions.ContainsKey(u.Key))">@L("Сопоставить")</button>
+                }
+            </span>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly Dictionary<string, string?> _search = [];
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<MarketplaceUnmatchedDto> Rows { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public Dictionary<string, long> Decisions { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public Dictionary<string, IReadOnlyList<MarketplaceItemOptionDto>> Options { get; set; } = [];
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter]
+    public EventCallback<(string Key, string? Text)> OnSearch { get; set; }
+
+    [Parameter]
+    public EventCallback<(string Key, long ItemId)> OnResolve { get; set; }
+
+    private string Codes(MarketplaceUnmatchedDto u) =>
+        string.Join(", ", new[] { u.ExternalCode is { } c ? L("код {0}", c) : null, u.Barcode is { } b ? L("штрихкод {0}", b) : null }.Where(x => x is not null));
+
+    private void Choose(string key, string? value)
+    {
+        if (long.TryParse(value, out var id))
+        {
+            Decisions[key] = id;
+        }
+        else
+        {
+            Decisions.Remove(key);
+        }
+    }
+}

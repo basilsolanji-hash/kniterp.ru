@@ -1,0 +1,42 @@
+@*
+    D1167: блок главного экрана «Продажи за месяц к плану» (подключается ModuleUi.AddDashboardBlock в Program.cs). Данные — своим
+    коротким контекстом (SalesReportService.PlanBlockAsync). Без прав «Продажи: отчёты» и «Цены и суммы», а также без плана и продаж
+    за месяц — блок ничего не выводит.
+*@
+@using KnitErp.Application.Sales
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+
+@if (_data is { } d)
+{
+    <section class="dash-box span-4" aria-label="@L("Продажи за месяц к плану")">
+        <h2><a href="reports/sales">@L("Продажи за месяц к плану")</a></h2>
+        <div class="mini-stats">
+            <a href="reports/sales"><b>@Amounts.Format(d.Fact)</b><span>@L("Факт, без НДС")</span></a>
+            <a href="sales-plan"><b>@Amounts.Format(d.Plan)</b><span>@(d.OwnOnly ? L("Мой план") : L("План"))</span></a>
+            <a href="reports/sales"><b class="@(d.Percent < d.ElapsedPercent ? "warn-text" : "")">@(d.Percent is { } p ? p.ToString("0.#") + "%" : "—")</b>
+                <span>@L("выполнено; прошло {0}% месяца", d.ElapsedPercent.ToString("0"))</span></a>
+        </div>
+        <div style="height: 6px; background: var(--line); border-radius: 3px; overflow: hidden;" role="progressbar"
+             aria-valuenow="@((int)Math.Min(100, d.Percent ?? 0))" aria-valuemin="0" aria-valuemax="100" aria-label="@L("Выполнение плана")">
+            <span style="display: block; height: 100%; background: var(--accent); width: @(Math.Min(100, d.Percent ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></span>
+        </div>
+    </section>
+}
+
+@code {
+    private SalesPlanBlockDto? _data;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await SalesReportService.PlanBlockAsync(Factory, CurrentUser, Clock, default);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _data = null; // блок модуля не мешает главному экрану
+        }
+    }
+}

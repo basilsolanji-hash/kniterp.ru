@@ -1,0 +1,434 @@
+@page "/marketplace-reports"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject MarketplaceReportService Marketplace
+@inject NavigationManager Navigation
+
+@* D1107, D1168–D1170: отчёты о реализации Wildberries и Ozon из Excel, каналы-маркетплейсы (FBS/FBO) и сопоставление столбцов. *@
+<PageTitle>@L("Отчёты маркетплейсов") — knitERP</PageTitle>
+<SalesStyles />
+<MarketplaceStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_channels is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head"><h1>@L("Отчёты маркетплейсов")</h1></div>
+    <p class="sx-lead">@L("Загрузите отчёт о реализации из личного кабинета Wildberries или Ozon (Excel): продажи, возвраты, комиссия и логистика попадут в отчёт канала, позиции найдутся по связям каталога с площадкой и штрихкодам. Повторно тот же отчёт не загрузится. Подключение по API маркетплейса не используется.")</p>
+
+    <div class="tabs" role="tablist">
+        @foreach (var t in Enum.GetValues<Tab>())
+        {
+            <button type="button" role="tab" class="@(_tab == t ? "tab active" : "tab secondary")" aria-selected="@(_tab == t ? "true" : "false")"
+                    @onclick="() => SwitchAsync(t)" disabled="@_busy">@TabName(t)</button>
+        }
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    @if (_tab == Tab.Reports)
+    {
+        var marketplaces = _channels.Where(c => c.Marketplace is not null).ToList();
+        <section class="panel" aria-label="@L("Загрузка отчёта")">
+            @if (marketplaces.Count == 0)
+            {
+                <p class="muted">@L("Нет каналов-маркетплейсов. На вкладке «Каналы» отметьте канал как Wildberries, Ozon или иной маркетплейс.")</p>
+            }
+            else
+            {
+                <form class="sx-form" @onsubmit:preventDefault>
+                    <label>
+                        @L("Канал")
+                        <select @bind="_channelId" disabled="@_busy">
+                            @foreach (var c in marketplaces)
+                            {
+                                <option value="@c.Id">@c.Name (@MarketplaceName(c.Marketplace!.Value))</option>
+                            }
+                        </select>
+                    </label>
+                    <label class="w2">@L("Файл отчёта (.xlsx, до 15 МБ)") <InputFile OnChange="PreviewAsync" accept=".xlsx" disabled="@_busy" /></label>
+                </form>
+            }
+        </section>
+
+        @if (_preview is { } p)
+        {
+            <section class="panel" aria-label="@L("Предпросмотр")">
+                <h2 style="margin: 0 0 6px">@L("Предпросмотр: {0}", _fileName ?? "")</h2>
+                @if (p.DuplicateId is { } dup)
+                {
+                    <div class="sx-issues">@L("Этот отчёт уже загружен.") <a href="marketplace-reports/@dup">@L("Открыть отчёт № {0}", dup)</a></div>
+                }
+                <MarketplaceTotals Totals="p.Totals" />
+                @if (p.Errors.Count > 0)
+                {
+                    <div class="sx-issues">
+                        <b>@L("Строки с ошибками ({0}) — не загрузятся:", p.Errors.Count)</b>
+                        <ul>
+                            @foreach (var e in p.Errors.Take(20))
+                            {
+                                <li>@(e.IsDate ? L("Строка {0}: «{1}» — «{2}» не дата.", e.Row, e.Column, e.Value) : L("Строка {0}: «{1}» — «{2}» не число.", e.Row, e.Column, e.Value))</li>
+                            }
+                        </ul>
+                    </div>
+                }
+                @if (p.Unmatched.Count > 0)
+                {
+                    <h3 class="mp-sub">@L("Нужно решение: товары без позиции ({0})", p.Unmatched.Count)</h3>
+                    <p class="muted small">@L("Выберите позицию — строки получат её, а в каталоге запомнится связь с площадкой. Можно решить и после загрузки.")</p>
+                    <MarketplaceUnmatched Rows="p.Unmatched" Decisions="_decisions" Busy="_busy" OnSearch="SearchAsync" Options="_options" />
+                }
+                <form class="sx-form" @onsubmit="SaveAsync">
+                    <label>@L("Период с") <input type="date" @bind="_from" required /></label>
+                    <label>@L("по") <input type="date" @bind="_to" required /></label>
+                    @if (p.Errors.Count > 0)
+                    {
+                        <label class="inline w2"><input type="checkbox" @bind="_acceptErrors" /> @L("Загрузить без строк с ошибками")</label>
+                    }
+                    <div class="sx-actions">
+                        <button type="submit" disabled="@(_busy || p.DuplicateId is not null)">@L("Загрузить отчёт")</button>
+                        <button type="button" class="secondary" @onclick="ResetPreview" disabled="@_busy">@L("Отмена")</button>
+                    </div>
+                </form>
+                <MarketplaceLines Lines="p.Lines" Total="p.Totals.Lines" />
+            </section>
+        }
+
+        @if (_reportsDenied)
+        {
+            <p class="muted">@L("Список отчётов виден с правами «Продажи: отчёты» и «Цены и суммы».")</p>
+        }
+        else if (_reports is not null)
+        {
+            <div class="scroll">
+                <table class="mp-table">
+                    <thead>
+                        <tr>
+                            <th>@L("№")</th><th>@L("Период")</th><th>@L("Канал")</th><th class="num">@L("Продажи")</th><th class="num opt">@L("Возвраты")</th>
+                            <th class="num opt">@L("Комиссия")</th><th class="num opt">@L("Логистика")</th><th class="num">@L("К перечислению")</th><th>@L("Без позиции")</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_reports.Count == 0)
+                        {
+                            <tr><td colspan="9" class="muted">@L("Отчётов ещё нет.")</td></tr>
+                        }
+                        @foreach (var r in _reports)
+                        {
+                            <tr class="@(r.Status == MarketplaceReportStatus.Cancelled ? "archived" : null)">
+                                <td><a href="marketplace-reports/@r.Id">@r.Id</a></td>
+                                <td>@r.From.ToString("dd.MM.yyyy")–@r.To.ToString("dd.MM.yyyy")@if (r.Status == MarketplaceReportStatus.Cancelled) {<span class="sx-line-flag">@L("аннулирован")</span>}</td>
+                                <td>@r.Channel</td>
+                                <td class="num">@Amounts.Format(r.Totals.SalesAmount)</td>
+                                <td class="num opt">@Amounts.Format(r.Totals.ReturnsAmount)</td>
+                                <td class="num opt">@Amounts.Format(r.Totals.Commission)</td>
+                                <td class="num opt">@Amounts.Format(r.Totals.Logistics)</td>
+                                <td class="num">@Amounts.Format(r.Totals.Payout)</td>
+                                <td>@if (r.Totals.Unmatched > 0) {<span class="sx-line-flag">@r.Totals.Unmatched</span>} else {<span class="muted">—</span>}</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+    else if (_tab == Tab.Channels)
+    {
+        <p class="muted">@L("Каналы продаж заводятся в «Настройках продаж». Здесь — площадка, схема FBS (со своего склада) или FBO (со склада маркетплейса) и маркетплейс-контрагент. Отчёты «Аналитики продаж» по каналам показывают площадку и схему.")</p>
+        <div class="scroll">
+            <table class="mp-table">
+                <thead><tr><th>@L("Канал")</th><th>@L("Площадка")</th><th>@L("Схема")</th><th></th></tr></thead>
+                <tbody>
+                    @if (_channels.Count == 0)
+                    {
+                        <tr><td colspan="4" class="muted">@L("Каналов нет — добавьте их в «Настройках продаж».")</td></tr>
+                    }
+                    @foreach (var c in _channels)
+                    {
+                        var edit = _edits[c.Id];
+                        <tr @key="c.Id">
+                            <td>@c.Name@if (c.Counterparty is not null) {<span class="mp-note">@c.Counterparty</span>}</td>
+                            <td>
+                                <select value="@(edit.Marketplace?.ToString() ?? "")" @onchange="e => edit.Marketplace = Enum.TryParse<MarketplaceKind>(e.Value?.ToString(), out var m) ? m : null"
+                                        aria-label="@L("Площадка канала {0}", c.Name)" disabled="@_busy">
+                                    <option value="">@L("не маркетплейс")</option>
+                                    @foreach (var m in Enum.GetValues<MarketplaceKind>())
+                                    {
+                                        <option value="@m">@MarketplaceName(m)</option>
+                                    }
+                                </select>
+                            </td>
+                            <td>
+                                <select value="@(edit.Scheme?.ToString() ?? "")" @onchange="e => edit.Scheme = Enum.TryParse<FulfillmentScheme>(e.Value?.ToString(), out var sc) ? sc : null"
+                                        aria-label="@L("Схема канала {0}", c.Name)" disabled="@(_busy || edit.Marketplace is null)">
+                                    <option value="">—</option>
+                                    <option value="@FulfillmentScheme.Fbs">@L("FBS — со своего склада")</option>
+                                    <option value="@FulfillmentScheme.Fbo">@L("FBO — со склада маркетплейса")</option>
+                                </select>
+                            </td>
+                            <td class="sx-row-actions"><button type="button" class="secondary" @onclick="() => SaveChannelAsync(c)" disabled="@_busy">@L("Сохранить")</button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_tab == Tab.Columns && _columns is not null)
+    {
+        <p class="muted">@L("Столбцы ищутся по заголовку (регистр и лишние пробелы не важны). Если площадка переименовала столбец, впишите новый заголовок; пусто — поле не берётся из файла.")</p>
+        <form class="sx-form" @onsubmit="SaveColumnsAsync">
+            <label>
+                @L("Площадка")
+                <select value="@_columnsMarketplace" @onchange="ColumnsMarketplaceAsync" disabled="@_busy">
+                    @foreach (var m in Enum.GetValues<MarketplaceKind>())
+                    {
+                        <option value="@m">@MarketplaceName(m)</option>
+                    }
+                </select>
+            </label>
+            <span class="sx-legend">@L("Заголовки столбцов")</span>
+            @foreach (var col in _columns)
+            {
+                <label class="w2">
+                    @FieldName(col.Field)
+                    <input value="@_headers.GetValueOrDefault(col.Field)" @onchange="e => _headers[col.Field] = e.Value?.ToString()" maxlength="@MarketplaceColumnMap.HeaderMaxLength"
+                           placeholder="@col.Default" />
+                    @if (col.Default.Length > 0 && col.Header != col.Default)
+                    {
+                        <span class="sx-hint">@L("по умолчанию: «{0}»", col.Default)</span>
+                    }
+                </label>
+            }
+            <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить сопоставление")</button></div>
+        </form>
+    }
+}
+
+@code {
+    private enum Tab
+    {
+        Reports,
+        Channels,
+        Columns,
+    }
+
+    private sealed class ChannelEdit
+    {
+        public MarketplaceKind? Marketplace { get; set; }
+        public FulfillmentScheme? Scheme { get; set; }
+    }
+
+    private IReadOnlyList<SalesChannelDto>? _channels;
+    private readonly Dictionary<long, ChannelEdit> _edits = [];
+    private IReadOnlyList<MarketplaceReportListItemDto>? _reports;
+    private bool _reportsDenied;
+    private IReadOnlyList<MarketplaceColumnDto>? _columns;
+    private readonly Dictionary<MarketplaceField, string?> _headers = [];
+    private MarketplaceKind _columnsMarketplace = MarketplaceKind.Wildberries;
+    private MarketplacePreviewDto? _preview;
+    private byte[]? _content;
+    private string? _fileName;
+    private long _channelId;
+    private DateTime? _from;
+    private DateTime? _to;
+    private bool _acceptErrors;
+    private readonly Dictionary<string, long> _decisions = [];
+    private readonly Dictionary<string, IReadOnlyList<MarketplaceItemOptionDto>> _options = [];
+    private Tab _tab = Tab.Reports;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private string TabName(Tab t) => t switch
+    {
+        Tab.Channels => L("Каналы"),
+        Tab.Columns => L("Столбцы файла"),
+        _ => L("Отчёты"),
+    };
+
+    private string MarketplaceName(MarketplaceKind m) => m == MarketplaceKind.Other ? L("Иной маркетплейс") : SalesChannelSettings.MarketplaceName(m);
+
+    private string FieldName(MarketplaceField f) => f switch
+    {
+        MarketplaceField.Article => L("Артикул продавца"),
+        MarketplaceField.ExternalCode => L("Код товара на площадке"),
+        MarketplaceField.Barcode => L("Штрихкод"),
+        MarketplaceField.Name => L("Наименование"),
+        MarketplaceField.DocumentType => L("Тип документа (продажа или возврат)"),
+        MarketplaceField.PaymentReason => L("Обоснование (логистика, штраф)"),
+        MarketplaceField.Date => L("Дата продажи"),
+        MarketplaceField.Quantity => L("Количество"),
+        MarketplaceField.Amount => L("Сумма реализации"),
+        MarketplaceField.ReturnQuantity => L("Возвращено, количество"),
+        MarketplaceField.ReturnAmount => L("Возвращено, сумма"),
+        MarketplaceField.Commission => L("Комиссия"),
+        MarketplaceField.Logistics => L("Логистика"),
+        _ => L("К перечислению"),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadChannelsAsync();
+            await LoadReportsAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadChannelsAsync()
+    {
+        _channels = await Marketplace.ChannelsAsync();
+        _edits.Clear();
+        foreach (var c in _channels)
+        {
+            _edits[c.Id] = new ChannelEdit { Marketplace = c.Marketplace, Scheme = c.Scheme };
+        }
+
+        if (_channels.FirstOrDefault(c => c.Marketplace is not null) is { } first && _channels.All(c => c.Id != _channelId || c.Marketplace is null))
+        {
+            _channelId = first.Id;
+        }
+    }
+
+    private async Task LoadReportsAsync()
+    {
+        try
+        {
+            _reports = await Marketplace.ListAsync();
+            _reportsDenied = false;
+        }
+        catch (AccessDeniedException)
+        {
+            _reportsDenied = true; // загрузка может быть доступна и без права отчётов — список просто не показывается
+        }
+    }
+
+    private async Task LoadColumnsAsync()
+    {
+        _columns = await Marketplace.ColumnsAsync(_columnsMarketplace);
+        _headers.Clear();
+        foreach (var c in _columns)
+        {
+            _headers[c.Field] = c.Header;
+        }
+    }
+
+    private Task SwitchAsync(Tab tab) => RunAsync(async () =>
+    {
+        _tab = tab;
+        if (tab == Tab.Columns)
+        {
+            await LoadColumnsAsync();
+        }
+        else if (tab == Tab.Channels)
+        {
+            await LoadChannelsAsync();
+        }
+        else
+        {
+            await LoadReportsAsync();
+        }
+    }, null);
+
+    private Task ColumnsMarketplaceAsync(ChangeEventArgs e) => RunAsync(async () =>
+    {
+        _columnsMarketplace = Enum.Parse<MarketplaceKind>(e.Value?.ToString() ?? nameof(MarketplaceKind.Wildberries));
+        await LoadColumnsAsync();
+    }, null);
+
+    private Task SaveColumnsAsync() => RunAsync(async () =>
+    {
+        await Marketplace.SetColumnsAsync(_columnsMarketplace, _headers);
+        await LoadColumnsAsync();
+    }, L("Сопоставление столбцов сохранено."));
+
+    private Task SaveChannelAsync(SalesChannelDto c) => RunAsync(async () =>
+    {
+        var edit = _edits[c.Id];
+        await Marketplace.SetChannelAsync(c.Id, edit.Marketplace, edit.Marketplace is null ? null : edit.Scheme, edit.Marketplace is null ? null : c.CounterpartyId,
+            c.RowVersion);
+        await LoadChannelsAsync();
+    }, L("Свойства канала сохранены."));
+
+    private Task PreviewAsync(InputFileChangeEventArgs e) => RunAsync(async () =>
+    {
+        if (e.File.Size is 0 or > MarketplaceReportService.MaxFileBytes)
+        {
+            throw new BusinessRuleException("marketplace.file_size", L("Файл отчёта пустой или больше 15 МБ."));
+        }
+
+        await using var upload = e.File.OpenReadStream(maxAllowedSize: MarketplaceReportService.MaxFileBytes);
+        using var buffer = new MemoryStream();
+        await upload.CopyToAsync(buffer);
+        _content = buffer.ToArray();
+        _fileName = e.File.Name;
+        _decisions.Clear();
+        _options.Clear();
+        _acceptErrors = false;
+        _preview = await Marketplace.PreviewAsync(_channelId, _content);
+        _from = _preview.From?.ToDateTime(TimeOnly.MinValue);
+        _to = _preview.To?.ToDateTime(TimeOnly.MinValue);
+    }, null);
+
+    private async Task SearchAsync((string Key, string? Text) query)
+    {
+        await RunAsync(async () => _options[query.Key] = await Marketplace.FindItemsAsync(query.Text), null);
+    }
+
+    private void ResetPreview()
+    {
+        _preview = null;
+        _content = null;
+        _decisions.Clear();
+        _options.Clear();
+    }
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var result = await Marketplace.SaveAsync(_channelId, _content!, _fileName, _from is { } f ? DateOnly.FromDateTime(f) : null,
+            _to is { } t ? DateOnly.FromDateTime(t) : null, _decisions, _acceptErrors);
+        ResetPreview();
+        Navigation.NavigateTo($"marketplace-reports/{result.ReportId}");
+    }, null);
+
+    /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? done)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _message = done;
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
