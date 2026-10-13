@@ -97,9 +97,7 @@ else
             {
                 <button type="button" class="secondary" aria-expanded="@(_moving ? "true" : "false")" @onclick="() => _moving = !_moving">@L("Другая стадия…")</button>
             }
-            <details class="dev-more" @key="_moreKey">
-                <summary class="button secondary" aria-label="@L("Ещё действия")">@L("Ещё")</summary>
-                <div class="dev-more-menu" @onclick="() => _moreKey++">
+            <DevMoreMenu>
                     @if (_canEdit)
                     {
                         <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Создать похожую")</button>
@@ -111,8 +109,7 @@ else
                     {
                         <button type="button" class="secondary danger-text" @onclick="() => _cancelling = true" disabled="@_busy">@L("Отменить модель")</button>
                     }
-                </div>
-            </details>
+            </DevMoreMenu>
         </div>
         @if (_moving && m.MoveTargets.Count > 0)
         {
@@ -299,7 +296,6 @@ else
     private bool _cancelling;
     private bool _moving;
 
-    private int _moreKey;
     private bool _canEdit;
     private bool _editingBrief;
     private string? _denied;

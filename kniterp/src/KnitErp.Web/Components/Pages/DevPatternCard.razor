@@ -68,13 +68,10 @@ else
         {
             <button type="button" class="@(p.IsEditable ? "secondary" : null)" disabled="@_busy" @onclick="() => _versionForm = !_versionForm">@L("Новая версия")</button>
             <button type="button" class="secondary" disabled="@_busy" @onclick="ReadyAsync">@L("Рисунок готов к программированию")</button>
-            <details class="dev-more" @key="_moreKey">
-                <summary class="button secondary" aria-label="@L("Ещё действия")">@L("Ещё")</summary>
-                <div class="dev-more-menu" @onclick="() => _moreKey++">
+            <DevMoreMenu>
                     <button type="button" class="secondary" disabled="@_busy" @onclick="CopyAsync">@L("Скопировать рисунок")</button>
                     <button type="button" class="secondary danger-text" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Archived)">@L("В архив")</button>
-                </div>
-            </details>
+            </DevMoreMenu>
         }
         @if (p.CanEdit && p.Status == DevPatternStatus.Archived)
         {
@@ -348,8 +345,6 @@ else
 }
 
 @code {
-    private int _moreKey;
-
     [Parameter]
     public long Id { get; set; }
 

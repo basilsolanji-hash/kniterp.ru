@@ -240,7 +240,9 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await AssertNoHorizontalScrollAsync(page, "образец у заказчика");
 
         // D725: технический паспорт открывается из карточки модели как PDF.
+        await DevUi.OpenMoreAsync(page);
         var passportHref = await page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" }).GetAttributeAsync("href") ?? throw new InvalidOperationException("нет ссылки");
+        await DevUi.CloseMoreAsync(page);
         var passport = await page.APIRequest.GetAsync(new Uri(new Uri(page.Url), "/" + passportHref).ToString());
         Assert.Equal(200, passport.Status);
         Assert.Equal("application/pdf", passport.Headers["content-type"]);

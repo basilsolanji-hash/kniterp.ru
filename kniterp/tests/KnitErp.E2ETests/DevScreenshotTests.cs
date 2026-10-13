@@ -448,7 +448,9 @@ public sealed class DevScreenshotTests(HrAppFixture app) : IClassFixture<HrAppFi
         await ShotIf(page, dir, "19-obrazec-u-zakazchika");
         if (dir is not null)
         {
+            await DevUi.OpenMoreAsync(page);
             var passportHref = await page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" }).GetAttributeAsync("href");
+            await DevUi.CloseMoreAsync(page);
             var pdf = await page.APIRequest.GetAsync(new Uri(new Uri(page.Url), "/" + passportHref).ToString());
             await File.WriteAllBytesAsync(Path.Combine(dir, "20-tehpasport.pdf"), await pdf.BodyAsync());
             await Go(page, "dev/analytics");

@@ -98,7 +98,7 @@ else
     @if (!_table && _board is not null)
     {
         @* Пустая стадия — узкая колонка, чтобы модели помещались без прокрутки вбок (пересмотр 13.10). *@
-        <div class="dev-board" style="grid-template-columns: @string.Join(" ", _board.Select(c => c.Models.Count == 0 ? "minmax(72px, .35fr)" : "minmax(170px, 1fr)"))">
+        <div class="dev-board" style="grid-template-columns: @string.Join(" ", _board.Select(c => c.Models.Count == 0 ? "minmax(96px, .4fr)" : "minmax(170px, 1fr)"))">
             @foreach (var col in _board)
             {
                 <section class="dev-col @(col.Models.Count == 0 ? "empty" : null)" aria-label="@L(col.StageName)">

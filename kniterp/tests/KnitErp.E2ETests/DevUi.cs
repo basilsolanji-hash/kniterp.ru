@@ -20,12 +20,22 @@ internal static class DevUi
         await select.SelectOptionAsync(new SelectOptionValue { Label = stage });
     }
 
+    /// <summary>Закрыть «Ещё» без выбора пункта (Escape), чтобы меню не перекрывало соседние кнопки.</summary>
+    public static async Task CloseMoreAsync(IPage page)
+    {
+        if (await page.Locator(".dev-more-menu").IsVisibleAsync())
+        {
+            await page.Keyboard.PressAsync("Escape");
+            await Assertions.Expect(page.Locator(".dev-more-menu")).ToBeHiddenAsync();
+        }
+    }
+
     public static async Task OpenMoreAsync(IPage page)
     {
         var menu = page.Locator(".dev-more-menu");
         for (var i = 0; i < 10 && !await menu.IsVisibleAsync(); i++)
         {
-            await page.Locator("details.dev-more > summary").ClickAsync();
+            await page.GetByRole(AriaRole.Button, new() { Name = "Ещё действия", Exact = true }).ClickAsync();
             await page.WaitForTimeoutAsync(300);
         }
     }
