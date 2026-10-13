@@ -610,3 +610,36 @@ internal sealed class CrmSalesOrderLinkConfiguration : IEntityTypeConfiguration<
         b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CrmDealId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_sales_orders_crm_deal");
 }
+
+/// <summary>D692: фото к сделке — как фото позиций каталога (varbinary, тип и размер под CHECK); сделка — составным ключом организации.</summary>
+internal sealed class CrmDealPhotoConfiguration : IEntityTypeConfiguration<CrmDealPhoto>
+{
+    public void Configure(EntityTypeBuilder<CrmDealPhoto> b)
+    {
+        b.ToTable("crm_deal_photos", t =>
+        {
+            t.HasCheckConstraint("ck_crm_deal_photos_size", $"[SizeBytes] BETWEEN 1 AND {CrmDealPhoto.MaxBytes} AND DATALENGTH([Content]) = [SizeBytes]");
+            t.HasCheckConstraint("ck_crm_deal_photos_type", "[ContentType] IN ('image/jpeg', 'image/png', 'image/webp')");
+            t.HasCheckConstraint("ck_crm_deal_photos_archive",
+                "([IsArchived] = 0 AND [ArchivedAtUtc] IS NULL AND [ArchivedByUserId] IS NULL) OR ([IsArchived] = 1 AND [ArchivedAtUtc] IS NOT NULL AND [ArchivedByUserId] IS NOT NULL)");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.ContentType).HasColumnType("varchar(20)").IsRequired();
+        b.Property(x => x.Content).HasColumnType("varbinary(max)").IsRequired();
+        b.Property(x => x.Caption).HasMaxLength(CrmDealPhoto.CaptionMaxLength);
+        b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ArchivedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.RowVersion).IsRowVersion();
+        b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_crm_deal_photos_organization");
+        b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DealId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_crm_deal_photos_deal");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_crm_deal_photos_created_by");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ArchivedByUserId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_crm_deal_photos_archived_by");
+        b.HasIndex(x => new { x.OrganizationId, x.DealId, x.IsArchived }).HasDatabaseName("ix_crm_deal_photos_deal");
+    }
+}

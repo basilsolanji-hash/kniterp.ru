@@ -22,6 +22,7 @@ public sealed class CrmServices(KnitErpDbContext db, CrmSettingsService settings
     public required CrmMessengerService Messenger { get; init; }
     public required CrmEmailTemplateService Templates { get; init; }
     public required CrmMailboxService Mailbox { get; init; }
+    public required CrmDealPhotoService Photos { get; init; }
 
     public KnitErpDbContext Db { get; } = db;
     public CrmSettingsService Settings { get; } = settings;
@@ -70,6 +71,7 @@ public static class CrmTestKit
             Messenger = new CrmMessengerService(db, guard, user, host.Clock, [Max, Telegram, WhatsApp], host.Mail),
             Templates = new CrmEmailTemplateService(db, guard, user, host.Clock),
             Mailbox = new CrmMailboxService(db, guard, user, host.Clock, Imap),
+            Photos = new CrmDealPhotoService(db, guard, user, host.Clock),
         };
     }
 

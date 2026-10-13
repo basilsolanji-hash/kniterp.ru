@@ -18,7 +18,8 @@ public static class SecurityHeaders
         headers.XContentTypeOptions = "nosniff";
         headers.XFrameOptions = "DENY";
         headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-        headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
+        // Допущение D693: микрофон — только своему сайту (диктовка заметок CRM, Web Speech API); чужим вставкам и сайтам — нет.
+        headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=(), payment=(), usb=()";
         headers["Cross-Origin-Opener-Policy"] = "same-origin";
         return next();
     }
