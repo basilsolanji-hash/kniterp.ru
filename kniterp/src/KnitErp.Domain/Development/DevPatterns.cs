@@ -92,7 +92,17 @@ public sealed class DevPattern
     public long CreatedByUserId { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
-    public bool IsEditable => Status is DevPatternStatus.Draft or DevPatternStatus.Review;
+    /// <summary>Последняя утверждённая версия (ревью 13.10): её цвета, колориты и сетку больше не меняют — только новой версией.</summary>
+    public int? ApprovedVersion { get; private set; }
+
+    /// <summary>Время последней правки рисунка или его цветов и колоритов: правка меняет версию строки — утверждение с устаревшей версией получит конфликт.</summary>
+    public DateTime? ChangedAtUtc { get; private set; }
+
+    public bool IsEditable => Status is DevPatternStatus.Draft or DevPatternStatus.Review && ApprovedVersion != CurrentVersion;
+
+    /// <summary>Отметить правку цветов, колоритов или файлов — меняет версию строки рисунка.</summary>
+    public void Touch(DateTime nowUtc) =>
+        ChangedAtUtc = ChangedAtUtc is { } last && nowUtc <= last ? last.AddMilliseconds(1) : nowUtc; // всегда новое значение — строка обновится
 
     public static string KindName(DevPatternKind kind) => kind switch
     {
@@ -144,8 +154,13 @@ public sealed class DevPattern
             throw new BusinessRuleException("dev.pattern.locked",
                 Status == DevPatternStatus.Archived
                     ? "Рисунок в архиве — сначала верните его из архива."
-                    : "Рисунок утверждён — изменения вносятся новой версией рисунка.");
+                    : "Эта версия рисунка утверждена — изменения вносятся новой версией рисунка.");
         }
+    }
+
+    private void ApplyApproval()
+    {
+        ApprovedVersion = CurrentVersion;
     }
 
     private void Apply(DevPatternValues v)
@@ -194,6 +209,11 @@ public sealed class DevPattern
         if (!ok)
         {
             throw new BusinessRuleException("dev.pattern.status", $"Из статуса «{StatusName(Status)}» в «{StatusName(target)}» перевести нельзя.");
+        }
+
+        if (target == DevPatternStatus.Approved)
+        {
+            ApplyApproval();
         }
 
         Status = target;
@@ -384,10 +404,11 @@ public sealed class DevPatternColor
         GridKey = DomainText.Optional(gridKey, GridKeyMaxLength, "Цвет сетки");
     }
 
-    public void SetShare(decimal? share, string? gridKey)
+    /// <summary>Доля по файлу-сетке; <paramref name="gridKey"/> — новый цвет сетки, <paramref name="clearKey"/> — снять его (цвета нет в сетке).</summary>
+    public void SetShare(decimal? share, string? gridKey, bool clearKey = false)
     {
         SharePercent = share is { } s ? Math.Round(Math.Clamp(s, 0, 100), 2) : null;
-        GridKey = gridKey ?? GridKey;
+        GridKey = clearKey ? null : gridKey is null ? GridKey : DomainText.Optional(gridKey, GridKeyMaxLength, "Цвет сетки");
     }
 }
 
@@ -495,4 +516,42 @@ public static class DevPatternRules
                 "Ширина изделия в петлях должна быть кратна раппорту — или укажите правило выравнивания.");
         }
     }
+}
+
+/// <summary>
+/// Снимок цвета версии рисунка (ревью 13.10): при новой версии сохраняется, какими были цвета, доли, нитеводители и пряжа колоритов прежней
+/// версии, — паспорт модели, привязанной к старой версии, печатает их, а не текущие. Только вставка (триггер).
+/// </summary>
+public sealed class DevPatternVersionColor
+{
+    private DevPatternVersionColor()
+    {
+    }
+
+    public long Id { get; private set; }
+    public long OrganizationId { get; private set; }
+    public long PatternId { get; private set; }
+    public int Version { get; private set; }
+    public int ColorNo { get; private set; }
+    public string ColorName { get; private set; } = string.Empty;
+    public decimal? SharePercent { get; private set; }
+    public int? Feeder { get; private set; }
+    public long? ColorwayId { get; private set; }
+    public string? Colorway { get; private set; }
+    public string? Yarn { get; private set; }
+
+    public static DevPatternVersionColor Create(long organizationId, long patternId, int version, int colorNo, string colorName, decimal? share, int? feeder,
+        long? colorwayId, string? colorway, string? yarn) => new()
+    {
+        OrganizationId = organizationId,
+        PatternId = patternId,
+        Version = version,
+        ColorNo = colorNo,
+        ColorName = colorName,
+        SharePercent = share,
+        Feeder = feeder,
+        ColorwayId = colorwayId,
+        Colorway = colorway,
+        Yarn = yarn is { Length: > 300 } ? yarn[..300] : yarn,
+    };
 }

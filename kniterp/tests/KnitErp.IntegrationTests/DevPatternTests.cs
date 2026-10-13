@@ -88,6 +88,9 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
             Assert.Equal("dev.pattern.approve.yarn", Code(await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Patterns.MoveAsync(pattern, DevPatternStatus.Approved, p.RowVersion))));
             await k.Patterns.SetYarnAsync(p.Colorways[1].Id, p.Colors[1].Id, milk, null);
+            // Ревью 13.10: правка раскладки меняет версию строки рисунка — утверждение по устаревшей версии получает конфликт.
+            await Assert.ThrowsAsync<ConcurrencyConflictException>(() => k.Patterns.MoveAsync(pattern, DevPatternStatus.Approved, p.RowVersion));
+            p = await k.Patterns.GetAsync(pattern);
             Assert.Equal("dev.pattern.approve.feeders", Code(await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Patterns.MoveAsync(pattern, DevPatternStatus.Approved, p.RowVersion)))); // 2 цвета, у класса 1 нитеводитель
             await k.Patterns.UpdateAsync(pattern, new DevPatternValues("Олени", DevPatternKind.JacquardDouble, 4, 2, 7m, e7, 26, null, null, dessinator, null), p.RowVersion);
@@ -100,6 +103,13 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
             p = await k.Patterns.GetAsync(pattern);
             Assert.Equal(DevPatternStatus.Approved, p.Status);
             Assert.Equal("dev.pattern.locked", Code(await Assert.ThrowsAsync<BusinessRuleException>(() => k.Patterns.AddColorAsync(pattern, "Ещё", null, null))));
+            // «Вернуть в черновик» не открывает правку утверждённой версии — только новая версия.
+            await k.Patterns.MoveAsync(pattern, DevPatternStatus.Draft, p.RowVersion);
+            Assert.Equal("dev.pattern.locked", Code(await Assert.ThrowsAsync<BusinessRuleException>(() => k.Patterns.AddColorAsync(pattern, "Ещё", null, null))));
+            Assert.Equal("dev.pattern.locked", Code(await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Patterns.AddFileAsync(pattern, DevPatternFileKind.Pattern, "podmena.csv", "1,1\n"u8.ToArray(), null))));
+            await k.Patterns.MoveAsync(pattern, DevPatternStatus.Approved, (await k.Patterns.GetAsync(pattern)).RowVersion);
+            p = await k.Patterns.GetAsync(pattern);
 
             // Модель — конкретная версия и колорит рисунка.
             var m = await k.Models.GetAsync(model);
@@ -122,7 +132,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
             Assert.Equal((2, DevPatternStatus.Draft), (p.CurrentVersion, p.Status));
             Assert.Equal("dev.pattern.ready.file", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Patterns.ReadyForProgrammingAsync(pattern, p.RowVersion))).Code);
             await k.Patterns.AddFileAsync(pattern, DevPatternFileKind.Pattern, "oleni-v2.csv", "1,2\n2,1\n"u8.ToArray(), null);
-            await k.Patterns.ReadyForProgrammingAsync(pattern, p.RowVersion);
+            await k.Patterns.ReadyForProgrammingAsync(pattern, (await k.Patterns.GetAsync(pattern)).RowVersion); // загрузка файла сменила версию строки
             Assert.Equal("dev.pattern.file.type", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Patterns.AddFileAsync(pattern, DevPatternFileKind.Pattern, "evil.csv", "<script>alert(1)</script>"u8.ToArray(), null))).Code);
         }
@@ -220,6 +230,17 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
         Assert.Equal(("Р-00001", 1, "Основной"), (passport.Pattern!.Number, passport.Pattern.Version, passport.Pattern.Colorway!));
         Assert.Contains("ПР-М", passport.Pattern.Colors.Single().Yarn);
         Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(new KnitErp.Infrastructure.Documents.DevPassportPdfRenderer().Render(passport), 0, 4));
+
+        // Ревью 13.10: новая версия рисунка меняет цвет и пряжу — паспорт модели на версии 1 печатает снимок версии 1, а не текущие данные.
+        await patterns.NewVersionAsync(pattern, "другой фон", null, (await patterns.GetAsync(pattern)).RowVersion);
+        var v2 = await patterns.GetAsync(pattern);
+        await patterns.UpdateColorAsync(color, "Фон новый", 100, 1, v2.Colors.Single().RowVersion);
+        await patterns.SetYarnAsync(main, color, red, null);
+        var old = (await new DevPassportService(all.Db, guard, host.Clock, models, tech, shop).BuildAsync(model)).Pattern!;
+        Assert.Equal((1, "Фон"), (old.Version, old.Colors.Single().Name));
+        Assert.Contains("ПР-М", old.Colors.Single().Yarn);
+        await Assert.ThrowsAnyAsync<Exception>(() => all.Db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM [kniterp].[dev_pattern_version_colors] WHERE [PatternId] = {0}", pattern));
 
         // Аналитика: рисунок во второй модели — повторное использование.
         var second = await models.CreateAsync(new DevModelHeader("Шапка в полоску", null, DevCategory.Hat, DevAudience.Unisex, false, true, null, null,

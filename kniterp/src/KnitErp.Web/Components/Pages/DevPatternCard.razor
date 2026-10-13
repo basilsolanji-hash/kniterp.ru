@@ -28,7 +28,7 @@ else if (_p is null)
 else
 {
     var p = _p;
-    var editable = p.CanEdit && p.Status is DevPatternStatus.Draft or DevPatternStatus.Review;
+    var editable = p.CanEdit && p.IsEditable;
     <p><a href="dev/patterns">← @L("Библиотека рисунков")</a></p>
     <div class="page-head">
         <h1>@p.Number · @p.Name <span class="tag @(p.Status == DevPatternStatus.Approved ? "ok" : p.Status == DevPatternStatus.Review ? "warn" : null)">@L(p.StatusName)</span></h1>
@@ -39,21 +39,25 @@ else
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
     }
+    @if (p.CanEdit && !p.IsEditable && p.Status != DevPatternStatus.Archived)
+    {
+        <div class="flash" role="status">@L("Версия {0} утверждена — чтобы изменить рисунок, создайте новую версию.", p.CurrentVersion)</div>
+    }
     @if (p.ReadyForProgrammingAtUtc is not null && !p.HasProgram)
     {
         <div class="flash" role="status">@L("Рисунок готов к программированию — ждёт программу машины от программиста {0}.", p.Programmer ?? "—")</div>
     }
 
     <div class="actions">
-        @if (p.CanEdit && p.Status == DevPatternStatus.Draft)
+        @if (p.CanEdit && p.Status == DevPatternStatus.Draft && p.IsEditable)
         {
             <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Review)">@L("На проверку")</button>
         }
-        @if (p.CanApprove && p.Status is DevPatternStatus.Draft or DevPatternStatus.Review)
+        @if (p.CanApprove && p.IsEditable)
         {
             <button type="button" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Approved)">@L("Утвердить рисунок")</button>
         }
-        @if (p.CanEdit && p.Status is DevPatternStatus.Review or DevPatternStatus.Approved)
+        @if (p.CanEdit && p.Status == DevPatternStatus.Review)
         {
             <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть в черновик")</button>
         }
