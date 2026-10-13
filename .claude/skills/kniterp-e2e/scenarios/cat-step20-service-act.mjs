@@ -105,6 +105,22 @@ if (await page.getByRole('button', { name: 'Оформить отгрузку' }
   throw new Error('заказ не закрыт отгрузкой и актом');
 ok('заказ отгружен полностью: отгрузка + акт');
 
+// API (D354): POST /sales-orders/{id}/service-act — для закрытого заказа понятный отказ 422, без токена — 401.
+const orderId = orderUrl.split('/').pop();
+await page.goto(`${BASE}/integrations`); await ready(page);
+await page.locator('label:has-text("Название") input').fill('Акты ' + sfx);
+for (const box of await page.locator('fieldset label.check input').all()) await box.check();
+await page.getByRole('button', { name: 'Выпустить токен' }).click();
+const secretBox = page.locator('input[readonly]');
+await secretBox.waitFor();
+const token = await secretBox.inputValue();
+const api = page.request;
+const closed = await api.post(`${BASE}/api/v1/sales-orders/${orderId}/service-act`, { headers: { Authorization: `Bearer ${token}` } });
+if (closed.status() !== 422) throw new Error('API акта по закрытому заказу: ' + closed.status() + ' ' + (await closed.text()).slice(0, 300));
+const unauth = await api.post(`${BASE}/api/v1/sales-orders/${orderId}/service-act`);
+if (unauth.status() !== 401) throw new Error('API без токена: ' + unauth.status());
+ok('API акта: закрытый заказ — 422 с причиной, без токена — 401');
+
 await page.setViewportSize({ width: 390, height: 844 });
 await page.reload(); await ready(page);
 await assertNoHorizontalScroll(page, 'заказ с актом @390');

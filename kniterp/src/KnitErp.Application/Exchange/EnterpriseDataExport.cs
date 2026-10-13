@@ -132,9 +132,17 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             docs = docs.Where(d => EntityOf(d) == only).ToList();
         }
 
-        // D352 (сессия 4, Р2): документ по заказу покупателя выгружается строками заказа — комплект одной строкой, как в УПД.
+        // D352 (сессия 4, Р2): цены документа по заказу покупателя — из строк заказа (комплект — строкой заказа).
         static IReadOnlyList<(long ItemId, decimal Quantity)> Goods(StockDocument d) => d.SalesOrderId is not null ? d.OrderLines() : d.ItemTotals();
-        var itemIds = docs.SelectMany(Goods).Select(l => l.ItemId).Distinct().ToList();
+        // D356 (сессия 4): в файл идут фактически ушедшие позиции — комплект компонентами (склад 1С ведётся по ним).
+        var itemIds = docs.SelectMany(d => d.ItemTotals()).Select(l => l.ItemId).Distinct().ToList();
+        var componentIds = docs.SelectMany(d => d.Lines).Where(l => l.BundleItemId != null).Select(l => l.ItemId).Distinct().ToList();
+        var salePrices = componentIds.Count == 0
+            ? []
+            : await (from pr in db.ItemPrices.AsNoTracking()
+                     join t in db.PriceTypes.AsNoTracking() on pr.PriceTypeId equals t.Id
+                     where pr.OrganizationId == org && t.IsDefault && componentIds.Contains(pr.ItemId)
+                     select new { pr.ItemId, pr.Price }).ToDictionaryAsync(x => x.ItemId, x => x.Price, ct);
         var items = await (from i in db.Items.AsNoTracking()
                            join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
                            where itemIds.Contains(i.Id)
@@ -226,6 +234,11 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
                 priced = Priced(sales[so].Lines.Select(o => (o.ItemId, o.Quantity, o.Amount, o.VatAmount, o.VatPercent)));
             }
 
+            if (priced is not null && d.SalesOrderId is not null)
+            {
+                priced = BundleComponents(d, priced, salePrices);
+            }
+
             if (priced is not null)
             {
                 element.Add(Currency(), new XElement(Ed + "Сумма", Money(priced.Sum(p => p.Amount))), new XElement(Ed + "ЦенаВключаетНДС", "true"));
@@ -252,7 +265,8 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             }
 
             var goods = new XElement(Ed + (act ? "Услуги" : "Товары"));
-            foreach (var l in Goods(d).OrderBy(l => items[l.ItemId].Code))
+            var rows = priced?.Select(p => (p.ItemId, p.Quantity)).ToList() ?? Goods(d).ToList();
+            foreach (var l in rows.OrderBy(l => items[l.ItemId].Code))
             {
                 var row = new XElement(Ed + "Строка", ItemRef(l.ItemId), UnitRef(l.ItemId), new XElement(Ed + "Количество", Qty(l.Quantity)));
                 if (priced?.FirstOrDefault(p => p.ItemId == l.ItemId) is { Quantity: > 0 } p)
@@ -291,6 +305,45 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
         return new EnterpriseDataFile(buffer.ToArray(), $"knitERP-EnterpriseData-{from:yyyyMMdd}-{to:yyyyMMdd}.xml", summary);
+    }
+
+    /// <summary>
+    /// D356 (сессия 4): строка комплекта → строки его компонентов из документа. Сумма и НДС комплекта делятся по весу «количество ×
+    /// цена продажи основного вида» (нет цены хоть у одного — по количеству); остаток округления — последнему, итог не меняется.
+    /// Одна позиция отдельно и в комплекте — одной строкой файла.
+    /// </summary>
+    internal static IReadOnlyList<(long ItemId, decimal Quantity, decimal Amount, decimal Vat, decimal? VatPercent)> BundleComponents(
+        StockDocument d, IReadOnlyList<(long ItemId, decimal Quantity, decimal Amount, decimal Vat, decimal? VatPercent)> priced,
+        IReadOnlyDictionary<long, decimal> salePrices)
+    {
+        var result = new List<(long ItemId, decimal Quantity, decimal Amount, decimal Vat, decimal? VatPercent)>();
+        foreach (var p in priced)
+        {
+            var parts = d.Lines.Where(l => l.BundleItemId == p.ItemId).GroupBy(l => l.ItemId)
+                .Select(g => (ItemId: g.Key, Quantity: g.Sum(l => l.Quantity))).OrderBy(c => c.ItemId).ToList();
+            if (parts.Count == 0)
+            {
+                result.Add(p);
+                continue;
+            }
+
+            var byPrice = parts.All(c => salePrices.GetValueOrDefault(c.ItemId) > 0);
+            var weights = parts.Select(c => c.Quantity * (byPrice ? salePrices[c.ItemId] : 1)).ToList();
+            var total = weights.Sum();
+            decimal amountLeft = p.Amount, vatLeft = p.Vat;
+            for (var i = 0; i < parts.Count; i++)
+            {
+                var last = i == parts.Count - 1;
+                var amount = last ? amountLeft : decimal.Round(p.Amount * weights[i] / total, 2);
+                var vat = last ? vatLeft : decimal.Round(p.Vat * weights[i] / total, 2);
+                amountLeft -= amount;
+                vatLeft -= vat;
+                result.Add((parts[i].ItemId, parts[i].Quantity, amount, vat, p.VatPercent));
+            }
+        }
+
+        return result.GroupBy(r => r.ItemId)
+            .Select(g => (g.Key, g.Sum(r => r.Quantity), g.Sum(r => r.Amount), g.Sum(r => r.Vat), g.First().VatPercent)).ToList();
     }
 
     private static string Money(decimal value) => value.ToString("0.00", Inv);

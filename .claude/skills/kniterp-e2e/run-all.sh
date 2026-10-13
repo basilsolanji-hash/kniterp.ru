@@ -13,6 +13,9 @@ if [ -n "${E2E_DB:-}" ]; then
   # Шаблоны этикеток сценария cat-step5 («Ценник XXXXX», «Лист XXXXX»; лимит — 30 на организацию); основной шаблон не трогаем.
   docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$KNITERP_SA_PASSWORD" -d "$E2E_DB" \
     -Q "SET QUOTED_IDENTIFIER ON; DELETE FROM kniterp.label_templates WHERE (Name LIKE N'Ценник _____' OR Name LIKE N'Лист _____') AND Name NOT LIKE N'%мм%' AND IsDefault = 0" >/dev/null || echo "очистка шаблонов этикеток не удалась"
+  # Доп. поля сценариев cat-step11/14 («Сайт XXXXX», «Длина XXXXX», «Производитель XXXXX»; лимит — 30): в архив, не удаляются.
+  docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$KNITERP_SA_PASSWORD" -d "$E2E_DB" \
+    -Q "SET QUOTED_IDENTIFIER ON; UPDATE kniterp.custom_field_definitions SET IsArchived = 1 WHERE IsArchived = 0 AND (Name LIKE N'Сайт _____' OR Name LIKE N'Длина _____' OR Name LIKE N'Производитель _____')" >/dev/null || echo "очистка доп. полей не удалась"
 fi
 fail=0
 for s in "$dir"/scenarios/cat-*.mjs; do
