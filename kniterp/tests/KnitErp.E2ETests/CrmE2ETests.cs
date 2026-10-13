@@ -108,6 +108,8 @@ public sealed class CrmAppFixture : IAsyncLifetime
     {
         var org = _org!;
         await using var crm = _host.Crm(org.OwnerUserId, org.OrganizationId);
+        // D132 п. 5: диктовку включает Владелец (по умолчанию выключена) — сценарий проверяет кнопку там, где браузер умеет.
+        await crm.Settings.SetVoiceDictationAsync(true, (await crm.Settings.GetAsync()).AutomationVersion);
         long customer;
         await using (var s = _host.As(org.OwnerUserId, org.OrganizationId))
         {

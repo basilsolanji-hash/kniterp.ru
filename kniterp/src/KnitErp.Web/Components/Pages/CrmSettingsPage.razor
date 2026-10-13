@@ -24,6 +24,7 @@ else
     <nav class="crm-toc" aria-label="@L("Разделы настроек")">
         <a href="crm/settings#pipelines">@L("Воронки и этапы")</a>
         <a href="crm/settings#automation">@L("Автоматизация")</a>
+        <a href="crm/settings#voice">@L("Диктовка")</a>
         <a href="crm/settings#messengers">@L("Мессенджеры")</a>
         <a href="crm/settings#mailbox">@L("Входящая почта")</a>
         <a href="crm/settings#templates">@L("Шаблоны писем")</a>
@@ -79,6 +80,31 @@ else
             </fieldset>
         </form>
     }
+
+    @* D132 п. 5: диктовка заметок — по умолчанию выключена, включает Владелец, видя предупреждение о передаче голоса. *@
+    <section class="panel" id="voice" aria-label="@L("Диктовка заметок")">
+        <h2>@L("Диктовка заметок")</h2>
+        <p>
+            @(_data.VoiceDictation ? L("Включена: у полей заметок есть кнопка «Надиктовать».") : L("Выключена: заметки вводятся с клавиатуры."))
+        </p>
+        <p class="muted small">@L("Речь распознаёт браузер сотрудника, не knitERP. Браузер может отправлять звук на серверы своего производителя, в том числе за рубеж (например, Chrome — Google). Не диктуйте персональные данные клиентов, если это не согласовано с ответственным за обработку персональных данных (152-ФЗ).")</p>
+        @if (_data.CanSetVoiceDictation)
+        {
+            @if (_data.VoiceDictation)
+            {
+                <button type="button" class="secondary" @onclick="() => SetVoiceAsync(false)" disabled="@_busy">@L("Выключить диктовку")</button>
+            }
+            else
+            {
+                <ConfirmButton Class="secondary" OnConfirm="() => SetVoiceAsync(true)" Disabled="@_busy"
+                               Question='@L("Голос сотрудников может уходить сервису производителя браузера. Включить?")'>@L("Включить диктовку")</ConfirmButton>
+            }
+        }
+        else
+        {
+            <p class="muted small">@L("Включить или выключить диктовку может только Владелец организации.")</p>
+        }
+    </section>
 
     <CrmMessengersPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
     <CrmMailboxPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
@@ -288,6 +314,9 @@ else
             OfferDays = a.OfferValidDays, OfferTerms = a.OfferTerms,
         };
     }
+
+    private Task SetVoiceAsync(bool on) => RunAsync(() => Settings.SetVoiceDictationAsync(on, _data!.AutomationVersion),
+        on ? L("Диктовка включена.") : L("Диктовка выключена."));
 
     private Task SaveAutomationAsync() => RunAsync(() => Settings.SaveAutomationAsync(new CrmAutomationValues(
         (CrmAssignMode)byte.Parse(_auto!.AssignMode), long.TryParse(_auto.DefaultUser, out var u) ? u : null, _auto.NextStep, _auto.StageByEvents, _auto.RepeatDays,
