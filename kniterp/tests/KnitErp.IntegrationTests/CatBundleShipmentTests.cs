@@ -91,6 +91,19 @@ public sealed class CatBundleShipmentTests(SqlTestHost host) : IClassFixture<Sql
         // Аудит D352: правило SQL главного экрана «комплект — один раз на документ» — долг покупателя равен отгруженному по заказу.
         Assert.Equal(dto.ShippedValue, home.Finance?.CustomerDebt);
 
+        // D356: в 1С отгрузка уходит компонентами (склад 1С ведётся по ним), сумма комплекта разложена по ним, итог не меняется.
+        var file = await s.Exchange.ExportAsync(Day, Day, null);
+        var xml = System.Xml.Linq.XDocument.Parse(System.Text.Encoding.UTF8.GetString(file.Xml));
+        var sale = xml.Descendants().Single(e => e.Name.LocalName == "Документ.РеализацияТоваровУслуг");
+        var saleRows = sale.Elements().Single(e => e.Name.LocalName == "Товары").Elements()
+            .Select(r => (Code: r.Descendants().First(x => x.Name.LocalName == "КодВПрограмме").Value,
+                Sum: decimal.Parse(r.Elements().First(x => x.Name.LocalName == "Сумма").Value, System.Globalization.CultureInfo.InvariantCulture)))
+            .ToList();
+        Assert.Equal(["ПР-1", "Ш-1", "ШФ-1"], saleRows.Select(r => r.Code).Order(StringComparer.Ordinal));
+        var docSum = decimal.Parse(sale.Elements().First(x => x.Name.LocalName == "Сумма").Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(dto.ShippedValue, docSum);
+        Assert.Equal(docSum, saleRows.Sum(r => r.Sum));
+
         // Прибыльность: себестоимость комплекта — по фактически ушедшим компонентам (2 × 600 + 2 × 450 + 0,07 × 3000).
         var profit = await s.Analytics.ProfitabilityAsync(new SalesAnalyticsFilter(new DateOnly(2026, 1, 1), new DateOnly(2027, 1, 1)), ProfitGrouping.Item);
         var bundleRow = profit.Rows.Single(r => r.Id == f.Bundle);

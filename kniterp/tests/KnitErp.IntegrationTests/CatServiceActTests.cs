@@ -154,6 +154,42 @@ public sealed class CatServiceActTests(SqlTestHost host) : IClassFixture<SqlTest
     }
 
     [SqlFact]
+    public async Task Act_posted_before_same_day_shipment_keeps_its_own_upd()
+    {
+        // D355 (аудит Р1): акт, проведённый раньше отгрузки той же датой, остаётся своим УПД — отгрузка его к себе не забирает,
+        // печать и журнал счетов-фактур не меняются задним числом.
+        var f = await SetUpAsync();
+        await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+        var order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, f.Customer, f.Store, Day, null, false, null));
+        await s.Sales.SetOrderLineAsync(order, f.Sweater, 1, 3000m, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
+        await s.Sales.SetOrderLineAsync(order, f.Delivery, 1, 500m, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
+        await s.Sales.ConfirmOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion);
+
+        var act = await s.Sales.CreateServiceActAsync(order);
+        await s.Documents.PostAsync(act, (await s.Documents.GetAsync(act)).RowVersion);
+        var printedBefore = await s.Print.UpdAsync(act);
+
+        var saved = host.Clock.UtcNow;
+        try
+        {
+            host.Clock.UtcNow = saved.AddMinutes(5);
+            var shipment = await s.Sales.CreateShipmentAsync(order);
+            await s.Documents.PostAsync(shipment, (await s.Documents.GetAsync(shipment)).RowVersion);
+
+            var printedAfter = await s.Print.UpdAsync(act);
+            Assert.Equal((printedBefore.Number, printedBefore.Total), (printedAfter.Number, printedAfter.Total));
+            Assert.Equal(printedBefore.Warnings, printedAfter.Warnings);
+            Assert.Equal(["СВ-1"], (await s.Print.UpdAsync(shipment)).Lines.Select(l => l.Code));
+            var issued = await s.VatInvoices.IssuedAsync(new KnitErp.Application.Taxes.VatJournalFilter(Day, Day));
+            Assert.Equal([act, shipment], issued.Select(i => i.DocumentId).Order());
+        }
+        finally
+        {
+            host.Clock.UtcNow = saved;
+        }
+    }
+
+    [SqlFact]
     public async Task Service_act_alone_prints_upd_and_database_guards()
     {
         var f = await SetUpAsync();
