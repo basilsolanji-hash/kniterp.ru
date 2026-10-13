@@ -97,6 +97,11 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
             q = q.Where(p => p.MachineClassId == mc);
         }
 
+        if (f.Colors is { } n)
+        {
+            q = q.Where(p => db.DevPatternColors.Count(c => c.OrganizationId == org && c.PatternId == p.Id) == n);
+        }
+
         if (f.TagId is { } tag)
         {
             q = q.Where(p => db.TagLinks.Any(l => l.OrganizationId == org && l.TagId == tag && l.Entity == TaggedEntity.DevPattern && l.EntityId == p.Id));
@@ -110,7 +115,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
                 Class = db.DevLookups.Where(l => l.Id == p.MachineClassId).Select(l => l.Name).FirstOrDefault(),
                 Used = db.DevModels.Count(m => m.OrganizationId == org && m.PatternId == p.Id),
             }).ToListAsync(ct);
-        return rows.Where(r => f.Colors is not { } n || r.Colors == n)
+        return rows
             .Select(r => new DevPatternRowDto(r.Id, r.Number, r.Name, r.Kind, r.RapportWidth, r.RapportHeight, r.Colors, r.Class, r.Status, r.CurrentVersion, r.Used,
                 r.ReadyForProgrammingAtUtc is not null)).ToList();
     }
@@ -315,7 +320,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
 
             foreach (var c in free)
             {
-                c.SetShare(0, null);
+                c.SetShare(0, null, clearKey: c.GridKey is not null); // цвета нет в сетке — его прежний цвет сетки снимается
             }
 
             Audit(ctx, p.Id, null, string.Join(", ", counted.Select(g => $"{g.Key} {g.Percent:0.##}%")), $"{p.Number}: доли по файлу {file.FileName}");
@@ -439,6 +444,8 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
                 throw new BusinessRuleException("dev.pattern.locked", "Рисунок в архиве — сначала верните его из архива.");
             }
 
+            p.Touch(clock.UtcNow);
+
             await db.LockAsync($"kniterp.dev.pattern.{ctx.OrganizationId}.{patternId}", ct);
             var used = await db.DevPatternFiles.AsNoTracking().Where(f => f.OrganizationId == ctx.OrganizationId && f.PatternId == patternId)
                 .GroupBy(_ => 1).Select(g => new { Count = g.Count(), Bytes = g.Sum(f => (long)f.SizeBytes) }).SingleOrDefaultAsync(ct);
@@ -478,6 +485,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
             var p = await LoadAsync(ctx, patternId, ct);
             p.EnsureVersion(p.RowVersion, rowVersion);
             var before = DevPattern.StatusName(p.Status);
+            await SnapshotAsync(ctx.OrganizationId, p, ct);
             var version = p.NextVersion();
             db.DevPatternVersions.Add(DevPatternVersion.Create(ctx.OrganizationId, p.Id, version, change, reason, clock.UtcNow, ctx.UserId));
             Audit(ctx, p.Id, before, $"версия {version}: {change}", p.Number);
@@ -680,6 +688,31 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
 
     // ---------- Помощники ----------
 
+    /// <summary>Снимок цветов и пряжи колоритов текущей версии перед новой (ревью 13.10): модели на старой версии печатают его в паспорте.</summary>
+    private async Task SnapshotAsync(long org, DevPattern p, CancellationToken ct)
+    {
+        var colors = await db.DevPatternColors.AsNoTracking().Where(c => c.OrganizationId == org && c.PatternId == p.Id).OrderBy(c => c.No).ToListAsync(ct);
+        var colorways = await db.DevPatternColorways.AsNoTracking().Where(c => c.OrganizationId == org && c.PatternId == p.Id).ToListAsync(ct);
+        var cwIds = colorways.Select(c => c.Id).ToList();
+        var yarns = await (from y in db.DevPatternColorwayYarns.AsNoTracking()
+                           join i in db.Items.AsNoTracking() on y.ItemId equals i.Id
+                           where y.OrganizationId == org && cwIds.Contains(y.ColorwayId)
+                           select new { y.ColorwayId, y.ColorId, Name = i.Code + " — " + i.Name }).ToListAsync(ct);
+        foreach (var c in colors)
+        {
+            if (colorways.Count == 0)
+            {
+                db.DevPatternVersionColors.Add(DevPatternVersionColor.Create(org, p.Id, p.CurrentVersion, c.No, c.Name, c.SharePercent, c.Feeder, null, null, null));
+            }
+
+            foreach (var cw in colorways)
+            {
+                db.DevPatternVersionColors.Add(DevPatternVersionColor.Create(org, p.Id, p.CurrentVersion, c.No, c.Name, c.SharePercent, c.Feeder, cw.Id, cw.Name,
+                    yarns.FirstOrDefault(y => y.ColorwayId == cw.Id && y.ColorId == c.Id)?.Name));
+            }
+        }
+    }
+
     private async Task EnsureApprovableAsync(AccessContext ctx, DevPattern p, CancellationToken ct)
     {
         var org = ctx.OrganizationId;
@@ -723,10 +756,13 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
     private async Task<DevPattern> LoadAsync(AccessContext ctx, long id, CancellationToken ct) =>
         await db.DevPatterns.SingleOrDefaultAsync(p => p.Id == id && p.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Рисунок");
 
+    /// <summary>Рисунок для правки цветов, колоритов и файлов: проверка статуса и отметка правки — версия строки рисунка меняется, поэтому
+    /// утверждение, начатое до правки, и правка после утверждения получают конфликт (ревью 13.10).</summary>
     private async Task<DevPattern> LoadEditableAsync(AccessContext ctx, long id, CancellationToken ct)
     {
         var p = await LoadAsync(ctx, id, ct);
         p.EnsureEditable();
+        p.Touch(clock.UtcNow);
         return p;
     }
 

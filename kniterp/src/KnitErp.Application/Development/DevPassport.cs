@@ -98,8 +98,22 @@ public sealed class DevPassportService(IKnitErpDbContext db, IAccessGuard guard,
                             where c.OrganizationId == org && c.PatternId == pid
                             orderby c.No
                             select new { c.No, c.Name, c.SharePercent, c.Feeder, Yarn = i == null ? null : i.Code + " — " + i.Name }).ToListAsync(ct);
-        return new DevPassportPattern(p.Number, p.Name, link.PatternVersion ?? p.CurrentVersion, DevPattern.KindName(p.Kind), p.RapportWidth, p.RapportHeight,
-            p.MaxFloatMm, cls, colorway, colors.Select(c => (c.No, c.Name, c.SharePercent, c.Feeder, (string?)c.Yarn)).ToList());
+        var version = link.PatternVersion ?? p.CurrentVersion;
+        IReadOnlyList<(int No, string Name, decimal? Share, int? Feeder, string? Yarn)> list =
+            colors.Select(c => (c.No, c.Name, c.SharePercent, c.Feeder, (string?)c.Yarn)).ToList();
+        if (version < p.CurrentVersion)
+        {
+            // Модель на старой версии — цвета и пряжа из снимка этой версии (ревью 13.10), а не текущие.
+            var snapshot = await db.DevPatternVersionColors.AsNoTracking()
+                .Where(v => v.OrganizationId == org && v.PatternId == pid && v.Version == version && (v.ColorwayId == link.ColorwayId || v.ColorwayId == null))
+                .OrderBy(v => v.ColorNo).ToListAsync(ct);
+            if (snapshot.Count > 0)
+            {
+                list = snapshot.Select(v => (v.ColorNo, v.ColorName, v.SharePercent, v.Feeder, v.Yarn)).ToList();
+            }
+        }
+
+        return new DevPassportPattern(p.Number, p.Name, version, DevPattern.KindName(p.Kind), p.RapportWidth, p.RapportHeight, p.MaxFloatMm, cls, colorway, list);
     }
 
     /// <summary>PDF и имя файла: «pasport-М-00001.pdf».</summary>

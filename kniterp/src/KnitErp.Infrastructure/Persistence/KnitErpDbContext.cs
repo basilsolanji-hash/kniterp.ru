@@ -149,6 +149,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevPatternColor> DevPatternColors => Set<KnitErp.Domain.Development.DevPatternColor>();
     public DbSet<KnitErp.Domain.Development.DevPatternColorway> DevPatternColorways => Set<KnitErp.Domain.Development.DevPatternColorway>();
     public DbSet<KnitErp.Domain.Development.DevPatternColorwayYarn> DevPatternColorwayYarns => Set<KnitErp.Domain.Development.DevPatternColorwayYarn>();
+    public DbSet<KnitErp.Domain.Development.DevPatternVersionColor> DevPatternVersionColors => Set<KnitErp.Domain.Development.DevPatternVersionColor>();
     public DbSet<KnitErp.Domain.Development.DevCategoryMeasure> DevCategoryMeasures => Set<KnitErp.Domain.Development.DevCategoryMeasure>();
     public DbSet<KnitErp.Domain.Development.DevModelAccessory> DevModelAccessories => Set<KnitErp.Domain.Development.DevModelAccessory>();
     public DbSet<KnitErp.Domain.Development.DevCostRun> DevCostRuns => Set<KnitErp.Domain.Development.DevCostRun>();

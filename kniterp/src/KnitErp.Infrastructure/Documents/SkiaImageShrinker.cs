@@ -9,6 +9,9 @@ namespace KnitErp.Infrastructure.Documents;
 /// </summary>
 public sealed class SkiaImageShrinker : IImageShrinker
 {
+    public const int MaxSide = 20_000;
+    public const long MaxPixels = 50_000_000;
+
     public byte[]? Shrink(byte[] content, string contentType, int maxSide)
     {
         var format = contentType switch
@@ -31,6 +34,13 @@ public sealed class SkiaImageShrinker : IImageShrinker
                 return null;
             }
 
+            // Ревью 13.10: «бомба» — маленький файл с огромными размерами — не разворачивается в память.
+            if (codec.Info.Width > MaxSide || codec.Info.Height > MaxSide || (long)codec.Info.Width * codec.Info.Height > MaxPixels)
+            {
+                throw new KnitErp.Domain.Common.BusinessRuleException("dev.file.image.size",
+                    "Фото слишком большое: не больше 50 мегапикселей и 20 000 точек по стороне. Уменьшите его перед загрузкой.");
+            }
+
             var origin = codec.EncodedOrigin;
             var swap = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
             var (w, h) = swap ? (codec.Info.Height, codec.Info.Width) : (codec.Info.Width, codec.Info.Height);
@@ -39,19 +49,28 @@ public sealed class SkiaImageShrinker : IImageShrinker
                 return null;
             }
 
-            using var source = SKBitmap.Decode(codec);
-            if (source is null)
+            var scale = Math.Min(1d, (double)maxSide / Math.Max(w, h));
+            var (tw, th) = (Math.Max(1, (int)Math.Round(w * scale)), Math.Max(1, (int)Math.Round(h * scale)));
+
+            // JPEG декодируется сразу в ближайшем масштабе не меньше нужного (1/2, 1/4, 1/8) — меньше памяти.
+            var decoded = codec.GetScaledDimensions((float)Math.Max(scale, 0.125));
+            if (decoded.Width < tw && decoded.Height < th && !swap || decoded.Width < th && decoded.Height < tw && swap)
+            {
+                decoded = codec.Info.Size;
+            }
+
+            using var source = new SKBitmap(new SKImageInfo(decoded.Width, decoded.Height, SKColorType.Rgba8888, SKAlphaType.Premul));
+            var status = codec.GetPixels(source.Info, source.GetPixels());
+            if (status is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
             {
                 return null;
             }
 
-            var scale = Math.Min(1d, (double)maxSide / Math.Max(w, h));
-            var (tw, th) = (Math.Max(1, (int)Math.Round(w * scale)), Math.Max(1, (int)Math.Round(h * scale)));
             using var surface = SKSurface.Create(new SKImageInfo(tw, th, SKColorType.Rgba8888, SKAlphaType.Premul));
             var canvas = surface.Canvas;
             canvas.Clear(SKColors.Transparent);
-            canvas.Scale((float)scale);
-            Orient(canvas, origin, codec.Info.Width, codec.Info.Height);
+            canvas.Scale((float)tw / (swap ? decoded.Height : decoded.Width), (float)th / (swap ? decoded.Width : decoded.Height));
+            Orient(canvas, origin, decoded.Width, decoded.Height);
             using var paint = new SKPaint { IsAntialias = true };
             using var image = SKImage.FromBitmap(source);
             canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), paint);

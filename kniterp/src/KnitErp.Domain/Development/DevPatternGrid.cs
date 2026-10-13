@@ -12,6 +12,9 @@ namespace KnitErp.Domain.Development;
 public static class DevPatternGrid
 {
     public const int MaxSide = 2000;
+
+    /// <summary>Предел размера текстовой сетки (CSV/TXT), байт.</summary>
+    public const int MaxTextBytes = 16 * 1024 * 1024;
     public const int MaxColors = 16;
 
     /// <summary>Цвет сетки: ключ (#RRGGBB для картинки, обозначение клетки для текста), число клеток и доля в процентах.</summary>
@@ -91,7 +94,8 @@ public static class DevPatternGrid
     /// <summary>Строки сетки (только непустые) или null, если это не безопасный текст. Предел строк проверяется по ходу разбора.</summary>
     private static List<List<string>>? TryParseText(byte[]? content)
     {
-        if (content is null)
+        // Ревью 13.10: сетка 2000 × 2000 клеток в тексте — заведомо меньше 16 МБ; больше — не разбираем (иначе память на каждый запрос).
+        if (content is null || content.Length > MaxTextBytes)
         {
             return null;
         }
@@ -121,9 +125,23 @@ public static class DevPatternGrid
         }
 
         var rows = new List<List<string>>();
-        foreach (var line in text.Split('\n'))
+        for (var start = 0; start < text.Length;)
         {
-            var cells = SplitRow(line.TrimEnd('\r'));
+            var end = text.IndexOf('\n', start);
+            if (end < 0)
+            {
+                end = text.Length;
+            }
+
+            var line = text.AsSpan(start, end - start).TrimEnd('\r');
+            start = end + 1;
+            var cells = SplitRow(line);
+            if (cells is null)
+            {
+                rows.Add(new List<string>(new string[MaxSide + 1])); // строка длиннее 2000 клеток — сетка заведомо велика
+                break;
+            }
+
             if (cells.Count == 0)
             {
                 continue;
@@ -140,21 +158,47 @@ public static class DevPatternGrid
         return rows;
     }
 
-    /// <summary>Клетки строки: разделители , ; табуляция и пробелы; без разделителей каждый непробельный символ — клетка.</summary>
-    private static List<string> SplitRow(string line)
+    /// <summary>
+    /// Клетки строки: разделители , ; табуляция и пробелы; без разделителей каждый непробельный символ — клетка. Больше 2000 клеток — null
+    /// (разбор останавливается сразу, без списка на всю строку).
+    /// </summary>
+    private static List<string>? SplitRow(ReadOnlySpan<char> line)
     {
-        if (line.AsSpan().IndexOfAny(",;\t ") >= 0 && !string.IsNullOrWhiteSpace(line))
+        var cells = new List<string>();
+        if (line.IndexOfAny(",;\t ") >= 0 && !line.IsWhiteSpace())
         {
-            return line.Split([',', ';', '\t', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            foreach (var range in line.SplitAny(",;\t "))
+            {
+                var cell = line[range].Trim();
+                if (cell.IsEmpty)
+                {
+                    continue;
+                }
+
+                if (cells.Count == MaxSide)
+                {
+                    return null;
+                }
+
+                cells.Add(cell.ToString());
+            }
+
+            return cells;
         }
 
-        var cells = new List<string>();
         foreach (var rune in line.EnumerateRunes())
         {
-            if (!Rune.IsWhiteSpace(rune))
+            if (Rune.IsWhiteSpace(rune))
             {
-                cells.Add(rune.ToString());
+                continue;
             }
+
+            if (cells.Count == MaxSide)
+            {
+                return null;
+            }
+
+            cells.Add(rune.ToString());
         }
 
         return cells;
