@@ -487,6 +487,23 @@ public sealed class CrmFullCycleTests(SqlTestHost host) : IClassFixture<SqlTestH
     }
 
     [SqlFact]
+    public async Task Import_contacts_from_bitrix_csv_in_windows_1251()
+    {
+        var org = await host.CreateCrmOrganizationAsync();
+        await using var crm = host.Crm(org.OwnerUserId, org.OrganizationId);
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        var csv = "ID;Имя;Фамилия;Рабочий телефон;Рабочий e-mail;Компания\r\n"
+                  + "501;Ольга;Импортова;+7 900 000-00-51;olga.csv@example.org;\"ООО \"\"Шерсть\"\"\"\r\n"
+                  + "502;Пётр;Кавычкин;+7 900 000-00-52;petr.csv@example.org;ООО «Пряжа»\r\n";
+        var plan = await crm.Import.PreviewAsync(CrmImportKind.Contacts, new MemoryStream(System.Text.Encoding.GetEncoding(1251).GetBytes(csv)));
+        Assert.Equal((2, 0), (plan.ToCreate, plan.Errors));
+        await crm.Import.ApplyAsync(plan);
+        var rows = (await crm.Contacts.ListAsync(null)).Rows;
+        Assert.Contains(rows, c => c.FullName == "Импортова Ольга");
+        Assert.Equal("Фамилия + Имя", plan.Mapping["name"]);
+    }
+
+    [SqlFact]
     public async Task Import_from_amocrm_maps_columns_stages_and_external_ids()
     {
         var org = await host.CreateCrmOrganizationAsync();
