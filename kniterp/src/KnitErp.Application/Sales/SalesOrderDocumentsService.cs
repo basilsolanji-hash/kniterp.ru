@@ -491,9 +491,10 @@ public sealed class SalesOrderDocumentsService(IKnitErpDbContext db, IAccessGuar
     {
         var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).SingleOrDefaultAsync(o => o.Id == id && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Заказ покупателя");
-        if (order.ResponsibleUserId != ctx.UserId && await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        if (await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct) is { } visible
+            && !(order.ResponsibleUserId is { } responsible && visible.Contains(responsible)))
         {
-            throw new NotFoundException("Заказ покупателя"); // D1110: чужой заказ при видимости «Свои»
+            throw new NotFoundException("Заказ покупателя"); // D1110: заказ вне видимости роли
         }
 
         return order;

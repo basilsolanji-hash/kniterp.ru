@@ -5468,7 +5468,6 @@
   "Отгрузка сверх кредитного лимита разрешена": "Kredit limitidan ortiq joʻnatishga ruxsat berildi",
   "Отсрочка оплаты": "Toʻlovni kechiktirish",
   "Письмо покупателю: {0}": "Xaridorga xat: {0}",
-  "Показаны только ваши покупатели — так настроено для вашей роли.": "Faqat sizning xaridorlaringiz koʻrsatilgan — rolingiz uchun shunday sozlangan.",
   "Покупателей с просрочкой": "Muddati oʻtgan xaridorlar",
   "Причина разрешения": "Ruxsat sababi",
   "Причина — не длиннее {0} символов.": "Sabab — {0} belgidan oshmasligi kerak.",
@@ -5803,7 +5802,6 @@
   "Позиция отчёта маркетплейса сопоставлена": "Marketpleys hisoboti pozitsiyasi moslashtirildi",
   "Поиск позиции для {0}": "{0} uchun pozitsiya qidirish",
   "Показаны первые {0} строк из {1}; все строки — в выгрузке Excel.": "{1} qatordan birinchi {0} tasi ko‘rsatildi; barcha qatorlar — Excel eksportida.",
-  "Показаны только заказы, где вы ответственный, — так настроено для вашей роли.": "Faqat siz mas’ul bo‘lgan buyurtmalar ko‘rsatilgan — rolingiz uchun shunday sozlangan.",
   "Предпросмотр: {0}": "Oldindan ko‘rish: {0}",
   "Причина аннулирования": "Bekor qilish sababi",
   "Продажа": "Sotuv",
@@ -5856,5 +5854,7 @@
   "нужно решение": "qaror kerak",
   "по связи с площадкой": "maydon bilan bog‘lanish bo‘yicha",
   "по умолчанию: «{0}»": "standart: «{0}»",
-  "штрихкод {0}": "shtrix-kod {0}"
+  "штрихкод {0}": "shtrix-kod {0}",
+  "Показаны только ваши покупатели и покупатели вашего подразделения — так настроено для вашей роли.": "Faqat sizning xaridorlaringiz va boʻlinmangiz xaridorlari koʻrsatilgan — rolingiz uchun shunday sozlangan.",
+  "Показаны только заказы, где ответственный — вы или сотрудник вашего подразделения, — так настроено для вашей роли.": "Faqat masʼuli — siz yoki boʻlinmangiz xodimi boʻlgan buyurtmalar koʻrsatilgan — rolingiz uchun shunday sozlangan."
 }

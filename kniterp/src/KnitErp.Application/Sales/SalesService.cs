@@ -148,10 +148,11 @@ public sealed partial class SalesService(
     {
         var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
         var q = db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == ctx.OrganizationId);
-        if (await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        if (await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct) is { } visibleManagers)
         {
-            // D1110: роль видит только свои заказы — где пользователь ответственный.
-            q = q.Where(o => o.ResponsibleUserId == ctx.UserId);
+            // D1110: роль видит свои заказы или заказы своего подразделения — по ответственному.
+            var visible = visibleManagers.ToList();
+            q = q.Where(o => o.ResponsibleUserId != null && visible.Contains(o.ResponsibleUserId.Value));
         }
 
         if (filter.CustomerId is { } customerId)
@@ -244,9 +245,10 @@ public sealed partial class SalesService(
         var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines)
                         .SingleOrDefaultAsync(o => o.Id == id && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Заказ покупателя");
-        if (order.ResponsibleUserId != ctx.UserId && await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        if (await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct) is { } visible
+            && !(order.ResponsibleUserId is { } responsible && visible.Contains(responsible)))
         {
-            throw new NotFoundException("Заказ покупателя"); // D1110: чужой заказ при видимости «Свои» — как несуществующий
+            throw new NotFoundException("Заказ покупателя"); // D1110: заказ вне видимости роли — как несуществующий
         }
 
         var itemIds = order.Lines.Select(l => l.ItemId).ToList();
