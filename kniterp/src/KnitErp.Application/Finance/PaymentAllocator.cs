@@ -271,7 +271,8 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
     /// <summary>D133: дата разноски — поздняя из дат оплаты и заказа.</summary>
     private static DateOnly AllocationDate(DateOnly paymentDate, DateOnly orderDate) => paymentDate > orderDate ? paymentDate : orderDate;
 
-    private static bool IsClosed(DateOnly? closedThrough, DateOnly paymentDate, DateOnly orderDate) =>
+    /// <summary>D133: разноска пары «оплата — заказ» в закрытом периоде (её дата — поздняя из двух). Общая для зачёта в аванс (D140).</summary>
+    internal static bool IsClosed(DateOnly? closedThrough, DateOnly paymentDate, DateOnly orderDate) =>
         closedThrough is { } t && AllocationDate(paymentDate, orderDate) <= t;
 
     private static void EnsureOpen(DateOnly? closedThrough, PaymentInfo p, OrderInfo order)

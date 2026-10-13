@@ -1,68 +1,87 @@
 @inject PersonalToolsService Personal
 @inject NavigationManager Navigation
-@* Пользователь: аватар, имя, должность; меню — организация, вход и коды, язык, тема, настройка панели, выход.
-   На компьютере — внизу меню слева (меню раскрывается вверх), на телефоне — в строке инструментов. *@
+@* D802 (сессия 5): блок пользователя — в правом краю верхней панели. Кнопка: аватар, имя, должность и стрелка (на телефоне —
+   только аватар). Меню: кто вы и где (организация, роли) → профиль и пароль, сессии и устройства, смена организации, панель,
+   обучение, поддержка (D807, раздел 0 п. 3) → «Оформление»
+   (язык, тема, размер, помощник) → «Выйти», всегда видна внизу; на телефоне меню прокручивается внутри, а не обрезается. *@
 
-    <div class="menu-anchor profile-anchor">
+    <div class="menu-anchor profile-anchor" @onkeydown="@(e => { if (e.Key == "Escape") { _open = false; } })">
         <button type="button" class="profile" aria-haspopup="menu" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open"
-                title="@($"{Access.DisplayName} — {L(Access.Subtitle)}")">
+                aria-label="@L("Профиль: {0}", Access.DisplayName)">
             <span class="avatar" aria-hidden="true">@Access.Initials</span>
             @if (!AvatarOnly)
             {
-                <span class="profile-text">
+                <span class="profile-text" aria-hidden="true">
                     <span class="profile-name">@Access.DisplayName</span>
-                    <span class="profile-sub">@L(Access.Subtitle)</span>
+                    <span class="profile-sub">@L(Access.Subtitle) · @Access.OrganizationName</span>
                 </span>
+                <span class="caret" aria-hidden="true">▾</span>
             }
-            <span class="sr-only">@L("Профиль")</span>
         </button>
         @if (_open)
         {
-            <div class="menu @(Up ? "menu-up" : "menu-right")" role="menu" aria-label="@L("Профиль")">
-                <div class="menu-info">
-                    <b>@Access.DisplayName</b>
-                    <span class="muted">@L(Access.Subtitle)</span>
-                    <span class="muted">@string.Join(", ", Access.RoleNames.Select(n => L(n))) · @Access.OrganizationName</span>
+            <div class="menu profile-menu @(Up ? "menu-up" : "menu-right")" role="menu" aria-label="@L("Профиль")">
+                <div class="pm-head">
+                    <span class="avatar avatar-lg" aria-hidden="true">@Access.Initials</span>
+                    <span class="pm-who">
+                        <b>@Access.DisplayName</b>
+                        <span class="muted">@L(Access.Subtitle)</span>
+                        <span class="muted small">@Access.OrganizationName · @string.Join(", ", Access.RoleNames.Select(n => L(n)))</span>
+                    </span>
                 </div>
-                <a role="menuitem" href="account/organizations" data-enhance-nav="false">@L("Сменить организацию")</a>
-                <a role="menuitem" href="security">@L("Вход и резервные коды")</a>
-                <div class="menu-caption">@L("Язык")</div>
-                <div class="lang-row">
-                    @foreach (var lang in KnitErp.Domain.Access.UiLanguages.Menu)
-                    {
-                        <button type="button" role="menuitemradio" aria-checked="@(lang.Code == CurrentCode ? "true" : "false")"
-                                class="@(lang.Code == CurrentCode ? "chip added" : "chip")" @onclick="() => ChangeLanguageAsync(lang.Code)">@lang.NativeName</button>
-                    }
+                <div class="pm-actions">
+                    <a role="menuitem" class="menu-item" href="security#password" @onclick="() => _open = false"><Icon Name="settings" Size="16" /><span>@L("Профиль и пароль")</span></a>
+                    <a role="menuitem" class="menu-item" href="security#devices" @onclick="() => _open = false"><Icon Name="links" Size="16" /><span>@L("Сессии и устройства")</span></a>
+                    <a role="menuitem" class="menu-item" href="account/organizations" data-enhance-nav="false"><Icon Name="all" Size="16" /><span>@L("Сменить организацию")</span></a>
+                    <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(QuickBar.SettingsId))"><Icon Name="favorites" Size="16" /><span>@L("Настроить панель")</span></button>
+                    <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(ToolCatalog.Help))"><Icon Name="help" Size="16" /><span>@L("Обучение")</span></button>
+                    <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(ToolCatalog.Support))"><Icon Name="support" Size="16" /><span>@L("Поддержка")</span></button>
                 </div>
-                <div class="menu-caption">@L("Тема")</div>
-                <div class="lang-row">
-                    @foreach (var (themeCode, themeTitle) in Themes)
-                    {
-                        <button type="button" role="menuitemradio" class="chip" data-theme-choice="@themeCode">@themeTitle</button>
-                    }
+                <div class="menu-caption">@L("Оформление")</div>
+                <div class="pm-row">
+                    <span class="pm-label">@L("Тема")</span>
+                    <span class="segmented" role="radiogroup" aria-label="@L("Тема")">
+                        @foreach (var (themeCode, themeTitle) in Themes)
+                        {
+                            <button type="button" role="menuitemradio" class="chip" data-theme-choice="@themeCode">@themeTitle</button>
+                        }
+                    </span>
+                </div>
+                <div class="pm-row">
+                    <span class="pm-label">@L("Размер")</span>
+                    <span class="segmented" role="radiogroup" aria-label="@L("Размер интерфейса")">
+                        <button type="button" role="menuitemradio" class="chip" data-density-choice="compact">@L("Компактно")</button>
+                        <button type="button" role="menuitemradio" class="chip" data-density-choice="normal">@L("Обычно")</button>
+                        <button type="button" role="menuitemradio" class="chip" data-density-choice="large">@L("Крупно")</button>
+                    </span>
+                </div>
+                <div class="pm-row">
+                    <span class="pm-label">@L("Язык")</span>
+                    <span class="segmented" role="radiogroup" aria-label="@L("Язык")">
+                        @foreach (var lang in KnitErp.Domain.Access.UiLanguages.Menu)
+                        {
+                            <button type="button" role="menuitemradio" aria-checked="@(lang.Code == CurrentCode ? "true" : "false")"
+                                    class="@(lang.Code == CurrentCode ? "chip added" : "chip")" @onclick="() => ChangeLanguageAsync(lang.Code)">@lang.NativeName</button>
+                        }
+                    </span>
                 </div>
                 @if (Assistant is not null)
                 {
                     @* D116: кто помогает — Ника, Книт или без персонажа; хранится в профиле. *@
-                    <div class="menu-caption">@L("Помощник")</div>
-                    <div class="lang-row" role="radiogroup" aria-label="@L("Помощник")">
-                        @foreach (var (code, title) in Personas)
-                        {
-                            <button type="button" role="menuitemradio" aria-checked="@(Assistant.Persona == code ? "true" : "false")"
-                                    class="@(Assistant.Persona == code ? "chip added" : "chip")" @onclick="() => Assistant.SetAsync(code)">@title</button>
-                        }
+                    <div class="pm-row">
+                        <span class="pm-label">@L("Помощник")</span>
+                        <span class="segmented" role="radiogroup" aria-label="@L("Помощник")">
+                            @foreach (var (code, title) in Personas)
+                            {
+                                <button type="button" role="menuitemradio" aria-checked="@(Assistant.Persona == code ? "true" : "false")"
+                                        class="@(Assistant.Persona == code ? "chip added" : "chip")" @onclick="() => Assistant.SetAsync(code)">@title</button>
+                            }
+                        </span>
                     </div>
                 }
-                <div class="menu-caption">@L("Размер интерфейса")</div>
-                <div class="lang-row" role="radiogroup" aria-label="@L("Размер интерфейса")">
-                    <button type="button" role="menuitemradio" class="chip" data-density-choice="compact">@L("Компактно")</button>
-                    <button type="button" role="menuitemradio" class="chip" data-density-choice="normal">@L("Обычно")</button>
-                    <button type="button" role="menuitemradio" class="chip" data-density-choice="large">@L("Крупно")</button>
-                </div>
-                <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(QuickBar.SettingsId))">@L("Настроить панель")</button>
-                <form method="post" action="account/logout">
+                <form method="post" action="account/logout" class="pm-logout">
                     <AntiforgeryToken />
-                    <button type="submit" role="menuitem" class="menu-item">@L("Выйти")</button>
+                    <button type="submit" role="menuitem" class="secondary">@L("Выйти")</button>
                 </form>
             </div>
         }

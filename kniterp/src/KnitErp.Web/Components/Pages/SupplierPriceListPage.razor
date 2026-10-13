@@ -61,7 +61,7 @@ else
             <span class="@(plan.Errors > 0 ? "neg" : null)">@L("С ошибками: {0}", plan.Errors)</span>
         </div>
         <div class="actions">
-            <ConfirmButton Disabled="@(_busy || plan.ToUpdate == 0)" Question="@L("Обновить закупочные цены по прайс-листу? Включённые автоцены пересчитаются.")"
+            <ConfirmButton Disabled="@(_busy || plan.ToUpdate == 0)" Title="@((plan.ToUpdate == 0) ? L("Нечего обновлять: цены совпадают") : null)" Question="@L("Обновить закупочные цены по прайс-листу? Включённые автоцены пересчитаются.")"
                            OnConfirm="ApplyAsync">@L("Применить")</ConfirmButton>
             <button type="button" class="secondary" @onclick="() => _plan = null" disabled="@_busy">@L("Отменить")</button>
         </div>

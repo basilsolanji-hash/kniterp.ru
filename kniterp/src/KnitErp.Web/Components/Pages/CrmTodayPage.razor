@@ -211,7 +211,14 @@ else
         }
 
         var local = TimeZones.ToLocal(due, CurrentAccess.TimeZoneId);
-        return a.Overdue && DateOnly.FromDateTime(local) != _data?.Date ? local.ToString("dd.MM HH:mm") : local.ToString("HH:mm");
+        var otherDay = a.Overdue && DateOnly.FromDateTime(local) != _data?.Date;
+        // D699: срок «до конца дня» (23:59) — это «в течение дня», а не точное время.
+        if (local is { Hour: 23, Minute: 59 })
+        {
+            return otherDay ? L("{0}, в течение дня", local.ToString("dd.MM")) : L("в течение дня");
+        }
+
+        return otherDay ? local.ToString("dd.MM HH:mm") : local.ToString("HH:mm");
     }
 
     private static string DaysText(int days) => days switch

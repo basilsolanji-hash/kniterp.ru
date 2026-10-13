@@ -392,8 +392,9 @@
         .nav-group-head .caret { margin-left: auto; font-size: 10px; transition: transform .15s; transform: rotate(-90deg); }
         .nav-group.open > .nav-group-head .caret { transform: none; }
         .nav-items { margin: 0 0 6px; }
-        .nav-planned { display: block; padding: 4px 10px 4px 32px; font-size: 13px; color: var(--faint); cursor: default; }
-        .nav-planned .tag { font-size: 10px; padding: 0 5px; background: var(--raised); color: var(--muted-2); }
+        /* D800: подзаголовок внутри раздела меню («Документы», «Цены», «Отчёты»). */
+        .nav-section { display: block; padding: 8px 10px 2px 32px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted-2); }
+        .shell.narrow .nav-section { display: none; }
         .learn article { border-bottom: 1px solid var(--line); padding: 10px 0; max-width: 860px; }
         .learn article h2 { font-size: 15px; }
         .nav-collapse { margin: 12px 10px 0; background: none; color: var(--muted-2); padding: 2px 6px; }
@@ -557,6 +558,9 @@
         /* D320: подсказка (похожие позиции и т. п.) — не ошибка. */
         .hint.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
         .hint.warn a { color: inherit; margin-left: 6px; }
+        /* D809: причина у неактивного действия и «только просмотр». */
+        .why-disabled { display: inline-flex; align-items: baseline; gap: 4px; font-size: 12.5px; color: var(--muted); margin: 0 6px; }
+        .readonly-note { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text-2); }
         /* D318: выбор позиций в списке и панель массового изменения. */
         th.select-col, td.select-col { width: 28px; padding-right: 0; }
         .bulk-bar { margin: 8px 0; } .bulk-bar .grid { grid-template-columns: minmax(140px, auto) minmax(0, 1fr); align-items: center; }
@@ -819,6 +823,87 @@
         .menu form { margin: 0; }
         .menu-backdrop { position: fixed; inset: 0; z-index: 65; }
         .quickbar .menu-anchor { z-index: 66; }
+        /* D801 (сессия 5): верхняя панель без скрытых значков — поиск слева, инструменты с подписями, блок пользователя справа. */
+        .topbar { height: auto; min-height: 57px; padding-top: 6px; padding-bottom: 6px; }
+        .topbar .quickbar { width: 100%; gap: 10px; }
+        .topbar .profile-text { max-width: 150px; }
+        .topbar .profile { margin-left: 0; padding-left: 10px; }
+        .topbar .quick-pinned { flex: 1 1 auto; justify-content: flex-end; flex-wrap: wrap; gap: 2px; row-gap: 4px; }
+        .quick-search { display: inline-flex; align-items: center; gap: 8px; height: 36px; min-width: 170px; padding: 0 10px; margin-right: auto;
+                        border: 1px solid var(--line-strong); border-radius: 8px; background: var(--field); color: var(--muted); font-weight: 400; }
+        .quick-search:hover, .quick-search.active { border-color: var(--accent); color: var(--text); }
+        .quick-search kbd { margin-left: auto; font: 11px/1.6 inherit; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted-2); }
+        .quick-pinned .quick-btn.labeled { width: auto; padding: 0 8px; gap: 5px; }
+        .quick-text { font-size: 13px; white-space: nowrap; }
+        /* D806: «Создать» — главная кнопка панели; подписи значков — на широком экране, уже — значок с подсказкой и aria-label. */
+        .quick-btn.quick-create { background: var(--accent); color: #fff; border-color: transparent; }
+        .quick-btn.quick-create:hover, .quick-btn.quick-create[aria-expanded=true] { background: var(--accent); color: #fff; filter: brightness(1.08); }
+        .quick-create .plus { font-size: 18px; line-height: 1; font-weight: 600; }
+        .topbar .quick-search { margin-right: 0; }
+        .topbar .quick-pinned > .menu-anchor:has(.quick-create) { margin-right: auto; }
+        @@media (max-width: 1499px) { .topbar .quick-pinned .quick-btn.labeled:not(.quick-create) .quick-text { display: none; }
+            .topbar .quick-pinned .quick-btn.labeled:not(.quick-create) { width: 36px; padding: 0; justify-content: center; } }
+        .profile .caret { font-size: 10px; color: var(--muted); }
+        /* D802: меню пользователя — шапка, действия, оформление, «Выйти» всегда видна внизу. */
+        .menu.profile-menu { min-width: 380px; max-width: calc(100vw - 16px); max-height: calc(100vh - 72px); max-height: calc(100dvh - 72px); padding: 0; }
+        .pm-head { display: flex; gap: 12px; align-items: center; padding: 14px 14px 12px; border-bottom: 1px solid var(--line); }
+        .avatar.avatar-lg { width: 44px; height: 44px; font-size: 16px; }
+        .pm-who { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
+        .pm-who .small { font-size: 12px; }
+        .pm-actions { padding: 6px; border-bottom: 1px solid var(--line); }
+        .pm-row { display: flex; flex-direction: column; gap: 4px; padding: 4px 12px 6px; }
+        .pm-label { font-size: 12px; color: var(--muted); }
+        .pm-row .segmented { display: flex; width: 100%; align-self: stretch; }
+        .pm-row .segmented .chip { flex: 1 1 0; border: 0; border-radius: 0; margin: 0; min-height: 32px; padding: 4px 6px; color: var(--text);
+                                   background: transparent; cursor: pointer; white-space: nowrap; text-align: center; }
+        .pm-row .segmented .chip + .chip { border-left: 1px solid var(--line); }
+        .pm-row .segmented .chip.added { background: var(--accent-soft); font-weight: 600; }
+        .pm-logout { position: sticky; bottom: 0; margin-top: 10px; padding: 10px 12px; background: var(--surface-2); border-top: 1px solid var(--line); }
+        .pm-logout button { width: 100%; }
+        /* D807: рабочий день одной строкой внизу меню. */
+        .sf-day > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font-size: 12.5px; min-height: 28px; }
+        .sf-day > summary::-webkit-details-marker { display: none; }
+        .sf-day-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sf-meter.sf-meter-inline { flex: 0 0 36px; margin: 0 0 0 auto; }
+        .sf-day[open] > summary { margin-bottom: 6px; }
+        /* D800: открытое меню на телефоне — во весь экран, помощник его не перекрывает. */
+        body:has(.nav-body.open) knit-assistant { display: none; }
+        /* D805: поиск, избранное и «Все в разделе» в меню; страница раздела; нижняя панель телефона. */
+        .nav-search { display: flex; align-items: center; gap: 8px; width: 100%; margin: 0 0 6px; padding: 6px 10px; border: 1px solid var(--line);
+                      border-radius: 6px; background: var(--field); color: var(--muted); font-weight: 400; text-align: left; }
+        .nav-search:hover { border-color: var(--accent); color: var(--text); }
+        .nav-search kbd { margin-left: auto; font-size: 10px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted-2); white-space: nowrap; }
+        .shell.narrow .nav-search { justify-content: center; padding: 8px 0; }
+        .nav-favorites { margin: 0 0 6px; }
+        .nav-favorites .nav-section { padding-left: 10px; }
+        .side .nav-favorites a { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 13px; }
+        .side .nav-favorites a .icon-svg { color: var(--warn-text); flex: none; }
+        .shell.narrow .nav-favorites a { justify-content: center; }
+        .side .nav-items a.nav-all { color: var(--accent-text, var(--accent)); font-size: 12.5px; }
+        .crumbs { font-size: 13px; color: var(--muted); margin-bottom: 4px; } .crumbs a { color: var(--muted); }
+        .section-hub { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; align-items: start; }
+        .section-card h2 { font-size: 15px; margin: 0 0 8px; }
+        .section-card ul.plain li a { display: flex; align-items: center; min-height: 36px; padding: 2px 4px; border-radius: 6px; text-decoration: none; }
+        .section-card ul.plain li a:hover { background: var(--accent-soft); }
+        .bottom-nav { display: none; }
+        @@media (max-width: 899px) {
+            .bottom-nav { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+                          padding-bottom: env(safe-area-inset-bottom, 0px); background: var(--bg); border-top: 1px solid var(--line-strong); }
+            .bottom-nav a, .bottom-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px;
+                          padding: 4px 2px; font-size: 11px; font-weight: 500; color: var(--muted); text-decoration: none; background: none; border: 0; border-radius: 0; }
+            .bottom-nav a.active, .bottom-nav button.active { color: var(--accent-text, var(--accent)); }
+            .bottom-nav span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .menu-toggle { display: none !important; }
+            .side:has(> .nav-body.open) .menu-toggle { display: inline-block !important; } /* «Закрыть» вверху открытого меню */
+            .side:has(> .nav-body.open) .side-head .quickbar { display: none; } /* при открытом меню в строке логотипа только «Закрыть» — иначе она не помещается */
+            main.main { padding-bottom: 80px; }
+            body:has(knit-assistant) main.main { padding-bottom: 160px; }
+            body knit-assistant { --knit-bottom: 72px; } /* выше нижней панели; общее правило ниже по файлу не должно перебить */
+            .side > .nav-body.open { padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+        }
+        @@media print { .bottom-nav { display: none !important; } }
+        @@media (max-width: 599px) { .menu.profile-menu { position: fixed; left: 8px; right: 8px; top: 60px; min-width: 0; }
+            .pm-row .segmented { flex-wrap: wrap; } .pm-row .segmented .chip { flex-basis: 45%; } }
         .side-tools { display: none; }
 
         /* Панель инструмента. */
@@ -938,9 +1023,13 @@
 
         /* Клавиатура: видимый фокус на всех элементах управления. */
         :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        /* Сенсорный экран (D114): цели не меньше 36 px — компактно, но попадание пальцем надёжное; 44 px — «Обычно» в профиле. */
-        @@media (pointer: coarse) { button, a.button, select, input:not([type=checkbox]), .quick-btn, .side a { min-height: 36px; }
-            .side a, .nav-group-head, .nav-single { min-height: 32px; padding-top: 5px; padding-bottom: 5px; } }
+        /* Сенсорный экран: цели нажатия не меньше 44 px (D801, требование владельца 13.10; было 36 px по D114). */
+        @@media (pointer: coarse) { button, a.button, select, input:not([type=checkbox]):not([type=radio]), .quick-btn, .side a,
+            .nav-group-head, .nav-single { min-height: 44px; }
+            .side a, .nav-group-head, .nav-single { display: flex; align-items: center; padding-top: 6px; padding-bottom: 6px; } }
+        /* D800: меню на телефоне и узком планшете — пункт 44 px при любом указателе (меню открывается во весь экран). */
+        @@media (max-width: 899px) { .side .nav-items a, .side .nav-group-head, .side .nav-single { min-height: 44px; display: flex; align-items: center; }
+            .side .nav-items a { padding-left: 36px; font-size: 14px; } }
         /* Большие мониторы: крупнее шрифт и поля, таблицы во всю ширину. */
         @@media (min-width: 1600px) { .main { padding: 24px 36px; } .topbar { padding: 0 36px; } .side { flex-basis: 248px; } }
 
@@ -951,6 +1040,9 @@
             .side-tools { display: block; }
             .quickbar.compact .profile { border-left: 0; margin-left: 0; padding: 2px; }
             .quickbar.compact .quick-btn { border: 1px solid var(--line-strong); }
+            /* D806: на телефоне число непрочитанных — меткой в углу значка, а не рядом (иначе панель шире 390 px). */
+            .quickbar.compact .quick-btn { justify-content: center; padding: 0; width: 40px; }
+            .quickbar.compact .quick-btn .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; padding: 0 4px; font-size: 11px; line-height: 18px; }
             .drawer { top: auto; left: 0; width: 100vw; z-index: 80; height: 88vh; height: 88dvh; border-left: 0; border-top: 1px solid var(--line-strong); border-radius: 14px 14px 0 0;
                       transform: translateY(105%); box-shadow: 0 -12px 32px var(--shadow); }
             .drawer.open { transform: none; }
@@ -1007,6 +1099,16 @@
             background: var(--bad-bg-2, #fde8e8); color: var(--text, #111); border-top: 1px solid var(--bad-line, #e0a0a0);
             box-shadow: 0 -2px 8px rgba(0,0,0,.15); font-size: 15px; }
         #blazor-error-ui .reload { font-weight: 600; margin-left: 8px; }
+        /* D803: заставка до подключения схемы (без предварительной отрисовки). */
+        .kn-boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+                   background: var(--bg); color: var(--muted); font-size: 14px; z-index: 5; }
+        .kn-boot-logo { font-size: 28px; font-weight: 600; color: var(--text); } .kn-boot-logo b { color: var(--accent); font-weight: 600; }
+        .kn-boot-bar { width: 160px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, var(--accent) 0 40%, var(--line) 40%);
+                       background-size: 250% 100%; animation: kn-boot 1.2s linear infinite; }
+        @@keyframes kn-boot { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+        @@media (prefers-reduced-motion: reduce) { .kn-boot-bar { animation: none; } }
+        /* Пока схема не подключилась, за заставкой идут только теги скриптов; первое отрисованное содержимое скрывает её. */
+        .kn-boot:has(+ :not(script)) { display: none; }
         @@media print { #blazor-error-ui { display: none !important; } }
     </style>
     <HeadOutlet @rendermode="PageRenderMode" />
@@ -1028,6 +1130,11 @@
         @L("Произошла ошибка, страница перестала отвечать. Введённые и не сохранённые данные могли не сохраниться.")
         <a href="" class="reload">@L("Перезагрузить")</a>
     </div>
+    @if (PageRenderMode is not null)
+    {
+        @* D803: заставка до подключения схемы Blazor; скрывается, как только появилась оболочка программы (.shell). *@
+        <div id="kn-boot" class="kn-boot" role="status" aria-live="polite"><span class="kn-boot-logo">knit<b>ERP</b></span><span class="kn-boot-bar"></span><span>@L("Загрузка…")</span></div>
+    }
     <Routes @rendermode="PageRenderMode" />
     <script src="_framework/blazor.web.js"></script>
     <script src="js/kniterp.js"></script>
@@ -1041,6 +1148,11 @@
     private HttpContext HttpContext { get; set; } = default!;
 
     // Страницы входа работают без интерактивности: cookie выдаётся только в обычном HTTP-ответе.
+    // D803 (сессия 5, дополнение 13.10): без предварительной отрисовки. Раньше сервер отдавал готовую страницу, а после
+    // подключения схемы рисовал её заново: главная «мигала» (содержимое → «Загрузка…» → содержимое), а введённое в первые
+    // секунды терялось при перерисовке. Теперь до подключения — заставка #kn-boot, поля появляются уже рабочими.
+    private static readonly IComponentRenderMode Interactive = new InteractiveServerRenderMode(prerender: false);
+
     private IComponentRenderMode? PageRenderMode =>
-        HttpContext.AcceptsInteractiveRouting() ? InteractiveServer : null;
+        HttpContext.AcceptsInteractiveRouting() ? Interactive : null;
 }

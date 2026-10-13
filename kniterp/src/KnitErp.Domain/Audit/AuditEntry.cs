@@ -236,6 +236,15 @@ public static class AuditActions
     public const string SupplierPaymentCancelled = "purchase.payment.cancelled";
     public const string SupplierOpeningBalanceChanged = "purchase.opening_balance.changed"; // D133
     public const string PurchaseSettingsChanged = "purchase.settings.changed"; // D133
+    public const string AutomationSettingsChanged = "automation.settings.changed"; // D145
+    public const string CurrencyRateChanged = "currency.rate.changed"; // D146
+    public const string RecurringOperationChanged = "money.recurring.changed"; // D147
+    public const string RecurringRunCreated = "money.recurring.run_created"; // D147
+    public const string RecurringRunPosted = "money.recurring.run_posted"; // D147
+    public const string RecurringRunSkipped = "money.recurring.run_skipped"; // D147
+    public const string PaymentReminderUnsubscribed = "sales.mail.reminders_off"; // D148
+    public const string OrderAutoClosed = "order.auto_closed"; // D150
+    public const string SupplierUpdImported = "purchase.upd.imported"; // D149
     public const string SalesOrderCreated = "sales.order.created";
     public const string SalesOrderChanged = "sales.order.changed";
     public const string SalesOrderConfirmed = "sales.order.confirmed";

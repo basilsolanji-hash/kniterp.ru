@@ -25,6 +25,7 @@ else
             <button type="button" @onclick="OpenCreate" disabled="@_busy">@L("Новое соглашение")</button>
         }
     </div>
+    <ReadOnlyNote When="@(!CanEdit)" />
     <p class="sx-lead">@L("Цена в заказе подставляется сама: соглашение с покупателем → вид цены клиента → основной вид цены. Своё соглашение покупателя сильнее соглашения его группы (тег контрагента), группа — сильнее типового для всех.")</p>
 
     <div class="tabs" role="tablist">
@@ -216,9 +217,9 @@ else
                         var row = _roleForms[r.RoleId];
                         <tr>
                             <td data-label="@L("Роль")">@L(r.Role)</td>
-                            <td data-label="@L("Макс. скидка, %")"><input @bind="row.Discount" inputmode="decimal" placeholder="@L("без ограничения")" disabled="@(!CanEdit)" aria-label="@L("Макс. скидка, %")" /></td>
+                            <td data-label="@L("Макс. скидка, %")"><input @bind="row.Discount" inputmode="decimal" placeholder="@L("без ограничения")" disabled="@(!CanEdit)" title="@((!CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("Макс. скидка, %")" /></td>
                             <td data-label="@L("Нижняя граница — вид цены")">
-                                <select @bind="row.PriceType" disabled="@(!CanEdit)" aria-label="@L("Нижняя граница — вид цены")">
+                                <select @bind="row.PriceType" disabled="@(!CanEdit)" title="@((!CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("Нижняя граница — вид цены")">
                                     <option value="">@L("только минимальная цена позиции")</option>
                                     @foreach (var p in _options.PriceTypes)
                                     {
@@ -227,7 +228,7 @@ else
                                 </select>
                             </td>
                             <td data-label="@L("Видимость заказов")">
-                                <select @bind="row.Visibility" disabled="@(!CanEdit)" aria-label="@L("Видимость заказов")">
+                                <select @bind="row.Visibility" disabled="@(!CanEdit)" title="@((!CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("Видимость заказов")">
                                     @foreach (var v in Enum.GetValues<SalesOrderVisibility>())
                                     {
                                         <option value="@v">@L(SalesRoleSettings.VisibilityName(v))</option>

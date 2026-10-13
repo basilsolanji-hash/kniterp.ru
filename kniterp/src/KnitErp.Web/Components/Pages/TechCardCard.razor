@@ -144,7 +144,7 @@ else
                         @if (_card.CanEdit)
                         {
                             <td>
-                                <button type="button" class="secondary" @onclick="() => EditLine(l)" disabled="@_busy" aria-label="@L("Изменить: {0}", l.Code)">@L("Изменить")</button>
+                                <button type="button" class="secondary" @onclick="() => EditLine(l)" disabled="@_busy" aria-label="@L("Изменить: {0}", l.Code)">@L("Изменить")</button><WhyDisabled When="@(_card.Lines.Count == 0)">@L("Добавьте хотя бы одну строку")</WhyDisabled>
                                 <ConfirmButton Class="secondary" OnConfirm="() => RemoveLineAsync(l)" Disabled="@_busy" AriaLabel="@L("Удалить строку {0}", l.Code)" Question='@L("Удалить?")'>@L("Удалить")</ConfirmButton>
                             </td>
                         }
@@ -159,7 +159,7 @@ else
         <div class="actions" style="margin-top: 16px">
             @if (_card.Status == TechCardStatus.Draft)
             {
-                <button type="button" @onclick="ActivateAsync" disabled="@(_busy || _card.Lines.Count == 0)">@L("Ввести в действие")</button>
+                <button type="button" @onclick="ActivateAsync" disabled="@(_busy || _card.Lines.Count == 0)" title="@((_card.Lines.Count == 0) ? L("Добавьте хотя бы одну строку") : null)">@L("Ввести в действие")</button>
             }
             <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Новая версия")</button>
             @if (_card.Status != TechCardStatus.Archived)

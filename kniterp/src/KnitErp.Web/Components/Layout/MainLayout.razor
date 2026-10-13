@@ -26,12 +26,35 @@
         <div id="nav-body" class="nav-body @(_menuOpen ? "open" : "")">
         @if (_access is not null)
         {
-            @foreach (var group in Groups)
+            @* D805: поиск по разделам и документам — первым, с подсказкой сочетания клавиш. *@
+            <button type="button" class="nav-search" @onclick="() => OpenTool(ToolCatalog.Search)" title="@L("Быстрый поиск (Ctrl+K)")">
+                <Icon Name="search" Size="16" /><span class="nav-text">@L("Найти раздел или документ")</span><kbd class="nav-text" aria-hidden="true">Ctrl K</kbd>
+            </button>
+            @if (_favorites is { Count: > 0 } favorites)
             {
+                @* D805: избранное пользователя (инструмент «Избранное») — сверху меню. *@
+                <div class="nav-favorites" aria-label="@L("Избранное")">
+                    <span class="nav-section nav-text">@L("Избранное")</span>
+                    @foreach (var f in favorites.Take(7))
+                    {
+                        <a href="@f.Href" class="@(Matches(Navigation.ToBaseRelativePath(Navigation.Uri), f.Href) ? "active" : null)" title="@f.Title">
+                            <Icon Name="favorites" Size="14" /><span class="nav-text">@f.Title</span>
+                        </a>
+                    }
+                </div>
+            }
+            @foreach (var group in Ordered)
+            {
+                var allowed = group.Items.Where(i => i.Allowed(_access)).ToList();
+                if (allowed.Count == 0)
+                {
+                    continue; // D800: раздел без единого доступного пункта не показывается
+                }
+
                 var open = IsOpen(group);
                 @if (group.Items.Length == 1)
                 {
-                    var item = group.Items[0];
+                    var item = allowed[0];
                     <NavLink class="nav-single" href="@item.Href" Match="@(item.Href == "" ? NavLinkMatch.All : NavLinkMatch.Prefix)" title="@L(group.Title)"
                              style="@($"--sec: var(--sec-{group.Key})")">
                         <Icon Name="@group.Key" Size="16" /><span class="nav-text">@L(group.Title)</span>
@@ -39,29 +62,34 @@
                     continue;
                 }
 
+                @if (group.Key == "settings")
+                {
+                    @* D808 (раздел 0, п. 8): «Настройки» — один пункт, ведёт на страницу всех настроек; пункты раздела — плитки на ней. *@
+                    var here = Navigation.ToBaseRelativePath(Navigation.Uri) == SettingsHref || allowed.Any(i => i.Href == Current);
+                    <a class="nav-single @(here ? "active" : null)" href="@SettingsHref" title="@L(group.Title)" aria-current="@(here ? "page" : null)"
+                       style="@($"--sec: var(--sec-{group.Key})")">
+                        <Icon Name="@group.Key" Size="16" /><span class="nav-text">@L(group.Title)</span>
+                    </a>
+                    continue;
+                }
+
+                var shown = MenuItems(group, allowed);
                 <div class="nav-group @(open ? "open" : "")" style="@($"--sec: var(--sec-{group.Key})")">
                     <button type="button" class="nav-group-head" aria-expanded="@(open ? "true" : "false")" title="@L(group.Title)"
-                            @onclick="() => Toggle(group.Key)">
+                            @onclick="() => Toggle(group)">
                         <Icon Name="@group.Key" Size="16" /><span class="nav-text">@L(group.Title)</span><span class="caret" aria-hidden="true">▾</span>
                     </button>
                     @if (open)
                     {
                         <div class="nav-items">
-                            @foreach (var item in group.Items)
+                            @foreach (var item in shown)
                             {
-                                @if (item.Planned)
-                                {
-                                    <span class="nav-planned" title="@L("В плане разработки")">@L(item.Label) <span class="tag">@L("скоро")</span></span>
-                                    continue;
-                                }
-
-                                <a href="@item.Href" class="@(item.Href == Current ? "active" : null)" aria-current="@(item.Href == Current ? "page" : null)">
-                                    @L(item.Label)
-                                    @if (!item.Allowed(_access))
-                                    {
-                                        <span class="tag">@L("нет доступа")</span>
-                                    }
-                                </a>
+                                <a href="@item.Href" class="@(item.Href == Current ? "active" : null)" aria-current="@(item.Href == Current ? "page" : null)">@L(item.Label)</a>
+                            }
+                            @if (allowed.Count > shown.Count)
+                            {
+                                var sectionHref = "section/" + group.Key;
+                                <a href="@sectionHref" class="nav-all @(Navigation.ToBaseRelativePath(Navigation.Uri) == sectionHref ? "active" : null)">@L("Все в разделе") <span class="muted">@allowed.Count →</span></a>
                             }
                         </div>
                     }
@@ -81,7 +109,7 @@
         @if (_access is not null && _panel is not null)
         {
             <header class="topbar">
-                <QuickBar Access="_access" Settings="_panel" ActiveTool="@_activeTool" Badge="_badge" OnOpen="OpenTool" OpenWindows="Windows" ShowProfile="false" />
+                <QuickBar Access="_access" Settings="_panel" ActiveTool="@_activeTool" Badge="_badge" OnOpen="OpenTool" OpenWindows="Windows" />
             </header>
         }
         <main class="main">
@@ -107,6 +135,19 @@
             }
         </main>
     </div>
+    @if (_access is not null)
+    {
+        @* D805 (раздел 0): на телефоне — нижняя панель: главная, до трёх главных разделов этой роли и «Ещё» (всё меню). *@
+        <nav class="bottom-nav" aria-label="@L("Главные разделы")">
+            <NavLink href="" Match="NavLinkMatch.All"><Icon Name="home" Size="20" /><span>@L("Главная")</span></NavLink>
+            @foreach (var group in BottomGroups())
+            {
+                <NavLink href="@("section/" + group.Key)"><Icon Name="@group.Key" Size="20" /><span>@L(group.Title)</span></NavLink>
+            }
+            <button type="button" class="@(_menuOpen ? "active" : null)" aria-expanded="@(_menuOpen ? "true" : "false")" aria-controls="nav-body"
+                    @onclick="() => _menuOpen = !_menuOpen"><Icon Name="all" Size="20" /><span>@L("Ещё")</span></button>
+        </nav>
+    }
     @if (_access is not null && _panel is not null && _opened.Count > 0)
     {
         <ToolDrawer Context="ToolContext()" Settings="_panel" Active="@_activeTool" Opened="_opened" HelpArticleId="@_helpArticle"
@@ -128,190 +169,221 @@
     private CurrentAccessDto? _access;
 
     /// <summary>Пункт меню. Planned — функция в плане: виден серым с пометкой «скоро» и никуда не ведёт.</summary>
-    private sealed record NavItem(string Href, string Label, Func<CurrentAccessDto, bool> Allowed, bool Planned = false);
+    public sealed record NavItem(string Href, string Label, Func<CurrentAccessDto, bool> Allowed, bool Planned = false, string? Section = null);
 
-    private sealed record NavGroup(string Key, string Title, NavItem[] Items);
+    public sealed record NavGroup(string Key, string Title, NavItem[] Items);
 
     private static bool Docs(CurrentAccessDto a) =>
         a.Has(Permissions.WarehouseDocumentCreate) || a.Has(Permissions.WarehouseDocumentPost) || a.Has(Permissions.WarehouseReportView);
 
-    private static NavItem Soon(string key, string label) => new("plan:" + key, label, _ => true, Planned: true);
+    // D800 (сессия 5, интерфейс): меню по участкам работы — docs/ui/menu.md. Внутри раздела — подзаголовки (Section);
+    // каждый адрес один раз; видны только пункты, на которые есть право (сервер всё равно проверяет); «скоро» и «Обучение»
+    // в разделах убраны — «Обучение» и «Поддержка» один раз внизу меню. Названия — русские ключи, переводятся при показе (L).
+    private static NavItem I(string href, string label, Func<CurrentAccessDto, bool> allowed, string? section = null) =>
+        new(href, label, allowed, Section: section);
 
-    // Разделы меню — по структуре, которую задал пользователь (Продажи, Закупки, CRM, Склад, в каждом «Обучение»).
-    // Названия — русские ключи, переводятся при показе (L). Пункты без доступа видны и кликабельны: сервер ответит
-    // отказом и запишет попытку в журнал. Пункты «скоро» — функции в плане (D66).
-    private static readonly NavGroup[] Groups =
+    private const string SDocs = "Документы", SPrices = "Цены", SReports = "Отчёты";
+
+    public static readonly NavGroup[] Groups =
     [
-        new("home", "Главная", [new("", "Главная", a => true)]),
-        new("discussions", "Обсуждения", [new("discussions", "Обсуждения", a => true)]),
+        new("home", "Главная", [I("", "Главная", a => true)]),
+        new("discussions", "Обсуждения", [I("discussions", "Обсуждения", a => true)]),
         new("sales", "Продажи",
         [
-            new("sales-orders", "Заказы покупателей", a => a.Has(Permissions.SalesView)),
-            new("customer-invoices", "Счета покупателям", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("stock-documents?kind=6", "Отгрузки", Docs),
-            new("sales-pick-lists", "Задания на сборку", a => a.Has(Permissions.SalesView) || Docs(a)), // D1150
-            new("sales-shipments", "Отгрузки по нескольким заказам", a => a.Has(Permissions.SalesView) || Docs(a)), // D1151
-            // D1168 (продажи): отчёты о реализации маркетплейсов вместо «Отчётов комиссионера».
-            new("marketplace-reports", "Отчёты маркетплейсов", a => a.Has(Permissions.SalesView)),
-            new("stock-documents?kind=7", "Возвраты покупателей", Docs),
-            new("vat-invoices/issued", "Счета-фактуры выданные", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("reports/profitability", "Прибыльность", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("reports/sales-by-item", "Товары и реализации", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("reports/receivables", "Дебиторская задолженность", a => a.Has(Permissions.SalesReportView) && a.Has(Permissions.PriceView)),
-            // D1171 (продажи): аналитика, план и воронка сделок CRM.
-            new("reports/sales", "Аналитика продаж", a => a.Has(Permissions.SalesReportView)),
-            new("sales-plan", "План продаж", a => a.Has(Permissions.SalesReportView)),
-            new("crm/deals", "Воронка продаж", a => a.Has(Permissions.CrmView)),
-            Soon("unit-economics", "Юнит-экономика"),
-            new("sales-order-stages", "Этапы заказов", a => a.Has(Permissions.SalesView)),
-            new("sales-agreements", "Соглашения и цены", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("sales-discounts", "Скидки и акции", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("sales-price-list", "Прайс-лист", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)), // D1142
-            new("sales-setup", "Настройки продаж", a => a.Has(Permissions.SalesView)),
-            new("learn/sales", "Обучение", a => true),
-        ]),
-        new("purchases", "Закупки",
-        [
-            new("purchase-orders", "Заказы поставщикам", a => a.Has(Permissions.PurchaseView)),
-            new("supplier-invoices", "Счета поставщиков", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
-            new("stock-documents?kind=1&order=1", "Приёмка", Docs),
-            new("stock-documents?kind=5", "Возвраты поставщикам", Docs),
-            new("vat-invoices/received", "Счета-фактуры полученные", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
-            Soon("purchase-planning", "Управление закупками"),
-            new("settings/purchases", "Настройки закупок", a => a.Has(Permissions.PurchaseView)), // D133
-            new("learn/purchases", "Обучение", a => true),
-        ]),
-        new("money", "Деньги",
-        [
-            new("money", "Касса и счета", a => a.Has(Permissions.PriceView)),
-            new("customer-payments", "Оплаты покупателей", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("supplier-payments", "Оплаты поставщикам", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
-            new("money/bank-statement", "Загрузка выписки банка", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesEdit) || a.Has(Permissions.PurchaseEdit))),
-            new("reports/customer-balances", "Расчёты с покупателями", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
-            new("reports/supplier-balances", "Расчёты с поставщиками", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
-            new("settlement-statement", "Акт сверки", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesView) || a.Has(Permissions.PurchaseView))),
-            new("reports/cash-flow", "Движение денег (ДДС)", a => a.Has(Permissions.PriceView)),
-            new("cash-book", "Кассовая книга", a => a.Has(Permissions.PriceView)),
-            new("accountables", "Подотчётные лица", a => a.Has(Permissions.PriceView)),
-            new("cash-flow-items", "Статьи движения денег", a => a.Has(Permissions.PriceView)),
-            new("legal-entities", "Юрлица, счета и кассы", a => a.Has(Permissions.OrganizationView)),
+            I("sales-orders", "Заказы покупателей", a => a.Has(Permissions.SalesView), SDocs),
+            I("customer-invoices", "Счета покупателям", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SDocs),
+            I("stock-documents?kind=6", "Отгрузки", Docs, SDocs),
+            I("sales-pick-lists", "Задания на сборку", a => a.Has(Permissions.SalesView) || Docs(a), SDocs), // D1150
+            I("sales-shipments", "Отгрузки по нескольким заказам", a => a.Has(Permissions.SalesView) || Docs(a), SDocs), // D1151
+            I("stock-documents?kind=7", "Возвраты покупателей", Docs, SDocs),
+            I("vat-invoices/issued", "Счета-фактуры выданные", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SDocs),
+            I("marketplace-reports", "Отчёты маркетплейсов", a => a.Has(Permissions.SalesView), SDocs), // D1168
+            I("sales-price-list", "Прайс-лист", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SPrices), // D1142
+            I("sales-agreements", "Соглашения и цены", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SPrices),
+            I("sales-discounts", "Скидки и акции", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SPrices),
+            I("reports/sales", "Аналитика продаж", a => a.Has(Permissions.SalesReportView), SReports), // D1171
+            I("sales-plan", "План продаж", a => a.Has(Permissions.SalesReportView), SReports),
+            I("reports/profitability", "Прибыльность", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SReports),
+            I("reports/sales-by-item", "Товары и реализации", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SReports),
+            I("reports/receivables", "Дебиторская задолженность", a => a.Has(Permissions.SalesReportView) && a.Has(Permissions.PriceView), SReports),
         ]),
         new("crm", "CRM",
         [
-            // D600 (CRM): лиды, сделки, контакты и настройки воронок.
-            new("crm/deals", "Сделки", a => a.Has(Permissions.CrmView)),
-            new("crm/leads", "Лиды", a => a.Has(Permissions.CrmView)),
-            new("crm/contacts", "Контакты", a => a.Has(Permissions.CrmView)),
-            new("crm/chats", "Чаты", a => a.Has(Permissions.CrmView)),
-            new("crm/today", "Мой день", a => a.Has(Permissions.CrmView)),
-            new("crm/tasks", "Мои задачи CRM", a => a.Has(Permissions.CrmView)),
-            new("crm/summary", "Сводка и отчёты", a => a.Has(Permissions.CrmView)),
-            new("crm/mailings", "Рассылки", a => a.Has(Permissions.CrmMailing)),
-            new("counterparties", "Контрагенты", a => a.Has(Permissions.CatalogView)),
-            new("counterparties?role=customer", "Покупатели", a => a.Has(Permissions.CatalogView)),
-            new("counterparties?role=supplier", "Поставщики", a => a.Has(Permissions.CatalogView)),
-            Soon("contracts", "Договоры"),
-            Soon("calls", "Звонки"),
-            Soon("discounts", "Скидки"),
-            new("crm/settings", "Настройки CRM", a => a.Has(Permissions.CrmView)),
-            new("learn/crm", "Обучение", a => true),
+            // D600 (CRM): лиды, сделки (воронка), контакты.
+            I("crm/today", "Мой день", a => a.Has(Permissions.CrmView)),
+            I("crm/deals", "Сделки", a => a.Has(Permissions.CrmView)),
+            I("crm/leads", "Лиды", a => a.Has(Permissions.CrmView)),
+            I("crm/contacts", "Контакты", a => a.Has(Permissions.CrmView)),
+            I("crm/chats", "Чаты", a => a.Has(Permissions.CrmView)),
+            I("crm/tasks", "Мои задачи CRM", a => a.Has(Permissions.CrmView)),
+            I("crm/mailings", "Рассылки", a => a.Has(Permissions.CrmMailing)),
+            I("crm/summary", "Сводка и отчёты", a => a.Has(Permissions.CrmView)),
+        ]),
+        new("purchases", "Закупки",
+        [
+            I("purchase-orders", "Заказы поставщикам", a => a.Has(Permissions.PurchaseView), SDocs),
+            I("supplier-invoices", "Счета поставщиков", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView), SDocs),
+            I("stock-documents?kind=1&order=1", "Приёмка", Docs, SDocs),
+            I("stock-documents?kind=5", "Возвраты поставщикам", Docs, SDocs),
+            I("vat-invoices/received", "Счета-фактуры полученные", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView), SDocs),
+            I("catalog/price-list", "Прайс-лист поставщика", a => a.Has(Permissions.CatalogEdit) && a.Has(Permissions.PriceView), SPrices),
         ]),
         new("warehouse", "Склад",
         [
-            new("stock-documents?kind=1&order=0", "Оприходования", Docs),
-            new("stock-documents?kind=2", "Списания", Docs),
-            new("stock-documents?kind=3", "Перемещения", Docs),
-            new("inventory", "Инвентаризация", Docs),
-            Soon("picking-waves", "Волны отбора"),
-            Soon("internal-orders", "Внутренние заказы"),
-            new("stock", "Остатки", a => a.Has(Permissions.WarehouseReportView)),
-            new("stock-batches", "Партии и вес", a => a.Has(Permissions.WarehouseReportView) || Docs(a)),
-            new("reports/turnover", "Обороты", a => a.Has(Permissions.WarehouseReportView)),
-            new("warehouses", "Склады", a => a.Has(Permissions.CatalogView)),
-            new("opening-balances", "Начальные остатки", a => a.Has(Permissions.OpeningBalanceCreate) || a.Has(Permissions.OpeningBalanceApprove)
-                                                         || a.Has(Permissions.WarehouseReportView)),
-            new("stock-documents", "Все складские документы", Docs),
-            new("learn/warehouse", "Обучение", a => true),
+            I("stock", "Остатки", a => a.Has(Permissions.WarehouseReportView)),
+            I("stock-batches", "Партии и вес", a => a.Has(Permissions.WarehouseReportView) || Docs(a)),
+            I("stock-documents?kind=1&order=0", "Оприходования", Docs, SDocs),
+            I("stock-documents?kind=2", "Списания", Docs, SDocs),
+            I("stock-documents?kind=3", "Перемещения", Docs, SDocs),
+            I("inventory", "Инвентаризация", Docs, SDocs),
+            I("opening-balances", "Начальные остатки", a => a.Has(Permissions.OpeningBalanceCreate) || a.Has(Permissions.OpeningBalanceApprove)
+                                                         || a.Has(Permissions.WarehouseReportView), SDocs),
+            I("stock-documents", "Все складские документы", Docs, SDocs),
+            I("reports/turnover", "Обороты", a => a.Has(Permissions.WarehouseReportView), SReports),
+            I("reports/movements", "Движения", a => a.Has(Permissions.WarehouseReportView), SReports),
+            I("reports/inventory-variances", "Отклонения инвентаризации", a => a.Has(Permissions.WarehouseReportView), SReports),
+            I("reconciliation", "Сверка", a => a.Has(Permissions.WarehouseReportView), SReports),
         ]),
         new("production", "Производство",
         [
-            new("production-orders", "Производственные заказы", a => a.Has(Permissions.ProductionOrderView)),
-            new("tech-cards", "Техкарты", a => a.Has(Permissions.CatalogView)),
-            new("production/planning", "Потребность в материалах", a => a.Has(Permissions.ProductionOrderView)),
-            new("production/shift-tasks", "Сменные задания", a => a.Has(Permissions.ProductionOrderView)),
-            new("production/scores", "Баллы и показатели", a => a.Has(Permissions.ProductionOrderView)),
-            new("shop", "Терминал цеха", a => a.Has(Permissions.ProductionStageMark)),
-            new("reports/production", "Отчёт по производству", a => a.Has(Permissions.ProductionOrderView)),
+            I("production-orders", "Производственные заказы", a => a.Has(Permissions.ProductionOrderView)),
+            I("production/shift-tasks", "Сменные задания", a => a.Has(Permissions.ProductionOrderView)),
+            I("shop", "Терминал цеха", a => a.Has(Permissions.ProductionStageMark)),
+            I("tech-cards", "Техкарты", a => a.Has(Permissions.CatalogView)),
+            I("production/planning", "Потребность в материалах", a => a.Has(Permissions.ProductionOrderView)),
+            I("reports/production", "Отчёт по производству", a => a.Has(Permissions.ProductionOrderView), SReports),
+            I("production/scores", "Баллы и показатели", a => a.Has(Permissions.ProductionOrderView), SReports),
         ]),
         // Модуль «Разработка» (D700–D799).
         new("dev", "Разработка",
         [
-            new("dev/models", "Модели", a => a.Has(Permissions.DevView)),
-            new("dev/my", "Мои задачи разработки", a => a.Has(Permissions.DevView)),
-            new("dev/patterns", "Библиотека рисунков", a => a.Has(Permissions.DevView)),
-            new("dev/tech", "Техкарты вязания", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
-            new("dev/machines", "Станки и программы", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
-            new("dev/analytics", "Аналитика разработки", a => a.Has(Permissions.DevView)),
-            new("dev/settings", "Настройки разработки", a => a.Has(Permissions.DevView)),
+            I("dev/models", "Модели", a => a.Has(Permissions.DevView)),
+            I("dev/my", "Мои задачи разработки", a => a.Has(Permissions.DevView)),
+            I("dev/patterns", "Библиотека рисунков", a => a.Has(Permissions.DevView)),
+            I("dev/tech", "Техкарты вязания", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
+            I("dev/machines", "Станки и программы", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
+            I("dev/analytics", "Аналитика разработки", a => a.Has(Permissions.DevView), SReports),
+        ]),
+        new("money", "Деньги",
+        [
+            I("money", "Касса и счета", a => a.Has(Permissions.PriceView)),
+            I("customer-payments", "Оплаты покупателей", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+            I("supplier-payments", "Оплаты поставщикам", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
+            I("money/bank-statement", "Загрузка выписки банка", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesEdit) || a.Has(Permissions.PurchaseEdit))),
+            I("cash-book", "Кассовая книга", a => a.Has(Permissions.PriceView)),
+            I("accountables", "Подотчётные лица", a => a.Has(Permissions.PriceView)),
+            I("reports/cash-flow", "Движение денег (ДДС)", a => a.Has(Permissions.PriceView), SReports),
+            I("reports/customer-balances", "Расчёты с покупателями", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView), SReports),
+            I("reports/supplier-balances", "Расчёты с поставщиками", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView), SReports),
+            I("settlement-statement", "Акт сверки", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesView) || a.Has(Permissions.PurchaseView)), SReports),
         ]),
         // Модуль «Сотрудники» (D200–D299).
-        new("hr", "Кадры",
+        new("hr", "Сотрудники",
         [
-            new("employees", "Сотрудники", a => a.HasOwnOnly(Permissions.EmployeeView)),
-            new("hr/orders", "Кадровые приказы", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
-            new("hr/staffing", "Штатное расписание", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
-            new("hr/timesheet", "Табель", a => a.HasOwnOnly(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
-            new("hr/schedules", "Графики работы", a => a.Has(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
-            new("hr/payroll", "Заработок", a => a.HasOwnOnly(Permissions.PayrollView)),
-            new("hr/piece-rates", "Сдельные расценки", a => a.Has(Permissions.PayrollView) || a.Has(Permissions.PayrollCalculate)),
-        ]),
-        new("reports", "Отчёты",
-        [
-            new("reports/movements", "Движения", a => a.Has(Permissions.WarehouseReportView)),
-            new("reports/inventory-variances", "Отклонения инвентаризации", a => a.Has(Permissions.WarehouseReportView)),
-            new("reconciliation", "Сверка", a => a.Has(Permissions.WarehouseReportView)),
-            new("audit", "Журнал аудита", a => a.HasOwnOnly(Permissions.AuditLogView)),
-            new("signins", "Журнал входов", a => a.HasOwnOnly(Permissions.AuditLogView)),
+            I("employees", "Сотрудники", a => a.HasOwnOnly(Permissions.EmployeeView)),
+            I("hr/orders", "Кадровые приказы", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
+            I("hr/staffing", "Штатное расписание", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
+            I("hr/timesheet", "Табель", a => a.HasOwnOnly(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
+            I("hr/schedules", "Графики работы", a => a.Has(Permissions.TimesheetEdit) || a.Has(Permissions.TimesheetClose)),
+            I("hr/payroll", "Заработок", a => a.HasOwnOnly(Permissions.PayrollView)),
+            I("hr/piece-rates", "Сдельные расценки", a => a.Has(Permissions.PayrollView) || a.Has(Permissions.PayrollCalculate)),
         ]),
         new("catalogs", "Справочники",
         [
-            new("catalog", "Номенклатура", a => a.Has(Permissions.CatalogView)),
-            new("catalog/settings?tab=Groups", "Группы номенклатуры", a => a.Has(Permissions.CatalogView)),
-            new("catalog/settings?tab=Prices", "Виды цен", a => a.Has(Permissions.CatalogView) && a.Has(Permissions.PriceView)),
-            new("catalog/settings?tab=Characteristics", "Характеристики", a => a.Has(Permissions.CatalogView)),
-            new("catalog/settings?tab=Fields", "Доп. поля номенклатуры", a => a.Has(Permissions.CatalogView)),
-            new("catalog/settings?tab=Catalogs", "Свои справочники", a => a.Has(Permissions.CatalogView)),
-            new("catalog/labels", "Этикетки и ценники", a => a.Has(Permissions.CatalogView)),
-            new("catalog/price-list", "Прайс-лист поставщика", a => a.Has(Permissions.CatalogEdit) && a.Has(Permissions.PriceView)),
-            new("catalog/settings?tab=General", "Настройки каталога", a => a.Has(Permissions.CatalogView)),
-            new("sales-settings?section=projects", "Проекты", a => a.Has(Permissions.SalesView)),
-            new("sales-settings?section=channels", "Каналы продаж", a => a.Has(Permissions.SalesView)),
-            new("sales-settings?section=fields", "Доп. поля заказов", a => a.Has(Permissions.SalesView)),
-            new("units", "Единицы измерения", a => a.Has(Permissions.CatalogView)),
-            new("vat-rates", "Ставки НДС", a => a.Has(Permissions.CatalogView)),
-            new("structure", "Структура", a => a.Has(Permissions.DepartmentView)),
+            I("catalog", "Номенклатура", a => a.Has(Permissions.CatalogView)),
+            I("counterparties", "Контрагенты", a => a.Has(Permissions.CatalogView)),
+            I("warehouses", "Склады", a => a.Has(Permissions.CatalogView)),
+            I("catalog/labels", "Этикетки и ценники", a => a.Has(Permissions.CatalogView)),
+            I("catalog/settings?tab=Catalogs", "Свои справочники", a => a.Has(Permissions.CatalogView)),
+            I("units", "Единицы измерения", a => a.Has(Permissions.CatalogView)),
+            I("vat-rates", "Ставки НДС", a => a.Has(Permissions.CatalogView)),
+            I("structure", "Структура", a => a.Has(Permissions.DepartmentView)),
         ]),
         new("settings", "Настройки",
         [
-            new("organization", "Организация", a => a.Has(Permissions.OrganizationView)),
-            new("sales-documents-settings", "Документы и письма продаж", a => a.Has(Permissions.SalesView)), // D1120
-            new("launch", "Готовность к запуску", a => a.Has(Permissions.OrganizationEdit)),
-            new("settings/production", "Производство", a => a.Has(Permissions.OrganizationView)),
-            new("hr/settings", "Кадры и заработок", a => a.Has(Permissions.OrganizationEdit) || a.Has(Permissions.PayrollCalculate)),
-            new("users", "Пользователи", a => a.Has(Permissions.UserView)),
-            new("roles", "Роли и права", a => a.Has(Permissions.UserView)),
-            new("period", "Закрытие периода", a => a.Has(Permissions.ClosedPeriodReopen) || a.Has(Permissions.WarehouseReportView)),
-            new("integrity", "Проверка целостности", a => a.Has(Permissions.AuditLogView)),
-            new("integrations", "Интеграции (API)", a => a.Has(Permissions.OrganizationEdit)),
-            new("exchange/moysklad", "Загрузка из МойСклад", a => a.Has(Permissions.MoySkladManage)),
-            new("exchange/feeds", "Фиды для площадок", a => a.Has(Permissions.OrganizationEdit) && a.Has(Permissions.PriceView)),
-            new("exchange/1c", "Обмен с 1С", a => a.Has(Permissions.CatalogView) && a.Has(Permissions.WarehouseReportView) && a.Has(Permissions.PriceView)),
+            I("organization", "Организация", a => a.Has(Permissions.OrganizationView), SOrg),
+            I("legal-entities", "Юрлица, счета и кассы", a => a.Has(Permissions.OrganizationView), SOrg),
+            I("users", "Пользователи", a => a.Has(Permissions.UserView), SOrg),
+            I("roles", "Роли и права", a => a.Has(Permissions.UserView), SOrg),
+            I("launch", "Готовность к запуску", a => a.Has(Permissions.OrganizationEdit), SOrg),
+            I("period", "Закрытие периода", a => a.Has(Permissions.ClosedPeriodReopen) || a.Has(Permissions.WarehouseReportView), SOrg),
+            I("catalog/settings?tab=General", "Настройки каталога", a => a.Has(Permissions.CatalogView), SModules),
+            I("catalog/settings?tab=Groups", "Группы номенклатуры", a => a.Has(Permissions.CatalogView), SModules),
+            I("catalog/settings?tab=Prices", "Виды цен", a => a.Has(Permissions.CatalogView) && a.Has(Permissions.PriceView), SModules),
+            I("catalog/settings?tab=Characteristics", "Характеристики", a => a.Has(Permissions.CatalogView), SModules),
+            I("catalog/settings?tab=Fields", "Доп. поля номенклатуры", a => a.Has(Permissions.CatalogView), SModules),
+            I("sales-setup", "Настройки продаж", a => a.Has(Permissions.SalesView), SModules),
+            I("settings/purchases", "Настройки закупок", a => a.Has(Permissions.PurchaseView), SModules), // D133
+            I("sales-order-stages", "Этапы заказов", a => a.Has(Permissions.SalesView), SModules),
+            I("sales-documents-settings", "Документы и письма продаж", a => a.Has(Permissions.SalesView), SModules), // D1120
+            I("sales-settings?section=projects", "Проекты", a => a.Has(Permissions.SalesView), SModules),
+            I("sales-settings?section=channels", "Каналы продаж", a => a.Has(Permissions.SalesView), SModules),
+            I("sales-settings?section=fields", "Доп. поля заказов", a => a.Has(Permissions.SalesView), SModules),
+            I("crm/settings", "Настройки CRM", a => a.Has(Permissions.CrmView), SModules),
+            I("settings/production", "Производство", a => a.Has(Permissions.OrganizationView), SModules),
+            I("dev/settings", "Настройки разработки", a => a.Has(Permissions.DevView), SModules),
+            I("hr/settings", "Кадры и заработок", a => a.Has(Permissions.OrganizationEdit) || a.Has(Permissions.PayrollCalculate), SModules),
+            I("cash-flow-items", "Статьи движения денег", a => a.Has(Permissions.PriceView), SModules),
+            I("integrations", "Интеграции (API)", a => a.Has(Permissions.OrganizationEdit), SExchange),
+            I("exchange/moysklad", "Загрузка из МойСклад", a => a.Has(Permissions.MoySkladManage), SExchange),
+            I("exchange/feeds", "Фиды для площадок", a => a.Has(Permissions.OrganizationEdit) && a.Has(Permissions.PriceView), SExchange),
+            I("exchange/1c", "Обмен с 1С", a => a.Has(Permissions.CatalogView) && a.Has(Permissions.WarehouseReportView) && a.Has(Permissions.PriceView), SExchange),
+            I("audit", "Журнал аудита", a => a.HasOwnOnly(Permissions.AuditLogView), SControl),
+            I("signins", "Журнал входов", a => a.HasOwnOnly(Permissions.AuditLogView), SControl),
+            I("integrity", "Проверка целостности", a => a.Has(Permissions.AuditLogView), SControl),
         ]),
     ];
 
+    private const string SOrg = "Организация и доступ", SModules = "Модули", SExchange = "Обмен", SControl = "Контроль";
+
+    // D805 (раздел 0 ТЗ интерфейса): порядок групп — по работе пользователя; в меню группы — 3–7 частых пунктов (MainHrefs),
+    // остальные — на странице раздела «section/{ключ}» (SectionPage) по ссылке «Все в разделе».
+    private static readonly string[] Order =
+        ["home", "discussions", "sales", "purchases", "warehouse", "production", "money", "hr", "crm", "dev", "catalogs", "settings"];
+
+    /// <summary>
+    /// D808: страница всех настроек. Пока единой страницы `/settings` нет (её делает сессия № 1, этап 2б) — страница раздела
+    /// с плитками по подзаголовкам; когда `/settings` появится, здесь меняется только адрес.
+    /// </summary>
+    public const string SettingsHref = "section/settings";
+
+    public static IEnumerable<NavGroup> Ordered => Order.Select(k => Groups.Single(g => g.Key == k));
+
+    private static readonly Dictionary<string, string[]> MainHrefs = new()
+    {
+        ["sales"] = ["sales-orders", "customer-invoices", "stock-documents?kind=6", "stock-documents?kind=7", "sales-price-list", "reports/sales"],
+        ["purchases"] = ["purchase-orders", "supplier-invoices", "stock-documents?kind=1&order=1", "stock-documents?kind=5", "catalog/price-list"],
+        ["warehouse"] = ["stock", "stock-documents?kind=1&order=0", "stock-documents?kind=2", "stock-documents?kind=3", "inventory", "stock-documents"],
+        ["production"] = ["production-orders", "production/shift-tasks", "shop", "tech-cards", "production/planning"],
+        ["money"] = ["money", "customer-payments", "supplier-payments", "money/bank-statement", "reports/cash-flow", "settlement-statement"],
+        ["hr"] = ["employees", "hr/timesheet", "hr/payroll", "hr/orders", "hr/schedules"],
+        ["crm"] = ["crm/today", "crm/deals", "crm/leads", "crm/contacts", "crm/chats", "crm/tasks"],
+        ["dev"] = ["dev/models", "dev/my", "dev/patterns", "dev/tech", "dev/machines"],
+        ["catalogs"] = ["catalog", "counterparties", "warehouses", "catalog/labels", "units"],
+    };
+
+    /// <summary>Пункты группы в меню: частые, на которые есть право, и текущая страница, если она среди редких.</summary>
+    private List<NavItem> MenuItems(NavGroup group, List<NavItem> allowed)
+    {
+        if (!MainHrefs.TryGetValue(group.Key, out var main))
+        {
+            return allowed;
+        }
+
+        var current = Current;
+        return allowed.Where(i => main.Contains(i.Href)).OrderBy(i => Array.IndexOf(main, i.Href))
+            .Concat(allowed.Where(i => i.Href == current && !main.Contains(i.Href))).ToList();
+    }
+
+    /// <summary>Разделы нижней панели телефона: первые три доступных из главных участков работы.</summary>
+    private IEnumerable<NavGroup> BottomGroups() =>
+        new[] { "sales", "warehouse", "production", "money", "crm", "purchases", "hr" }
+            .Select(k => Groups.Single(g => g.Key == k)).Where(g => g.Items.Any(i => i.Allowed(_access!))).Take(3);
+
     private static readonly NavItem[] Items = Groups.SelectMany(g => g.Items).Where(i => !i.Planned).ToArray();
 
-    private readonly HashSet<string> _toggled = [];
+    private string? _openKey;
+    private IReadOnlyList<KnitErp.Application.Workspace.FavoriteItem>? _favorites;
     private bool _narrow;
 
     /// <summary>
@@ -332,8 +404,14 @@
     /// <summary>Раздел раскрыт, если в нём текущая страница; щелчок по заголовку меняет это состояние.</summary>
     private bool IsOpen(NavGroup group)
     {
+        if (_openKey is not null)
+        {
+            return _openKey == group.Key;
+        }
+
         var current = Current;
-        return group.Items.Any(i => i.Href == current) ^ _toggled.Contains(group.Key);
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+        return group.Items.Any(i => i.Href == current) || path == "section/" + group.Key;
     }
 
     private static bool Matches(string path, string href)
@@ -349,12 +427,10 @@
         return bare == h || bare.StartsWith(h + "/", StringComparison.Ordinal);
     }
 
-    private void Toggle(string key)
+    /// <summary>D805: раскрыта одна группа — выбранная пользователем, иначе группа текущей страницы.</summary>
+    private void Toggle(NavGroup group)
     {
-        if (!_toggled.Remove(key))
-        {
-            _toggled.Add(key);
-        }
+        _openKey = IsOpen(group) ? "" : group.Key;
     }
 
     private void ToggleNarrow() => _narrow = !_narrow;
@@ -448,7 +524,21 @@
             _panel = new PanelSettings(ToolCatalog.DefaultPinned, ToolCatalog.DefaultVisible);
         }
 
+        await LoadFavoritesAsync();
         _access = access;
+    }
+
+    /// <summary>D805: избранное для верха меню; свой контекст базы (PersonalToolsService), ошибка не мешает работе.</summary>
+    private async Task LoadFavoritesAsync()
+    {
+        try
+        {
+            _favorites = await Personal.GetFavoritesAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _favorites = null;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -568,14 +658,17 @@
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         _menuOpen = false;
-        _toggled.Clear();
+        _openKey = null;
         _ = InvokeAsync(async () =>
         {
             StateHasChanged();
+            await LoadFavoritesAsync(); // избранное могли изменить в инструменте «Избранное»
             if (DateTime.UtcNow - _badgeAt > TimeSpan.FromMinutes(1))
             {
                 await RefreshBadgeAsync();
             }
+
+            StateHasChanged();
         });
     }
 

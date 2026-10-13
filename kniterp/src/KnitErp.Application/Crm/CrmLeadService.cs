@@ -429,7 +429,7 @@ public sealed class CrmLeadService(IKnitErpDbContext db, IAccessGuard guard, ICu
     {
         var ctx = await guard.DemandAsync(Permissions.CrmEdit, ct);
         var lead = await CrmAccess.Leads(db, ctx).SingleOrDefaultAsync(l => l.Id == id, ct) ?? throw new NotFoundException("Лид");
-        return (ctx, lead.EnsureVersion(lead.RowVersion, rowVersion));
+        return (ctx, await CrmConflict.EnsureVersionAsync(db, ctx.OrganizationId, lead, nameof(CrmLead), lead.Id, "Лид", lead.RowVersion, rowVersion, ct));
     }
 
     private static string? TryPhone(string text)

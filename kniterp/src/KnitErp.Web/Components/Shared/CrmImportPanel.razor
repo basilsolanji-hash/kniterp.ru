@@ -8,13 +8,13 @@
    применение всё или ничего, повторная загрузка обновляет по внешнему ID. *@
 <div class="actions" style="margin: 8px 0">
     <button type="button" class="secondary" @onclick="() => _open = !_open" aria-expanded="@(_open ? "true" : "false")">
-        @L("Импорт из Excel, amoCRM, Битрикс24") @(_open ? "▲" : "▼")
+        @L("Импорт из Excel/CSV, amoCRM, Битрикс24") @(_open ? "▲" : "▼")
     </button>
 </div>
 @if (_open)
 {
     <div class="panel">
-        <p class="muted small">@L("Выгрузите список из amoCRM или Битрикс24 в Excel (.xlsx) и загрузите как есть — столбцы сопоставятся по названиям. Строка с тем же ID при повторной загрузке обновится, а не задвоится; строки с уже известными телефоном или почтой пропускаются.")</p>
+        <p class="muted small">@L("Выгрузите список из amoCRM или Битрикс24 в Excel (.xlsx) или CSV и загрузите как есть — столбцы сопоставятся по названиям. Строка с тем же ID при повторной загрузке обновится, а не задвоится; строки с уже известными телефоном или почтой пропускаются.")</p>
         <div class="actions">
             <a class="button secondary" href="crm/import-template.xlsx?kind=@Kind" download data-enhance-nav="false">@L("Шаблон knitERP")</a>
         </div>
@@ -26,7 +26,7 @@
         {
             <div class="flash" role="status">@_flash</div>
         }
-        <label>@L("Файл .xlsx") <InputFile OnChange="PreviewAsync" accept=".xlsx" disabled="@_busy" /></label>
+        <label>@L("Файл .xlsx или .csv") <InputFile OnChange="PreviewAsync" accept=".xlsx,.csv,text/csv" disabled="@_busy" /></label>
         @if (_plan is not null)
         {
             <div class="totals" role="status">

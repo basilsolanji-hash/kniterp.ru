@@ -21,7 +21,7 @@ public sealed record CrmReferenceDto(long Id, CrmReferenceKind Kind, string Name
 
 public sealed record CrmSettingsDto(
     IReadOnlyList<CrmPipelineDto> Pipelines, IReadOnlyList<CrmReferenceDto> Sources, IReadOnlyList<CrmReferenceDto> LossReasons, bool CanEdit,
-    CrmAutomationValues? Automation = null, byte[]? AutomationVersion = null);
+    CrmAutomationValues? Automation = null, byte[]? AutomationVersion = null, bool VoiceDictation = false, bool CanSetVoiceDictation = false);
 
 public sealed record CrmPlanRowDto(long Id, int Year, int Month, long? UserId, string? User, long? PipelineId, string? Pipeline, decimal Amount, byte[] RowVersion);
 
@@ -41,10 +41,54 @@ public sealed class CrmSettingsService(IKnitErpDbContext db, IAccessGuard guard,
             .OrderBy(r => r.IsArchived).ThenBy(r => r.SortOrder).ThenBy(r => r.Name)
             .Select(r => new CrmReferenceDto(r.Id, r.Kind, r.Name, r.IsArchived, r.RowVersion)).ToListAsync(ct);
         var automation = await db.CrmSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
+        var canEdit = ctx.Permissions.Has(Permissions.CrmSettings);
         return new CrmSettingsDto(pipelines, refs.Where(r => r.Kind == CrmReferenceKind.Source).ToList(),
-            refs.Where(r => r.Kind == CrmReferenceKind.LossReason).ToList(), ctx.Permissions.Has(Permissions.CrmSettings),
-            (automation ?? CrmSettings.Default(ctx.OrganizationId)).Values, automation?.RowVersion);
+            refs.Where(r => r.Kind == CrmReferenceKind.LossReason).ToList(), canEdit,
+            (automation ?? CrmSettings.Default(ctx.OrganizationId)).Values, automation?.RowVersion, automation?.VoiceDictation ?? false,
+            canEdit && await IsOwnerAsync(ctx, ct));
     }
+
+    /// <summary>D132 п. 5: включена ли диктовка заметок в организации (по умолчанию — нет).</summary>
+    public async Task<bool> VoiceDictationAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.CrmView, ct);
+        return await db.CrmSettings.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId).Select(x => x.VoiceDictation).SingleOrDefaultAsync(ct);
+    }
+
+    /// <summary>
+    /// D132 п. 5: включить или выключить диктовку — только Владелец (право «CRM: настройки» и роль Владельца): голос может уйти
+    /// сервису производителя браузера, это решение о передаче данных, а не настройка удобства.
+    /// </summary>
+    public async Task SetVoiceDictationAsync(bool on, byte[]? rowVersion, CancellationToken ct = default)
+    {
+        var ctx = await DemandAsync(ct);
+        if (!await IsOwnerAsync(ctx, ct))
+        {
+            throw new BusinessRuleException("crm.settings.voice_owner", "Включить или выключить диктовку может только Владелец организации.");
+        }
+
+        var s = await db.CrmSettings.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct);
+        if (s is null)
+        {
+            if (rowVersion is { Length: > 0 })
+            {
+                throw new ConcurrencyConflictException();
+            }
+
+            s = CrmSettings.Default(ctx.OrganizationId);
+            db.CrmSettings.Add(s);
+        }
+        else
+        {
+            s.EnsureVersion(s.RowVersion, rowVersion ?? []);
+        }
+
+        Audit(ctx, nameof(CrmSettings), ctx.OrganizationId, null, s.SetVoiceDictation(on), "Диктовка заметок");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    private Task<bool> IsOwnerAsync(AccessContext ctx, CancellationToken ct) =>
+        KnitErp.Application.Authentication.SignInRestrictionRules.IsOwnerAsync(db, ctx.UserId, ctx.OrganizationId, clock.UtcNow, ct);
 
     /// <summary>Настройки автоматизации (D660–D669). rowVersion null — записи ещё нет.</summary>
     public async Task SaveAutomationAsync(CrmAutomationValues values, byte[]? rowVersion, CancellationToken ct = default)

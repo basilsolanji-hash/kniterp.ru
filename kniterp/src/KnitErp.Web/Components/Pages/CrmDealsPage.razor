@@ -78,6 +78,7 @@ else
         </div>
     }
 
+    <FoldOnPhone Title="@L("Фильтры")">
     <form class="inline-form" @onsubmit="ReloadAsync">
         <label>
             @L("Воронка")
@@ -121,10 +122,12 @@ else
         }
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
     </form>
+    </FoldOnPhone>
 
     @if (_options.CanAll && _options.CanEdit)
     {
-        <CrmImportPanel Kind="CrmImportKind.Deals" Applied="ReloadAsync" />
+        @* D699: импорт из файла — работа за компьютером; на телефоне не занимает экран над сделками. *@
+        <div class="crm-wide-only"><CrmImportPanel Kind="CrmImportKind.Deals" Applied="ReloadAsync" /></div>
     }
 
     <div class="crm-tabs" role="group" aria-label="@L("Вид")">
@@ -140,7 +143,7 @@ else
                 var col = _board.Columns[i];
                 var prev = i > 0 ? _board.Columns[i - 1].Stage : null;
                 var next = i + 1 < _board.Columns.Count ? _board.Columns[i + 1].Stage : null;
-                <section class="crm-col @(_dropStage == col.Stage.Id ? "drop" : null)" aria-label="@col.Stage.Name"
+                <section class="crm-col @(_dropStage == col.Stage.Id ? "drop" : null) @(col.Count == 0 ? "empty" : null)" aria-label="@col.Stage.Name"
                          @ondragover="() => _dropStage = col.Stage.Id" @ondragover:preventDefault="true" @ondrop="() => DropAsync(col.Stage)">
                     <div class="crm-col-head">
                         <span class="stage stage-@col.Stage.Color">@col.Stage.Name</span>
@@ -173,10 +176,10 @@ else
                                     <div class="crm-move">
                                         <button type="button" class="secondary" disabled="@(_busy || prev is null || prev.Kind == CrmStageKind.Lost)"
                                                 aria-label="@L("Сделку {0} — на этап левее", d.Number)" title="@L("На этап левее")"
-                                                @onclick="() => MoveAsync(d, prev!)">←</button>
+                                                @onclick="() => MoveAsync(d, prev!)">← <span class="crm-move-name">@prev?.Name</span></button>
                                         <button type="button" class="secondary" disabled="@(_busy || next is null || next.Kind == CrmStageKind.Lost)"
                                                 aria-label="@L("Сделку {0} — на этап правее", d.Number)" title="@L("На этап правее")"
-                                                @onclick="() => MoveAsync(d, next!)">→</button>
+                                                @onclick="() => MoveAsync(d, next!)"><span class="crm-move-name">@next?.Name</span> →</button>
                                     </div>
                                 }
                             </li>
@@ -189,7 +192,7 @@ else
                 </section>
             }
         </div>
-        <p class="muted small">@L("Перетащите карточку на другой этап или нажмите «←» и «→». Проигрыш — в карточке сделки, с причиной.")</p>
+        <p class="muted small"><span class="crm-drag-hint">@L("Перетащите карточку на другой этап или нажмите «←» и «→».")</span> @L("Проигрыш — в карточке сделки, с причиной.")</p>
     }
     else if (_view == "table" && _page is not null)
     {

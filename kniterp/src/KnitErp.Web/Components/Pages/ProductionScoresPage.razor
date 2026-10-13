@@ -82,10 +82,11 @@ else
     private string? _denied;
     private string? _message;
     private bool _busy;
-    private DateTime _month = DateTime.Today;
+    private DateTime _month;
 
     protected override async Task OnInitializedAsync()
     {
+        _month = TimeZones.Today(CurrentAccess.TimeZoneId); // D809: месяц по часовому поясу организации
         try
         {
             await LoadCoreAsync();

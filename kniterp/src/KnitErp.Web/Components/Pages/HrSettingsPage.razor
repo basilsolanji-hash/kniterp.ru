@@ -17,6 +17,7 @@ else if (_data is null)
 else
 {
     <div class="page-head"><h1>@L("Кадры и заработок: настройки")</h1></div>
+    <ReadOnlyNote When="@(!_data.CanEditPayroll && !_data.CanEditRules)" />
 
     @if (_message is not null)
     {
@@ -26,7 +27,7 @@ else
     <div class="panel">
         <h2>@L("Доплаты и оплата по окладу")</h2>
         <p class="muted">@L("Значения не ниже минимума Трудового кодекса: ночные — 20 % (ст. 154), сверхурочные — 1,5 и 2 (ст. 152), выходные и праздники — 2 (ст. 153). Больше — если так записано в коллективном договоре или положении об оплате труда.")</p>
-        <fieldset disabled="@(!_data.CanEditPayroll || _busy)" style="border: 0; padding: 0; margin: 0; min-width: 0">
+        <fieldset disabled="@(!_data.CanEditPayroll || _busy)" title="@((!_data.CanEditPayroll) ? L("Нет права на изменение") : null)" style="border: 0; padding: 0; margin: 0; min-width: 0">
             <div class="grid">
                 <label>@L("Ночные часы, % часовой ставки") <input type="number" step="0.01" min="20" max="200" @bind="_p.NightPercent" /></label>
                 <label>@L("Сверхурочные: первые 2 часа, ×") <input type="number" step="0.01" min="1.5" max="5" @bind="_p.OvertimeFirst" /></label>
@@ -45,7 +46,7 @@ else
 
         <h2>@L("Выгрузка в 1С: Зарплата и управление персоналом")</h2>
         <p class="muted">@L("Коды видов начислений, как они называются в вашей 1С: ЗУП. Пусто — стандартный код. Уточните у бухгалтера перед первой загрузкой.")</p>
-        <fieldset disabled="@(!_data.CanEditPayroll || _busy)" style="border: 0; padding: 0; margin: 0; min-width: 0">
+        <fieldset disabled="@(!_data.CanEditPayroll || _busy)" title="@((!_data.CanEditPayroll) ? L("Нет права на изменение") : null)" style="border: 0; padding: 0; margin: 0; min-width: 0">
             <div class="grid">
                 <label>@L("Версия 1С: ЗУП") <input @bind="_p.ZupVersion" maxlength="100" placeholder="3.1" /></label>
                 <label>@L("Сдельная оплата") <input @bind="_p.ZupPieceCode" maxlength="100" placeholder="СдельнаяОплата" /></label>
@@ -67,7 +68,7 @@ else
 
     <div class="panel">
         <h2>@L("Кадровые правила")</h2>
-        <fieldset disabled="@(!_data.CanEditRules || _busy)" style="border: 0; padding: 0; margin: 0; min-width: 0">
+        <fieldset disabled="@(!_data.CanEditRules || _busy)" title="@((!_data.CanEditRules) ? L("Нет права на изменение") : null)" style="border: 0; padding: 0; margin: 0; min-width: 0">
             <label class="inline"><input type="checkbox" @bind="_r.HrOfficerClosesTimesheet" /> @L("Кадровик может закрывать табель (иначе закрывает руководитель подразделения)")</label>
             <label class="inline"><input type="checkbox" @bind="_r.LeaveOnlyByOrder" /> @L("Отпуск только по приказу Т-6 (без кнопки «В отпуск» на карточке)")</label>
             <label class="inline"><input type="checkbox" @bind="_r.BlockPersonalDataWithoutConsent" /> @L("Не вводить персональные данные без действующего согласия сотрудника")</label>

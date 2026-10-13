@@ -53,7 +53,8 @@ public sealed class CounterpartyCardE2ETests(HrAppFixture app) : IClassFixture<H
         // Страница прокручена вниз, затем открыто меню.
         await page.EvaluateAsync("() => window.scrollTo(0, 200)");
         var before = await page.EvaluateAsync<double>("() => window.scrollY");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Меню" }).ClickAsync();
+        // D805 (интерфейс): на телефоне меню открывает «Ещё» в нижней панели.
+        await page.Locator("nav.bottom-nav").GetByRole(AriaRole.Button, new() { Name = "Ещё" }).ClickAsync();
         var nav = page.Locator("#nav-body");
         await Assertions.Expect(nav).ToBeVisibleAsync();
 

@@ -108,6 +108,8 @@ public sealed class CrmAppFixture : IAsyncLifetime
     {
         var org = _org!;
         await using var crm = _host.Crm(org.OwnerUserId, org.OrganizationId);
+        // D132 п. 5: диктовку включает Владелец (по умолчанию выключена) — сценарий проверяет кнопку там, где браузер умеет.
+        await crm.Settings.SetVoiceDictationAsync(true, (await crm.Settings.GetAsync()).AutomationVersion);
         long customer;
         await using (var s = _host.As(org.OwnerUserId, org.OrganizationId))
         {
@@ -295,11 +297,23 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await page.GetByLabel("Цена").FillAsync("900");
         await page.GetByRole(AriaRole.Form, new() { Name = "Добавить позицию" }).GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Позиция добавлена");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Сформировать КП" }).ClickAsync();
+        // D699: панель «Дальше» предлагает одно главное действие — после позиций это КП.
+        var next = page.GetByRole(AriaRole.Region, new() { Name = "Дальше" });
+        await next.GetByRole(AriaRole.Button, new() { Name = "Сформировать КП" }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("КП сформировано");
         await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"КП-\d+") })).ToContainTextAsync("180 000,00");
+        await Assertions.Expect(next.GetByRole(AriaRole.Button, new() { Name = "Заказ по КП" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "PDF", Exact = true })).ToHaveAttributeAsync("href", new Regex(@"crm/offers/\d+\.pdf$"));
+
+        // D699: «Выиграна» без заказа — только после подтверждения.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Выиграна", Exact = true }).ClickAsync();
+        var confirmWon = page.GetByRole(AriaRole.Alertdialog, new() { Name = "Закрыть сделку выигранной" });
+        await Assertions.Expect(confirmWon).ToContainTextAsync("нет заказа покупателя");
+        await confirmWon.GetByRole(AriaRole.Button, new() { Name = "Отмена" }).ClickAsync();
+        await Assertions.Expect(confirmWon).ToHaveCountAsync(0);
+        await Assertions.Expect(page.Locator(".page-head .tag")).ToHaveTextAsync("В работе");
         await Shot(page, "crm-02-deal-offer");
-        var href = await page.GetByRole(AriaRole.Link, new() { Name = "Печать / PDF" }).First.GetAttributeAsync("href");
+        var href = await page.GetByRole(AriaRole.Link, new() { Name = "Печать", Exact = true }).First.GetAttributeAsync("href");
         await OpenAsync(page, href!);
         await Assertions.Expect(page.Locator("body")).ToContainTextAsync("Коммерческое предложение");
         await Assertions.Expect(page.Locator("body")).ToContainTextAsync("Свитер вязаный");
@@ -380,23 +394,23 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await page.GetByLabel("Цена").FillAsync("1000");
         await page.GetByRole(AriaRole.Form, new() { Name = "Добавить позицию" }).GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Позиция добавлена" })).ToBeVisibleAsync();
-        await page.GetByRole(AriaRole.Button, new() { Name = "Сформировать КП" }).ClickAsync();
+        // Весь путь — кнопкой панели «Дальше» (D699): КП → заказ по КП → подтверждение → счёт → оплата.
+        var next = page.GetByRole(AriaRole.Region, new() { Name = "Дальше" });
+        await next.GetByRole(AriaRole.Button, new() { Name = "Сформировать КП" }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"КП-\d+") })).ToContainTextAsync("150 000,00");
 
-        // Заказ по КП → подтверждение из сделки → счёт.
-        await page.GetByRole(AriaRole.Button, new() { Name = "Заказ по КП" }).ClickAsync();
+        await next.GetByRole(AriaRole.Button, new() { Name = "Заказ по КП" }).ClickAsync();
         await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Создать заказ по КП-") }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Заказ покупателя создан" })).ToBeVisibleAsync();
-        await page.GetByRole(AriaRole.Button, new() { Name = "Подтвердить", Exact = true }).ClickAsync();
-        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Выставить счёт" })).ToBeVisibleAsync();
-        await page.GetByRole(AriaRole.Button, new() { Name = "Выставить счёт" }).ClickAsync();
+        await next.GetByRole(AriaRole.Button, new() { Name = "Подтвердить заказ" }).ClickAsync();
+        await next.GetByRole(AriaRole.Button, new() { Name = "Выставить счёт" }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex(@"^Счёт СЧ-\d+$") })).ToBeVisibleAsync();
         await Assertions.Expect(page.Locator(".crm-paid")).ToContainTextAsync("Оплачено по сделке: 0,00 из 150 000,00");
         await Shot(page, "crm-11-deal-invoice");
 
-        // Оплата — в карточке заказа (модуль продаж).
-        await page.GetByRole(AriaRole.Link, new() { Name = "Открыть", Exact = true }).First.ClickAsync();
-        await page.WaitForURLAsync(new Regex(@"/sales-orders/\d+$"));
+        // Оплата — в карточке заказа (модуль продаж): «Внести оплату» ведёт сразу к форме оплат.
+        await next.GetByRole(AriaRole.Link, new() { Name = "Внести оплату" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/sales-orders/\d+#payments$"));
         await WaitBlazorAsync(page);
         var pay = page.Locator("form", new() { Has = page.GetByRole(AriaRole.Button, new() { Name = "Записать оплату" }) });
         await pay.GetByLabel("Сумма").FillAsync("150000");
@@ -408,6 +422,7 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await Assertions.Expect(page.Locator(".page-head .tag")).ToHaveTextAsync("Выиграна");
         await Assertions.Expect(page.Locator(".crm-paid")).ToContainTextAsync("150 000,00 из 150 000,00");
         await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"ЗК-\d+") })).ToContainTextAsync("оплачен");
+        await Assertions.Expect(page.GetByRole(AriaRole.Region, new() { Name = "Дальше" })).ToHaveCountAsync(0);
         await Shot(page, "crm-12-deal-paid");
     });
 

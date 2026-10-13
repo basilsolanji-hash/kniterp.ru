@@ -34,7 +34,7 @@ else
 
     <form class="panel" @onsubmit="SaveAsync" aria-label="@L("Новая рассылка")">
         <h2>@(_edit is null ? L("Новая рассылка") : _edit.Status == CrmMailingStatus.Scheduled ? L("Запланирована: {0}", _edit.Subject) : L("Черновик: {0}", _edit.Subject))</h2>
-        <fieldset disabled="@(_edit?.Status == CrmMailingStatus.Scheduled)">
+        <fieldset disabled="@(_edit?.Status == CrmMailingStatus.Scheduled)" title="@((_edit?.Status == CrmMailingStatus.Scheduled) ? L("Рассылка запланирована — чтобы изменить, сначала отмените отправку") : null)">
             <div class="grid">
                 @if (_templates.Count > 0)
                 {
@@ -80,11 +80,11 @@ else
             }
             @if (_edit is not null)
             {
-                <ConfirmButton OnConfirm="SendAsync" Disabled="@(_busy || _audience == 0 || !Mailings.MailConfigured)" Question='@L("Отправить рассылку сейчас?")'>@L("Отправить сейчас")</ConfirmButton>
+                <ConfirmButton OnConfirm="SendAsync" Disabled="@(_busy || _audience == 0 || !Mailings.MailConfigured)" Title="@((!Mailings.MailConfigured) ? L("Почта организации не настроена: CRM → Настройки → Почта") : (_audience == 0) ? L("В выборке нет получателей") : null)" Question='@L("Отправить рассылку сейчас?")'>@L("Отправить сейчас")</ConfirmButton>
                 @if (_edit.Status == CrmMailingStatus.Draft)
                 {
                     <label class="inline">@L("или в") <input type="datetime-local" @bind="_at" aria-label="@L("Время отправки")" /></label>
-                    <button type="button" class="secondary" @onclick="ScheduleAsync" disabled="@(_busy || _at is null || !Mailings.MailConfigured)">@L("Запланировать")</button>
+                    <button type="button" class="secondary" @onclick="ScheduleAsync" disabled="@(_busy || _at is null || !Mailings.MailConfigured)" title="@((!Mailings.MailConfigured) ? L("Почта организации не настроена: CRM → Настройки → Почта") : (_at is null) ? L("Укажите дату и время отправки") : null)">@L("Запланировать")</button>
                 }
                 <button type="button" class="secondary" @onclick="NewAsync" disabled="@_busy">@L("Новая")</button>
             }

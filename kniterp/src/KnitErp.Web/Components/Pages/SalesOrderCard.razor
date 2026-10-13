@@ -423,7 +423,7 @@ else
                         @if (editable)
                         {
                             <td>
-                                <button type="button" class="secondary" @onclick="() => EditLine(l)" disabled="@_busy" aria-label="@L("Изменить: {0}", l.Code)">@L("Изменить")</button>
+                                <button type="button" class="secondary" @onclick="() => EditLine(l)" disabled="@_busy" aria-label="@L("Изменить: {0}", l.Code)">@L("Изменить")</button><WhyDisabled When="@(_order.Lines.Count == 0)">@L("Добавьте хотя бы одну строку")</WhyDisabled>
                                 <ConfirmButton Class="secondary" OnConfirm="() => RemoveLineAsync(l)" Disabled="@_busy" AriaLabel="@L("Удалить строку {0}", l.Code)" Question='@L("Удалить?")'>@L("Удалить")</ConfirmButton>
                             </td>
                         }
@@ -486,7 +486,7 @@ else
         <LabelsButton Lines="@(_order.Lines.Select(l => (l.ItemId, l.Quantity)))" />
         @if (editable && _order.PriceIssues is not { Count: > 0 })
         {
-            <button type="button" @onclick="ConfirmAsync" disabled="@(_busy || _order.Lines.Count == 0)">@L("Подтвердить заказ")</button>
+            <button type="button" @onclick="ConfirmAsync" disabled="@(_busy || _order.Lines.Count == 0)" title="@((_order.Lines.Count == 0) ? L("Добавьте хотя бы одну строку") : null)">@L("Подтвердить заказ")</button>
         }
         @if (_order.CanCreateDocuments && _order.Status == SalesOrderStatus.Confirmed && _order.Shipped != ShipmentState.Full)
         {
@@ -604,7 +604,7 @@ else
             <p class="muted">@L("Счёт не выставлен.")</p>
         }
 
-        <h2 style="margin-top: 20px">@L("Оплаты")</h2>
+        <h2 id="payments" style="margin-top: 20px">@L("Оплаты")</h2>
         @if (_order.CanEdit)
         {
             <form class="inline-form" @onsubmit="PayAsync">

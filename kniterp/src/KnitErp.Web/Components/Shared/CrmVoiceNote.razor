@@ -1,9 +1,14 @@
 @using KnitErp.Domain.Crm
+@using KnitErp.Application.Crm
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
 
 @*
-    D693: поле заметки с диктовкой. Кнопка «Надиктовать» есть, только если браузер поддерживает Web Speech API (SpeechRecognition или
+    D693: поле заметки с диктовкой. Кнопка «Надиктовать» есть, только если диктовку включил Владелец в настройках CRM (D132 п. 5;
+    проверка — своим DbContext, чтобы не мешать запросам страницы) и браузер поддерживает Web Speech API (SpeechRecognition или
     webkitSpeechRecognition), язык ru-RU; иначе — обычное поле. Распознанный текст дописывается в поле, пользователь правит и сохраняет
     сам — компонент ничего не сохраняет. Подключение: <CrmVoiceNote @bind-Value="_note" Label="@L("Заметка")" />.
 *@
@@ -26,7 +31,7 @@
                 <button type="button" class="secondary" @onclick="StartAsync" disabled="@Disabled" aria-pressed="false">🎤 @L("Надиктовать")</button>
             }
         </div>
-        <p class="muted small crm-voice-hint">@L("Речь распознаёт браузер. knitERP не отправляет звук и текст сторонним сервисам; браузер может использовать для распознавания свой сервис (например, Chrome — Google). Проверьте текст перед сохранением.")</p>
+        <details class="muted small crm-voice-hint"><summary>ⓘ @L("Как распознаётся речь")</summary>@L("Речь распознаёт браузер. knitERP не отправляет звук и текст сторонним сервисам; браузер может использовать для распознавания свой сервис (например, Chrome — Google). Проверьте текст перед сохранением.")</details>
     }
     @if (_error is not null)
     {
@@ -63,6 +68,15 @@
 
         try
         {
+            await using (var db = Factory.Create())
+            {
+                var settings = new CrmSettingsService(db, new KnitErp.Application.Access.AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock);
+                if (!await settings.VoiceDictationAsync())
+                {
+                    return; // выключено в организации — обычное поле
+                }
+            }
+
             _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/crm-voice.js");
             _supported = await _module.InvokeAsync<bool>("supported");
             if (_supported)
@@ -70,7 +84,7 @@
                 StateHasChanged();
             }
         }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException or AccessDeniedException)
         {
             _supported = false; // нет модуля или схема отключилась — остаётся обычное поле
         }

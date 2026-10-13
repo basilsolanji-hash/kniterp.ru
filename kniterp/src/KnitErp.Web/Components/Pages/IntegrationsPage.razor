@@ -128,7 +128,7 @@ else
                         <td class="num @(w.Failed > 0 ? "neg" : null)">@w.Failed</td>
                         <td>
                             <div class="row-actions">
-                                <button type="button" class="secondary" @onclick="() => TestAsync(w)" disabled="@(_busy || !w.IsActive)">@L("Тест")</button>
+                                <button type="button" class="secondary" @onclick="() => TestAsync(w)" disabled="@(_busy || !w.IsActive)" title="@((!w.IsActive) ? L("Вебхук отключён") : null)">@L("Тест")</button>
                                 <button type="button" class="secondary" @onclick="() => ShowDeliveriesAsync(w)" disabled="@_busy">@L("Журнал")</button>
                                 <button type="button" class="secondary" @onclick="() => SetActiveAsync(w, !w.IsActive)" disabled="@_busy">@(w.IsActive ? L("Выключить") : L("Включить"))</button>
                             </div>

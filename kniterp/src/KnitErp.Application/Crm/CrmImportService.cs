@@ -87,7 +87,11 @@ public sealed class CrmImportService(IKnitErpDbContext db, IAccessGuard guard, I
     {
         var ctx = await DemandAsync(ct);
         await CrmSettingsService.EnsureDefaultsAsync(db, ctx.OrganizationId, ct);
-        var sheet = spreadsheet.ReadFirstSheet(file, MaxRows + 1);
+        // D697: CSV наравне с Excel — формат определяется по содержимому, а не по расширению.
+        using var buffer = new MemoryStream();
+        await file.CopyToAsync(buffer, ct);
+        var bytes = buffer.ToArray();
+        var sheet = CrmCsv.IsXlsx(bytes) ? spreadsheet.ReadFirstSheet(new MemoryStream(bytes), MaxRows + 1) : CrmCsv.Parse(bytes, MaxRows + 1);
         if (sheet.Count < 2)
         {
             throw new BusinessRuleException("import.file_empty", "В файле нет строк с данными.");
@@ -112,10 +116,21 @@ public sealed class CrmImportService(IKnitErpDbContext db, IAccessGuard guard, I
             }
         }
 
+        // D697: Битрикс24 и amoCRM выгружают ФИО тремя столбцами — «Фамилия», «Имя», «Отчество»: собираем «Фамилия Имя Отчество».
+        var surname = lower.FindIndex(h => h is "фамилия" or "контакт: фамилия");
+        var patronymic = lower.FindIndex(h => h is "отчество" or "контакт: отчество");
+        var firstName = lower.FindIndex(h => h is "имя" or "контакт: имя");
+        var splitName = surname >= 0 && firstName >= 0 && (!index.TryGetValue("name", out var nameIndex) || nameIndex == firstName);
+        if (splitName)
+        {
+            index.Remove("name");
+            mapping["name"] = string.Join(" + ", new[] { surname, firstName, patronymic }.Where(i => i >= 0).Select(i => header[i]));
+        }
+
         var system = lower.Any(h => h is "этап сделки" or "основной контакт" or "бюджет") ? "amoCRM"
             : lower.Any(h => h is "стадия сделки" or "стадия" or "рабочий телефон" or "рабочий e-mail") ? "Битрикс24" : "knitERP";
         var required = kind == CrmImportKind.Contacts ? "name" : "title";
-        if (!index.ContainsKey(required))
+        if (!index.ContainsKey(required) && !(required == "name" && splitName))
         {
             throw new BusinessRuleException("crm.import.header", kind == CrmImportKind.Contacts
                 ? "В файле нет столбца «ФИО» (или «Имя», «Контакт»). Скачайте шаблон."
@@ -137,6 +152,11 @@ public sealed class CrmImportService(IKnitErpDbContext db, IAccessGuard guard, I
             }
 
             var values = index.ToDictionary(x => x.Key, x => x.Value < cells.Count ? cells[x.Value].Trim() : "", StringComparer.Ordinal);
+            if (splitName)
+            {
+                values["name"] = string.Join(" ", new[] { surname, firstName, patronymic }.Where(i => i >= 0 && i < cells.Count).Select(i => cells[i].Trim())
+                    .Where(v => v.Length > 0));
+            }
             var msgs = new List<string>();
             var ext = values.GetValueOrDefault("id") is { Length: > 0 } e ? e : null;
             var action = CrmImportAction.Create;

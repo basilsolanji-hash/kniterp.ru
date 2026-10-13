@@ -51,6 +51,12 @@ public sealed class CrmSettings
     public string? OfferTerms { get; private set; }
     public int OfferValidDays { get; private set; } = 14;
 
+    /// <summary>
+    /// D132 п. 5: диктовка заметок (D693). Речь распознаёт браузер, и он может отправлять звук на серверы своего производителя
+    /// (за рубеж, 152-ФЗ), поэтому по умолчанию выключено; включает только Владелец, видя предупреждение.
+    /// </summary>
+    public bool VoiceDictation { get; private set; }
+
     /// <summary>Курсор распределения по очереди: id последнего назначенного менеджера.</summary>
     public long? LastAssignedUserId { get; private set; }
 
@@ -95,6 +101,12 @@ public sealed class CrmSettings
         return $"распределение {(AssignMode == CrmAssignMode.RoundRobin ? "по очереди" : "по умолчанию")}, следующий шаг {(NextStepSuggestions ? "да" : "нет")}, "
                + $"этап по событиям {(StageByEvents ? "да" : "нет")}, повторная продажа {(RepeatSaleDays is { } r ? $"{r} дн." : "нет")}, "
                + $"лид без действий {StaleLeadDays} дн., факт плана {(PlanFact == CrmPlanFact.Payments ? "оплаты" : "выигранные сделки")}, КП {OfferValidDays} дн.";
+    }
+
+    public string SetVoiceDictation(bool on)
+    {
+        VoiceDictation = on;
+        return on ? "диктовка заметок включена (распознаёт браузер)" : "диктовка заметок выключена";
     }
 
     /// <summary>Следующий по очереди из списка (по возрастанию id); пусто — null.</summary>

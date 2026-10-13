@@ -15,7 +15,8 @@ else if (_s is null)
 }
 else
 {
-    <div class="page-head"><h1>@L("Настройки закупок")</h1></div>
+    <div class="page-head"><h1>@L("Настройки закупок")</h1><a class="button secondary" href="settings/automation">@L("Настройки автоматизации")</a></div>
+    <ReadOnlyNote When="@(!_s.CanEdit)" />
     @if (_message is not null)
     {
         <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
@@ -24,7 +25,7 @@ else
     <form class="panel" @onsubmit="SaveAsync">
         <h2>@L("Поступление по заказу")</h2>
         <label>@L("Допуск поступления сверх заказа, %")
-            <input @bind="_percent" inputmode="decimal" disabled="@(!_s.CanEdit)" aria-label="@L("Допуск поступления сверх заказа, %")" /></label>
+            <input @bind="_percent" inputmode="decimal" disabled="@(!_s.CanEdit)" title="@((!_s.CanEdit) ? L("Нет права на изменение") : null)" aria-label="@L("Допуск поступления сверх заказа, %")" /></label>
         <p class="muted">@L("По позиции заказа можно принять не больше «заказано × (1 + допуск/100)». От 0 до 10%; 0 — сверх заказа нельзя, лишнее оформляется поступлением без заказа. Менять может пользователь с правом «Организация: изменение».")</p>
         @if (_s.UpdatedAtUtc is { } at)
         {

@@ -39,7 +39,8 @@ public sealed record SalesDocumentSettingsDto(
 /// </summary>
 public sealed class SalesDocumentSettingsService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IEmailSender email)
 {
-    public static readonly IReadOnlyList<SalesMailKind> MailKinds = [SalesMailKind.Order, SalesMailKind.Invoice, SalesMailKind.Upd, SalesMailKind.Stage];
+    public static readonly IReadOnlyList<SalesMailKind> MailKinds =
+        [SalesMailKind.Order, SalesMailKind.Invoice, SalesMailKind.Upd, SalesMailKind.Stage, SalesMailKind.PaymentReminder, SalesMailKind.PaymentOverdue]; // D148
 
     public async Task<SalesDocumentSettingsDto> GetAsync(CancellationToken ct = default)
     {

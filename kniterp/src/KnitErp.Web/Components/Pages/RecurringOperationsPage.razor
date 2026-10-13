@@ -1,0 +1,273 @@
+@page "/money/recurring"
+@using KnitErp.Application.Finance
+@using KnitErp.Domain.Finance
+@using KnitErp.Domain.Catalog
+@inject RecurringOperationService Recurring
+
+@* D147: регулярные денежные операции — шаблоны с расписанием; черновики создаются сами, проводит человек. *@
+<PageTitle>@L("Регулярные операции") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Регулярные операции")</h1>
+        @if (_data.CanEdit && _form is null && _data.Accounts.Count > 0)
+        {
+            <button type="button" @onclick="NewForm" disabled="@_busy">@L("Новый шаблон")</button>
+        }
+        <a class="button secondary" href="money">@L("Касса и счета")</a>
+    </div>
+    <p class="muted">@L("Аренда, связь, зарплатные авансы: по расписанию создаётся черновик, деньги списываются только после «Провести». Пропущенный черновик — с причиной.")</p>
+    @if (_data.CanEdit && _data.Accounts.Count == 0)
+    {
+        <div class="flash error" role="alert">@L("Нет счёта или кассы — добавьте их в разделе «Юрлица, счета и кассы», затем создайте шаблон.") <a href="legal-entities">@L("Юрлица, счета и кассы")</a></div>
+    }
+    @if (!_data.Enabled)
+    {
+        <div class="flash error" role="alert">@L("Регулярные операции выключены в настройках автоматизации — черновики не создаются.") <a href="settings/automation">@L("Настройки автоматизации")</a></div>
+    }
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_form is { } f)
+    {
+        <form class="panel" @onsubmit="SaveAsync">
+            <h2>@(f.Id is null ? L("Новый шаблон") : L("Изменить шаблон"))</h2>
+            <label>@L("Название") <input @bind="f.Name" maxlength="@RecurringOperation.NameMaxLength" disabled="@_busy" /></label>
+            <label>@L("Вид")
+                <select @bind="f.Kind" disabled="@_busy">
+                    <option value="@MoneyOperationKind.Expense">@L("Выдача")</option>
+                    <option value="@MoneyOperationKind.Income">@L("Поступление")</option>
+                </select></label>
+            <label>@L("Счёт или касса")
+                <select @bind="f.AccountId" disabled="@_busy">
+                    @foreach (var a in _data.Accounts)
+                    {
+                        <option value="@a.Id">@a.Label</option>
+                    }
+                </select></label>
+            <label>@L("Статья")
+                <select @bind="f.ItemId" disabled="@_busy">
+                    <option value="0">@L("— прочие —")</option>
+                    @foreach (var i in _data.Items.Where(i => i.Direction == (f.Kind == MoneyOperationKind.Income ? CashFlowDirection.In : CashFlowDirection.Out)))
+                    {
+                        <option value="@i.Id">@i.Name</option>
+                    }
+                </select></label>
+            <label>@L("Сумма") <input @bind="f.Amount" inputmode="decimal" disabled="@_busy" /></label>
+            <label>@L("Получатель или плательщик") <input @bind="f.Party" maxlength="@MoneyOperation.PartyMaxLength" disabled="@_busy" /></label>
+            <label>@L("Основание") <input @bind="f.Basis" maxlength="@MoneyOperation.BasisMaxLength" disabled="@_busy" /></label>
+            <label>@L("Расписание")
+                <select @bind="f.Period" disabled="@_busy">
+                    <option value="@RecurrencePeriod.Monthly">@L("Каждый месяц")</option>
+                    <option value="@RecurrencePeriod.Quarterly">@L("Каждый квартал")</option>
+                    <option value="@RecurrencePeriod.Weekly">@L("Каждую неделю")</option>
+                </select></label>
+            <label>@(f.Period == RecurrencePeriod.Weekly ? L("День недели (1 — понедельник … 7 — воскресенье)") : L("День месяца (1–31; в коротком месяце — последний)"))
+                <input type="number" min="1" max="@(f.Period == RecurrencePeriod.Weekly ? 7 : 31)" step="1" @bind="f.Day" disabled="@_busy" /></label>
+            <label>@L("С") <input type="date" @bind="f.Start" disabled="@_busy" /></label>
+            <label>@L("По (необязательно)") <input type="date" @bind="f.End" disabled="@_busy" /></label>
+            <div class="actions">
+                <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                <button type="button" class="secondary" @onclick="() => _form = null" disabled="@_busy">@L("Отмена")</button>
+            </div>
+        </form>
+    }
+
+    <h2>@L("Черновики")</h2>
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Дата")</th><th>@L("Операция")</th><th>@L("Счёт или касса")</th><th class="num">@L("Сумма")</th><th>@L("Состояние")</th><th></th></tr></thead>
+            <tbody>
+                @if (_data.Runs.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Черновиков пока нет.")</td></tr>
+                }
+                @foreach (var r in _data.Runs)
+                {
+                    <tr @key="r.Id">
+                        <td>@r.DueDate.ToString("dd.MM.yyyy")</td>
+                        <td>@r.Name</td>
+                        <td class="small">@r.Account</td>
+                        <td class="num">@Amounts.Format(r.Amount)</td>
+                        <td>@L(RecurringOperationRun.StatusName(r.Status)) @if (r.MoneyOperationNumber is { } n) { <span class="muted small">@n</span> } @if (r.SkipReason is { } why) { <span class="muted small">@why</span> }</td>
+                        <td>
+                            @if (r.Status == RecurringRunStatus.Pending && _data.CanEdit)
+                            {
+                                @if (_skip == r.Id)
+                                {
+                                    <input @bind="_skipReason" aria-label="@L("Причина пропуска")" placeholder="@L("Причина пропуска")" disabled="@_busy" />
+                                    <button type="button" class="secondary" @onclick="() => SkipAsync(r)" disabled="@_busy">@L("Пропустить")</button>
+                                }
+                                else
+                                {
+                                    <button type="button" @onclick="() => PostAsync(r)" disabled="@_busy" aria-label="@L("Провести: {0}", r.Name)">@L("Провести")</button>
+                                    <button type="button" class="secondary" @onclick="() => { _skip = r.Id; _skipReason = null; }" disabled="@_busy">@L("Пропустить")</button>
+                                }
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h2>@L("Шаблоны")</h2>
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>@L("Название")</th><th>@L("Вид")</th><th class="num">@L("Сумма")</th><th>@L("Расписание")</th><th>@L("Следующий черновик")</th><th></th></tr></thead>
+            <tbody>
+                @if (_data.Templates.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Шаблонов нет — добавьте аренду, связь или другой регулярный платёж.")</td></tr>
+                }
+                @foreach (var t in _data.Templates)
+                {
+                    <tr @key="t.Id" class="@(t.IsArchived ? "archived" : null)">
+                        <td>@t.Name <div class="muted small">@t.Account</div></td>
+                        <td>@(t.Kind == MoneyOperationKind.Income ? L("Поступление") : L("Выдача"))</td>
+                        <td class="num">@Amounts.Format(t.Amount)</td>
+                        <td>@L(RecurringOperation.PeriodName(t.Period)), @L("день {0}", t.Day)</td>
+                        <td>@(t.IsArchived ? L("отключён") : t.NextDate.ToString("dd.MM.yyyy"))</td>
+                        <td>
+                            @if (_data.CanEdit)
+                            {
+                                <button type="button" class="secondary" @onclick="() => Edit(t)" disabled="@_busy">@L("Изменить")</button>
+                                <button type="button" class="secondary" @onclick="() => ArchiveAsync(t)" disabled="@_busy">@(t.IsArchived ? L("Включить") : L("Отключить"))</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private RecurringOverviewDto? _data;
+    private Form? _form;
+    private long? _skip;
+    private string? _skipReason;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    private sealed class Form
+    {
+        public long? Id { get; init; }
+        public byte[]? RowVersion { get; init; }
+        public string? Name { get; set; }
+        public MoneyOperationKind Kind { get; set; } = MoneyOperationKind.Expense;
+        public long AccountId { get; set; }
+        public long ItemId { get; set; }
+        public string? Amount { get; set; }
+        public string? Party { get; set; }
+        public string? Basis { get; set; }
+        public RecurrencePeriod Period { get; set; } = RecurrencePeriod.Monthly;
+        public int Day { get; set; } = 1;
+        public DateTime Start { get; set; }
+        public DateTime? End { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await Recurring.GetAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private void NewForm() => _form = new Form
+    {
+        AccountId = _data!.Accounts.FirstOrDefault()?.Id ?? 0, Start = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date,
+    };
+
+    private void Edit(RecurringOperationDto t) => _form = new Form
+    {
+        Id = t.Id, RowVersion = t.RowVersion, Name = t.Name, Kind = t.Kind, AccountId = t.AccountId, ItemId = t.CashFlowItemId ?? 0,
+        Amount = t.Amount.ToString("0.00", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")), Party = t.Party, Basis = t.Basis, Period = t.Period,
+        Day = t.Day, Start = t.StartDate.ToDateTime(TimeOnly.MinValue), End = t.EndDate?.ToDateTime(TimeOnly.MinValue),
+    };
+
+    private Task SaveAsync() => RunAsync(async () =>
+    {
+        var f = _form!;
+        var amount = Decimals.Parse(f.Amount, L("Сумма")) ?? throw new BusinessRuleException("recurring.amount", L("Укажите сумму."));
+        var data = new RecurringOperationData(f.Name, f.Kind, f.AccountId, f.ItemId == 0 ? null : f.ItemId, amount, f.Party, f.Basis, f.Period, f.Day,
+            DateOnly.FromDateTime(f.Start), f.End is { } e ? DateOnly.FromDateTime(e) : null);
+        if (f.Id is { } id)
+        {
+            await Recurring.UpdateAsync(id, data, f.RowVersion!);
+        }
+        else
+        {
+            await Recurring.CreateAsync(data);
+        }
+
+        _form = null;
+        _message = L("Шаблон сохранён.");
+    });
+
+    private Task PostAsync(RecurringRunDto r) => RunAsync(async () =>
+    {
+        await Recurring.PostRunAsync(r.Id, null, null, r.RowVersion);
+        _message = L("Операция проведена: {0}", r.Name);
+    });
+
+    private Task SkipAsync(RecurringRunDto r) => RunAsync(async () =>
+    {
+        await Recurring.SkipRunAsync(r.Id, _skipReason, r.RowVersion);
+        _skip = null;
+        _message = L("Черновик пропущен.");
+    });
+
+    private Task ArchiveAsync(RecurringOperationDto t) => RunAsync(async () =>
+    {
+        await Recurring.SetArchivedAsync(t.Id, !t.IsArchived, t.RowVersion);
+        _message = t.IsArchived ? L("Шаблон включён.") : L("Шаблон отключён.");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _data = await Recurring.GetAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
