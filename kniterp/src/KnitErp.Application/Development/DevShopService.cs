@@ -434,6 +434,60 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             ctx.Permissions.Has(Permissions.DevEdit) && model.Stage != DevStage.Cancelled, ctx.Permissions.Has(Permissions.DevEdit));
     }
 
+    /// <summary>Сколько образцов сравниваем рядом (ТЗ §8): меньше двух — нечего сравнивать, больше шести — не помещается на экран.</summary>
+    public const int CompareMin = 2, CompareMax = 6;
+
+    /// <summary>
+    /// Сравнение образцов модели рядом (ТЗ §8 «замеры, вес, фото»): статус, размер, решение, факт вязания и веса по деталям против плана,
+    /// общий вес, замеры с отклонением и выходом за допуск. Строится из тех же данных, что и вкладка «Образцы» (<see cref="SamplesAsync"/>).
+    /// </summary>
+    public async Task<DevSampleCompareDto> CompareSamplesAsync(long modelId, IReadOnlyList<long> sampleIds, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        var org = ctx.OrganizationId;
+        var ids = (sampleIds ?? []).Distinct().ToList();
+        if (ids.Count is < CompareMin or > CompareMax)
+        {
+            throw new BusinessRuleException("dev.sample.compare", $"Для сравнения выберите от {CompareMin} до {CompareMax} образцов модели.");
+        }
+
+        var all = await SamplesAsync(modelId, ct); // чужая организация или нет модели → NotFoundException
+        var chosen = all.Samples.Where(s => ids.Contains(s.Id)).OrderBy(s => s.No).ToList();
+        if (chosen.Count != ids.Count)
+        {
+            throw new NotFoundException("Образец");
+        }
+
+        // Тот же порядок деталей, что в SamplesAsync, — чтобы сопоставить кортеж детали с количеством деталей в изделии.
+        var details = await db.DevDetails.AsNoTracking().Where(d => d.OrganizationId == org && d.ModelId == modelId).OrderBy(d => d.SortOrder).ThenBy(d => d.Id)
+            .Select(d => new { d.Id, d.Name, d.Quantity }).ToListAsync(ct);
+
+        // Допущение (ТЗ §8 «фото»): у образца нет своих фото — фото загружаются в файлы модели (вид «Фото»). Образцу относим фото модели,
+        // загруженные от создания этого образца до создания следующего по номеру образца модели (у последнего — до сих пор).
+        var photos = await db.DevFiles.AsNoTracking().Where(f => f.OrganizationId == org && f.ModelId == modelId && f.Kind == DevFileKind.Photo)
+            .OrderBy(f => f.UploadedAtUtc).ThenBy(f => f.Id).Select(f => new { f.Id, f.UploadedAtUtc }).ToListAsync(ct);
+        var byNo = all.Samples.OrderBy(s => s.No).ToList();
+
+        var items = chosen.Select(s =>
+        {
+            var rows = s.Details.Select((d, i) =>
+            {
+                var meta = i < details.Count ? details[i] : null;
+                return new DevSampleCompareDetailDto(meta?.Id ?? d.Fact?.DetailId ?? 0, d.Detail, meta?.Quantity ?? 1, d.PlanKnitSeconds, d.Fact?.KnitSeconds,
+                    d.PlanWeightGrams, d.Fact?.WeightGrams);
+            }).ToList();
+            var weighed = rows.Where(r => r.FactWeightGrams is not null).ToList();
+            decimal? total = weighed.Count == 0 ? null : weighed.Sum(r => r.FactWeightGrams!.Value * r.Quantity);
+            var next = byNo.FirstOrDefault(o => o.No > s.No);
+            var photoIds = photos.Where(p => p.UploadedAtUtc >= s.CreatedAtUtc && (next is null || p.UploadedAtUtc < next.CreatedAtUtc))
+                .Select(p => p.Id).ToList();
+            return new DevSampleCompareItemDto(s.Id, s.No, s.Size, s.Status, s.Reason, s.Comment, s.CreatedAtUtc, rows, total, s.Measures, photoIds);
+        }).ToList();
+
+        var measureNames = chosen[0].Measures.Select(m => m.Name).ToList();
+        return new DevSampleCompareDto(modelId, items, measureNames, details.Select(d => d.Name).ToList());
+    }
+
     /// <summary>Новый образец (№ следующий в модели) в размере сетки.</summary>
     public async Task<long> CreateSampleAsync(long modelId, long? sizeId, CancellationToken ct = default)
     {

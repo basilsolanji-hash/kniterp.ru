@@ -113,6 +113,22 @@ public sealed record DevSamplesDto(IReadOnlyList<DevSampleDto> Samples, IReadOnl
     int FactTolerancePercent = DevSettings.DefaultTolerance, IReadOnlyList<DevOptionDto>? Reasons = null, string? CustomerName = null, DateOnly? Today = null,
     bool CanHand = false, bool CanCloseCustody = false);
 
+/// <summary>Деталь в сравнении образцов: факт вязания и веса против плана детали.</summary>
+public sealed record DevSampleCompareDetailDto(long DetailId, string Detail, int Quantity, int? PlanKnitSeconds, int? FactKnitSeconds,
+    decimal? PlanWeightGrams, decimal? FactWeightGrams);
+
+/// <summary>Образец в сравнении (ТЗ §8): статус, размер, решение, детали, общий вес, замеры и фото периода образца.</summary>
+public sealed record DevSampleCompareItemDto(long Id, int No, string? Size, DevSampleStatus Status, string? Reason, string? Comment, DateTime CreatedAtUtc,
+    IReadOnlyList<DevSampleCompareDetailDto> Details, decimal? TotalWeightGrams, IReadOnlyList<DevSampleMeasureDto> Measures,
+    IReadOnlyList<long> PhotoFileIds)
+{
+    public string StatusName => DevSample.StatusName(Status);
+}
+
+/// <summary>Сравнение образцов модели рядом: колонки — образцы (по возрастанию №), строки — точки замера и детали в одном порядке у всех.</summary>
+public sealed record DevSampleCompareDto(long ModelId, IReadOnlyList<DevSampleCompareItemDto> Samples, IReadOnlyList<string> MeasureNames,
+    IReadOnlyList<string> DetailNames);
+
 public sealed record DevOperationTypeDto(long Id, string Name, string Unit, decimal? Price, decimal? NormMinutes, byte? ProductionStage, bool IsArchived,
     byte[] RowVersion);
 

@@ -361,6 +361,22 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByRole(AriaRole.Button, new() { Name = "Записать решение", Exact = true }).First.ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Решение записано" })).ToBeVisibleAsync();
 
+        // ТЗ §8: сравнение образцов рядом — замеры, вес, фото; на телефоне без горизонтальной прокрутки страницы.
+        var compareBoxes = page.GetByRole(AriaRole.Checkbox, new() { Name = "Сравнить", Exact = true });
+        await Assertions.Expect(compareBoxes).ToHaveCountAsync(2);
+        var compareButton = page.GetByRole(AriaRole.Button, new() { Name = "Сравнить выбранные" });
+        await Assertions.Expect(compareButton).ToBeDisabledAsync();
+        await compareBoxes.Nth(0).CheckAsync();
+        await compareBoxes.Nth(1).CheckAsync();
+        await Assertions.Expect(compareButton).ToBeEnabledAsync();
+        await compareButton.ClickAsync();
+        var compare = page.Locator("[data-test=dev-sample-compare]");
+        await Assertions.Expect(compare).ToContainTextAsync("Длина изделия");
+        await Assertions.Expect(compare).ToContainTextAsync("Образец № 1");
+        await page.SetViewportSizeAsync(390, 844);
+        await AssertNoHorizontalScrollAsync(page, "сравнение образцов");
+        await page.SetViewportSizeAsync(1440, 900);
+
         // Расчёт себестоимости и утверждение.
         await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
         await Click(page, "Сохранить версию расчёта", "Сохранена версия расчёта");

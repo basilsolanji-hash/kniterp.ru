@@ -42,6 +42,130 @@ else
     {
         <p class="muted">@L("Образцов пока нет.")</p>
     }
+    @if (data.Samples.Count >= DevShopService.CompareMin)
+    {
+        @* ТЗ §8: сравнение образцов рядом — замеры, вес, фото. Отмечаются галочкой «Сравнить» в карточке образца. *@
+        <div class="actions">
+            <button type="button" class="secondary" disabled="@(_busy || _selected.Count < DevShopService.CompareMin || _selected.Count > DevShopService.CompareMax)"
+                    @onclick="CompareAsync">@L("Сравнить выбранные") (@_selected.Count)</button>
+            @if (_compare is not null)
+            {
+                <button type="button" class="secondary" @onclick="() => _compare = null">@L("Скрыть сравнение")</button>
+            }
+        </div>
+    }
+    @if (_compare is { } cmp)
+    {
+        <div class="panel" data-test="dev-sample-compare">
+            <h2>@L("Сравнение образцов")</h2>
+            <div class="scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th></th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <th>@L("Образец № {0}", c.No)</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">@L("Статус")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td><span class="tag @(c.Status == DevSampleStatus.Accepted ? "ok" : c.Status is DevSampleStatus.Rework or DevSampleStatus.Rejected ? "bad" : "warn")">@L(c.StatusName)</span></td>
+                            }
+                        </tr>
+                        <tr>
+                            <th scope="row">@L("Размер")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td>@(c.Size ?? "—")</td>
+                            }
+                        </tr>
+                        <tr>
+                            <th scope="row">@L("Решение")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td class="small">@if (c.Reason is not null) { <span class="tag bad">@c.Reason</span> } @(c.Reason is null && c.Comment is null ? "—" : c.Comment)</td>
+                            }
+                        </tr>
+                        @if (cmp.MeasureNames.Count > 0)
+                        {
+                            <tr><th scope="rowgroup" colspan="@(cmp.Samples.Count + 1)">@L("Замеры, см: табель / факт (отклонение)")</th></tr>
+                            @for (var i = 0; i < cmp.MeasureNames.Count; i++)
+                            {
+                                var mi = i;
+                                <tr>
+                                    <th scope="row">@cmp.MeasureNames[mi]</th>
+                                    @foreach (var c in cmp.Samples)
+                                    {
+                                        var m = mi < c.Measures.Count ? c.Measures[mi] : null;
+                                        <td class="num">
+                                            @DevFormat.Cm(m?.Plan) / @DevFormat.Cm(m?.Fact)
+                                            @if (m?.Deviation is { } dv)
+                                            {
+                                                <span class="@(m.OutOfTolerance ? "late-text" : null)">(@((dv > 0 ? "+" : "") + DevFormat.Cm(dv)))</span>
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        }
+                        @if (cmp.DetailNames.Count > 0)
+                        {
+                            <tr><th scope="rowgroup" colspan="@(cmp.Samples.Count + 1)">@L("Детали: план / факт")</th></tr>
+                            @for (var i = 0; i < cmp.DetailNames.Count; i++)
+                            {
+                                var di = i;
+                                <tr>
+                                    <th scope="row">@cmp.DetailNames[di] · @L("Вес")</th>
+                                    @foreach (var c in cmp.Samples)
+                                    {
+                                        var d = di < c.Details.Count ? c.Details[di] : null;
+                                        <td class="num @(DevSettings.OverPlan(d?.FactWeightGrams, d?.PlanWeightGrams, _s.FactTolerancePercent) ? "late-text" : null)">@DevFormat.Grams(d?.PlanWeightGrams) / @DevFormat.Grams(d?.FactWeightGrams)</td>
+                                    }
+                                </tr>
+                                <tr>
+                                    <th scope="row">@cmp.DetailNames[di] · @L("Время")</th>
+                                    @foreach (var c in cmp.Samples)
+                                    {
+                                        var d = di < c.Details.Count ? c.Details[di] : null;
+                                        <td class="num @(DevSettings.OverPlan(d?.FactKnitSeconds, d?.PlanKnitSeconds, _s.FactTolerancePercent) ? "late-text" : null)">@DevFormat.Duration(d?.PlanKnitSeconds) / @DevFormat.Duration(d?.FactKnitSeconds)</td>
+                                    }
+                                </tr>
+                            }
+                        }
+                        <tr>
+                            <th scope="row">@L("Общий вес изделия")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td class="num">@DevFormat.Grams(c.TotalWeightGrams)</td>
+                            }
+                        </tr>
+                        <tr>
+                            <th scope="row">@L("Фото")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td>
+                                    @if (c.PhotoFileIds.Count == 0)
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                    @foreach (var fid in c.PhotoFileIds)
+                                    {
+                                        <a href="dev/files/@fid" target="_blank" rel="noopener" data-enhance-nav="false"><img class="dev-thumb" style="max-width: 96px; max-height: 96px" src="dev/files/@(fid)?inline=1" alt="@L("Фото образца № {0}", c.No)" loading="lazy" /></a>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="small muted">@L("Фото — снимки модели, загруженные от создания образца до создания следующего.")</p>
+        </div>
+    }
     @foreach (var smp in data.Samples)
     {
         var sample = smp;
@@ -50,6 +174,13 @@ else
                 <h2>@L("Образец № {0}", smp.No)@(smp.Size is null ? "" : " · " + L("размер {0}", smp.Size))</h2>
                 <span class="actions" style="margin: 0; align-items: center">
                     <span class="tag @(smp.Status == DevSampleStatus.Accepted ? "ok" : smp.Status is DevSampleStatus.Rework or DevSampleStatus.Rejected ? "bad" : "warn")">@L(smp.StatusName)</span>
+                    @if (data.Samples.Count >= DevShopService.CompareMin)
+                    {
+                        <label class="small" style="display: inline-flex; gap: 4px; align-items: center">
+                            <input type="checkbox" checked="@_selected.Contains(smp.Id)" @onchange="e => ToggleCompare(sample.Id, e.Value is true)" />
+                            @L("Сравнить")
+                        </label>
+                    }
                     <DevLabelLink Kind="sample" Id="smp.Id" />
                     @if (data.CanEdit || data.CanRecord)
                     {
@@ -235,6 +366,7 @@ else
         var dirty = _facts.Where(kv => kv.Value != _wasFacts.GetValueOrDefault(kv.Key) && (_isError || kv.Key.Item1 != _resetSample)).ToList();
         _facts.Clear();
         _wasFacts.Clear();
+        _selected.IntersectWith(_s.Samples.Select(s => s.Id));
         foreach (var s in _s.Samples)
         {
             foreach (var m in s.Measures.Where(m => m.Fact is not null))
@@ -286,6 +418,49 @@ else
     private Task CloseCustodyAsync(DevSampleDto s, DevSampleCustody result) =>
         RunAsync(() => Shop.CloseSampleCustodyAsync(s.Id, result, _s?.Today ?? DateOnly.FromDateTime(DateTime.Today), null, s.RowVersion), L("Записано."));
 
+    // ТЗ §8: отмеченные для сравнения образцы и последнее построенное сравнение.
+    private readonly HashSet<long> _selected = [];
+    private DevSampleCompareDto? _compare;
+
+    private void ToggleCompare(long sampleId, bool on)
+    {
+        if (on)
+        {
+            _selected.Add(sampleId);
+        }
+        else
+        {
+            _selected.Remove(sampleId);
+        }
+    }
+
+    private async Task CompareAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            var ids = _selected.ToList();
+            _compare = await Gate.Run(() => Shop.CompareSamplesAsync(ModelId, ids));
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _compare = null;
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
     private Task CreateAsync() => RunAsync(() => Shop.CreateSampleAsync(ModelId, long.TryParse(_size, out var z) ? z : null), L("Образец создан."));
 
     private async Task SaveMeasuresAsync(DevSampleDto s)
@@ -322,6 +497,7 @@ else
         _busy = true;
         _message = null;
         _isError = false;
+        _compare = null; // после изменения образца сравнение устарело — строится заново кнопкой
         try
         {
             await Gate.Run(action);

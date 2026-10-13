@@ -728,6 +728,82 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         }
     }
 
+    /// <summary>ТЗ §8: сравнение образцов рядом — замеры с отклонением, факт деталей против плана, общий вес, фото периода образца.</summary>
+    [SqlFact]
+    public async Task Samples_are_compared_side_by_side()
+    {
+        var org = await CreateOrganizationAsync();
+        var other = await CreateOrganizationAsync();
+        var png = KnitErp.Infrastructure.Documents.PaymentQrImage.Png("фото", 4);
+        var start = host.Clock.UtcNow;
+        long model, first, second, photo1, photo2, length;
+        try
+        {
+            await using var k = As(org.OwnerUserId, org.OrganizationId);
+            model = await k.Models.CreateAsync(Header("Шапка для сравнения"));
+            var front = await k.Tech.AddDetailAsync(model, "Полотно", 1);
+            var cuff = await k.Tech.AddDetailAsync(model, "Манжета", 2);
+            await k.Tech.SetKnittingAsync(front, null, null, 300, 80m, null, (await k.Tech.DetailAsync(front)).RowVersion);
+            await k.Tech.SetKnittingAsync(cuff, null, null, 60, 10m, null, (await k.Tech.DetailAsync(cuff)).RowVersion);
+            await k.Shop.SetSizeGridAsync(model, ["S", "M"], "M");
+            var sizes = (await k.Shop.SizesAsync(model)).Sizes;
+            length = await k.Shop.AddMeasureAsync(model, "Длина изделия", 0.5m, null);
+            var width = await k.Shop.AddMeasureAsync(model, "Ширина", 1m, null);
+            await k.Shop.SetMeasureValuesAsync(model, [new(length, sizes[1].Id, 0, null, 20m), new(width, sizes[1].Id, 0, null, 18m)]);
+
+            // Образец № 1, фото после него; через сутки — образец № 2 и его фото.
+            first = await k.Shop.CreateSampleAsync(model, sizes[1].Id);
+            host.Clock.UtcNow = start.AddHours(1);
+            photo1 = await k.Models.AddFileAsync(model, DevFileKind.Photo, "obrazec1.png", png, null);
+            host.Clock.UtcNow = start.AddDays(1);
+            second = await k.Shop.CreateSampleAsync(model, sizes[1].Id);
+            host.Clock.UtcNow = start.AddDays(1).AddHours(1);
+            photo2 = await k.Models.AddFileAsync(model, DevFileKind.Photo, "obrazec2.png", png, null);
+
+            await k.Shop.RecordFactAsync(first, front, 330, 90m, []);
+            await k.Shop.RecordFactAsync(first, cuff, 70, 12m, []);
+            await k.Shop.RecordFactAsync(second, front, 290, 81m, []);
+            await k.Shop.SetSampleMeasuresAsync(first, [new(length, 0, 0, null, 21m), new(width, 0, 0, null, 18.5m)]);
+            await k.Shop.SetSampleMeasuresAsync(second, [new(length, 0, 0, null, 20.3m)]);
+            var rv = (await k.Shop.SamplesAsync(model)).Samples.Single(s => s.Id == first).RowVersion;
+            await k.Shop.DecideSampleAsync(first, DevSampleStatus.Rework, "длинная", rv);
+
+            var cmp = await k.Shop.CompareSamplesAsync(model, [second, first]);
+            Assert.Equal(new[] { 1, 2 }, cmp.Samples.Select(s => s.No)); // колонки — по возрастанию номера
+            Assert.Equal(new[] { "Длина изделия", "Ширина" }, cmp.MeasureNames);
+            Assert.Equal(new[] { "Полотно", "Манжета" }, cmp.DetailNames);
+            var (s1, s2) = (cmp.Samples[0], cmp.Samples[1]);
+            Assert.Equal((DevSampleStatus.Rework, "длинная", "M"), (s1.Status, s1.Comment!, s1.Size!));
+            Assert.Equal((20m, 21m, 1m, true), (s1.Measures[0].Plan!.Value, s1.Measures[0].Fact!.Value, s1.Measures[0].Deviation!.Value, s1.Measures[0].OutOfTolerance));
+            Assert.Equal((0.5m, false), (s1.Measures[1].Deviation!.Value, s1.Measures[1].OutOfTolerance));
+            Assert.Equal((0.3m, false), (s2.Measures[0].Deviation!.Value, s2.Measures[0].OutOfTolerance));
+            Assert.Null(s2.Measures[1].Fact);
+            Assert.Equal((300, 330, 80m, 90m), (s1.Details[0].PlanKnitSeconds!.Value, s1.Details[0].FactKnitSeconds!.Value, s1.Details[0].PlanWeightGrams!.Value,
+                s1.Details[0].FactWeightGrams!.Value));
+            Assert.Equal(2, s1.Details[1].Quantity);
+            Assert.Equal(114m, s1.TotalWeightGrams); // 90 + 12 × 2 манжеты
+            Assert.Equal(81m, s2.TotalWeightGrams);
+            Assert.Null(s2.Details[1].FactWeightGrams);
+            Assert.Equal(new[] { photo1 }, s1.PhotoFileIds);
+            Assert.Equal(new[] { photo2 }, s2.PhotoFileIds);
+
+            Assert.Equal("dev.sample.compare", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Shop.CompareSamplesAsync(model, [first]))).Code);
+            Assert.Equal("dev.sample.compare", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Shop.CompareSamplesAsync(model, [first, first]))).Code);
+            var otherModel = await k.Models.CreateAsync(Header("Другая модель"));
+            var foreignSample = await k.Shop.CreateSampleAsync(otherModel, null);
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.CompareSamplesAsync(model, [first, foreignSample]));
+        }
+        finally
+        {
+            host.Clock.UtcNow = start;
+        }
+
+        await using (var k = As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.CompareSamplesAsync(model, [first, second]));
+        }
+    }
+
     private async Task<CreatedOrganization> CreateOrganizationAsync()
     {
         var inn = NextValidInn();
