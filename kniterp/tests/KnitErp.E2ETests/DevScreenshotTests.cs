@@ -267,6 +267,26 @@ public sealed class DevScreenshotTests(HrAppFixture app) : IClassFixture<HrAppFi
             await Save(page, "Сохранить версию расчёта", "Сохранена версия расчёта");
             await Shot(page, dir, "17-sebestoimost");
 
+            // D723: образец передан заказчику со сроком возврата; D725: технический паспорт PDF.
+            await page.GetByRole(AriaRole.Tab, new() { Name = "Образцы" }).ClickAsync();
+            if (await page.GetByRole(AriaRole.Button, new() { Name = "Записать решение", Exact = true }).CountAsync() == 0)
+            {
+                await Save(page, "Новый образец", "Образец создан");
+            }
+
+            await Save(page, "Записать решение", "Решение записано");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Передать заказчику", Exact = true }).First.ClickAsync();
+            await page.GetByLabel("Кому").FillAsync("ООО «Северный трикотаж», Иванова А.");
+            await page.Locator("form", new() { HasText = "Вернуть до" }).GetByLabel("Комментарий").FillAsync("для выставки");
+            await Save(page, "Передать", "Образец передан заказчику");
+            await Shot(page, dir, "19-obrazec-u-zakazchika");
+            var passportHref = await page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" }).GetAttributeAsync("href");
+            var pdf = await page.APIRequest.GetAsync(new Uri(new Uri(page.Url), "/" + passportHref).ToString());
+            await File.WriteAllBytesAsync(Path.Combine(dir, "20-tehpasport.pdf"), await pdf.BodyAsync());
+            await Go(page, "dev/analytics");
+            await page.Locator(".dev-cost-tiles").First.WaitForAsync();
+            await Shot(page, dir, "18-analitika");
+
             await Go(page, $"dev/tech/{detailUrl[(detailUrl.LastIndexOf('/') + 1)..]}");
             await Shot(page, dir, "10-tehkarta-vyazaniya");
             await Go(page, $"print/dev/tech/{detailUrl[(detailUrl.LastIndexOf('/') + 1)..]}");

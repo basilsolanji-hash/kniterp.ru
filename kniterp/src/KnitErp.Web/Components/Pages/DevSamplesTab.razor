@@ -7,6 +7,7 @@
 @*
     Образцы (D714): образец № 1, 2, 3 в размере сетки; по деталям — план и факт цеха (время, вес, доли цветов); замеры по табелю мер
     с отклонением (выход за допуск — красным); решение: принят, на доработку, отклонён. Факт цех вносит в техкарте вязания детали.
+    Образец у заказчика (D723): передать (кому, когда, вернуть до), вернули, оставили или продали.
 *@
 @if (_message is not null)
 {
@@ -56,13 +57,58 @@ else
                     }
                 </span>
             </div>
-            @if (smp.Comment is not null)
+            @if (smp.Reason is not null || smp.Comment is not null)
             {
-                <p class="small">@smp.Comment</p>
+                <p class="small">@if (smp.Reason is not null) { <span class="tag bad">@smp.Reason</span> } @smp.Comment</p>
             }
             @if (_yarnFor == smp.Id)
             {
                 <DevYarnWriteOff SampleId="smp.Id" />
+            }
+            @* D723: образец у заказчика — кому, когда, вернуть до; вернули, оставили или продали. *@
+            @if (smp.Custody != DevSampleCustody.AtFactory)
+            {
+                <p class="small">
+                    <span class="tag @(smp.ReturnOverdue ? "bad" : smp.Custody == DevSampleCustody.AtCustomer ? "warn" : null)">@L(smp.CustodyName)</span>
+                    @smp.CustodyRecipient · @L("передан") @smp.HandedOn?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)
+                    @if (smp.Custody == DevSampleCustody.AtCustomer)
+                    {
+                        <span class="@(smp.ReturnOverdue ? "late-text" : null)">· @(smp.ReturnBy is { } rb ? L("вернуть до {0}", rb.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)) : L("без возврата"))</span>
+                    }
+                    else if (smp.CustodyClosedOn is { } closed)
+                    {
+                        <span>· @closed.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</span>
+                    }
+                    @if (smp.CustodyNote is not null) { <span class="muted">· @smp.CustodyNote</span> }
+                </p>
+            }
+            @if (smp.Custody == DevSampleCustody.AtCustomer && data.CanCloseCustody)
+            {
+                <div class="actions">
+                    @foreach (var result in CloseResults)
+                    {
+                        var res = result;
+                        <button type="button" class="secondary" disabled="@_busy" @onclick="() => CloseCustodyAsync(sample, res)">@L(CloseLabel(res))</button>
+                    }
+                </div>
+            }
+            else if (data.CanHand && smp.Status != DevSampleStatus.Knitting && smp.Custody is DevSampleCustody.AtFactory or DevSampleCustody.Returned)
+            {
+                @if (_handFor == smp.Id)
+                {
+                    <form class="inline-form" @onsubmit="() => HandAsync(sample)">
+                        <label>@L("Кому") <input @bind="_handTo" maxlength="@DevSample.RecipientMaxLength" required /></label>
+                        <label>@L("Передан") <input type="date" @bind="_handOn" required /></label>
+                        <label>@L("Вернуть до") <input type="date" @bind="_returnBy" /></label>
+                        <label>@L("Комментарий") <input @bind="_handNote" maxlength="@DevSample.CustodyNoteMaxLength" /></label>
+                        <button type="submit" disabled="@_busy">@L("Передать")</button>
+                        <button type="button" class="secondary" @onclick="() => _handFor = null">@L("Отмена")</button>
+                    </form>
+                }
+                else
+                {
+                    <div class="actions"><button type="button" class="secondary" @onclick="() => OpenHand(sample)">@L("Передать заказчику")</button></div>
+                }
             }
             <div class="scroll">
                 <table>
@@ -130,6 +176,19 @@ else
                             }
                         </select>
                     </label>
+                    @if (data.Reasons is { Count: > 0 } reasons && _decision != ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture))
+                    {
+                        <label>
+                            @L("Причина")
+                            <select @bind="_reason">
+                                <option value="">—</option>
+                                @foreach (var r in reasons)
+                                {
+                                    <option value="@r.Id">@r.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
                     <label>@L("Что не так / комментарий") <input @bind="_decisionComment" maxlength="@DevSample.CommentMaxLength" /></label>
                     <button type="submit" disabled="@_busy">@L("Записать решение")</button>
                 </form>
@@ -152,6 +211,7 @@ else
     private string _size = string.Empty;
     private string _decision = ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture);
     private string? _decisionComment;
+    private string _reason = string.Empty;
     private bool _busy;
     private string? _message;
     private bool _isError;
@@ -192,6 +252,40 @@ else
         _resetSample = null;
     }
 
+    private static readonly DevSampleCustody[] CloseResults = [DevSampleCustody.Returned, DevSampleCustody.Kept, DevSampleCustody.Sold];
+
+    private static string CloseLabel(DevSampleCustody c) => c switch
+    {
+        DevSampleCustody.Returned => "Вернули на фабрику",
+        DevSampleCustody.Kept => "Оставлен у заказчика",
+        _ => "Продан заказчику",
+    };
+
+    private long? _handFor;
+    private string? _handTo;
+    private DateOnly _handOn;
+    private DateOnly? _returnBy;
+    private string? _handNote;
+
+    private void OpenHand(DevSampleDto s)
+    {
+        var today = _s?.Today ?? DateOnly.FromDateTime(DateTime.Today);
+        _handFor = s.Id;
+        _handTo = s.CustodyRecipient ?? _s?.CustomerName;
+        _handOn = today;
+        _returnBy = today.AddDays(14);
+        _handNote = null;
+    }
+
+    private Task HandAsync(DevSampleDto s) => RunAsync(async () =>
+    {
+        await Shop.HandSampleAsync(s.Id, _handTo, _handOn, _returnBy, _handNote, s.RowVersion);
+        _handFor = null;
+    }, L("Образец передан заказчику."));
+
+    private Task CloseCustodyAsync(DevSampleDto s, DevSampleCustody result) =>
+        RunAsync(() => Shop.CloseSampleCustodyAsync(s.Id, result, _s?.Today ?? DateOnly.FromDateTime(DateTime.Today), null, s.RowVersion), L("Записано."));
+
     private Task CreateAsync() => RunAsync(() => Shop.CreateSampleAsync(ModelId, long.TryParse(_size, out var z) ? z : null), L("Образец создан."));
 
     private async Task SaveMeasuresAsync(DevSampleDto s)
@@ -212,8 +306,10 @@ else
 
     private Task DecideAsync(DevSampleDto s) => RunAsync(async () =>
     {
-        await Shop.DecideSampleAsync(s.Id, (DevSampleStatus)byte.Parse(_decision, CultureInfo.InvariantCulture), _decisionComment, s.RowVersion);
+        await Shop.DecideSampleAsync(s.Id, (DevSampleStatus)byte.Parse(_decision, CultureInfo.InvariantCulture), _decisionComment, s.RowVersion,
+            long.TryParse(_reason, out var reason) ? reason : null);
         _decisionComment = null;
+        _reason = string.Empty;
     }, L("Решение записано."));
 
     private async Task RunAsync(Func<Task> action, string success)

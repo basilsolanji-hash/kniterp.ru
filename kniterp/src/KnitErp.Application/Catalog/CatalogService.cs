@@ -32,7 +32,17 @@ public static class ItemSearch
 /// <summary>Отбор списка номенклатуры. Skip/Take — серверная страница (сессия 4): список на 50 000 позиций не читается целиком.</summary>
 public sealed record ItemFilter(
     ItemType? Type = null, string? Search = null, bool IncludeArchived = false, int Take = 500, long? GroupId = null, long? TagId = null,
-    ItemKind? Kind = null, int Skip = 0);
+    ItemKind? Kind = null, int Skip = 0, ItemSort Sort = ItemSort.Default, bool Descending = false);
+
+/// <summary>D338: сортировка списка номенклатуры на сервере (по странице — неверно при 50 000 позиций). Id — устойчивый порядок при равных.</summary>
+public enum ItemSort : byte
+{
+    /// <summary>Тип, затем наименование — как было.</summary>
+    Default = 0,
+    Code = 1,
+    Name = 2,
+    Article = 3,
+}
 
 public sealed record ItemListDto(IReadOnlyList<ItemDto> Items, int Total, bool CanEdit, bool CanArchive);
 
@@ -81,6 +91,13 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         var unit = await FindUnitAsync(ctx, id, ct);
         unit.EnsureVersion(unit.RowVersion, rowVersion);
+        // D339: меньше знаков после запятой — уже записанные дробные количества (2,5 кг) стали бы недопустимыми и «вечными».
+        if (cmd.Precision < unit.Precision && await db.ItemUsageAsync(ctx.OrganizationId, null, id, ct) is { } usage)
+        {
+            throw new BusinessRuleException("catalog.unit.precision_in_use",
+                $"Единица «{unit.Symbol}» уже в учёте ({ItemUsage.Describe(usage)}): уменьшать число знаков после запятой нельзя — записанные количества стали бы недопустимыми.");
+        }
+
         foreach (var c in unit.Update(cmd.Name, cmd.Symbol, cmd.Precision))
         {
             Audit(ctx, AuditActions.CatalogChanged, nameof(UnitOfMeasure), id, c.Before, c.After, c.Field);
@@ -193,13 +210,24 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         return query;
     }
 
+    private static IQueryable<Item> Sorted(IQueryable<Item> q, ItemFilter f) => (f.Sort, f.Descending) switch
+    {
+        (ItemSort.Code, false) => q.OrderBy(i => i.Code).ThenBy(i => i.Id),
+        (ItemSort.Code, true) => q.OrderByDescending(i => i.Code).ThenByDescending(i => i.Id),
+        (ItemSort.Name, false) => q.OrderBy(i => i.Name).ThenBy(i => i.Id),
+        (ItemSort.Name, true) => q.OrderByDescending(i => i.Name).ThenByDescending(i => i.Id),
+        // Без артикула — в конце при любом направлении: пустые не нужны в начале списка.
+        (ItemSort.Article, false) => q.OrderBy(i => i.Article == null).ThenBy(i => i.Article).ThenBy(i => i.Id),
+        (ItemSort.Article, true) => q.OrderBy(i => i.Article == null).ThenByDescending(i => i.Article).ThenByDescending(i => i.Id),
+        _ => q.OrderBy(i => i.Type).ThenBy(i => i.Name).ThenBy(i => i.Id),
+    };
+
     public async Task<ItemListDto> ListItemsAsync(ItemFilter filter, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogView, ct);
         var query = await FilterAsync(ctx, filter, ct);
         var total = await query.CountAsync(ct);
-        var items = await query
-            .OrderBy(i => i.Type).ThenBy(i => i.Name).ThenBy(i => i.Id) // Id — устойчивый порядок страниц при одинаковых названиях
+        var items = await Sorted(query, filter) // Id — устойчивый порядок страниц при одинаковых значениях
             .Skip(Math.Max(0, filter.Skip))
             .Take(Math.Clamp(filter.Take, 1, 2000))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i, u.Symbol })
@@ -336,6 +364,30 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
             await EnsureTypeChangeAsync(ctx, item, cmd.Type, ct);
         }
 
+        // D339: модификация — та же единица и ставка НДС, что у основной позиции (D82); меняются у основной.
+        if (item.IsModification && (cmd.UnitId != item.UnitId || cmd.VatRateId != item.VatRateId))
+        {
+            throw new BusinessRuleException("catalog.variant.unit_vat", "У модификации единица и ставка НДС — как у основной позиции: меняйте их в основной позиции.");
+        }
+
+        var variants = item.IsModification ? [] : await db.Items.Where(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == id).ToListAsync(ct);
+        if (cmd.UnitId != item.UnitId)
+        {
+            // D339: количества в движениях, документах и заказах записаны без единицы — в единице позиции. Сменить её — переписать
+            // смысл всей истории (2,5 кг стали бы 2,5 шт). Для позиции (и её модификаций) в учёте — только новая позиция.
+            foreach (var target in variants.Prepend(item))
+            {
+                if (await db.ItemUsageAsync(ctx.OrganizationId, target.Id, null, ct) is { } usage)
+                {
+                    throw new BusinessRuleException("catalog.unit.in_use",
+                        $"Позиция {target.Code} уже в учёте ({ItemUsage.Describe(usage)}): единицу менять нельзя — записанные количества относятся к прежней. Создайте новую позицию с нужной единицей.");
+                }
+            }
+        }
+
+        // D342 (ответ заказчика): артикулы на фабрике меняются — код позиции в учёте менять можно (отменяет запрет D339).
+        // Документы ссылаются на позицию по Id, старый код остаётся в журнале аудита («Код: было → стало»).
+
         if (cmd.UnitId != item.UnitId && await db.ItemPacks.AnyAsync(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == id, ct))
         {
             // D307: коэффициенты упаковок заданы в основной единице — при её смене они потеряли бы смысл.
@@ -343,6 +395,20 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         var changes = item.Update(cmd.Code, cmd.Name, cmd.Type, cmd.UnitId, cmd.Description);
+        // D339: единица и ставка НДС основной позиции — сразу и у её модификаций (D82: «как у основной»).
+        foreach (var v in variants.Where(v => !v.IsArchived))
+        {
+            if (v.UnitId != cmd.UnitId)
+            {
+                v.Update(v.Code, v.Name, v.Type, cmd.UnitId, v.Description);
+            }
+
+            if (v.VatRateId != cmd.VatRateId)
+            {
+                v.SetVatRate(cmd.VatRateId);
+            }
+        }
+
         if (cmd.VatRateId != oldVat)
         {
             await RequireActiveVatRateAsync(ctx, cmd.VatRateId, ct);
@@ -437,14 +503,77 @@ public sealed class CatalogService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
     }
 
-    public async Task ArchiveItemAsync(long id, byte[] rowVersion, CancellationToken ct = default)
+    /// <summary>
+    /// D343 (ответ заказчика: жёсткий запрет D339/D340 не подходит): у позиции в учёте архив — с подтверждением. Без confirmed
+    /// при остатке, действующих модификациях, комплекте или открытом заказе ничего не меняется — возвращаются предупреждения,
+    /// экран спрашивает «Всё равно в архив?». С confirmed позиция уходит в архив вместе с действующими модификациями,
+    /// предупреждения пишутся в журнал. Пустой список — позиция в архиве.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ArchiveItemAsync(long id, byte[] rowVersion, bool confirmed = false, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.CatalogArchive, ct);
         var item = await FindItemAsync(ctx, id, ct);
         item.EnsureVersion(item.RowVersion, rowVersion);
+        var variants = await db.Items.Where(i => i.OrganizationId == ctx.OrganizationId && i.ParentItemId == id && !i.IsArchived).ToListAsync(ct);
+        var ids = variants.Select(v => v.Id).Append(id).ToList();
+        var warnings = new List<string>();
+        void Warn(BusinessRuleException w) => warnings.Add(w.Message); // сообщение правила — переводится экраном (Text.Message)
+
+        var stock = await db.StockMovements.Where(m => m.OrganizationId == ctx.OrganizationId && ids.Contains(m.ItemId)).SumAsync(m => (decimal?)m.Quantity, ct) ?? 0;
+        if (stock != 0)
+        {
+            var qty = stock.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+            Warn(new BusinessRuleException("catalog.archive.has_stock", $"На складе остаток {qty}: списать или переместить его можно будет только после возврата из архива."));
+        }
+
+        if (variants.Count > 0)
+        {
+            Warn(new BusinessRuleException("catalog.archive.has_variants", $"Действующих модификаций: {variants.Count} — они уйдут в архив вместе с позицией."));
+        }
+
+        var bundle = await db.BundleComponents.Where(c => c.OrganizationId == ctx.OrganizationId && ids.Contains(c.ComponentItemId))
+            .Join(db.Items.Where(b => !b.IsArchived), c => c.BundleItemId, b => b.Id, (c, b) => b.Code).FirstOrDefaultAsync(ct);
+        if (bundle is not null)
+        {
+            Warn(new BusinessRuleException("catalog.archive.in_bundle", $"Входит в действующий комплект {bundle}: собрать и продать его без этой позиции не получится."));
+        }
+
+        var salesOrder = await db.SalesOrders.AsNoTracking()
+            .Where(o => o.OrganizationId == ctx.OrganizationId
+                        && (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft || o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed)
+                        && o.Lines.Any(l => ids.Contains(l.ItemId)))
+            .Select(o => o.Number).FirstOrDefaultAsync(ct);
+        if (salesOrder is not null)
+        {
+            Warn(new BusinessRuleException("catalog.archive.in_sales_order", $"Есть в открытом заказе покупателя {salesOrder}."));
+        }
+
+        var purchaseOrder = await db.PurchaseOrders.AsNoTracking()
+            .Where(o => o.OrganizationId == ctx.OrganizationId
+                        && (o.Status == KnitErp.Domain.Purchasing.PurchaseOrderStatus.Draft || o.Status == KnitErp.Domain.Purchasing.PurchaseOrderStatus.Confirmed)
+                        && o.Lines.Any(l => ids.Contains(l.ItemId)))
+            .Select(o => o.Number).FirstOrDefaultAsync(ct);
+        if (purchaseOrder is not null)
+        {
+            Warn(new BusinessRuleException("catalog.archive.in_purchase_order", $"Есть в открытом заказе поставщику {purchaseOrder}."));
+        }
+
+        if (warnings.Count > 0 && !confirmed)
+        {
+            return warnings;
+        }
+
+        var note = warnings.Count > 0 ? "подтверждено: " + string.Join(" ", warnings) : null;
+        foreach (var v in variants)
+        {
+            v.Archive(clock.UtcNow);
+            Audit(ctx, AuditActions.CatalogArchived, nameof(Item), v.Id, $"{v.Code} {v.Name}", "в архиве", $"вместе с {item.Code}");
+        }
+
         item.Archive(clock.UtcNow);
-        Audit(ctx, AuditActions.CatalogArchived, nameof(Item), id, $"{item.Code} {item.Name}", "в архиве", null);
+        Audit(ctx, AuditActions.CatalogArchived, nameof(Item), id, $"{item.Code} {item.Name}", "в архиве", note);
         await db.SaveOrConflictAsync(ct);
+        return [];
     }
 
     public async Task RestoreItemAsync(long id, byte[] rowVersion, CancellationToken ct = default)

@@ -13,6 +13,9 @@ public enum StageTrigger : byte
     Shipped = 6,
     ProductionStarted = 7,
     ProductionCompleted = 8,
+
+    /// <summary>D1150: заказ собран на складе по заданию на сборку.</summary>
+    Picked = 9,
 }
 
 /// <summary>
@@ -65,13 +68,14 @@ public static class SalesStageAutomation
         (StageTrigger.Paid, "Оплачен — в производство"),
         (StageTrigger.ProductionStarted, "В работе"),
         (StageTrigger.ProductionCompleted, "Собран"),
+        (StageTrigger.Picked, "Собран"), // D1150
         (StageTrigger.Shipped, "Отгружен"),
     ];
 
     public static readonly IReadOnlyList<StageTrigger> All =
     [
         StageTrigger.Confirmed, StageTrigger.Invoiced, StageTrigger.PartiallyPaid, StageTrigger.Paid,
-        StageTrigger.ProductionStarted, StageTrigger.ProductionCompleted, StageTrigger.PartiallyShipped, StageTrigger.Shipped,
+        StageTrigger.ProductionStarted, StageTrigger.ProductionCompleted, StageTrigger.Picked, StageTrigger.PartiallyShipped, StageTrigger.Shipped,
     ];
 
     public static string Name(StageTrigger trigger) => trigger switch
@@ -84,6 +88,7 @@ public static class SalesStageAutomation
         StageTrigger.Shipped => "Отгружен полностью",
         StageTrigger.ProductionStarted => "Производство начато",
         StageTrigger.ProductionCompleted => "Производство завершено",
+        StageTrigger.Picked => "Заказ собран на складе",
         _ => trigger.ToString(),
     };
 

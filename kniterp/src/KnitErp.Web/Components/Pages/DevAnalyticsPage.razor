@@ -1,0 +1,216 @@
+@page "/dev/analytics"
+@using KnitErp.Application.Development
+@using System.Globalization
+@inject DevAnalyticsService Analytics
+
+@*
+    Аналитика разработки (D760–D766, этап 7 ТЗ): в работе и просрочки по стадиям, время разработки и рисунка, образцы и причины
+    доработок, загрузка участников, план-факт себестоимости (только с правом на суммы), выгрузка в Excel.
+*@
+<PageTitle>@L("Аналитика разработки") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Аналитика разработки")</h1>
+        <a class="button secondary" href="@ExcelHref" data-enhance-nav="false">@L("Выгрузить в Excel")</a>
+    </div>
+    <form class="inline-form" @onsubmit="LoadAsync">
+        <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+            <label>@L("С") <input type="date" @bind="_from" /></label>
+            <label>@L("По") <input type="date" @bind="_to" /></label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        </fieldset>
+    </form>
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+    @if (_r is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else
+    {
+        var r = _r;
+        <div class="dev-cost-tiles compact">
+            <div><span>@L("В работе")</span><b>@r.InWork</b></div>
+            <div class="@(r.Overdue > 0 ? "hi" : null)"><span>@L("Стадия дольше нормы")</span><b class="@(r.Overdue > 0 ? "late-text" : null)">@r.Overdue</b></div>
+            <div><span>@L("Просрочен запуск")</span><b class="@(r.Late > 0 ? "late-text" : null)">@r.Late</b></div>
+            <div><span>@L("Передано за период")</span><b>@r.Handed</b></div>
+            <div><span>@L("Отменено за период")</span><b>@r.Cancelled</b></div>
+            <div><span>@L("Разработка модели, дн.")</span><b>@DevFormat.Number(r.AvgDevelopmentDays)</b></div>
+            <div><span>@L("Рисунок, дн.")</span><b>@DevFormat.Number(r.AvgPatternDays)</b></div>
+            <div><span>@L("Образцов на модель")</span><b>@DevFormat.Number(r.SamplesPerModel)</b></div>
+        </div>
+
+        <div class="dev-panels">
+            <div class="panel">
+                <h2>@L("Стадии")</h2>
+                <div class="scroll">
+                    <table class="dev-matrix">
+                        <thead><tr><th>@L("Стадия")</th><th class="num">@L("В работе")</th><th class="num">@L("Дольше нормы")</th><th class="num">@L("Просрочен запуск")</th><th class="num">@L("Среднее, дн.")</th></tr></thead>
+                        <tbody>
+                            @foreach (var s in r.Stages)
+                            {
+                                <tr>
+                                    <td>@L(s.Name)</td>
+                                    <td class="num">@s.Open</td>
+                                    <td class="num @(s.Overdue > 0 ? "late-text" : null)">@s.Overdue</td>
+                                    <td class="num @(s.Late > 0 ? "late-text" : null)">@s.Late</td>
+                                    <td class="num">@DevFormat.Number(s.AvgDays)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="panel">
+                <h2>@L("Образцы за период")</h2>
+                <div class="dev-cost-tiles compact">
+                    <div><span>@L("Приняты")</span><b>@r.SamplesAccepted</b></div>
+                    <div><span>@L("На доработку")</span><b>@r.SamplesRework</b></div>
+                    <div><span>@L("Отклонены")</span><b>@r.SamplesRejected</b></div>
+                    <div><span>@L("Ждут решения")</span><b>@r.SamplesWaiting</b></div>
+                </div>
+                <h3>@L("Причины доработок")</h3>
+                @if (r.ReworkReasons.Count == 0)
+                {
+                    <p class="muted">@L("Доработок и отказов за период нет.")</p>
+                }
+                else
+                {
+                    <ul class="dev-files">
+                        @foreach (var x in r.ReworkReasons)
+                        {
+                            <li><b>@x.Count</b> @x.Reason</li>
+                        }
+                    </ul>
+                }
+            </div>
+            <div class="panel">
+                <h2>@L("Загрузка участников")</h2>
+                @if (r.Load.Count == 0)
+                {
+                    <p class="muted">@L("Исполнители у моделей в работе не назначены.")</p>
+                }
+                else
+                {
+                    <div class="scroll">
+                        <table class="dev-matrix">
+                            <thead><tr><th>@L("Участник")</th><th>@L("Роль")</th><th class="num">@L("Моделей")</th><th class="num">@L("Дольше нормы")</th></tr></thead>
+                            <tbody>
+                                @foreach (var l in r.Load)
+                                {
+                                    <tr><td>@l.User</td><td>@L(l.Role)</td><td class="num">@l.Open</td><td class="num @(l.Overdue > 0 ? "late-text" : null)">@l.Overdue</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+            <div class="panel" id="samples-out">
+                <h2>@L("Образцы у заказчиков")</h2>
+                @if (r.SamplesOut is not { Count: > 0 } so)
+                {
+                    <p class="muted">@L("Сейчас все образцы на фабрике.")</p>
+                }
+                else
+                {
+                    <div class="scroll">
+                        <table class="dev-matrix">
+                            <thead><tr><th>@L("Модель")</th><th>@L("Образец")</th><th>@L("Кому")</th><th>@L("Передан")</th><th>@L("Вернуть до")</th></tr></thead>
+                            <tbody>
+                                @foreach (var x in so)
+                                {
+                                    <tr>
+                                        <td><a href="dev/models/@x.ModelId?tab=samples">@x.Number</a> @x.ModelName</td>
+                                        <td class="num">№ @x.No</td>
+                                        <td>@x.Recipient</td>
+                                        <td>@x.HandedOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</td>
+                                        <td class="@(x.Overdue ? "late-text" : null)">@(x.ReturnBy?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? L("без возврата"))@(x.Overdue ? " — " + L("просрочен") : "")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+            @if (r.PlanFact is { } pf)
+            {
+                <div class="panel">
+                    <h2>@L("План-факт себестоимости")</h2>
+                    <p class="muted small">@L("Целевая из задания против последней версии расчёта у моделей, переданных за период. Фактическая себестоимость производственных заказов появится, когда её начнёт считать производство.")</p>
+                    @if (pf.Count == 0)
+                    {
+                        <p class="muted">@L("За период ничего не передано в производство.")</p>
+                    }
+                    else
+                    {
+                        <div class="scroll">
+                            <table class="dev-matrix">
+                                <thead><tr><th>@L("Модель")</th><th class="num">@L("Целевая")</th><th class="num">@L("Расчёт")</th><th class="num">@L("Разница")</th></tr></thead>
+                                <tbody>
+                                    @foreach (var p in pf)
+                                    {
+                                        <tr>
+                                            <td><a href="dev/models/@p.ModelId">@p.Number</a> @p.Name</td>
+                                            <td class="num">@Amounts.Format(p.TargetCost)</td>
+                                            <td class="num">@Amounts.Format(p.CalculatedCost)</td>
+                                            <td class="num @(p.Difference > 0 ? "late-text" : null)">@(p.Difference is { } d ? (d > 0 ? "+" : "") + Amounts.Format(d) : "—")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private DevAnalyticsDto? _r;
+    private DateOnly _from = DateOnly.FromDateTime(DateTime.Today.AddDays(-90));
+    private DateOnly _to = DateOnly.FromDateTime(DateTime.Today);
+    private string? _denied;
+    private string? _error;
+    private bool _busy;
+
+    private string ExcelHref => $"dev/analytics.xlsx?from={_from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}&to={_to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            _r = await Analytics.ReportAsync(_from, _to);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

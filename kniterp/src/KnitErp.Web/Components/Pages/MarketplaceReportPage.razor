@@ -1,0 +1,145 @@
+@page "/marketplace-reports/{Id:long}"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject MarketplaceReportService Marketplace
+
+@* D1168–D1170: загруженный отчёт маркетплейса — итоги, решения по товарам без позиции, аннулирование, Excel строк. *@
+<PageTitle>@L("Отчёт маркетплейса № {0}", Id) — knitERP</PageTitle>
+<SalesStyles />
+<MarketplaceStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <p class="muted">@L("Отчёт не найден.")</p>
+}
+else if (_report is not { } r)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Отчёт маркетплейса № {0}", r.Id)</h1>
+        <div class="sx-tools">
+            <a class="button secondary" href="marketplace-reports">@L("Все отчёты")</a>
+            <a class="button secondary" href="marketplace-reports/@(r.Id).xlsx" download data-enhance-nav="false">Excel</a>
+        </div>
+    </div>
+    <div class="sx-kv">
+        <div><span>@L("Канал")</span><span>@r.Channel (@(r.Marketplace == MarketplaceKind.Other ? L("Иной маркетплейс") : SalesChannelSettings.MarketplaceName(r.Marketplace)))</span></div>
+        <div><span>@L("Период")</span><span>@r.From.ToString("dd.MM.yyyy")–@r.To.ToString("dd.MM.yyyy")</span></div>
+        <div><span>@L("Файл")</span><span>@r.FileName</span></div>
+        <div><span>@L("Загрузил")</span><span>@r.CreatedBy, @TimeZones.ToLocal(r.CreatedAtUtc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm")</span></div>
+        <div><span>@L("Состояние")</span><span>@(r.Status == MarketplaceReportStatus.Cancelled ? L("аннулирован: {0}", r.CancelReason ?? "") : L("действует"))</span></div>
+    </div>
+    <MarketplaceTotals Totals="r.Totals" />
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    @if (r.Unmatched.Count > 0 && r.Status == MarketplaceReportStatus.Active)
+    {
+        <h2 class="mp-sub">@L("Нужно решение: товары без позиции ({0})", r.Unmatched.Count)</h2>
+        <MarketplaceUnmatched Rows="r.Unmatched" Decisions="_decisions" Options="_options" Busy="_busy" OnSearch="SearchAsync" OnResolve="ResolveAsync" />
+    }
+
+    <MarketplaceLines Lines="r.Lines" Total="r.TotalLines" />
+
+    @if (r.Status == MarketplaceReportStatus.Active)
+    {
+        <section class="panel" aria-label="@L("Аннулировать отчёт")">
+            <form class="sx-form" @onsubmit="CancelAsync">
+                <label class="w2">@L("Причина аннулирования") <input @bind="_reason" maxlength="@MarketplaceReport.ReasonMaxLength" placeholder="@L("Загружен не тот период")" /></label>
+                <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Аннулировать отчёт")</button></div>
+            </form>
+            <p class="muted small">@L("Аннулированный отчёт остаётся в истории; после этого тот же файл можно загрузить снова.")</p>
+        </section>
+    }
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private MarketplaceReportDto? _report;
+    private readonly Dictionary<string, long> _decisions = [];
+    private readonly Dictionary<string, IReadOnlyList<MarketplaceItemOptionDto>> _options = [];
+    private string? _reason;
+    private bool _busy;
+    private bool _notFound;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _report = await Marketplace.GetAsync(Id);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private Task SearchAsync((string Key, string? Text) query) =>
+        RunAsync(async () => _options[query.Key] = await Marketplace.FindItemsAsync(query.Text), null);
+
+    private Task ResolveAsync((string Key, long ItemId) decision) => RunAsync(async () =>
+    {
+        var result = await Marketplace.ResolveAsync(Id, decision.Key, decision.ItemId, _report!.RowVersion);
+        _decisions.Remove(decision.Key);
+        _options.Remove(decision.Key);
+        _report = await Marketplace.GetAsync(Id);
+        _message = result.LinksCreated > 0
+            ? L("Сопоставлено строк: {0}. Связь с площадкой сохранена в каталоге.", result.Resolved)
+            : L("Сопоставлено строк: {0}.", result.Resolved);
+    }, null);
+
+    private Task CancelAsync() => RunAsync(async () =>
+    {
+        await Marketplace.CancelAsync(Id, _reason, _report!.RowVersion);
+        _report = await Marketplace.GetAsync(Id);
+    }, L("Отчёт аннулирован."));
+
+    /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? done)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _message ??= done;
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

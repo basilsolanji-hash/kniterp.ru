@@ -20,6 +20,8 @@
                     <label>@L("Накладные расходы, %") <input type="number" min="0" max="1000" step="0.1" inputmode="decimal" @bind="_overhead" /></label>
                     <label>@L("Ставка работы за минуту") <input type="number" min="0" step="0.01" inputmode="decimal" @bind="_rate" /></label>
                     <label>@L("Наценка по умолчанию, %") <input type="number" min="0" max="1000" step="0.1" inputmode="decimal" @bind="_markup" /></label>
+                    <label>@L("Порог маржи для утверждения, %") <input type="number" min="-100" max="100" step="0.1" inputmode="decimal" @bind="_minMargin" placeholder="@L("без порога")" /></label>
+                    <label class="inline"><span><input type="checkbox" @bind="_requireCost" /> @L("Утверждать только с сохранённым расчётом")</span></label>
                 </div>
                 @if (_s.CanEdit)
                 {
@@ -36,6 +38,8 @@
     private decimal _overhead;
     private decimal? _rate;
     private decimal _markup;
+    private bool _requireCost = true;
+    private decimal? _minMargin;
     private bool _busy;
     private string? _message;
     private bool _isError;
@@ -46,6 +50,7 @@
     {
         _s = await Gate.Run(() => Settings.CostSettingsAsync());
         (_waste, _overhead, _rate, _markup) = (_s.YarnWastePercent, _s.OverheadPercent, _s.LaborRatePerMinute, _s.MarkupPercent);
+        (_requireCost, _minMargin) = (_s.RequireCostForApproval, _s.MinMarginPercent);
     }
 
     private async Task SaveAsync()
@@ -60,7 +65,7 @@
         _isError = false;
         try
         {
-            await Gate.Run(() => Settings.SaveCostSettingsAsync(_waste, _overhead, _rate, _markup));
+            await Gate.Run(() => Settings.SaveCostSettingsAsync(_waste, _overhead, _rate, _markup, _requireCost, _minMargin));
             _message = L("Условия расчёта сохранены.");
         }
         catch (Exception ex) when (UiErrors.IsUserFacing(ex))

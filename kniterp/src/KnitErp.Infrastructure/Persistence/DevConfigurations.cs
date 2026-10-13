@@ -1,5 +1,6 @@
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Catalog;
+using KnitErp.Domain.Crm;
 using KnitErp.Domain.Development;
 using KnitErp.Domain.Organizations;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,7 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
         b.ToTable("dev_models", t =>
         {
             t.HasCheckConstraint("ck_dev_models_stage", "[Stage] BETWEEN 1 AND 11 OR [Stage] = 99");
+            t.HasCheckConstraint("ck_dev_models_version", "[VersionNo] >= 1 AND ([PreviousVersionId] IS NULL OR [VersionNo] >= 2)");
             t.HasCheckConstraint("ck_dev_models_category", "[Category] BETWEEN 1 AND 10 OR [Category] = 99");
             t.HasCheckConstraint("ck_dev_models_audience", "[Audience] BETWEEN 1 AND 4");
             t.HasCheckConstraint("ck_dev_models_priority", "[Priority] BETWEEN 1 AND 4");
@@ -43,6 +45,14 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_collection");
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustomerId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_customer");
+        b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DealId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_deal");
+        // D769: предыдущая версия — модель своей организации; у версии не больше одной следующей.
+        b.Property(x => x.VersionNo).HasDefaultValue(1).HasSentinel(1);
+        b.HasOne<DevModel>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PreviousVersionId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_previous_version");
+        b.HasIndex(x => new { x.OrganizationId, x.PreviousVersionId }).IsUnique().HasFilter("[PreviousVersionId] IS NOT NULL")
+            .HasDatabaseName("ux_dev_models_previous_version");
         // D750: позиция и черновик техкарты, в которые передана модель, — только своей организации.
         b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ProductionItemId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_production_item");
@@ -82,6 +92,8 @@ internal sealed class DevModelStageEntryConfiguration : IEntityTypeConfiguration
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_model_stages_model");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.Id }).HasDatabaseName("ix_dev_model_stages_model");
+        // Аудит 2026-10-12: аналитика берёт переходы за период — без индекса просматривалась вся история организации.
+        b.HasIndex(x => new { x.OrganizationId, x.AtUtc }).HasDatabaseName("ix_dev_model_stages_at");
     }
 }
 
@@ -172,11 +184,14 @@ internal sealed class DevSettingsConfiguration : IEntityTypeConfiguration<DevSet
         b.Property(x => x.OverheadPercent).HasPrecision(9, 4);
         b.Property(x => x.MarkupPercent).HasPrecision(9, 4);
         b.Property(x => x.LaborRatePerMinute).HasPrecision(19, 4);
+        b.Property(x => x.MinMarginPercent).HasPrecision(9, 4);
+        b.Property(x => x.RequireCostForApproval).HasDefaultValue(true).HasSentinel(true);
         b.ToTable(t =>
         {
             t.HasCheckConstraint("ck_dev_settings_tolerance", "[FactTolerancePercent] BETWEEN 1 AND 100");
             t.HasCheckConstraint("ck_dev_settings_costing",
-                "[YarnWastePercent] BETWEEN 0 AND 100 AND [OverheadPercent] BETWEEN 0 AND 1000 AND [MarkupPercent] BETWEEN 0 AND 1000 AND ([LaborRatePerMinute] IS NULL OR [LaborRatePerMinute] >= 0)");
+                "[YarnWastePercent] BETWEEN 0 AND 100 AND [OverheadPercent] BETWEEN 0 AND 1000 AND [MarkupPercent] BETWEEN 0 AND 1000 AND ([LaborRatePerMinute] IS NULL OR [LaborRatePerMinute] >= 0) "
+                + "AND ([MinMarginPercent] IS NULL OR [MinMarginPercent] BETWEEN -100 AND 100)");
             t.HasCheckConstraint("ck_dev_settings_sections", $"[CompletenessSections] BETWEEN 1 AND {DevCompleteness.AllSections}");
             t.HasCheckConstraint("ck_dev_settings_label", $"[LabelWidthMm] BETWEEN {DevSettings.MinLabelMm} AND {DevSettings.MaxLabelMm} AND [LabelHeightMm] BETWEEN {DevSettings.MinLabelMm} AND {DevSettings.MaxLabelMm}");
         });

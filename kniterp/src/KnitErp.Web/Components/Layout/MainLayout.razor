@@ -149,17 +149,24 @@
             new("sales-orders", "Заказы покупателей", a => a.Has(Permissions.SalesView)),
             new("customer-invoices", "Счета покупателям", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("stock-documents?kind=6", "Отгрузки", Docs),
-            Soon("commission-reports", "Отчёты комиссионера"),
+            new("sales-pick-lists", "Задания на сборку", a => a.Has(Permissions.SalesView) || Docs(a)), // D1150
+            new("sales-shipments", "Отгрузки по нескольким заказам", a => a.Has(Permissions.SalesView) || Docs(a)), // D1151
+            // D1168 (продажи): отчёты о реализации маркетплейсов вместо «Отчётов комиссионера».
+            new("marketplace-reports", "Отчёты маркетплейсов", a => a.Has(Permissions.SalesView)),
             new("stock-documents?kind=7", "Возвраты покупателей", Docs),
             new("vat-invoices/issued", "Счета-фактуры выданные", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/profitability", "Прибыльность", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/sales-by-item", "Товары и реализации", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("reports/receivables", "Дебиторская задолженность", a => a.Has(Permissions.SalesReportView) && a.Has(Permissions.PriceView)),
-            Soon("sales-funnel", "Воронка продаж"),
+            // D1171 (продажи): аналитика, план и воронка сделок CRM.
+            new("reports/sales", "Аналитика продаж", a => a.Has(Permissions.SalesReportView)),
+            new("sales-plan", "План продаж", a => a.Has(Permissions.SalesReportView)),
+            new("crm/deals", "Воронка продаж", a => a.Has(Permissions.CrmView)),
             Soon("unit-economics", "Юнит-экономика"),
             new("sales-order-stages", "Этапы заказов", a => a.Has(Permissions.SalesView)),
             new("sales-agreements", "Соглашения и цены", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
             new("sales-discounts", "Скидки и акции", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+            new("sales-price-list", "Прайс-лист", a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)), // D1142
             new("sales-setup", "Настройки продаж", a => a.Has(Permissions.SalesView)),
             new("learn/sales", "Обучение", a => true),
         ]),
@@ -241,6 +248,7 @@
             new("dev/my", "Мои задачи разработки", a => a.Has(Permissions.DevView)),
             new("dev/tech", "Техкарты вязания", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
             new("dev/machines", "Станки и программы", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
+            new("dev/analytics", "Аналитика разработки", a => a.Has(Permissions.DevView)),
             new("dev/settings", "Настройки разработки", a => a.Has(Permissions.DevView)),
         ]),
         // Модуль «Сотрудники» (D200–D299).

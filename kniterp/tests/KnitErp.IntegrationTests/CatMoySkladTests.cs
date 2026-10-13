@@ -89,8 +89,20 @@ public sealed class FakeMoySkladClient : IMoySkladClient
         return Task.FromResult(new MsPage<MsRow>(new MsMeta(null, null, Stock.Count, limit, offset), Stock.Skip(offset).Take(limit).ToList()));
     }
 
+    /// <summary>Отчёт «Остатки по складам» (D336).</summary>
+    public List<MsRow> StockByStore { get; } = [];
+
+    public Task<MsPage<MsRow>> StockByStoreAsync(string token, int offset, int limit, CancellationToken ct = default)
+    {
+        Assert.Equal(Token, token);
+        return Task.FromResult(new MsPage<MsRow>(new MsMeta(null, null, StockByStore.Count, limit, offset), StockByStore.Skip(offset).Take(limit).ToList()));
+    }
+
     /// <summary>Отправленные изменения цен (D327) — и применены к строкам, как сделал бы МойСклад.</summary>
     public List<(string Entity, MsPriceUpdate Update)> PriceUpdates { get; } = [];
+
+    /// <summary>Объекты, которые «МойСклад» отклонит при массовом изменении цен.</summary>
+    public HashSet<string> RejectIds { get; } = [];
 
     public Task<IReadOnlyList<MsRow>> UpdatePricesAsync(string token, string entity, IReadOnlyList<MsPriceUpdate> updates, CancellationToken ct = default)
     {
@@ -101,6 +113,12 @@ public sealed class FakeMoySkladClient : IMoySkladClient
         var result = new List<MsRow>();
         foreach (var u in updates)
         {
+            if (RejectIds.Contains(u.Id))
+            {
+                result.Add(new MsRow()); // как МойСклад: элемент массива с errors и без id
+                continue;
+            }
+
             PriceUpdates.Add((entity, u));
             var i = rows.FindIndex(r => r.Id == u.Id);
             var old = rows[i];
@@ -397,7 +415,8 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         await using var s = host.As(_user, _org);
         var ms = Service(s, fake);
         var probe = await ms.ProbeAsync("Bearer " + FakeMoySkladClient.Token);
-        Assert.Equal(10, probe.Count);
+        Assert.Equal(11, probe.Count);
+        Assert.Equal("Версия knitERP", probe[0].Section); // D337: версия сборки — первой строкой
         Assert.All(probe.Where(p => p.Section != "Комплекты"), p => Assert.True(p.Ok, p.Section + ": " + p.Detail));
         var bundles = probe.Single(p => p.Section == "Комплекты");
         Assert.False(bundles.Ok);
@@ -455,7 +474,8 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         {
             Attributes =
             [
-                A("Состав", "string", "\"шерсть 50%\""),
+                A("Состав", "string", "\"шерсть 40%\""),
+                A("состав", "string", "\"шерсть 50%\""), // то же поле knitERP — последнее значение, без дубля
                 A("Уход", "text", "\"Стирка 30°\\nНе отбеливать\""),
                 A("Плотность", "double", "220.5"),
                 A("Новинка", "boolean", "true"),
@@ -531,6 +551,47 @@ public sealed class CatMoySkladTests(SqlTestHost host) : IClassFixture<SqlTestHo
         Assert.Equal(1, result.Different);
         Assert.True(result.Compared >= 3); // шапка, шарф, модификация
         Assert.Empty(fake.PriceUpdates);
+
+        // D336: по складам — «Склад» knitERP и « склад » МойСклад (регистр и пробелы не важны); «Цех» без пары — в списке.
+        var storeHref = new MsMeta("https://api.moysklad.ru/api/remap/1.2/entity/store/s-1", "store", null, null, null);
+        fake.StockByStore.Add(R("entity/product", "p-hat", 0) with { StockByStore = [new MsStoreStock(storeHref, " склад ", 4), new MsStoreStock(storeHref, "Цех", 7)] });
+        var perStore = await ms.StockCompareAsync(perWarehouse: true);
+        var byStore = perStore.Differences.Single();
+        Assert.Equal(("Склад", 5m, 4m), (byStore.Warehouse, byStore.KnitErp, byStore.MoySklad));
+        Assert.Equal(["МойСклад: Цех"], perStore.Unmatched);
+    }
+
+    [SqlFact]
+    public async Task Price_export_does_not_hide_moysklad_changes_and_counts_rejected()
+    {
+        // Ревью D327: правка в МойСклад после загрузки не «съедается» выгрузкой цен; отклонённый объект не считается отправленным.
+        var org = await CreateOrgAsync();
+        (_user, _org) = (org.OwnerUserId, org.OrganizationId);
+        var fake = FakeMoySkladClient.FromSamples();
+        await using var s = host.As(_user, _org);
+        var ms = Service(s, fake);
+        await ms.ConnectAsync(FakeMoySkladClient.Token);
+        await ms.StartAsync();
+        Assert.True(await ms.ProcessNextAsync());
+
+        var hat = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ШП-1"))).Items.Single(i => i.ParentItemId is null).Id;
+        var scarf = (await s.Catalog.ListItemsAsync(new ItemFilter(Search: "ШФ-1"))).Items.Single().Id;
+        var retail = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.Name == "Цена продажи").Id;
+        await s.Nomenclature.SetPricesAsync(hat, new Dictionary<long, decimal?> { [retail] = 1700 });
+        await s.Nomenclature.SetPricesAsync(scarf, new Dictionary<long, decimal?> { [retail] = 999 });
+
+        // В МойСклад шапку переименовали после загрузки; шарф МойСклад отклонит.
+        var products = fake.Entities[MoySkladEntities.Product];
+        var i = products.FindIndex(r => r.Id == "p-hat");
+        products[i] = products[i] with { Name = "Шапка вязаная NEW", Updated = "2026-10-05 09:00:00.000" };
+        fake.RejectIds.Add("p-scarf");
+
+        var result = await ms.ExportPricesAsync();
+        Assert.Equal((1, 1), (result.Sent, result.Rejected));
+
+        await ms.StartAsync();
+        Assert.True(await ms.ProcessNextAsync());
+        Assert.Equal("Шапка вязаная NEW", (await s.Nomenclature.GetItemAsync(hat)).Name);
     }
 
     [SqlFact]

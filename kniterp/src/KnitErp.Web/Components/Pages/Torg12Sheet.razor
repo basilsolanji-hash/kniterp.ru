@@ -1,0 +1,152 @@
+@*
+    D1141: товарная накладная по унифицированной форме № ТОРГ-12 (ОКУД 0330212, постановление Госкомстата России от 25.12.1998 № 132)
+    по проведённой отгрузке. Данные — как у УПД (D68); масса нетто — вес позиции × количество; места, упаковка и масса брутто
+    заполняются от руки, пока документ отгрузки их не хранит. Печатается по-русски.
+*@
+@using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+
+@{
+    var u = Form.Upd;
+    var r = u.Requisites;
+    var noVat = r.VatExempt || u.Lines.All(l => l.VatPercent is null);
+}
+<div class="sheet torg12" style="@(Break ? "break-before: page" : null)">
+    @if (u.Reversed)
+    {
+        <div class="stamp">ОТГРУЗКА СТОРНИРОВАНА — НАКЛАДНАЯ АННУЛИРОВАНА</div>
+    }
+    <p class="small sx-right">Унифицированная форма № ТОРГ-12<br />Утверждена постановлением Госкомстата России от 25.12.98 № 132</p>
+    <table class="plain">
+        <tr>
+            <td style="width: 78%">
+                <div><b>Грузоотправитель:</b> @PrintInvoicePage.Party(u.Seller)@(r.BankName is null ? "" : $", р/с {r.BankAccount} в {r.BankName}, БИК {r.BankBic}, к/с {r.BankCorrAccount}")</div>
+                <div class="small">организация-грузоотправитель, адрес, телефон, факс, банковские реквизиты · склад отгрузки: @u.Warehouse</div>
+                <div><b>Грузополучатель:</b> @PrintInvoicePage.Party(u.Buyer)@(Form.DeliveryAddress is { } da ? $"; адрес доставки: {da}" : "")</div>
+                <div><b>Поставщик:</b> @PrintInvoicePage.Party(u.Seller)</div>
+                <div><b>Плательщик:</b> @PrintInvoicePage.Party(u.Buyer)</div>
+                <div><b>Основание:</b> @u.Basis</div>
+            </td>
+            <td>
+                <table>
+                    <tr><td>Форма по ОКУД</td><td class="c">0330212</td></tr>
+                    <tr><td>по ОКПО</td><td class="c">&nbsp;</td></tr>
+                    <tr><td>Вид деятельности по ОКДП</td><td class="c">&nbsp;</td></tr>
+                    <tr><td>Заказ номер / дата</td><td class="c">@Form.OrderNumber / @Form.OrderDate.ToString("dd.MM.yyyy")</td></tr>
+                    <tr><td>Транспортная накладная номер / дата</td><td class="c">@u.ShipmentNumber / @u.Date.ToString("dd.MM.yyyy")</td></tr>
+                    <tr><td>Вид операции</td><td class="c">&nbsp;</td></tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <table style="width: auto; margin: 8px auto">
+        <tr><th></th><th>Номер документа</th><th>Дата составления</th></tr>
+        <tr><td><b>ТОВАРНАЯ НАКЛАДНАЯ</b></td><td class="c">@u.ShipmentNumber</td><td class="c">@u.Date.ToString("dd.MM.yyyy")</td></tr>
+    </table>
+
+    <table class="goods">
+        <thead>
+            <tr>
+                <th rowspan="2">Номер по по&shy;рядку</th><th colspan="2">Товар</th><th colspan="2">Единица измерения</th>
+                <th rowspan="2">Вид упа&shy;ковки</th><th colspan="2">Количество</th><th rowspan="2">Масса брутто</th>
+                <th rowspan="2">Коли&shy;чество (масса нетто)</th><th rowspan="2">Цена, руб. коп.</th><th rowspan="2">Сумма без учёта НДС, руб. коп.</th>
+                <th colspan="2">НДС</th><th rowspan="2">Сумма с учётом НДС, руб. коп.</th>
+            </tr>
+            <tr>
+                <th>наименование, характеристика, сорт, артикул товара</th><th>код</th><th>наиме&shy;нование</th><th>код по ОКЕИ</th>
+                <th>в одном месте</th><th>мест, штук</th><th>ставка, %</th><th>сумма, руб. коп.</th>
+            </tr>
+            <tr class="small"><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th><th>11</th><th>12</th><th>13</th><th>14</th><th>15</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var l in u.Lines)
+            {
+                <tr>
+                    <td class="c">@l.No</td>
+                    <td>@l.Name</td>
+                    <td>@l.Code</td>
+                    <td class="c">@l.UnitSymbol</td>
+                    <td class="c">@l.UnitCode</td>
+                    <td></td><td></td><td></td><td></td>
+                    <td class="n">@Quantities.Format(l.Quantity)</td>
+                    <td class="n">@Amounts.Format(l.Price)</td>
+                    <td class="n">@Amounts.Format(l.AmountWithoutVat)</td>
+                    <td class="c">@(l.VatPercent is null ? "без НДС" : Amounts.Vat(l.VatPercent))</td>
+                    <td class="n">@(l.VatPercent is null ? "—" : Amounts.Format(l.VatAmount))</td>
+                    <td class="n">@Amounts.Format(l.Amount)</td>
+                </tr>
+            }
+            <tr>
+                <td colspan="9" class="sx-right">Итого</td>
+                <td class="n">@Quantities.Format(u.Lines.Sum(l => l.Quantity))</td>
+                <td class="c">X</td>
+                <td class="n">@Amounts.Format(u.TotalWithoutVat)</td>
+                <td class="c">X</td>
+                <td class="n">@(noVat ? "—" : Amounts.Format(u.VatTotal))</td>
+                <td class="n">@Amounts.Format(u.Total)</td>
+            </tr>
+            <tr>
+                <td colspan="9" class="sx-right"><b>Всего по накладной</b></td>
+                <td class="n"><b>@Quantities.Format(u.Lines.Sum(l => l.Quantity))</b></td>
+                <td class="c">X</td>
+                <td class="n"><b>@Amounts.Format(u.TotalWithoutVat)</b></td>
+                <td class="c">X</td>
+                <td class="n"><b>@(noVat ? "—" : Amounts.Format(u.VatTotal))</b></td>
+                <td class="n"><b>@Amounts.Format(u.Total)</b></td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p>Товарная накладная имеет приложение на <span class="sx-blank" style="min-width: 60px"></span> листах и содержит <b>@u.Lines.Count</b> порядковых номеров записей.</p>
+    <table class="plain">
+        <tr>
+            <td style="width: 50%">Масса груза (нетто): <b>@(Form.TotalNetKg is { } kg ? Quantities.Format(kg) + " кг" : "")</b> <span class="sx-blank" style="min-width: 80px"></span></td>
+            <td>Масса груза (брутто): <span class="sx-blank"></span></td>
+        </tr>
+        <tr><td>Всего мест: <span class="sx-blank"></span></td><td>Приложение (паспорта, сертификаты и т. п.) на <span class="sx-blank" style="min-width: 60px"></span> листах</td></tr>
+        <tr><td colspan="2">Всего отпущено на сумму: <b>@u.TotalInWords</b></td></tr>
+    </table>
+
+    <table class="plain" style="margin-top: 10px">
+        <tr>
+            <td style="width: 50%; vertical-align: top">
+                <div>Отпуск груза разрешил @(r.SoleProprietor ? "Индивидуальный предприниматель" : r.DirectorPosition ?? "Руководитель") <SalesPrintSign Image="Deco.DirectorSignature" /> @r.DirectorName
+                    <div class="small">(должность) (подпись) (расшифровка подписи)</div></div>
+                @if (!r.SoleProprietor)
+                {
+                    <div>Главный (старший) бухгалтер <SalesPrintSign Image="@(Deco.AccountantSignature ?? Deco.DirectorSignature)" /> @(r.AccountantName ?? r.DirectorName)
+                        <div class="small">(подпись) (расшифровка подписи)</div></div>
+                }
+                <div>Отпуск груза произвёл <span class="sx-blank" style="min-width: 120px"></span> <span class="sx-blank" style="min-width: 100px"></span> <span class="sx-blank" style="min-width: 120px"></span>
+                    <div class="small">(должность) (подпись) (расшифровка подписи)</div></div>
+                <div style="position: relative">М. П. @u.Date.ToString("«dd» MMMM yyyy г.", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"))
+                    @if (Deco.Stamp is { } stamp)
+                    {
+                        <img class="sx-stamp sx-stamp-upd" src="@stamp.DataUri" alt="" />
+                    }
+                </div>
+            </td>
+            <td style="vertical-align: top">
+                <div>По доверенности № <span class="sx-blank" style="min-width: 80px"></span> от «___» __________ 20__ г.</div>
+                <div>выданной <span class="sx-blank" style="min-width: 300px"></span><div class="small">(кем, кому (организация, должность, фамилия, и. о.))</div></div>
+                <div>Груз принял <span class="sx-blank" style="min-width: 120px"></span> <span class="sx-blank" style="min-width: 100px"></span> <span class="sx-blank" style="min-width: 120px"></span>
+                    <div class="small">(должность) (подпись) (расшифровка подписи)</div></div>
+                <div>Груз получил грузополучатель <span class="sx-blank" style="min-width: 120px"></span> <span class="sx-blank" style="min-width: 100px"></span> <span class="sx-blank" style="min-width: 120px"></span>
+                    <div class="small">(должность) (подпись) (расшифровка подписи)</div></div>
+                <div>М. П. «___» __________ 20__ г.</div>
+            </td>
+        </tr>
+    </table>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public ShipmentFormDto Form { get; set; } = null!;
+
+    [Parameter]
+    public SalesPrintDecorations Deco { get; set; } = SalesPrintDecorations.None;
+
+    [Parameter]
+    public bool Break { get; set; }
+}

@@ -38,7 +38,7 @@
             <ul class="small muted">
                 @foreach (var w in _p.Warnings)
                 {
-                    <li>@w</li>
+                    <li>@DevFormat.Note(w)</li>
                 }
             </ul>
         }

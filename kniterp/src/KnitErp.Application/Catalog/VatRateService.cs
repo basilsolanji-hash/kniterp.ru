@@ -53,6 +53,19 @@ public sealed class VatRateService(IKnitErpDbContext db, IAccessGuard guard, ICu
     /// <summary>Новый вид ставки. Процент с даты обязателен, кроме «Без НДС».</summary>
     public async Task<long> CreateAsync(string name, VatRateKind kind, DateOnly? validFrom, decimal? percent, CancellationToken ct = default)
     {
+        try
+        {
+            return await CreateAsyncCoreAsync(name, kind, validFrom, percent, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // аудит каталога (D347): транзакция откатилась — несохранённое не должно уйти следующим сохранением вкладки
+            throw;
+        }
+    }
+
+    private async Task<long> CreateAsyncCoreAsync(string name, VatRateKind kind, DateOnly? validFrom, decimal? percent, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         var rate = VatRate.Create(ctx.OrganizationId, name, kind);
         if (kind != VatRateKind.Exempt)

@@ -13,6 +13,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
     private static readonly string Stamp = DateTime.UtcNow.Ticks.ToString()[^6..];
 
     /// <summary>PNG 1×1, сгенерированный в тесте (не реальное изображение).</summary>
+    private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
     private static readonly byte[] Png = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
 
@@ -226,7 +227,32 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByRole(AriaRole.Button, new() { Name = "Списать пряжу", Exact = true }).First.ClickAsync();
         await Assertions.Expect(page.Locator(".dev-yarn")).ToContainTextAsync("Нечего списывать");
 
+        // D723: принятый образец передаём заказчику со сроком возврата — метка «У заказчика», без горизонтальной прокрутки.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Записать решение", Exact = true }).First.ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Решение записано" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Передать заказчику", Exact = true }).First.ClickAsync();
+        await page.GetByLabel("Кому").FillAsync("ООО «Пример», Иванова");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Передать", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Образец передан заказчику" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".tag", new() { HasText = "У заказчика" })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Вернули на фабрику", Exact = true })).ToBeVisibleAsync();
+        await AssertNoHorizontalScrollAsync(page, "образец у заказчика");
+
+        // D725: технический паспорт открывается из карточки модели как PDF.
+        var passportHref = await page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" }).GetAttributeAsync("href") ?? throw new InvalidOperationException("нет ссылки");
+        var passport = await page.APIRequest.GetAsync(new Uri(new Uri(page.Url), "/" + passportHref).ToString());
+        Assert.Equal(200, passport.Status);
+        Assert.Equal("application/pdf", passport.Headers["content-type"]);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString((await passport.BodyAsync())[..4]));
+
         // D750: утверждённая модель — панель передачи в производство с нормами и причиной, почему пока нельзя.
+        // D746: без сохранённого расчёта себестоимости утвердить нельзя — сначала версия расчёта.
+        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("сохраните расчёт себестоимости");
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить версию расчёта", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Сохранена версия расчёта" })).ToBeVisibleAsync();
         await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
         await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждено");
@@ -241,10 +267,150 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GotoAsync("dev/settings");
         await Ready(page);
         await Assertions.Expect(page.GetByLabel("Ставка работы за минуту")).ToBeVisibleAsync();
+
+        // D760: аналитика разработки — плитки, стадии, выгрузка в Excel; на телефоне без горизонтальной прокрутки.
+        await page.GotoAsync("dev/analytics");
+        await Ready(page);
+        await Assertions.Expect(page.Locator(".dev-cost-tiles").First).ToContainTextAsync("В работе");
+        await Assertions.Expect(page.Locator("#samples-out")).ToContainTextAsync("ООО «Пример», Иванова");
+        await AssertNoHorizontalScrollAsync(page, "аналитика");
+        var xlsx = await page.APIRequest.GetAsync(await page.GetByRole(AriaRole.Link, new() { Name = "Выгрузить в Excel" }).GetAttributeAsync("href") is { } href
+            ? new Uri(new Uri(page.Url), "/" + href).ToString() : throw new InvalidOperationException("нет ссылки")); // <base href="/">
+        Assert.Equal(200, xlsx.Status);
         await page.GotoAsync("dev/machines");
         await Ready(page);
         await AssertNoHorizontalScrollAsync(page, "станки");
     });
+
+    /// <summary>
+    /// Приёмка модуля (ТЗ разработки §14): модель → рисунок → станок, деталь, заправка, программа → образец № 1 на доработку →
+    /// новая версия рисунка → образец № 2 с замерами принят → расчёт и утверждение → передача → позиция каталога и черновик техкарты.
+    /// Ошибок JavaScript — 0 (проверяет RunAsync); карточка на телефоне без горизонтальной прокрутки.
+    /// </summary>
+    [SqlFact]
+    public Task Acceptance_model_from_idea_to_production() => RunAsync("dev-acceptance", false, async page =>
+    {
+        var yarn = await app.CreateYarnAsync("Хлопок 20/1 приёмка");
+        var machineName = "STOLL №" + Random.Shared.Next(100, 999);
+        await page.GotoAsync("dev/machines");
+        await Ready(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить станок", Exact = true }).ClickAsync();
+        await page.GetByLabel("Название").FillAsync(machineName);
+        await page.GetByLabel("Нитеводителей").FillAsync("8");
+        await Click(page, "Сохранить", "Сохранено");
+
+        var name = "Свитер «Приёмка» " + Guid.NewGuid().ToString("N")[..4];
+        await CreateModelAsync(page, name);
+        var modelUrl = page.Url;
+
+        // Дизайнер: одноцветная палитра с пряжей; дессинатор: рисунок (автопереход на «Рисунок»).
+        await page.GetByLabel("Обозначение").FillAsync("Основной");
+        await SelectContainingAsync(page.GetByLabel("Пряжа из номенклатуры"), yarn); // «код — название»
+        await Click(page, "Добавить цвет", "Палитра сохранена");
+        await UploadPatternAsync(page);
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Рисунок");
+
+        // Деталь: станок, вес, заправка, программа машины.
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Детали и заправка" }).ClickAsync();
+        await page.GetByLabel("Новая деталь").FillAsync("Перед");
+        await Click(page, "Добавить деталь", "Деталь добавлена");
+        await page.GetByRole(AriaRole.Link, new() { Name = "Перед", Exact = true }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/dev/details/\d+$"));
+        await Ready(page);
+        await SelectContainingAsync(page.GetByLabel("Станок"), machineName);
+        await page.GetByLabel("Время вязания, мин").FillAsync("12");
+        await page.GetByLabel("Вес детали, г").FillAsync("250");
+        await Click(page, "Сохранить", "Сохранено");
+        await page.GetByRole(AriaRole.Checkbox, new() { Name = "Нитеводитель 5, слева" }).CheckAsync();
+        await SelectContainingAsync(page.Locator(".dev-slot").Filter(new() { HasText = "Нитеводитель 5, слева" }).GetByLabel("Цвет / нить"), "Основной");
+        await Click(page, "Сохранить заправку", "Заправка сохранена");
+        await page.Locator("input[type=file]").SetInputFilesAsync(new FilePayload { Name = "pered.sin", MimeType = "application/octet-stream", Buffer = Program });
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Программа загружена" })).ToBeVisibleAsync();
+
+        // Конструктор: сетка и табель мер.
+        await page.GotoAsync(modelUrl);
+        await Ready(page);
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Размеры" }).ClickAsync();
+        await page.GetByLabel("Размеры через запятую").FillAsync("46, 48");
+        await page.GetByLabel("Базовый размер").FillAsync("46");
+        await Click(page, "Сохранить сетку", "Размерная сетка сохранена");
+        await page.GetByLabel("Точка измерения").FillAsync("Длина изделия");
+        await page.GetByLabel("Допуск ±, см").FillAsync("1");
+        await Click(page, "Добавить точку", null);
+        await page.GetByLabel("Длина изделия, размер 46").FillAsync("62");
+        await Click(page, "Сохранить табель мер", null);
+
+        // Образец № 1 — на доработку; доработка рисунка — его новая версия.
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Образцы" }).ClickAsync();
+        await page.GetByLabel("Размер образца").SelectOptionAsync(new SelectOptionValue { Label = "46" });
+        await Click(page, "Новый образец", "Образец создан");
+        await page.GetByLabel("Решение").SelectOptionAsync(new SelectOptionValue { Label = "На доработку" });
+        await page.GetByLabel("Что не так / комментарий").FillAsync("рисунок съехал на 2 петли");
+        await Click(page, "Записать решение", "Решение записано");
+        await UploadPatternAsync(page);
+        await Assertions.Expect(page.Locator(".dev-files")).ToContainTextAsync("версия 2");
+
+        // Образец № 2 с замером — принят.
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Образцы" }).ClickAsync();
+        await page.GetByLabel("Размер образца").SelectOptionAsync(new SelectOptionValue { Label = "46" });
+        await Click(page, "Новый образец", "Образец создан");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Образец № 2" })).ToBeVisibleAsync();
+        await page.GetByLabel("Замер Длина изделия").First.FillAsync("62.5");
+        await Click(page, "Сохранить замеры", "Замеры сохранены");
+        await page.GetByLabel("Решение").First.SelectOptionAsync(new SelectOptionValue { Label = "Принят" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Записать решение", Exact = true }).First.ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Решение записано" })).ToBeVisibleAsync();
+
+        // Расчёт себестоимости и утверждение.
+        await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
+        await Click(page, "Сохранить версию расчёта", "Сохранена версия расчёта");
+        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
+        await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждено");
+
+        // Передача: позиция «Готовая продукция» и черновик техкарты с нормой пряжи.
+        await Assertions.Expect(page.Locator(".dev-handoff")).ToContainTextAsync(yarn);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Передать в производство", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.Locator(".dev-handoff")).ToContainTextAsync("Передано в производство");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Передано в производство");
+        var item = await page.GetByRole(AriaRole.Link, new() { Name = "Позиция в номенклатуре" }).GetAttributeAsync("href");
+        await page.GetByRole(AriaRole.Link, new() { Name = "Черновик техкарты производства" }).ClickAsync();
+        await Ready(page);
+        await Assertions.Expect(page.Locator("main")).ToContainTextAsync(yarn);
+        await page.GotoAsync(item!);
+        await Ready(page);
+        await Assertions.Expect(page.Locator("main")).ToContainTextAsync(name);
+
+        // Карточка переданной модели на телефоне: без горизонтальной прокрутки, есть «Новая версия» и техпаспорт.
+        await page.SetViewportSizeAsync(390, 844);
+        await page.GotoAsync(modelUrl);
+        await Ready(page);
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Новая версия", Exact = true })).ToBeVisibleAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" })).ToBeVisibleAsync();
+        await AssertNoHorizontalScrollAsync(page, "переданная модель");
+    });
+
+    private static async Task UploadPatternAsync(IPage page)
+    {
+        await page.GetByRole(AriaRole.Tab, new() { NameRegex = new Regex("^Файлы") }).ClickAsync();
+        await page.GetByLabel("Вид файла").SelectOptionAsync(new SelectOptionValue { Label = "Рисунок" });
+        await page.Locator("input[type=file]").SetInputFilesAsync(new FilePayload { Name = "risunok.png", MimeType = "image/png", Buffer = Png });
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Файл загружен" })).ToBeVisibleAsync();
+    }
+
+    private static async Task SelectContainingAsync(ILocator select, string text) =>
+        await select.SelectOptionAsync((await select.Locator("option", new() { HasText = text }).First.GetAttributeAsync("value"))!);
+
+    /// <summary>Нажать кнопку и дождаться сообщения сервера (или просто ответа, если сообщение не задано).</summary>
+    private static async Task Click(IPage page, string button, string? status)
+    {
+        await page.GetByRole(AriaRole.Button, new() { Name = button, Exact = true }).First.ClickAsync();
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        if (status is not null)
+        {
+            await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = status }).First).ToBeVisibleAsync();
+        }
+    }
 
     private static async Task CreateModelAsync(IPage page, string name)
     {

@@ -66,6 +66,25 @@ public sealed class SalesUpdXmlTests(SqlTestHost host) : IClassFixture<SqlTestHo
             Assert.Equal(upd.TotalWithoutVat.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture), (string?)total.Attribute("СтТовБезНДСВсего"));
             Assert.NotNull(docEl.Element("Подписант")?.Element("ФИО")?.Attribute("Фамилия"));
 
+            // D1141: ТОРГ-12 и транспортная накладная — те же строки и суммы, что у УПД; без веса позиции масса нетто не считается.
+            var form = await s.Print.ShipmentFormAsync(ship);
+            Assert.Equal((upd.Total, upd.Lines.Count), (form.Upd.Total, form.LineNetKg.Count));
+            Assert.Null(form.TotalNetKg);
+            Assert.Contains(form.Warnings, w => w.Contains("Вес, кг", StringComparison.Ordinal));
+            var orderId = (await s.Sales.ListOrdersAsync(new SalesOrderFilter())).First().Id;
+            var set = await s.OrderDocuments.PrintSetAsync(orderId);
+            Assert.Contains(set, p => p.Document == SalesMailDocument.Order);
+            Assert.Contains(set, p => p.Document == SalesMailDocument.Upd);
+
+            // D1143: журнал «не отгружены полностью» — только подтверждённый заказ без отгрузки; отгруженные полностью и черновики — нет.
+            var pending = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, customer, store, null, null, true, null));
+            await s.Sales.SetOrderLineAsync(pending, sweater, 1, 1220m, 22m, (await s.Sales.GetOrderAsync(pending)).RowVersion);
+            var draft = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, customer, store, null, null, true, null));
+            Assert.Empty(await s.Sales.ListOrdersAsync(new SalesOrderFilter(Unshipped: true)));
+            await s.Sales.ConfirmOrderAsync(pending, (await s.Sales.GetOrderAsync(pending)).RowVersion);
+            Assert.Equal([pending], (await s.Sales.ListOrdersAsync(new SalesOrderFilter(Unshipped: true))).Select(o => o.Id));
+            Assert.Contains(draft, (await s.Sales.ListOrdersAsync(new SalesOrderFilter())).Select(o => o.Id));
+
             Assert.Equal("sales.upd_xml.inn", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Print.UpdXmlAsync(noInnShip, null, host.Clock.UtcNow))).Code);
         }
 
@@ -73,6 +92,7 @@ public sealed class SalesUpdXmlTests(SqlTestHost host) : IClassFixture<SqlTestHo
         await using (var o = host.As(other.OwnerUserId, other.OrganizationId))
         {
             await Assert.ThrowsAsync<NotFoundException>(() => o.Print.UpdXmlAsync(ship, null, host.Clock.UtcNow));
+            await Assert.ThrowsAsync<NotFoundException>(() => o.Print.ShipmentFormAsync(ship));
         }
     }
 

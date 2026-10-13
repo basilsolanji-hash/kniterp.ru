@@ -46,7 +46,7 @@ node .claude/skills/kniterp-e2e/scenarios/<сценарий>.mjs       # с те
 Результат 12.10.2026: EAN-13 — 100 %; длинный Code 128 на 30×20 и 43×25 при 203 dpi не читается — экран предупреждает (`BarcodeFit`).
 
 ## Регрессия всех сценариев
-`KNITERP_SA_PASSWORD=… E2E_DIR=<scratchpad>/e2e bash .claude/skills/kniterp-e2e/run-all.sh` — на уже запущенном приложении все `scenarios/cat-*.mjs` по очереди
+`KNITERP_SA_PASSWORD=… E2E_DB=<база e2e> E2E_DIR=<scratchpad>/e2e bash .claude/skills/kniterp-e2e/run-all.sh` (с `E2E_DB` — сначала удаляются тестовые фиды прошлых прогонов: их не больше 10 на организацию) — на уже запущенном приложении все `scenarios/cat-*.mjs` по очереди
 (вход с 2FA ждёт новое окно кода, поэтому ~1 мин на сценарий), итог «сценарий — ок/ОШИБКА — время», логи в `$E2E_DIR/regress/`.
 Сценариям со складом нужны данные: `cat-step9` создаёт склад и поступление; `cat-step10` — `E2E_STOCK_WAREHOUSE` (склад с остатком).
 `cat-step13-feed-host` с `E2E_PUBLIC_URL` проверяет режим с `App__PublicUrl` (приложение запускать с той же переменной).

@@ -138,6 +138,7 @@ public static class SalesCredit
 
         var terms = await TermsAsync(db, org, docs.Select(d => d.AgreementId), ct);
         var paid = await payments.GroupBy(p => p.CustomerId).Select(g => new { g.Key, Sum = g.Sum(p => p.Amount) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+        await SalesRefunds.SubtractAsync(db, org, customers, asOf, paid, ct); // D1154: возвраты денег покупателю уменьшают оплату
 
         var result = new Dictionary<long, CustomerLedger>();
         CustomerLedger Of(long id) => result.TryGetValue(id, out var l) ? l : result[id] = new CustomerLedger(id);

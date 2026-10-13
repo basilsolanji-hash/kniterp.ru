@@ -50,6 +50,7 @@ public static class DependencyInjection
         services.AddSingleton<KnitErp.Application.Crm.ICrmMailboxClient, Email.ImapMailboxClient>(); // D676: входящая почта CRM
         // D1123 (продажи): PDF счёта, УПД и заказа для писем клиенту.
         services.AddSingleton<KnitErp.Application.Sales.ISalesPdfRenderer, Documents.SalesPdfRenderer>();
+        services.AddSingleton<KnitErp.Application.Development.IDevPassportRenderer, Documents.DevPassportPdfRenderer>(); // D725
         return services;
     }
 

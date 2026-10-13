@@ -42,6 +42,8 @@
             a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
         new("sales-discounts", ModuleUi.Text("Скидки и акции"), ModuleUi.Text("Акции на группы, скидки от количества и суммы, порядок применения и суммирование"),
             a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
+        new("sales-price-list", ModuleUi.Text("Прайс-лист"), ModuleUi.Text("По виду цены, группе и наличию — PDF для клиента и Excel со ссылками на фото"),
+            a => a.Has(Permissions.SalesView) && a.Has(Permissions.PriceView)),
         new("catalog/settings?tab=prices", ModuleUi.Text("Виды цен"), ModuleUi.Text("Розница, опт, маркетплейс; основной вид цены"), a => a.Has(Permissions.PriceView)),
         new("sales-order-stages", ModuleUi.Text("Этапы заказов и автосмена"), ModuleUi.Text("Свои этапы и правила «событие → этап»"), a => a.Has(Permissions.SalesView)),
         new("sales-settings?section=channels", ModuleUi.Text("Каналы продаж"), ModuleUi.Text("Магазин, опт, маркетплейсы — для отчётов по каналам"), a => a.Has(Permissions.SalesView)),

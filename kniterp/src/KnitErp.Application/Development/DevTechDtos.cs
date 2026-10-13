@@ -33,10 +33,6 @@ public sealed record DevThreadSlotDto(long? ColorId, string Yarn, string? ItemNa
 
 public sealed record DevFeederRowDto(int Feeder, DevThreadSlotDto? Left, DevThreadSlotDto? Right);
 
-public sealed record DevTechOperationDto(int Seq, string Name, string? Note, decimal? NormMinutes, string Unit, decimal? Price);
-
-public sealed record DevTechSizeDto(long SizeId, string Size, bool IsBase, decimal? OffMachineCm, decimal? AfterSteamCm, decimal? WidthCm, int? PerBox);
-
 public sealed record DevSampleOptionDto(long Id, int No, string? Size, DevSampleStatus Status)
 {
     public string StatusName => DevSample.StatusName(Status);
@@ -49,13 +45,13 @@ public sealed record DevFactDto(
 
 /// <summary>
 /// Техкарта вязания детали (D711, D717) — то, что вязальщица открывает на телефоне или планшете у машины: общая информация,
-/// заправка по нитеводителям, важные комментарии, технологические операции, размеры и упаковка. Цены — только с правом себестоимости.
+/// заправка по нитеводителям, важные комментарии (блоки 1–3, D719). Операции и размеры — во вкладках модели, сюда не грузятся.
 /// </summary>
 public sealed record DevTechCardDto(
     long ModelId, string ModelNumber, string ModelName, long DetailId, string DetailName, int Quantity, long? MachineId, string? MachineName,
     string? MachineParams, int FeederCount, DevMachineStatus? MachineStatus, string? MachineLastNote, long? WeaveId, string? Weave,
     int? PlanKnitSeconds, decimal? PlanWeightGrams, string? Composition, string? Notes, IReadOnlyList<DevFeederRowDto> Feeders,
-    IReadOnlyList<DevColorDto> Palette, IReadOnlyList<DevTechOperationDto> Operations, IReadOnlyList<DevTechSizeDto> Sizes, string? PackBox,
+    IReadOnlyList<DevColorDto> Palette,
     long? ProgramFileId, string? ProgramName, int? ProgramVersion, string? ProgramParams, long? SketchFileId, bool CanEditThreading,
     bool CanRecordFact, bool CanSeeCost, IReadOnlyList<DevSampleOptionDto> Samples, IReadOnlyList<DevFactDto> Facts, byte[] RowVersion,
     int FactTolerancePercent = DevSettings.DefaultTolerance)
@@ -69,7 +65,8 @@ public sealed record DevCompletenessDto(IReadOnlyList<DevSectionDto> Sections, i
 public sealed record DevSectionDto(string Name, bool Done);
 
 /// <summary>Условия расчёта себестоимости (D740, D742): видит `dev.cost.view`, меняет ещё и `dev.settings`.</summary>
-public sealed record DevCostSettingsDto(decimal YarnWastePercent, decimal OverheadPercent, decimal? LaborRatePerMinute, decimal MarkupPercent, bool CanEdit);
+public sealed record DevCostSettingsDto(decimal YarnWastePercent, decimal OverheadPercent, decimal? LaborRatePerMinute, decimal MarkupPercent, bool CanEdit,
+    bool RequireCostForApproval = true, decimal? MinMarginPercent = null);
 
 /// <summary>
 /// Изменённая ячейка таблицы (D720): строка (деталь, точка, размер для упаковки), столбец (размер; 0 — нет), поле (0 — длина с машины или
@@ -100,13 +97,21 @@ public sealed record DevSampleMeasureDto(long MeasureId, string Name, decimal? P
 public sealed record DevSampleDto(
     long Id, int No, long? SizeId, string? Size, DevSampleStatus Status, string? Comment, DateTime CreatedAtUtc, string CreatedBy,
     IReadOnlyList<(string Detail, DevFactDto? Fact, int? PlanKnitSeconds, decimal? PlanWeightGrams)> Details,
-    IReadOnlyList<DevSampleMeasureDto> Measures, byte[] RowVersion)
+    IReadOnlyList<DevSampleMeasureDto> Measures, byte[] RowVersion, string? Reason = null, DevSampleCustody Custody = DevSampleCustody.AtFactory,
+    string? CustodyRecipient = null, DateOnly? HandedOn = null, DateOnly? ReturnBy = null, DateOnly? CustodyClosedOn = null, string? CustodyNote = null,
+    bool ReturnOverdue = false)
 {
     public string StatusName => DevSample.StatusName(Status);
+    public string CustodyName => DevSample.CustodyName(Custody);
 }
 
+/// <summary>Образец у заказчика (D723) — строка списка «Образцы у заказчиков».</summary>
+public sealed record DevSampleOutDto(long SampleId, int No, long ModelId, string Number, string ModelName, string Recipient, DateOnly HandedOn, DateOnly? ReturnBy,
+    bool Overdue);
+
 public sealed record DevSamplesDto(IReadOnlyList<DevSampleDto> Samples, IReadOnlyList<DevSizeDto> Sizes, bool CanEdit, bool CanRecord,
-    int FactTolerancePercent = DevSettings.DefaultTolerance);
+    int FactTolerancePercent = DevSettings.DefaultTolerance, IReadOnlyList<DevOptionDto>? Reasons = null, string? CustomerName = null, DateOnly? Today = null,
+    bool CanHand = false, bool CanCloseCustody = false);
 
 public sealed record DevOperationTypeDto(long Id, string Name, string Unit, decimal? Price, decimal? NormMinutes, byte? ProductionStage, bool IsArchived,
     byte[] RowVersion);

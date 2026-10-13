@@ -22,6 +22,21 @@ public enum DevFileKind : byte
 public sealed class DevFile
 {
     public const int MaxBytes = 50 * 1024 * 1024;
+
+    /// <summary>Аудит 2026-10-12: предел хранилища одной модели — версии файлов не удаляются, без предела база растёт бесконечно.</summary>
+    public const long MaxBytesPerModel = 2L * 1024 * 1024 * 1024;
+
+    public const int MaxFilesPerModel = 1000;
+
+    /// <summary>Можно ли добавить к модели ещё один файл: уже есть <paramref name="files"/> файлов общим объёмом <paramref name="bytes"/>.</summary>
+    public static void EnsureQuota(int files, long bytes, int newBytes)
+    {
+        if (files >= MaxFilesPerModel || bytes + newBytes > MaxBytesPerModel)
+        {
+            throw new BusinessRuleException("dev.file.quota",
+                $"У модели исчерпан предел файлов: не больше {MaxFilesPerModel} файлов и {MaxBytesPerModel / 1024 / 1024 / 1024} ГБ вместе с версиями.");
+        }
+    }
     public const int FileNameMaxLength = 200;
     public const int CommentMaxLength = 300;
 

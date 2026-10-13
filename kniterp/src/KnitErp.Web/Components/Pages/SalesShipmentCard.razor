@@ -1,0 +1,221 @@
+@page "/sales-shipments/{Id:long}"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@using KnitErp.Domain.Warehousing
+@inject SalesService Sales
+
+@* D1151, D1152: отгрузка по нескольким заказам — документы по заказам, логистика, проведение всех документов сразу, упаковочный лист. *@
+<PageTitle>@(_group?.Number ?? L("Отгрузка")) — knitERP</PageTitle>
+<SalesShippingStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <h1>@L("Отгрузка не найдена")</h1>
+    <p><a href="sales-shipments">@L("К списку отгрузок")</a></p>
+}
+else if (_group is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <p><a href="sales-shipments">@L("← Отгрузки по нескольким заказам")</a></p>
+    <div class="sx-head">
+        <h1>@L("Отгрузка {0}", _group.Number) <span class="tag">@L(_group.StatusName)</span></h1>
+        <div class="sx-tools">
+            <a class="button secondary" href="sales-print/packing-list/@Id" target="_blank" rel="noopener">@L("Упаковочный лист")</a>
+        </div>
+    </div>
+    <div class="sx-kv">
+        <div><span>@L("Дата")</span><span>@_group.Date.ToString("dd.MM.yyyy")</span></div>
+        <div><span>@L("Покупатель")</span><span>@_group.Customer</span></div>
+        <div><span>@L("Склад")</span><span>@_group.Warehouse</span></div>
+        <div><span>@L("Создал")</span><span>@_group.CreatedBy, @Local(_group.CreatedAtUtc)</span></div>
+        @if (_group.PostedBy is not null)
+        {
+            <div><span>@L("Провёл")</span><span>@_group.PostedBy, @Local(_group.PostedAtUtc!.Value)</span></div>
+        }
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_group.CanEdit)
+    {
+        <form class="sx-form" @onsubmit="SaveAsync">
+            <span class="sx-legend">@L("Доставка")</span>
+            <label>
+                @L("Способ доставки")
+                <select @bind="_delivery">
+                    <option value="">—</option>
+                    @foreach (var m in _methods.Where(m => !m.IsArchived || m.Id == _group.DeliveryMethodId))
+                    {
+                        <option value="@m.Id">@m.Name</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Трек-номер") <input @bind="_tracking" maxlength="@SalesShipmentGroup.TrackingMaxLength" /></label>
+            <label>@L("Мест") <input @bind="_packages" inputmode="numeric" /></label>
+            <label>@L("Вес брутто, кг") <input @bind="_weight" inputmode="decimal" /></label>
+            <label class="w4">@L("Комментарий") <input @bind="_comment" maxlength="@SalesShipmentGroup.CommentMaxLength" /></label>
+            <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Сохранить доставку")</button></div>
+        </form>
+    }
+    else
+    {
+        <div class="sx-kv">
+            <div><span>@L("Способ доставки")</span><span>@(_group.Delivery ?? "—")</span></div>
+            <div><span>@L("Трек-номер")</span><span>@(_group.TrackingNumber ?? "—")</span></div>
+            <div><span>@L("Мест")</span><span>@(_group.Packages?.ToString() ?? "—")</span></div>
+            <div><span>@L("Вес брутто, кг")</span><span>@(_group.GrossWeightKg?.ToString("#,0.###") ?? "—")</span></div>
+        </div>
+    }
+
+    <h2 style="margin-top: 16px">@L("Документы по заказам")</h2>
+    <div class="scroll">
+        <table class="compact sx-table">
+            <thead><tr><th>@L("Заказ")</th><th>@L("Документ")</th><th class="num">@L("Строк")</th><th class="num">@L("Количество")</th><th>@L("Состояние")</th></tr></thead>
+            <tbody>
+                @foreach (var d in _group.Documents)
+                {
+                    <tr>
+                        <td><a href="sales-orders/@d.OrderId">@d.OrderNumber</a></td>
+                        <td><a href="stock-documents/@d.DocumentId">@d.DocumentNumber</a></td>
+                        <td class="num">@d.Lines</td>
+                        <td class="num">@Quantities.Format(d.Quantity)</td>
+                        <td><span class="tag @StockDocumentsPage.StatusClass(d.Status)">@L(d.StatusName)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <p class="muted small">@L("Количества по факту и коды маркировки правятся в документе отгрузки каждого заказа.")</p>
+
+    <div class="actions" style="margin-top: 12px">
+        @if (_group.CanPost)
+        {
+            <button type="button" @onclick="PostAsync" disabled="@_busy">@L("Провести все документы")</button>
+        }
+        @if (_group.Status == ShipmentGroupStatus.Draft && _group.Documents.All(d => d.Status != StockDocumentStatus.Posted))
+        {
+            <ConfirmButton Class="secondary" OnConfirm="CancelAsync" Disabled="@_busy" Question='@L("Отменить отгрузку и её черновики?")'>@L("Отменить отгрузку")</ConfirmButton>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private ShipmentGroupDto? _group;
+    private IReadOnlyList<DeliveryMethodDto> _methods = [];
+    private bool _busy;
+    private bool _notFound;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private string? _delivery;
+    private string? _tracking;
+    private string? _packages;
+    private string? _weight;
+    private string? _comment;
+
+    /// <summary>Логистика из полей формы: мест — целое, вес — число.</summary>
+    public static SalesShipmentLogistics Logistics(string? delivery, string? tracking, string? packages, string? weight, string? comment)
+    {
+        int? count = null;
+        if (!string.IsNullOrWhiteSpace(packages))
+        {
+            count = int.TryParse(packages.Trim(), out var p) ? p : throw new BusinessRuleException("sales.shipment_group.packages", L("Мест — целое число от 1."));
+        }
+
+        decimal? kg = null;
+        if (!string.IsNullOrWhiteSpace(weight))
+        {
+            kg = Quantities.TryParse(weight, out var w) ? w : throw new BusinessRuleException("sales.shipment_group.weight", L("Вес брутто — числом, например 25,4."));
+        }
+
+        return new SalesShipmentLogistics(long.TryParse(delivery, out var d) ? d : null, tracking, count, kg, comment);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await LoadAsync();
+            if (_group!.CanEdit)
+            {
+                _methods = await Sales.DeliveryMethodsAsync(includeArchived: true);
+            }
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _group = await Sales.GetShipmentGroupAsync(Id);
+        _delivery = _group.DeliveryMethodId?.ToString();
+        _tracking = _group.TrackingNumber;
+        _packages = _group.Packages?.ToString();
+        _weight = _group.GrossWeightKg?.ToString("0.###");
+        _comment = _group.Comment;
+    }
+
+    private Task SaveAsync() => RunAsync(() => Sales.SetShipmentLogisticsAsync(Id, Logistics(_delivery, _tracking, _packages, _weight, _comment), _group!.RowVersion),
+        L("Доставка сохранена."));
+
+    private Task PostAsync() => RunAsync(() => Sales.PostShipmentGroupAsync(Id, _group!.RowVersion), L("Отгрузка проведена, остатки изменены."));
+
+    private Task CancelAsync() => RunAsync(() => Sales.CancelShipmentGroupAsync(Id, _group!.RowVersion), L("Отгрузка отменена."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+}

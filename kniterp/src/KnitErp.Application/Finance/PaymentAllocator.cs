@@ -321,7 +321,9 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
         sales
             ? db.CustomerPayments.AsNoTracking().Where(p => p.OrganizationId == org).Select(p => new PaymentInfo
             {
-                Id = p.Id, Number = p.Number, Date = p.PaymentDate, CounterpartyId = p.CustomerId, Amount = p.Amount,
+                Id = p.Id, Number = p.Number, Date = p.PaymentDate, CounterpartyId = p.CustomerId,
+                // D1154 (сессия «Продажи»): возвращённое покупателю деньгами из оплаты уже не разносится.
+                Amount = p.Amount - (db.CustomerRefunds.Where(r => r.PaymentId == p.Id && r.Status == CustomerRefundStatus.Posted).Sum(r => (decimal?)r.Amount) ?? 0),
                 Posted = p.Status == CustomerPaymentStatus.Posted, AccountId = p.MoneyAccountId,
             })
             : db.SupplierPayments.AsNoTracking().Where(p => p.OrganizationId == org).Select(p => new PaymentInfo
