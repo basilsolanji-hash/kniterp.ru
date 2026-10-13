@@ -25,10 +25,22 @@ public sealed class StockDocument
         [StockOperationKind.Receipt, StockOperationKind.Transfer, StockOperationKind.WriteOff, StockOperationKind.ReturnToSupplier,
          StockOperationKind.Shipment, StockOperationKind.CustomerReturn];
 
-    /// <summary>Документы с контрагентом: поставщиком (поступление, возврат поставщику) или покупателем (отгрузка, возврат).</summary>
-    public static bool WithSupplier(StockOperationKind kind) => kind is StockOperationKind.Receipt or StockOperationKind.ReturnToSupplier;
+    /// <summary>
+    /// D354 (сессия 4, Р1): все виды документа, включая акты услуг. Акты оформляются по заказу (кнопкой в карточке заказа),
+    /// поэтому кнопок «Новый …» в реестре у них нет — для этого <see cref="Kinds"/> без актов.
+    /// </summary>
+    public static readonly IReadOnlyList<StockOperationKind> AllKinds =
+        [.. Kinds, StockOperationKind.ServiceAct, StockOperationKind.SupplierServiceAct];
 
-    public static bool WithCustomer(StockOperationKind kind) => kind is StockOperationKind.Shipment or StockOperationKind.CustomerReturn;
+    /// <summary>
+    /// Документы с контрагентом: поставщиком (поступление, возврат поставщику, акт поставщика) или покупателем (отгрузка, возврат,
+    /// акт услуг).
+    /// </summary>
+    public static bool WithSupplier(StockOperationKind kind) =>
+        kind is StockOperationKind.Receipt or StockOperationKind.ReturnToSupplier or StockOperationKind.SupplierServiceAct;
+
+    public static bool WithCustomer(StockOperationKind kind) =>
+        kind is StockOperationKind.Shipment or StockOperationKind.CustomerReturn or StockOperationKind.ServiceAct;
 
     /// <summary>Расходные виды: товар уходит со склада документа.</summary>
     public static bool IsOutgoing(StockOperationKind kind) =>
@@ -88,13 +100,27 @@ public sealed class StockDocument
         StockOperationKind.ReturnToSupplier => "ВП",
         StockOperationKind.Shipment => "ОТ",
         StockOperationKind.CustomerReturn => "ВК",
+        StockOperationKind.ServiceAct => "АУ",
+        StockOperationKind.SupplierServiceAct => "АП",
         _ => throw new BusinessRuleException("stock.document.kind", "Выберите вид документа."),
     };
+
+    /// <summary>
+    /// D354 (сессия 4, Р1): счётчик номеров. Акт услуг берёт номер из общего счётчика с отгрузками (с префиксом «АУ»): УПД по акту —
+    /// счёт-фактура, а его порядковый номер — цифры номера документа (<c>PrintService.VatInvoiceNumber</c>), и номера отгрузок и актов
+    /// не должны совпадать.
+    /// </summary>
+    public static string CounterPrefix(StockOperationKind kind) =>
+        NumberPrefix(kind == StockOperationKind.ServiceAct ? StockOperationKind.Shipment : kind);
+
+    /// <summary>Номер документа из номера счётчика (<see cref="CounterPrefix"/>): «ОТ-000016» → «АУ-000016» для акта услуг.</summary>
+    public static string NumberFromCounter(StockOperationKind kind, string counterNumber) =>
+        NumberPrefix(kind) + counterNumber[CounterPrefix(kind).Length..];
 
     public static StockDocument Create(
         long organizationId, string number, StockOperationKind kind, StockDocumentHeader header, long createdBy, DateTime nowUtc)
     {
-        if (!Kinds.Contains(kind))
+        if (!AllKinds.Contains(kind))
         {
             throw new BusinessRuleException("stock.document.kind", "Выберите вид документа.");
         }
@@ -116,15 +142,22 @@ public sealed class StockDocument
     {
         EnsureDraft();
         ApplyHeader(header);
+        if (_lines.Any(l => l.BundleItemId is not null))
+        {
+            EnsureBundleAllowed(); // D352: строки комплекта держатся только за заказ покупателя
+        }
     }
 
-    /// <summary>Строка по позиции: новая или замена количества. Одна позиция — одна строка.</summary>
+    /// <summary>
+    /// Строка по позиции: новая или замена количества. Одна позиция — одна строка; строки разворота комплекта (D352) — отдельно,
+    /// их меняет <see cref="SetBundle"/>.
+    /// </summary>
     public void SetLine(long itemId, decimal quantity)
     {
         EnsureDraft();
         Quantities.EnsurePositive(quantity);
         LinesRevision++;
-        var line = _lines.FirstOrDefault(l => l.ItemId == itemId);
+        var line = _lines.FirstOrDefault(l => l.ItemId == itemId && l.BundleItemId == null);
         if (line is null)
         {
             _lines.Add(new StockDocumentLine(itemId, quantity));
@@ -145,30 +178,93 @@ public sealed class StockDocument
     public void RemoveLine(long itemId)
     {
         EnsureDraft();
-        var line = _lines.FirstOrDefault(l => l.ItemId == itemId)
+        var line = _lines.FirstOrDefault(l => l.ItemId == itemId && l.BundleItemId == null)
                    ?? throw new BusinessRuleException("stock.document.line_missing", "Такой строки в документе нет.");
         LinesRevision++;
         _lines.Remove(line);
     }
 
     /// <summary>Замена всех строк (загрузка из файла).</summary>
-    public void ReplaceLines(IReadOnlyList<(long ItemId, decimal Quantity)> lines)
+    public void ReplaceLines(IReadOnlyList<(long ItemId, decimal Quantity)> lines) =>
+        ReplaceLines(lines.Select(l => new StockLineSpec(l.ItemId, l.Quantity)).ToList());
+
+    /// <summary>Замена всех строк, в том числе строк разворота комплектов (D352, сессия 4, Р2).</summary>
+    public void ReplaceLines(IReadOnlyList<StockLineSpec> lines)
     {
         EnsureDraft();
-        if (lines.Select(l => l.ItemId).Distinct().Count() != lines.Count)
+        if (lines.Select(l => (l.ItemId, l.BundleItemId)).Distinct().Count() != lines.Count)
         {
             throw new BusinessRuleException("stock.document.duplicate_item", "Позиция повторяется в документе.");
         }
 
-        foreach (var (_, quantity) in lines)
+        foreach (var l in lines)
+        {
+            Quantities.EnsurePositive(l.Quantity);
+            if (l.BundleItemId is not null)
+            {
+                EnsureBundleAllowed();
+                Quantities.EnsurePositive(l.BundleQuantity ?? 0);
+            }
+        }
+
+        // У одного комплекта в документе одно количество наборов: оно же «отгружено» по строке заказа.
+        if (lines.Where(l => l.BundleItemId is not null).GroupBy(l => l.BundleItemId).Any(g => g.Select(l => l.BundleQuantity).Distinct().Count() > 1))
+        {
+            throw new BusinessRuleException("stock.document.bundle_quantity", "У строк одного комплекта разное количество комплектов.");
+        }
+
+        _lines.Clear();
+        _lines.AddRange(lines.Select(l => new StockDocumentLine(l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity)));
+        LinesRevision++;
+    }
+
+    /// <summary>
+    /// D352 (сессия 4, Р2): строки комплекта — его компоненты на bundleQuantity наборов. Прежние строки этого комплекта заменяются.
+    /// Разворот (количества компонентов) считает сервис: при отгрузке — по составу, при возврате — по отгруженному.
+    /// </summary>
+    public void SetBundle(long bundleItemId, decimal bundleQuantity, IReadOnlyList<(long ItemId, decimal Quantity)> components)
+    {
+        EnsureDraft();
+        EnsureBundleAllowed();
+        Quantities.EnsurePositive(bundleQuantity);
+        if (components.Count == 0 || components.Select(c => c.ItemId).Distinct().Count() != components.Count)
+        {
+            throw new BusinessRuleException("catalog.bundle.empty", "У комплекта не задан состав.");
+        }
+
+        foreach (var (_, quantity) in components)
         {
             Quantities.EnsurePositive(quantity);
         }
 
-        _lines.Clear();
-        _lines.AddRange(lines.Select(l => new StockDocumentLine(l.ItemId, l.Quantity)));
+        _lines.RemoveAll(l => l.BundleItemId == bundleItemId);
+        _lines.AddRange(components.Select(c => new StockDocumentLine(c.ItemId, c.Quantity, bundleItemId, bundleQuantity)));
         LinesRevision++;
     }
+
+    /// <summary>D352: убрать комплект из документа — все строки его разворота.</summary>
+    public void RemoveBundle(long bundleItemId)
+    {
+        EnsureDraft();
+        if (_lines.RemoveAll(l => l.BundleItemId == bundleItemId) == 0)
+        {
+            throw new BusinessRuleException("stock.document.line_missing", "Такой строки в документе нет.");
+        }
+
+        LinesRevision++;
+    }
+
+    /// <summary>
+    /// Количества по позициям склада: строки одной позиции (отдельная и из комплектов, D352) складываются. По ним — движения,
+    /// партии и проверка остатка.
+    /// </summary>
+    public IReadOnlyList<(long ItemId, decimal Quantity)> ItemTotals() =>
+        _lines.GroupBy(l => l.ItemId).Select(g => (g.Key, g.Sum(l => l.Quantity))).ToList();
+
+    /// <summary>D352: строки в терминах заказа — комплект одной строкой (его количество), остальное как есть.</summary>
+    public IReadOnlyList<(long ItemId, decimal Quantity)> OrderLines() =>
+        BundleLines.InOrderTerms(_lines.Select(l => (0L, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity)))
+            .Select(x => (x.ItemId, x.Quantity)).ToList();
 
     /// <summary>
     /// Проведение. Причина обязательна — по ней отчёт объясняет, откуда пришёл и куда ушёл материал;
@@ -217,7 +313,7 @@ public sealed class StockDocument
     public IReadOnlyList<(long WarehouseId, long ItemId, decimal Quantity)> MovementDeltas()
     {
         var result = new List<(long, long, decimal)>();
-        foreach (var line in _lines)
+        foreach (var line in ItemTotals())
         {
             switch (Kind)
             {
@@ -234,6 +330,9 @@ public sealed class StockDocument
                     result.Add((WarehouseId, line.ItemId, -line.Quantity));
                     result.Add((TargetWarehouseId!.Value, line.ItemId, line.Quantity));
                     break;
+                case StockOperationKind.ServiceAct:
+                case StockOperationKind.SupplierServiceAct:
+                    break; // D354 (сессия 4, Р1): услуги не хранятся — акт движений не пишет
             }
         }
 
@@ -286,7 +385,7 @@ public sealed class StockDocument
             throw new BusinessRuleException("stock.document.sales_order_not_allowed", "Заказ покупателя указывается только в отгрузке и возврате от покупателя.");
         }
 
-        if (Kind == StockOperationKind.ReturnToSupplier && h.CounterpartyId is null)
+        if (Kind is (StockOperationKind.ReturnToSupplier or StockOperationKind.SupplierServiceAct) && h.CounterpartyId is null)
         {
             throw new BusinessRuleException("stock.document.supplier_required", "Укажите поставщика, которому возвращается товар.");
         }
@@ -294,6 +393,17 @@ public sealed class StockDocument
         if (!withSupplier && h.PurchaseOrderId is not null)
         {
             throw new BusinessRuleException("stock.document.order_not_allowed", "Заказ поставщику указывается только в поступлении и возврате.");
+        }
+
+        // D354 (сессия 4, Р1): цена и НДС услуги — из строки заказа, поэтому акт без заказа не оформляется.
+        if (Kind == StockOperationKind.ServiceAct && h.SalesOrderId is null)
+        {
+            throw new BusinessRuleException("stock.service_act.order_required", "Акт оказания услуг оформляется по заказу покупателя.");
+        }
+
+        if (Kind == StockOperationKind.SupplierServiceAct && h.PurchaseOrderId is null)
+        {
+            throw new BusinessRuleException("stock.service_act.purchase_order_required", "Акт услуг поставщика оформляется по заказу поставщику.");
         }
 
         WarehouseId = h.WarehouseId;
@@ -304,6 +414,16 @@ public sealed class StockDocument
         ReasonId = h.ReasonId;
         DocumentDate = h.DocumentDate;
         Comment = DomainText.Optional(h.Comment, CommentMaxLength, "Комментарий");
+    }
+
+    /// <summary>Строки комплектов (D352) — только в отгрузке и возврате по заказу покупателя.</summary>
+    private void EnsureBundleAllowed()
+    {
+        if (Kind is not (StockOperationKind.Shipment or StockOperationKind.CustomerReturn) || SalesOrderId is null)
+        {
+            throw new BusinessRuleException("item.bundle_not_stocked",
+                "Комплект не хранится на складе — в складском документе укажите его компоненты.");
+        }
     }
 
     private void EnsureDraft() => EnsureStatus(StockDocumentStatus.Draft, "Документ уже не черновик — изменения запрещены.");
@@ -328,10 +448,12 @@ public sealed class StockDocumentLine
     {
     }
 
-    internal StockDocumentLine(long itemId, decimal quantity)
+    internal StockDocumentLine(long itemId, decimal quantity, long? bundleItemId = null, decimal? bundleQuantity = null)
     {
         ItemId = itemId;
         Quantity = quantity;
+        BundleItemId = bundleItemId;
+        BundleQuantity = bundleItemId is null ? null : bundleQuantity;
     }
 
     public long Id { get; private set; }
@@ -339,5 +461,41 @@ public sealed class StockDocumentLine
     public long ItemId { get; private set; }
     public decimal Quantity { get; private set; }
 
+    /// <summary>D352 (сессия 4, Р2): комплект, из разворота которого строка (компонент); null — обычная строка.</summary>
+    public long? BundleItemId { get; private set; }
+
+    /// <summary>Сколько комплектов развёрнуто в строку — одинаково у всех строк комплекта в документе; так состав фиксируется.</summary>
+    public decimal? BundleQuantity { get; private set; }
+
     internal void SetQuantity(decimal quantity) => Quantity = quantity;
+}
+
+/// <summary>Строка для заполнения документа; BundleItemId и BundleQuantity — у строки разворота комплекта (D352).</summary>
+public sealed record StockLineSpec(long ItemId, decimal Quantity, long? BundleItemId = null, decimal? BundleQuantity = null);
+
+/// <summary>
+/// D352 (сессия 4, Р2): строки документов по заказу покупателя в терминах строк заказа. Комплект в заказе — одна строка, а в
+/// документе — его компоненты; «отгружено» по строке комплекта = количество комплектов (BundleQuantity) один раз на документ.
+/// Key — ключ документа (Id или набор с Id): строки разных документов не сливаются.
+/// </summary>
+public static class BundleLines
+{
+    public static IReadOnlyList<(TKey Key, long ItemId, decimal Quantity)> InOrderTerms<TKey>(
+        IEnumerable<(TKey Key, long ItemId, decimal Quantity, long? BundleItemId, decimal? BundleQuantity)> lines)
+    {
+        var result = new List<(TKey, long, decimal)>();
+        foreach (var g in lines.GroupBy(l => (l.Key, l.BundleItemId)))
+        {
+            if (g.Key.BundleItemId is { } bundle)
+            {
+                result.Add((g.Key.Key, bundle, g.Max(l => l.BundleQuantity ?? 0)));
+            }
+            else
+            {
+                result.AddRange(g.Select(l => (l.Key, l.ItemId, l.Quantity)));
+            }
+        }
+
+        return result;
+    }
 }

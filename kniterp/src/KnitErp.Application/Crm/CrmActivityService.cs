@@ -48,6 +48,25 @@ public sealed record CrmMyTasksDto(
     IReadOnlyList<CrmActivityDto> Overdue, IReadOnlyList<CrmActivityDto> Upcoming, IReadOnlyList<CrmDealRowDto> DealsWithoutNextStep,
     IReadOnlyList<CrmLeadRowDto> StaleLeads);
 
+/// <summary>Карточка «Мой день» (D690): задача, клиент, контактное лицо и телефон — только у видимого пользователю объекта.</summary>
+public sealed record CrmTodayItemDto(CrmActivityDto Activity, string? Client, string? ContactName, string? Phone)
+{
+    /// <summary>Телефон для показа: +7 900 000-00-01.</summary>
+    public string? PhoneText => CrmText.FormatPhone(Phone) ?? Phone;
+}
+
+/// <summary>«Мой день» (D690): мои просроченные задачи и задачи со сроком сегодня по местному времени организации.</summary>
+public sealed record CrmTodayDto(DateOnly Date, IReadOnlyList<CrmTodayItemDto> Overdue, IReadOnlyList<CrmTodayItemDto> Today);
+
+/// <summary>
+/// Результат звонка (D691): дозвонился или нет, комментарий, следующий шаг через N дней (1–90, в 10:00 по местному времени).
+/// CompleteTask — для задачи другого вида (не «Звонок»): отметить и её выполненной.
+/// </summary>
+public sealed record CrmCallResultCommand(long ActivityId, bool Reached, string? Comment, int? NextStepDays, string? NextStepSubject, bool CompleteTask,
+    byte[] RowVersion);
+
+public sealed record CrmCallResultDto(long CallId, long? NextStepId);
+
 /// <summary>Уведомление CRM для колокольчика базы.</summary>
 public sealed record CrmAlertDto(string Text, string Href, bool Warning, string Key);
 
@@ -125,8 +144,9 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
         var activities = await ActivitiesQuery(ctx).Where(a => a.Target == target && a.TargetId == targetId)
             .OrderByDescending(a => a.CreatedAtUtc).Take(take).ToListAsync(ct);
         var names = await UserNamesAsync(activities.Select(a => a.AssigneeUserId).Concat(activities.Select(a => a.CreatedByUserId)), ct);
+        var prices = ctx.Permissions.Has(Permissions.PriceView);
         items.AddRange(activities.Select(a => new CrmFeedItemDto(a.IsDone && a.DoneAtUtc is { } done ? done : a.CreatedAtUtc, CrmFeedKind.Activity,
-            $"{CrmActivity.KindName(a.Kind)}: {a.Subject}", a.Text, null, names.GetValueOrDefault(a.CreatedByUserId), ToDto(a, names))));
+            $"{CrmActivity.KindName(a.Kind)}: {a.Subject}", VisibleText(a, prices), null, names.GetValueOrDefault(a.CreatedByUserId), ToDto(a, names, prices: prices))));
 
         var taggedEntity = target switch { CrmTarget.Lead => TaggedEntity.CrmLead, CrmTarget.Deal => TaggedEntity.CrmDeal, _ => TaggedEntity.CrmContact };
         var comments = await (from c in db.DiscussionComments.AsNoTracking()
@@ -155,8 +175,8 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
             .OrderBy(a => a.DueAtUtc).Take(200).ToListAsync(ct);
         var names = await UserNamesAsync(open.Select(a => a.AssigneeUserId), ct);
         var titles = await TitlesAsync(ctx, open, ct);
-        var dtos = open.Select(a => ToDto(a, names, titles)).ToList();
         var amounts = ctx.Permissions.Has(Permissions.PriceView);
+        var dtos = open.Select(a => ToDto(a, names, titles, amounts)).ToList();
         var noStep = await (from d in WithoutNextStep(ctx).Where(d => d.ResponsibleUserId == ctx.UserId)
                             join c in db.Counterparties.AsNoTracking() on d.CounterpartyId equals c.Id
                             join u in db.Users.AsNoTracking() on d.ResponsibleUserId equals u.Id
@@ -172,6 +192,183 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
                            select new CrmLeadRowDto(l.Id, l.Number, l.Title, l.Status, null, u.DisplayName, l.ContactName, l.CompanyName,
                                amounts ? l.ExpectedAmount : null, l.CurrencyCode, l.CreatedAtUtc)).Take(100).ToListAsync(ct);
         return new CrmMyTasksDto(dtos.Where(a => a.Overdue).ToList(), dtos.Where(a => !a.Overdue).ToList(), noStep, stale);
+    }
+
+    public const int CallCommentMaxLength = 900;
+    public const int NextStepMaxDays = 90;
+
+    /// <summary>
+    /// «Мой день» (D690): мои невыполненные задачи — просроченные и со сроком до конца сегодняшнего дня по местному времени организации.
+    /// Клиент и телефон берутся у объекта задачи (сделка — основной контакт, иначе лид, из которого она создана; лид — его телефон, иначе
+    /// контакт; контакт — его телефон), и только если объект виден пользователю (<see cref="CrmAccess"/>).
+    /// </summary>
+    public async Task<CrmTodayDto> TodayAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.CrmView, ct);
+        var now = clock.UtcNow;
+        var tz = await CrmEvents.TimeZoneAsync(db, ctx.OrganizationId, ct);
+        var today = CrmEvents.Today(now, tz);
+        // Допущение D690: «сегодня» — до полуночи по времени организации; задачи без срока в «Мой день» не попадают (они в «Мои задачи CRM»).
+        var endUtc = CrmEvents.ToUtc(today.AddDays(1).ToDateTime(TimeOnly.MinValue), tz);
+        var open = await ActivitiesQuery(ctx).Where(a => a.AssigneeUserId == ctx.UserId && !a.IsDone && a.DueAtUtc != null && a.DueAtUtc < endUtc)
+            .OrderBy(a => a.DueAtUtc).ThenBy(a => a.Id).Take(200).ToListAsync(ct);
+        var names = await UserNamesAsync(open.Select(a => a.AssigneeUserId), ct);
+        var titles = await TitlesAsync(ctx, open, ct);
+        var prices = ctx.Permissions.Has(Permissions.PriceView);
+        var clients = await ClientsAsync(ctx, open, ct);
+        var items = open.Select(a =>
+        {
+            var c = clients.GetValueOrDefault((a.Target, a.TargetId));
+            return new CrmTodayItemDto(ToDto(a, names, titles, prices), c.Client, c.Contact, c.Phone);
+        }).ToList();
+        return new CrmTodayDto(today, items.Where(i => i.Activity.Overdue).ToList(), items.Where(i => !i.Activity.Overdue).ToList());
+    }
+
+    /// <summary>
+    /// Результат звонка одной формой (D691): задача «Звонок» отмечается выполненной с результатом; у задачи другого вида создаётся
+    /// выполненная активность «Звонок» (и задача закрывается, если попросили). Следующий шаг — новая задача на меня: не дозвонился —
+    /// «Перезвонить», дозвонился — «Следующий шаг» (или своя тема). Всё — одной транзакцией, конфликт версии возвращается пользователю.
+    /// </summary>
+    public async Task<CrmCallResultDto> CallResultAsync(CrmCallResultCommand cmd, CancellationToken ct = default)
+    {
+        var (ctx, a) = await LoadAsync(cmd.ActivityId, cmd.RowVersion, ct);
+        // Задача назначена мне, даже если объект виден не мне (D623) — звонок по ней записать можно, как и отметить выполненной.
+        var title = await TargetTitleAsync(ctx, a.Target, a.TargetId, ct) ?? a.Subject;
+        if (cmd.NextStepDays is { } n && (n < 1 || n > NextStepMaxDays))
+        {
+            throw new BusinessRuleException("crm.call.next_days", "Следующий шаг — через 1–90 дней.");
+        }
+
+        var comment = cmd.Comment?.Trim();
+        if (comment is { Length: > CallCommentMaxLength })
+        {
+            throw new BusinessRuleException("crm.call.comment", "Комментарий к звонку — не длиннее 900 символов.");
+        }
+
+        if (a.IsDone)
+        {
+            throw new BusinessRuleException("crm.activity.done", "Активность уже выполнена.");
+        }
+
+        // Сначала все проверки и новые объекты, потом изменения и db.Add (D678): отказ не оставит недописанных строк в контексте.
+        var now = clock.UtcNow;
+        var result = (cmd.Reached ? "Дозвонился" : "Не дозвонился") + (string.IsNullOrEmpty(comment) ? "" : ": " + comment);
+        var call = a.Kind == CrmActivityKind.Call
+            ? a
+            : CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Call, a.Target, a.TargetId, a.Subject, null, null, ctx.UserId, ctx.UserId, now,
+                done: true, result: result);
+        // Допущение D691: следующий шаг — на меня, в 10:00 по местному времени через N дней; не дозвонился — «Звонок», дозвонился — «Задача».
+        CrmActivity? next = null;
+        if (cmd.NextStepDays is { } days)
+        {
+            var tz = await CrmEvents.TimeZoneAsync(db, ctx.OrganizationId, ct);
+            var subject = string.IsNullOrWhiteSpace(cmd.NextStepSubject) ? cmd.Reached ? "Следующий шаг" : "Перезвонить" : cmd.NextStepSubject;
+            next = CrmActivity.Create(ctx.OrganizationId, cmd.Reached ? CrmActivityKind.Task : CrmActivityKind.Call, a.Target, a.TargetId, subject,
+                string.IsNullOrEmpty(comment) ? null : comment, CrmEvents.DueInDays(now, tz, days), ctx.UserId, ctx.UserId, now);
+        }
+
+        if (ReferenceEquals(call, a) || cmd.CompleteTask)
+        {
+            a.Complete(result, ctx.UserId, now);
+        }
+
+        await using var tx = await db.BeginTransactionAsync(ct);
+        if (!ReferenceEquals(call, a))
+        {
+            db.CrmActivities.Add(call);
+        }
+
+        if (next is not null)
+        {
+            db.CrmActivities.Add(next);
+        }
+
+        await db.SaveOrConflictAsync(ct);
+        if (ReferenceEquals(call, a))
+        {
+            Audit(ctx, AuditActions.CrmActivityDone, a.Id, null, result, title);
+        }
+        else
+        {
+            Audit(ctx, AuditActions.CrmActivityCreated, call.Id, null, $"Звонок: {call.Subject} (выполнено), {result}", title);
+            if (a.IsDone)
+            {
+                Audit(ctx, AuditActions.CrmActivityDone, a.Id, null, result, title);
+            }
+        }
+
+        if (next is not null)
+        {
+            Audit(ctx, AuditActions.CrmActivityCreated, next.Id, null, $"{CrmActivity.KindName(next.Kind)}: {next.Subject}, срок {next.DueAtUtc:dd.MM.yyyy HH:mm}", title);
+        }
+
+        if (a.Target == CrmTarget.Lead && await db.CrmLeads.SingleOrDefaultAsync(l => l.Id == a.TargetId && l.Status == CrmLeadStatus.New, ct) is { } lead)
+        {
+            lead.StartWork(); // звонок по новому лиду берёт его в работу, как любое первое действие
+        }
+
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new CrmCallResultDto(call.Id, next?.Id);
+    }
+
+    /// <summary>Клиент, контактное лицо и телефон объектов задач — только видимых пользователю.</summary>
+    private async Task<Dictionary<(CrmTarget, long), (string? Client, string? Contact, string? Phone)>> ClientsAsync(
+        AccessContext ctx, IReadOnlyList<CrmActivity> list, CancellationToken ct)
+    {
+        var map = new Dictionary<(CrmTarget, long), (string?, string?, string?)>();
+        var dealIds = list.Where(a => a.Target == CrmTarget.Deal).Select(a => a.TargetId).Distinct().ToList();
+        var leadIds = list.Where(a => a.Target == CrmTarget.Lead).Select(a => a.TargetId).Distinct().ToList();
+        var contactIds = list.Where(a => a.Target == CrmTarget.Contact).Select(a => a.TargetId).Distinct().ToList();
+
+        var deals = await (from d in CrmAccess.Deals(db, ctx).AsNoTracking()
+                           join c in db.Counterparties.AsNoTracking() on d.CounterpartyId equals c.Id
+                           where dealIds.Contains(d.Id)
+                           select new { d.Id, Client = c.Name, d.ContactId, d.LeadId }).ToListAsync(ct);
+        var leads = await CrmAccess.Leads(db, ctx).AsNoTracking().Where(l => leadIds.Contains(l.Id))
+            .Select(l => new { l.Id, l.CompanyName, l.ContactName, l.Phone, l.ContactId }).ToListAsync(ct);
+        var dealLeadIds = deals.Where(d => d.ContactId == null && d.LeadId != null).Select(d => d.LeadId!.Value).Distinct().ToList();
+        // Лид, из которого создана видимая сделка, — часть этой сделки: его контакт и телефон показываются вместе с ней.
+        var dealLeads = await db.CrmLeads.AsNoTracking().Where(l => l.OrganizationId == ctx.OrganizationId && dealLeadIds.Contains(l.Id))
+            .Select(l => new { l.Id, l.ContactName, l.Phone }).ToDictionaryAsync(l => l.Id, ct);
+        var contactLookup = deals.Where(d => d.ContactId != null).Select(d => d.ContactId!.Value)
+            .Concat(leads.Where(l => l.ContactId != null).Select(l => l.ContactId!.Value)).Distinct().ToList();
+        var linkedContacts = await db.CrmContacts.AsNoTracking().Where(c => c.OrganizationId == ctx.OrganizationId && contactLookup.Contains(c.Id))
+            .Select(c => new { c.Id, c.FullName, c.Phone }).ToDictionaryAsync(c => c.Id, ct);
+        var contacts = await (from c in CrmAccess.Contacts(db, ctx).AsNoTracking()
+                              join cp in db.Counterparties.AsNoTracking() on c.CounterpartyId equals cp.Id into cpj
+                              from cp in cpj.DefaultIfEmpty()
+                              where contactIds.Contains(c.Id)
+                              select new { c.Id, c.FullName, c.Phone, Client = cp == null ? null : cp.Name }).ToListAsync(ct);
+
+        foreach (var d in deals)
+        {
+            if (d.ContactId is { } cid && linkedContacts.TryGetValue(cid, out var c))
+            {
+                map[(CrmTarget.Deal, d.Id)] = (d.Client, c.FullName, c.Phone);
+            }
+            else if (d.LeadId is { } lid && dealLeads.TryGetValue(lid, out var l))
+            {
+                map[(CrmTarget.Deal, d.Id)] = (d.Client, l.ContactName, l.Phone);
+            }
+            else
+            {
+                map[(CrmTarget.Deal, d.Id)] = (d.Client, null, null);
+            }
+        }
+
+        foreach (var l in leads)
+        {
+            var c = l.ContactId is { } cid ? linkedContacts.GetValueOrDefault(cid) : null;
+            map[(CrmTarget.Lead, l.Id)] = (l.CompanyName ?? l.ContactName ?? c?.FullName, l.ContactName ?? c?.FullName, l.Phone ?? c?.Phone);
+        }
+
+        foreach (var c in contacts)
+        {
+            map[(CrmTarget.Contact, c.Id)] = (c.Client ?? c.FullName, c.FullName, c.Phone);
+        }
+
+        return map;
     }
 
     /// <summary>
@@ -415,11 +612,19 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
         _ => null,
     };
 
+    /// <summary>
+    /// Текст активности для ленты (D680, замечание проверки): письмо с КП и активность КП содержат позиции и цены — без права
+    /// «Цены и суммы» текст не показывается.
+    /// </summary>
+    public const string HiddenPricesText = "Позиции и суммы КП скрыты: нет права «Цены и суммы».";
+
+    private static string? VisibleText(CrmActivity a, bool prices) => a.OfferId is not null && !prices ? HiddenPricesText : a.Text;
+
     private CrmActivityDto ToDto(CrmActivity a, IReadOnlyDictionary<long, string> names,
-        IReadOnlyDictionary<(CrmTarget, long), (string Title, string Href)>? titles = null)
+        IReadOnlyDictionary<(CrmTarget, long), (string Title, string Href)>? titles = null, bool prices = true)
     {
         var t = titles is not null && titles.TryGetValue((a.Target, a.TargetId), out var x) ? x : ((string?)null, (string?)null);
-        return new CrmActivityDto(a.Id, a.Kind, a.Target, a.TargetId, a.Subject, a.Text, a.DueAtUtc, a.AssigneeUserId, names.GetValueOrDefault(a.AssigneeUserId) ?? "—",
+        return new CrmActivityDto(a.Id, a.Kind, a.Target, a.TargetId, a.Subject, VisibleText(a, prices), a.DueAtUtc, a.AssigneeUserId, names.GetValueOrDefault(a.AssigneeUserId) ?? "—",
             a.Result, a.IsDone, a.DoneAtUtc, a.Source, a.CreatedAtUtc, a.IsOverdue(clock.UtcNow), a.RowVersion, t.Item1, t.Item2);
     }
 

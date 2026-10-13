@@ -178,6 +178,7 @@
             new("stock-documents?kind=5", "Возвраты поставщикам", Docs),
             new("vat-invoices/received", "Счета-фактуры полученные", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
             Soon("purchase-planning", "Управление закупками"),
+            new("settings/purchases", "Настройки закупок", a => a.Has(Permissions.PurchaseView)), // D133
             new("learn/purchases", "Обучение", a => true),
         ]),
         new("money", "Деньги",
@@ -202,6 +203,7 @@
             new("crm/leads", "Лиды", a => a.Has(Permissions.CrmView)),
             new("crm/contacts", "Контакты", a => a.Has(Permissions.CrmView)),
             new("crm/chats", "Чаты", a => a.Has(Permissions.CrmView)),
+            new("crm/today", "Мой день", a => a.Has(Permissions.CrmView)),
             new("crm/tasks", "Мои задачи CRM", a => a.Has(Permissions.CrmView)),
             new("crm/summary", "Сводка и отчёты", a => a.Has(Permissions.CrmView)),
             new("crm/mailings", "Рассылки", a => a.Has(Permissions.CrmMailing)),
@@ -422,7 +424,10 @@
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
-        _access = await Access.GetCurrentAccessAsync();
+        // Страница (@Body) показывается, как только задан _access. Поэтому доступ присваивается последним, после всех запросов меню:
+        // иначе любая перерисовка (OnAfterRenderAsync, переход) запускала страницу параллельно с меню на общем DbContext вкладки —
+        // «A second operation was started on this context», вкладка падала (аудит 13.10, терминал цеха под нагрузкой).
+        var access = await Access.GetCurrentAccessAsync();
         await LoadAgreementsAsync();
         try
         {
@@ -442,6 +447,8 @@
             // Панель не должна мешать работе: без настроек показываем панель по умолчанию.
             _panel = new PanelSettings(ToolCatalog.DefaultPinned, ToolCatalog.DefaultVisible);
         }
+
+        _access = access;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

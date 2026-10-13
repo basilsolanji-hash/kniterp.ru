@@ -287,7 +287,8 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
             Items = catalog ? db.Items.Count(i => i.OrganizationId == org && !i.IsArchived) : 0,
             Cards = catalog ? db.TechCards.Count(t => t.OrganizationId == org && t.Status == TechCardStatus.Active) : 0,
             WithoutVat = withoutVat
-                ? db.StockDocuments.Count(d => d.OrganizationId == org && d.Kind == StockOperationKind.Receipt && d.PurchaseOrderId != null
+                ? db.StockDocuments.Count(d => d.OrganizationId == org && d.PurchaseOrderId != null
+                                               && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.SupplierServiceAct) // D354
                                                && d.CounterpartyId != null && d.Status == StockDocumentStatus.Posted
                                                && !db.ReceivedVatInvoices.Any(i => i.ReceiptDocumentId == d.Id && i.Status == ReceivedVatInvoiceStatus.Registered))
                 : 0,
@@ -380,13 +381,16 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                 // Отгрузки и возвраты по заказам: день — в окне двух периодов графика, раньше и позже — только в расчёты.
                 var moved = await (from d in db.StockDocuments.AsNoTracking()
                                    where d.OrganizationId == org && d.SalesOrderId != null && d.Status == StockDocumentStatus.Posted
-                                   from l in d.Lines
+                                   // D352 (сессия 4, Р2): комплект — строкой заказа: одна (первая) строка разворота на документ, количество комплектов.
+                                   from l in d.Lines.Where(x => x.BundleItemId == null
+                                                                || x.Id == d.Lines.Where(y => y.BundleItemId == x.BundleItemId).Min(y => y.Id))
                                    join o in db.SalesOrders.AsNoTracking() on d.SalesOrderId equals o.Id
                                    join cp in db.Counterparties.AsNoTracking() on o.CustomerId equals cp.Id
-                                   from ol in o.Lines.Where(x => x.ItemId == l.ItemId).DefaultIfEmpty()
-                                   group l.Quantity by new
+                                   from ol in o.Lines.Where(x => x.ItemId == (l.BundleItemId ?? l.ItemId)).DefaultIfEmpty()
+                                   group (l.BundleQuantity ?? l.Quantity) by new
                                    {
-                                       o.CustomerId, cp.Name, d.Kind,
+                                       // D354 (сессия 4, Р1): акт оказания услуг — как отгрузка (в продажах и долге).
+                                       o.CustomerId, cp.Name, Kind = d.Kind == StockOperationKind.ServiceAct ? StockOperationKind.Shipment : d.Kind,
                                        Day = d.DocumentDate >= windowStart && d.DocumentDate <= today ? (DateOnly?)d.DocumentDate : null,
                                        Amount = (decimal?)ol.Amount, LineQuantity = (decimal?)ol.Quantity,
                                    } into g
@@ -446,8 +450,13 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                        Net = l == null
                                            ? 0m
                                            : db.StockDocuments.Where(d => d.OrganizationId == org && d.SalesOrderId == o.Id && d.Status == StockDocumentStatus.Posted)
-                                               .SelectMany(d => d.Lines.Where(x => x.ItemId == l.ItemId)
-                                                   .Select(x => d.Kind == StockOperationKind.Shipment ? x.Quantity : -x.Quantity))
+                                               // D352 (сессия 4, Р2): строка комплекта — по первой строке его разворота, количеством комплектов.
+                                               .SelectMany(d => d.Lines.Where(x => (x.BundleItemId ?? x.ItemId) == l.ItemId
+                                                                                   && (x.BundleItemId == null
+                                                                                       || x.Id == d.Lines.Where(y => y.BundleItemId == x.BundleItemId).Min(y => y.Id)))
+                                                   // D354 (сессия 4, Р1): строку-услугу закрывает акт оказания услуг.
+                                                   .Select(x => d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.ServiceAct
+                                                       ? (x.BundleQuantity ?? x.Quantity) : -(x.BundleQuantity ?? x.Quantity)))
                                                .Sum(),
                                    })
                     .ToListAsync(ct);
@@ -469,16 +478,22 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                    from ol in o.Lines.Where(x => x.ItemId == l.ItemId).DefaultIfEmpty()
                                    group l.Quantity by new
                                    {
-                                       o.SupplierId, d.Kind,
+                                       // D354 (сессия 4, Р1): акт услуг поставщика — как поступление.
+                                       o.SupplierId, Kind = d.Kind == StockOperationKind.SupplierServiceAct ? StockOperationKind.Receipt : d.Kind,
                                        Day = d.DocumentDate >= windowStart && d.DocumentDate <= today ? (DateOnly?)d.DocumentDate : null,
                                        Amount = (decimal?)ol.Amount, LineQuantity = (decimal?)ol.Quantity,
                                    } into g
                                    select new { g.Key.SupplierId, g.Key.Kind, g.Key.Day, g.Key.Amount, g.Key.LineQuantity, Quantity = g.Sum() })
                     .ToListAsync(ct);
+                // D133: вводные остатки — в том же запросе, как оплата со знаком минус (наш долг увеличивает долг, наш аванс — уменьшает),
+                // без дня: в график оплат не попадают.
                 var paid = await db.SupplierPayments.AsNoTracking()
                     .Where(pay => pay.OrganizationId == org && pay.Status == SupplierPaymentStatus.Posted)
-                    .GroupBy(pay => new { pay.SupplierId, Day = pay.PaymentDate >= windowStart && pay.PaymentDate <= today ? (DateOnly?)pay.PaymentDate : null })
-                    .Select(g => new { g.Key.SupplierId, g.Key.Day, Sum = g.Sum(pay => pay.Amount) })
+                    .Select(pay => new { pay.SupplierId, Day = pay.PaymentDate >= windowStart && pay.PaymentDate <= today ? (DateOnly?)pay.PaymentDate : null, pay.Amount })
+                    .Concat(db.SupplierOpeningBalances.AsNoTracking().Where(b => b.OrganizationId == org && !b.IsCancelled)
+                        .Select(b => new { b.SupplierId, Day = (DateOnly?)null, Amount = -b.Amount }))
+                    .GroupBy(x => new { x.SupplierId, x.Day })
+                    .Select(g => new { g.Key.SupplierId, g.Key.Day, Sum = g.Sum(x => x.Amount) })
                     .ToListAsync(ct);
 
                 charts.Add(Chart("Закупки", "reports/supplier-balances", today, moved.Where(m => m.Day != null).Select(m => (m.Day!.Value,
@@ -525,7 +540,8 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                               : db.StockDocuments.Where(d => d.OrganizationId == org && d.PurchaseOrderId == o.Id
                                                                              && d.Status == StockDocumentStatus.Posted)
                                                   .SelectMany(d => d.Lines.Where(x => x.ItemId == l.ItemId)
-                                                      .Select(x => d.Kind == StockOperationKind.Receipt ? x.Quantity : -x.Quantity))
+                                                      .Select(x => d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.SupplierServiceAct
+                                                          ? x.Quantity : -x.Quantity)) // D354
                                                   .Sum(),
                                       })
                     .ToListAsync(ct);

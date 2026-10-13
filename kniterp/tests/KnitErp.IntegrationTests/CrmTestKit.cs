@@ -22,6 +22,8 @@ public sealed class CrmServices(KnitErpDbContext db, CrmSettingsService settings
     public required CrmMessengerService Messenger { get; init; }
     public required CrmEmailTemplateService Templates { get; init; }
     public required CrmMailboxService Mailbox { get; init; }
+    public required CrmDealSalesService DealSales { get; init; }
+    public required CrmDealPhotoService Photos { get; init; }
 
     public KnitErpDbContext Db { get; } = db;
     public CrmSettingsService Settings { get; } = settings;
@@ -56,7 +58,8 @@ public static class CrmTestKit
         var db = interceptors.Length == 0 ? host.NewDb() : host.NewDb(interceptors);
         var user = new TestUser { UserId = userId, OrganizationId = organizationId, ApiScope = apiScope };
         var guard = new AccessGuard(db, user, host.Clock);
-        var sales = new SalesService(db, guard, user, host.Clock, new StockDocumentService(db, guard, SqlTestHost.Spreadsheet, user, host.Clock));
+        var sales = new SalesService(db, guard, user, host.Clock, new StockDocumentService(db, guard, SqlTestHost.Spreadsheet, user, host.Clock),
+            [new CrmSalesOrderEvents(host.Clock, user)]); // D683: «заказ подтверждён» → сделка выиграна, как в приложении
         return new CrmServices(db, new CrmSettingsService(db, guard, user, host.Clock), new CrmLeadService(db, guard, user, host.Clock, new FakeRequisitesLookup()),
             new CrmDealService(db, guard, user, host.Clock, sales), new CrmContactService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet), sales)
         {
@@ -69,6 +72,9 @@ public static class CrmTestKit
             Messenger = new CrmMessengerService(db, guard, user, host.Clock, [Max, Telegram, WhatsApp], host.Mail),
             Templates = new CrmEmailTemplateService(db, guard, user, host.Clock),
             Mailbox = new CrmMailboxService(db, guard, user, host.Clock, Imap),
+            DealSales = new CrmDealSalesService(db, guard, user, host.Clock, new CustomerInvoiceService(db, guard, user, host.Clock),
+                new SalesOrderDocumentsService(db, guard, user, host.Clock, host.Mail)),
+            Photos = new CrmDealPhotoService(db, guard, user, host.Clock),
         };
     }
 

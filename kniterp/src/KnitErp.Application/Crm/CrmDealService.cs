@@ -44,9 +44,23 @@ public sealed record CrmStageHistoryDto(string? From, string To, string By, Date
 
 /// <summary>Заказ покупателя базы по сделке — только чтение (D607): этап, сумма, оплата и отгрузка из модуля продаж.</summary>
 public sealed record CrmLinkedOrderDto(
-    long Id, string Number, DateOnly Date, SalesOrderStatus Status, SalesStageRefDto? Stage, decimal? Total, decimal? Paid, ShipmentState Shipped, decimal? Debt)
+    long Id, string Number, DateOnly Date, SalesOrderStatus Status, SalesStageRefDto? Stage, decimal? Total, decimal? Paid, ShipmentState Shipped, decimal? Debt,
+    long? InvoiceId = null, string? InvoiceNumber = null)
 {
     public string StatusName => SalesOrder.StatusName(Status);
+
+    /// <summary>D684: оплата заказа — «оплачен», «частично», «не оплачен» (без права цен — null).</summary>
+    public CrmPaymentState? Payment => Total is not { } t || Paid is not { } p ? null
+        : Status == SalesOrderStatus.Cancelled ? null
+        : p >= t && t > 0 ? CrmPaymentState.Paid : p > 0 ? CrmPaymentState.Partial : CrmPaymentState.None;
+}
+
+/// <summary>Оплата заказа в сделке (D684).</summary>
+public enum CrmPaymentState : byte
+{
+    None = 1,
+    Partial = 2,
+    Paid = 3,
 }
 
 public sealed record CrmDealDto(
@@ -54,7 +68,8 @@ public sealed record CrmDealDto(
     CrmDealOutcome Outcome, string? LossReason, string? LossComment, string Counterparty, string? Contact, string Responsible, string? Source,
     string? Channel, string? Project, long? LeadId, string? LeadNumber, IReadOnlyList<CrmDealLineDto> Lines, IReadOnlyList<LookupDto> Participants,
     IReadOnlyList<CrmStageHistoryDto> History, IReadOnlyList<CrmLinkedOrderDto> Orders, int HiddenOrders, string CreatedBy, DateTime CreatedAtUtc,
-    DateTime? ClosedAtUtc, bool CanEdit, bool CanAll, bool CanSeeAmounts, bool CanCreateOrder, byte[] RowVersion)
+    DateTime? ClosedAtUtc, bool CanEdit, bool CanAll, bool CanSeeAmounts, bool CanCreateOrder, byte[] RowVersion, int? ClientCycleDays = null,
+    DateOnly? NextOrderExpected = null)
 {
     public string OutcomeName => CrmDeal.OutcomeName(Outcome);
     public decimal? Amount => CanSeeAmounts ? Values.Amount : null;
@@ -171,6 +186,8 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var (orders, hidden) = await LinkedOrdersAsync(ctx, id, ct);
         var values = new CrmDealValues(d.Title, d.CounterpartyId, d.ContactId, amounts ? d.Amount : 0, d.CurrencyCode, d.ExpectedCloseDate,
             d.ResponsibleUserId, d.ProjectId, d.ChannelId, d.SourceId);
+        // D684: цикл заказов клиента — с правом «Продажи: просмотр» (даты заказов — данные продаж).
+        var cycle = ctx.Permissions.Has(Permissions.SalesView) ? await CrmEvents.ClientCycleAsync(db, ctx.OrganizationId, d.CounterpartyId, ct) : null;
         return new CrmDealDto(d.Id, d.Number, values, d.PipelineId, pipeline, d.StageId,
             CrmSettingsService.Ordered(stages.Where(s => !s.IsArchived || s.Id == d.StageId))
                 .Select(s => new CrmStageDto(s.Id, s.PipelineId, s.Name, s.Color, s.Probability, s.Kind, s.IsArchived, 0, s.RowVersion)).ToList(),
@@ -184,7 +201,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
             orders, hidden, users[d.CreatedByUserId], d.CreatedAtUtc, d.ClosedAtUtc,
             ctx.Permissions.Has(Permissions.CrmEdit), CrmAccess.SeesAll(ctx), amounts,
             ctx.Permissions.Has(Permissions.CrmEdit) && ctx.Permissions.Has(Permissions.SalesEdit) && amounts && d.Outcome != CrmDealOutcome.Lost,
-            d.RowVersion);
+            d.RowVersion, cycle?.Days, cycle is { } c ? c.LastOrder.AddDays(c.Days) : null);
     }
 
     /// <summary>Новая сделка без лида — на первом рабочем этапе выбранной (или первой) воронки.</summary>
@@ -511,6 +528,8 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         db.CrmDealOrders.Add(CrmDealOrder.Create(ctx.OrganizationId, id, orderId, ctx.UserId, clock.UtcNow, offerId));
+        // D683: связь и в заказе базы (SalesOrder.CrmDealId, D117) — карточка заказа показывает сделку в «Связанных документах».
+        (await db.SalesOrders.SingleAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)).LinkCrmDeal(id);
         Audit(ctx, AuditActions.CrmDealOrderCreated, id, null, order.Number, offerNumber ?? deal.Number);
         await db.SaveChangesAsync(ct);
         // Б2 (D665): создан заказ — сделка «Согласование» (только вперёд).
@@ -561,10 +580,17 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         var list = new List<CrmLinkedOrderDto>();
+        // D684: действующий счёт заказа — номер и ссылка видны с правом цен (как в модуле продаж).
+        var invoices = ctx.Permissions.Has(Permissions.PriceView)
+            ? await db.CustomerInvoices.AsNoTracking()
+                .Where(i => i.OrganizationId == ctx.OrganizationId && ids.Contains(i.SalesOrderId) && i.Status == CustomerInvoiceStatus.Issued)
+                .Select(i => new { i.SalesOrderId, i.Id, i.Number }).ToListAsync(ct)
+            : [];
         foreach (var orderId in ids)
         {
             var o = await sales.GetOrderAsync(orderId, ct);
-            list.Add(new CrmLinkedOrderDto(o.Id, o.Number, o.OrderDate, o.Status, o.Stage, o.Total, o.Paid, o.Shipped, o.Debt));
+            var invoice = invoices.FirstOrDefault(i => i.SalesOrderId == orderId);
+            list.Add(new CrmLinkedOrderDto(o.Id, o.Number, o.OrderDate, o.Status, o.Stage, o.Total, o.Paid, o.Shipped, o.Debt, invoice?.Id, invoice?.Number));
         }
 
         return (list, 0);

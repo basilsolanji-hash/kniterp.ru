@@ -18,7 +18,7 @@ for (const width of [1440, 390]) {
     const sfx = Date.now().toString(36).slice(-4).toUpperCase();
     await page.locator('input[aria-label="Способ доставки"]').fill('ТК ' + sfx);
     await page.locator('form:has(input[aria-label="Способ доставки"])').getByRole('button', { name: 'Добавить', exact: true }).click();
-    await page.waitForSelector(`text=ТК ${sfx}`);
+    await page.locator(`text=ТК ${sfx} >> visible=true`).first().waitFor();
     ok('способ доставки добавлен');
   }
   ok('отгрузки по нескольким заказам');

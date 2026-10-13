@@ -6,6 +6,7 @@
 @inject CrmDealService Deals
 @inject CrmOfferService Offers
 @inject CrmActivityService Activities
+@inject CrmDealSalesService DealSales
 @inject KnitErp.Application.Production.SalesProductionService Production
 @inject IEmailSender Mail
 @inject NavigationManager Navigation
@@ -104,6 +105,10 @@ else
         {
             <div><span>@L("Из лида")</span><a href="crm/leads/@lid">@_deal.LeadNumber</a></div>
         }
+        @if (_deal.ClientCycleDays is { } cycleDays)
+        {
+            <div><span>@L("Цикл заказов клиента")</span><span>@L("≈ {0} дн., следующий около {1}", cycleDays, _deal.NextOrderExpected?.ToString("dd.MM.yyyy") ?? "—")</span></div>
+        }
         @if (_deal.LossReason is not null)
         {
             <div><span>@L("Причина проигрыша")</span><span>@_deal.LossReason@(_deal.LossComment is null ? "" : $" — {_deal.LossComment}")</span></div>
@@ -124,9 +129,18 @@ else
             }
             else
             {
+                @if (_deal.Orders.Where(o => o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled && o.Total is not null).ToList() is { Count: > 0 } active)
+                {
+                    var total = active.Sum(o => o.Total ?? 0);
+                    var paid = active.Sum(o => o.Paid ?? 0);
+                    <p class="crm-paid">
+                        @L("Оплачено по сделке: {0} из {1}", Amounts.Format(paid), Amounts.Format(total))
+                        <span class="crm-bar" style="display: inline-block; width: 120px; vertical-align: middle"><i style="width: @(total > 0 ? Math.Min(100, (int)(paid * 100 / total)) : 0)%"></i></span>
+                    </p>
+                }
                 <div class="scroll">
                     <table class="compact">
-                        <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th><th></th></tr></thead>
+                        <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th></tr></thead>
                         <tbody>
                             @foreach (var o in _deal.Orders)
                             {
@@ -135,9 +149,12 @@ else
                                     <td><span class="tag @SalesOrdersPage.StatusClass(o.Status)">@L(o.StatusName)</span></td>
                                     <td><StageChip Stage="o.Stage" /></td>
                                     <td class="num">@Amounts.Format(o.Total)</td>
-                                    <td class="num">@Amounts.Format(o.Paid)</td>
+                                    <td class="num">@Amounts.Format(o.Paid) @if (o.Payment is { } pay) { <span class="tag @(pay == CrmPaymentState.Paid ? "ok" : pay == CrmPaymentState.Partial ? "warn" : null)">@PaymentName(pay)</span> }</td>
                                     <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
-                                    <td><div class="row-actions">
+                                </tr>
+                                @* D684: действия по заказу — отдельной строкой во всю ширину, чтобы не уезжали за край таблицы. *@
+                                <tr class="crm-order-actions">
+                                    <td colspan="6"><div class="row-actions">
                                         @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
                                         {
                                             <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>
@@ -146,6 +163,19 @@ else
                                         {
                                             <button type="button" class="secondary" @onclick="() => ToProductionAsync(o.Id)" disabled="@_busy">@L("В производство")</button>
                                         }
+                                        @if (o.InvoiceId is { } inv)
+                                        {
+                                            <a class="small" href="customer-invoices/@inv">@L("Счёт {0}", o.InvoiceNumber ?? "")</a>
+                                            <a class="small" href="print/invoice/@inv" target="_blank" rel="noopener">@L("Печать счёта")</a>
+                                        }
+                                        else if (o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled && o.Total is not null && CurrentAccess.Has(Permissions.SalesEdit))
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => InvoiceAsync(o.Id)" disabled="@_busy">@L("Выставить счёт")</button>
+                                        }
+                                        @if (o.Total is not null && CurrentAccess.Has(Permissions.SalesEdit) && o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled)
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => OpenDocsAsync(o)" disabled="@_busy">@L("Документы клиенту")</button>
+                                        }
                                         <a class="small" href="sales-orders/@o.Id">@L("Открыть")</a>
                                     </div></td>
                                 </tr>
@@ -153,6 +183,33 @@ else
                         </tbody>
                     </table>
                 </div>
+            }
+            @if (_docs is { } draft)
+            {
+                <form class="panel" @onsubmit="SendDocsAsync" aria-label="@L("Документы клиенту")">
+                    <h3>@L("Документы клиенту по заказу {0}", _docsOrder?.Number ?? "")</h3>
+                    @if (!draft.MailConfigured)
+                    {
+                        <p class="muted small">@L("Почта сервера не настроена — обратитесь к администратору.")</p>
+                    }
+                    <div class="grid">
+                        <label>@L("Кому") <input type="email" @bind="_docsTo" required /></label>
+                        <label class="wide">@L("Тема") <input @bind="_docsSubject" required /></label>
+                        <label class="wide">@L("Текст") <textarea rows="4" @bind="_docsBody"></textarea></label>
+                    </div>
+                    <fieldset class="crm-docs">
+                        <legend>@L("Вложить PDF")</legend>
+                        @foreach (var d in draft.Documents)
+                        {
+                            var key = (d.Document, d.Id);
+                            <label class="inline"><input type="checkbox" checked="@_docsSelected.Contains(key)" @onchange="e => ToggleDoc(key, e.Value is true)" /> @L(d.DocumentName) @d.Number</label>
+                        }
+                    </fieldset>
+                    <div class="actions">
+                        <button type="submit" disabled="@(_busy || !draft.MailConfigured || _docsSelected.Count == 0)">@L("Отправить клиенту")</button>
+                        <button type="button" class="secondary" @onclick="() => _docs = null">@L("Отмена")</button>
+                    </div>
+                </form>
             }
             @if (_deal.CanCreateOrder)
             {
@@ -302,6 +359,8 @@ else
                 </form>
             }
 
+
+            <CrmDealPhotos DealId="Id" CanEdit="@_deal.CanEdit" /> @* D692: фото к сделке (камера телефона) *@
 
             <CrmActivities Target="CrmTarget.Deal" TargetId="Id" CanEdit="@_deal.CanEdit" Version="_feedVersion" />
 
@@ -587,6 +646,55 @@ else
         _warehouses = await Deals.WarehousesAsync();
         _warehouse = _warehouses.FirstOrDefault()?.Id.ToString() ?? "";
     }, null, reload: false);
+
+    private SalesMailDraftDto? _docs;
+    private CrmLinkedOrderDto? _docsOrder;
+    private string? _docsTo;
+    private string? _docsSubject;
+    private string? _docsBody;
+    private readonly HashSet<(KnitErp.Domain.Sales.SalesMailDocument, long)> _docsSelected = [];
+
+    private static string PaymentName(CrmPaymentState p) => p switch
+    {
+        CrmPaymentState.Paid => L("оплачен"),
+        CrmPaymentState.Partial => L("частично"),
+        _ => L("не оплачен"),
+    };
+
+    /// <summary>D684: счёт по заказу сделки — модулем продаж; уже есть — откроется действующий.</summary>
+    private Task InvoiceAsync(long orderId) => RunAsync(() => DealSales.InvoiceAsync(Id, orderId), L("Счёт выставлен — его видно в строке заказа и в ленте."));
+
+    private Task OpenDocsAsync(CrmLinkedOrderDto order) => RunAsync(async () =>
+    {
+        var doc = order.InvoiceId is not null ? KnitErp.Domain.Sales.SalesMailDocument.Invoice : KnitErp.Domain.Sales.SalesMailDocument.Order;
+        _docs = await DealSales.DraftAsync(Id, order.Id, doc);
+        _docsOrder = order;
+        (_docsTo, _docsSubject, _docsBody) = (_docs.To, _docs.Subject, _docs.Body);
+        _docsSelected.Clear();
+        foreach (var d in _docs.Selected)
+        {
+            _docsSelected.Add((d.Document, d.Id));
+        }
+    }, null, reload: false);
+
+    private void ToggleDoc((KnitErp.Domain.Sales.SalesMailDocument, long) key, bool on)
+    {
+        if (on)
+        {
+            _docsSelected.Add(key);
+        }
+        else
+        {
+            _docsSelected.Remove(key);
+        }
+    }
+
+    private Task SendDocsAsync() => RunAsync(async () =>
+    {
+        await DealSales.SendAsync(Id, new SalesMailRequest(_docsOrder!.Id, _docsTo, _docsSubject, _docsBody,
+            _docsSelected.Select(k => new SalesMailDocumentRef(k.Item1, k.Item2)).ToList()));
+        _docs = null;
+    }, L("Документы поставлены в очередь писем клиенту и записаны в ленту."));
 
     private Task ConfirmOrderAsync(long orderId) => RunAsync(() => Deals.ConfirmOrderAsync(Id, orderId), L("Заказ подтверждён — сделка выиграна."));
 

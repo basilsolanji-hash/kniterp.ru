@@ -25,6 +25,11 @@ description: Модуль CRM knitERP — лиды, сделки, контакт
 - Каждый метод сервиса начинает с `guard.DemandAsync(...)`; без `crm.all` — только видимое через `CrmAccess.Leads/Deals/Contacts`; чужое — 404.
 - Вход без пользователя (вебхуки, воркер, IMAP) работает с правами подключившего/поставившего в очередь (`IntegrationUser`/`SystemUser` +
   `AccessGuard`): отозвали права — обработка останавливается, а не идёт «от системы».
+- Составные внешние ключи `(OrganizationId, X)` у всех ссылок CRM (D682); новая дочерняя таблица — со своим `OrganizationId`.
+- Модуль продаж CRM не вызывает напрямую и наоборот: «заказ подтверждён» — `ISalesOrderEvents` (`CrmSalesOrderEvents`, D683); счёт и
+  документы клиенту — вызовом сервисов продаж из `CrmDealSalesService` (D684), их права не дублируются.
+- Тексты с ценами (КП) в ленте — только с `Permissions.PriceView` (`CrmActivityService.VisibleText`, D680); API наружу не раскрывает,
+  существует ли лид/телефон (D681).
 - Секреты: токены, пароль ящика, App secret — `PersonalDataColumns.Text` (шифрование); секрет вебхука — только SHA-256; сравнение —
   `CryptographicOperations.FixedTimeEquals`; HttpClient мессенджеров — `.RemoveAllLoggers()` (токен Telegram в адресе).
 - Сначала проверка реквизитов, потом `db.Add` — иначе неудачная попытка оставит недописанную строку в контексте (D678).
@@ -39,10 +44,16 @@ description: Модуль CRM knitERP — лиды, сделки, контакт
 
 ## Тесты
 - Модульные: `CrmRulesTests`, `CrmMessengerHooksTests`, `CrmMailRulesTests`.
-- Интеграционные (SQL Server): `CrmTests`, `CrmFullCycleTests` (фейки `CrmTestKit.Max/Telegram/WhatsApp/Imap`, `host.Mail.Messages`),
+- Интеграционные (SQL Server): `CrmTests`, `CrmFullCycleTests`, `CrmReviewTests` (замечания проверки), `CrmSalesLinkTests`, `CrmReportTests` (фейки `CrmTestKit.Max/Telegram/WhatsApp/Imap`, `host.Mail.Messages`),
   `ImapAddressTests`. Фильтр: `--filter "FullyQualifiedName~Crm"`.
 - e2e: `CrmE2ETests` (1440 и 390 px, светлая/тёмная, 0 ошибок JS, скриншоты `Shot(...)` в `KNITERP_E2E_ARTIFACTS`).
   `GetByRole(AriaRole.Status)` на страницах с предупреждением о почте — фильтровать по тексту (их два).
+
+## Субагенты и параллельная работа
+Если работа делится на независимые части, их можно отдать субагентам в отдельных worktree: дайте каждому свой набор файлов (запретите
+трогать чужие), переводы — в `docs/sessions/tr-<имя>.json` (слить `merge.py`, файл удалить), решения — строками в ответе. Проверьте, что
+worktree стоит на вершине `claude/crm` (бывает, что создаётся от другой линии истории — тогда `git reset --hard <вершина>`).
+Сливать по одному; конфликт в `CrmE2ETests.cs` разрешать вставкой метода целиком, а не построчно.
 
 ## Переводы
 Новые строки `L("…")` и сообщения `BusinessRuleException` — be/kk/uz через `kniterp-translations`. Подсказки переменных шаблонов

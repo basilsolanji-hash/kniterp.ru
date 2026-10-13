@@ -188,6 +188,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans => Set<KnitErp.Domain.Crm.CrmPlan>();
     public DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings => Set<KnitErp.Domain.Crm.CrmMailing>();
     public DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks => Set<KnitErp.Domain.Crm.CrmExternalLink>();
+    public DbSet<KnitErp.Domain.Crm.CrmDealPhoto> CrmDealPhotos => Set<KnitErp.Domain.Crm.CrmDealPhoto>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountRule> SalesDiscountRules => Set<KnitErp.Domain.Sales.SalesDiscountRule>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountSettings> SalesDiscountSettings => Set<KnitErp.Domain.Sales.SalesDiscountSettings>();
     public DbSet<KnitErp.Domain.Sales.SalesCancelReason> SalesCancelReasons => Set<KnitErp.Domain.Sales.SalesCancelReason>();
@@ -218,6 +219,9 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.MarketplaceReport> MarketplaceReports => Set<KnitErp.Domain.Sales.MarketplaceReport>();
     public DbSet<KnitErp.Domain.Sales.MarketplaceReportLine> MarketplaceReportLines => Set<KnitErp.Domain.Sales.MarketplaceReportLine>();
     public DbSet<KnitErp.Domain.Sales.MarketplaceColumnMap> MarketplaceColumnMaps => Set<KnitErp.Domain.Sales.MarketplaceColumnMap>();
+    public DbSet<KnitErp.Domain.Sales.CustomerOpeningBalance> CustomerOpeningBalances => Set<KnitErp.Domain.Sales.CustomerOpeningBalance>(); // D1146
+    public DbSet<KnitErp.Domain.Purchasing.SupplierOpeningBalance> SupplierOpeningBalances => Set<KnitErp.Domain.Purchasing.SupplierOpeningBalance>(); // D133
+    public DbSet<KnitErp.Domain.Purchasing.PurchaseSettings> PurchaseSettings => Set<KnitErp.Domain.Purchasing.PurchaseSettings>(); // D133
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней

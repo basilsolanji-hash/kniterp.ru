@@ -1,0 +1,272 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+
+@*
+    D692: фото к сделке — снимок с камеры телефона или из галереи, JPEG/PNG/WebP до 5 МБ (больше — браузер сначала уменьшает снимок),
+    до 30 фото, миниатюры, просмотр, подпись, удаление в архив. Картинки отдаёт /crm/deal-photos/{id} с проверкой прав сделки.
+    Свой контекст базы на каждое действие (как CrmImportPanel): блок не мешает операциям карточки.
+    Подключение в карточке сделки: <CrmDealPhotos DealId="Id" CanEdit="@_deal.CanEdit" />.
+*@
+<section class="crm-photos" aria-label="@L("Фото к сделке")">
+    <h2>
+        @L("Фото")
+        @if (_data is not null)
+        {
+            <span class="muted small crm-photo-count">@L("{0} из {1}", _data.Items.Count, CrmDealPhoto.MaxPerDeal)</span>
+        }
+    </h2>
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert">@_error</div>
+    }
+    @if (_flash is not null)
+    {
+        <div class="flash" role="status">@_flash</div>
+    }
+
+    @if (_data is null)
+    {
+        <p class="muted small">@L("Загрузка…")</p>
+    }
+    else
+    {
+        @if (CanEdit && _data.CanEdit)
+        {
+            @if (_data.Left > 0)
+            {
+                <div class="crm-photo-add">
+                    <label class="wide">@L("Подпись к фото") <input @bind="_caption" maxlength="@CrmDealPhoto.CaptionMaxLength" placeholder="@L("Например: образец полотна, витрина клиента")" disabled="@_busy" /></label>
+                    <div class="actions">
+                        <label class="button crm-photo-pick @(_busy ? "disabled" : null)">
+                            @L("Снять фото")
+                            <InputFile OnChange="UploadAsync" accept="image/*" capture="environment" disabled="@_busy" aria-label="@L("Снять фото")" />
+                        </label>
+                        <label class="button secondary crm-photo-pick @(_busy ? "disabled" : null)">
+                            @L("Выбрать из галереи")
+                            <InputFile OnChange="UploadAsync" accept="image/jpeg,image/png,image/webp" disabled="@_busy" aria-label="@L("Выбрать из галереи")" />
+                        </label>
+                    </div>
+                    <p class="muted small">@L("JPEG, PNG или WebP, до 5 МБ — снимок больше браузер сначала уменьшит. Не больше 30 фото на сделку.")</p>
+                </div>
+            }
+            else
+            {
+                <p class="muted small">@L("Приложено 30 фото — это предел. Удалите лишние, чтобы добавить новые.")</p>
+            }
+        }
+
+        @if (_data.Items.Count == 0)
+        {
+            <p class="muted small">@L("Фото пока нет.")</p>
+        }
+        else
+        {
+            <ul class="crm-photo-grid">
+                @foreach (var p in _data.Items)
+                {
+                    <li>
+                        <button type="button" class="crm-photo-thumb" @onclick="() => Open(p)" aria-label="@L("Открыть фото: {0}", p.Caption ?? p.CreatedAtUtc.ToString("dd.MM.yyyy"))">
+                            <img src="@p.Href" alt="@(p.Caption ?? L("Фото к сделке"))" loading="lazy" />
+                        </button>
+                        @if (p.Caption is not null)
+                        {
+                            <span class="small">@p.Caption</span>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    }
+
+    @if (_open is not null)
+    {
+        <div class="crm-photo-view" role="dialog" aria-modal="true" aria-label="@L("Просмотр фото")">
+            <div class="crm-photo-view-body">
+                <img src="@_open.Href" alt="@(_open.Caption ?? L("Фото к сделке"))" />
+                <p class="muted small">@_open.Author · @TimeZones.ToLocal(_open.CreatedAtUtc, CurrentAccess?.TimeZoneId ?? "Europe/Moscow").ToString("dd.MM.yyyy HH:mm") · @((_open.SizeBytes + 1023) / 1024) @L("КБ")</p>
+                @if (CanEdit && _data?.CanEdit == true)
+                {
+                    <form class="inline-form" @onsubmit="SaveCaptionAsync" aria-label="@L("Подпись к фото")">
+                        <label class="wide">@L("Подпись к фото") <input @bind="_editCaption" maxlength="@CrmDealPhoto.CaptionMaxLength" /></label>
+                        <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+                    </form>
+                }
+                <div class="actions">
+                    @if (_data is not null && _data.Items.Count > 1)
+                    {
+                        <button type="button" class="secondary" @onclick="() => Step(-1)">← @L("Предыдущее")</button>
+                        <button type="button" class="secondary" @onclick="() => Step(1)">@L("Следующее") →</button>
+                    }
+                    <a class="button secondary" href="@_open.Href" target="_blank" rel="noopener" data-enhance-nav="false">@L("Открыть полностью")</a>
+                    @if (CanEdit && _data?.CanEdit == true)
+                    {
+                        @if (_confirmDelete)
+                        {
+                            <button type="button" class="danger" @onclick="ArchiveAsync" disabled="@_busy">@L("Да, удалить фото")</button>
+                            <button type="button" class="secondary" @onclick="() => _confirmDelete = false">@L("Отмена")</button>
+                        }
+                        else
+                        {
+                            <button type="button" class="secondary" @onclick="() => _confirmDelete = true">@L("Удалить")</button>
+                        }
+                    }
+                    <button type="button" @onclick="Close">@L("Закрыть")</button>
+                </div>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public long DealId { get; set; }
+    [Parameter] public bool CanEdit { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto? CurrentAccess { get; set; }
+
+    private CrmDealPhotosDto? _data;
+    private CrmDealPhotoDto? _open;
+    private string? _caption;
+    private string? _editCaption;
+    private bool _confirmDelete;
+    private bool _busy;
+    private string? _error;
+    private string? _flash;
+    private long _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == DealId)
+        {
+            return;
+        }
+
+        _loadedFor = DealId;
+        _open = null;
+        await RunAsync(LoadAsync, null);
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = Factory.Create();
+        _data = await Service(db).ListAsync(DealId);
+    }
+
+    private Task UploadAsync(InputFileChangeEventArgs e) => RunAsync(async () =>
+    {
+        var file = e.File;
+        if (file.Size > CrmDealPhoto.MaxBytes)
+        {
+            // Допущение D694: снимок камеры бывает больше 5 МБ — браузер уменьшает его до 2560 px по большей стороне (JPEG), на сервер идёт уже он.
+            try
+            {
+                file = await file.RequestImageFileAsync("image/jpeg", 2560, 2560);
+            }
+            catch (JSException)
+            {
+                throw new BusinessRuleException("crm.photo.too_large", "Фото — не больше 5 МБ. Уменьшите размер снимка.");
+            }
+
+            if (file.Size > CrmDealPhoto.MaxBytes)
+            {
+                throw new BusinessRuleException("crm.photo.too_large", "Фото — не больше 5 МБ. Уменьшите размер снимка.");
+            }
+        }
+
+        byte[] content;
+        await using (var stream = file.OpenReadStream(CrmDealPhoto.MaxBytes))
+        using (var buffer = new MemoryStream())
+        {
+            await stream.CopyToAsync(buffer);
+            content = buffer.ToArray();
+        }
+
+        await using (var db = Factory.Create())
+        {
+            await Service(db).UploadAsync(DealId, content, _caption);
+        }
+
+        _caption = null;
+        await LoadAsync();
+    }, L("Фото добавлено."));
+
+    private void Open(CrmDealPhotoDto p)
+    {
+        _open = p;
+        _editCaption = p.Caption;
+        _confirmDelete = false;
+        _error = null;
+        _flash = null;
+    }
+
+    private void Close()
+    {
+        _open = null;
+        _confirmDelete = false;
+    }
+
+    private void Step(int delta)
+    {
+        if (_data is null || _open is null || _data.Items.Count == 0)
+        {
+            return;
+        }
+
+        var index = _data.Items.ToList().FindIndex(p => p.Id == _open.Id);
+        Open(_data.Items[((index < 0 ? 0 : index) + delta + _data.Items.Count) % _data.Items.Count]);
+    }
+
+    private Task SaveCaptionAsync() => RunAsync(async () =>
+    {
+        var id = _open!.Id;
+        await using (var db = Factory.Create())
+        {
+            await Service(db).SetCaptionAsync(id, _editCaption, _open.RowVersion);
+        }
+
+        await LoadAsync();
+        _open = _data?.Items.FirstOrDefault(p => p.Id == id);
+    }, L("Подпись сохранена."));
+
+    private Task ArchiveAsync() => RunAsync(async () =>
+    {
+        await using (var db = Factory.Create())
+        {
+            await Service(db).ArchiveAsync(_open!.Id, _open.RowVersion);
+        }
+
+        Close();
+        await LoadAsync();
+    }, L("Фото удалено из сделки."));
+
+    /// <summary>Свой контекст базы на действие: панель не мешает операциям карточки.</summary>
+    private CrmDealPhotoService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock);
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _flash = null;
+        try
+        {
+            await action();
+            _flash = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

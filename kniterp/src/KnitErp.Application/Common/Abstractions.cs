@@ -230,6 +230,7 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans { get; }
     DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings { get; }
     DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks { get; }
+    DbSet<KnitErp.Domain.Crm.CrmDealPhoto> CrmDealPhotos { get; }
     DbSet<KnitErp.Domain.Sales.SalesDiscountRule> SalesDiscountRules { get; }
     DbSet<KnitErp.Domain.Sales.SalesDiscountSettings> SalesDiscountSettings { get; }
     DbSet<KnitErp.Domain.Sales.SalesCancelReason> SalesCancelReasons { get; }
@@ -260,6 +261,9 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.MarketplaceReport> MarketplaceReports { get; }
     DbSet<KnitErp.Domain.Sales.MarketplaceReportLine> MarketplaceReportLines { get; }
     DbSet<KnitErp.Domain.Sales.MarketplaceColumnMap> MarketplaceColumnMaps { get; }
+    DbSet<KnitErp.Domain.Sales.CustomerOpeningBalance> CustomerOpeningBalances { get; } // D1146
+    DbSet<KnitErp.Domain.Purchasing.SupplierOpeningBalance> SupplierOpeningBalances { get; } // D133
+    DbSet<KnitErp.Domain.Purchasing.PurchaseSettings> PurchaseSettings { get; } // D133
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

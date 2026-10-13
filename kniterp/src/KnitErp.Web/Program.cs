@@ -250,6 +250,9 @@ KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("sales", KnitErp.Web.Modules.Mod
     typeof(KnitErp.Web.Components.Pages.SalesCustomerTermsTab), KnitErp.Domain.Access.Permissions.SalesView);
 KnitErp.Web.Api.SalesDocumentsSetup.AddSalesDocuments(builder); // D1120–D1125 (продажи): письма клиенту, вкладка «Почта для документов»
 
+// D133: вкладка «Расчёты с поставщиком» — долг и вводные остатки расчётов с поставщиком.
+KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("purchases", KnitErp.Web.Modules.ModuleUi.Text("Расчёты с поставщиком"),
+    typeof(KnitErp.Web.Components.Pages.SupplierSettlementTab), KnitErp.Domain.Access.Permissions.PurchaseView);
 // D616, D632 (сессия CRM): вкладка «Контакты и сделки» у контрагента и блок «CRM» главного экрана.
 KnitErp.Web.Modules.ModuleUi.AddCounterpartyTab("crm", KnitErp.Web.Modules.ModuleUi.Text("Контакты и сделки"),
     typeof(KnitErp.Web.Components.Shared.CrmCounterpartyPanel), KnitErp.Domain.Access.Permissions.CrmView);

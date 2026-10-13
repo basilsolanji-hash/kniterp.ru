@@ -1,0 +1,79 @@
+@using KnitErp.Application.Catalog
+@using KnitErp.Domain.Catalog
+@using KnitErp.Domain.Common
+@*
+    D353 (сессия 4, Р4): ввод количества в упаковках рядом с полем «Количество» строки документа. В строку уходит количество в
+    основных единицах (движения и остатки не меняются): N упаковок × коэффициент, с проверкой точности основной единицы.
+    Без запросов к серверу — упаковки позиций страница загрузила один раз (PackService.AllAsync).
+*@
+@if (Packs is { Count: > 0 } packs)
+{
+    <label>
+        @L("Упаковок")
+        <span class="pack-count">
+            <input @bind="_count" inputmode="decimal" size="4" aria-label="@L("Число упаковок")" />
+            <select @bind="_packId" aria-label="@L("Упаковка")">
+                @foreach (var p in packs)
+                {
+                    <option value="@p.Id">@p.UnitSymbol = @Quantities.Format(p.Factor)</option>
+                }
+            </select>
+            <button type="button" class="secondary" @onclick="ApplyAsync">@L("в количество")</button>
+        </span>
+        @if (_error is not null)
+        {
+            <span class="neg small" role="alert">@_error</span>
+        }
+    </label>
+}
+
+@code {
+    [Parameter]
+    public IReadOnlyList<ItemPackDto>? Packs { get; set; }
+
+    [Parameter]
+    public byte Precision { get; set; }
+
+    /// <summary>Количество в основных единицах — как текст для поля «Количество».</summary>
+    [Parameter]
+    public EventCallback<string> OnQuantity { get; set; }
+
+    private string? _count;
+    private long _packId;
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        if (Packs is { Count: > 0 } packs && packs.All(p => p.Id != _packId))
+        {
+            _packId = packs[0].Id;
+            _error = null;
+        }
+    }
+
+    private async Task ApplyAsync()
+    {
+        _error = null;
+        var pack = Packs?.FirstOrDefault(p => p.Id == _packId);
+        if (pack is null)
+        {
+            return;
+        }
+
+        if (!Quantities.TryParse(_count, out var count))
+        {
+            _error = L("Укажите число упаковок.");
+            return;
+        }
+
+        try
+        {
+            await OnQuantity.InvokeAsync(Quantities.Format(KnitErp.Domain.Catalog.Packs.ToBase(count, pack.Factor, Precision)));
+            _count = null;
+        }
+        catch (BusinessRuleException ex)
+        {
+            _error = KnitErp.Web.Localization.Text.Message(ex.Message);
+        }
+    }
+}

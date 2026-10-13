@@ -234,6 +234,8 @@ public static class AuditActions
     public const string PurchaseOrderCancelled = "purchase.order.cancelled";
     public const string SupplierPaymentCreated = "purchase.payment.created";
     public const string SupplierPaymentCancelled = "purchase.payment.cancelled";
+    public const string SupplierOpeningBalanceChanged = "purchase.opening_balance.changed"; // D133
+    public const string PurchaseSettingsChanged = "purchase.settings.changed"; // D133
     public const string SalesOrderCreated = "sales.order.created";
     public const string SalesOrderChanged = "sales.order.changed";
     public const string SalesOrderConfirmed = "sales.order.confirmed";
@@ -269,6 +271,7 @@ public static class AuditActions
     public const string CustomerRefundCreated = "sales.refund.created";
     public const string CustomerRefundCancelled = "sales.refund.cancelled";
     public const string SalesAdvanceReleased = "sales.advance.released";
+    public const string CustomerOpeningBalanceChanged = "sales.opening_balance.changed"; // D1146
     public const string SalesMarkingChanged = "sales.marking.changed";
     // D1107, D1162, D1168–D1170 (продажи, аналитика): план продаж, каналы, отчёты маркетплейсов.
     public const string SalesPlanChanged = "sales.plan.changed";
@@ -334,4 +337,7 @@ public static class AuditActions
     public const string CrmMailingQueued = "crm.mailing.queued";
     public const string CrmMailingScheduled = "crm.mailing.scheduled";
     public const string CrmEmailReceived = "crm.email.received";
+    public const string CrmDealPhotoAdded = "crm.deal_photo.added";
+    public const string CrmDealPhotoChanged = "crm.deal_photo.changed";
+    public const string CrmDealPhotoArchived = "crm.deal_photo.archived";
 }

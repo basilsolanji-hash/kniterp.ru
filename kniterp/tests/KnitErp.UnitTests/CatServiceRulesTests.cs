@@ -1,5 +1,6 @@
 using KnitErp.Domain.Catalog;
 using KnitErp.Domain.Common;
+using KnitErp.Domain.Warehousing;
 
 namespace KnitErp.UnitTests;
 
@@ -78,5 +79,32 @@ public sealed class CatServiceRulesTests
         Assert.Contains(UnitOfMeasure.Defaults, u => u.Code == ServiceRules.ServiceUnitCode && u.Symbol == "усл. ед" && u.Precision == 0);
         Assert.Contains(UnitOfMeasure.Defaults, u => u.Code == ServiceRules.HourUnitCode && u.Symbol == "ч");
         Assert.Equal(UnitOfMeasure.Defaults.Count, UnitOfMeasure.Defaults.Select(u => u.Code).Distinct().Count());
+    }
+
+    /// <summary>D354 (сессия 4, Р1): акт услуг — по заказу, без движений склада, номер из общего с отгрузками счётчика.</summary>
+    [Fact]
+    public void Service_act_needs_order_has_no_movements_and_shares_shipment_counter()
+    {
+        var header = new StockDocumentHeader(1, null, 5, 3, new DateOnly(2026, 10, 9), null, SalesOrderId: 9);
+        var act = StockDocument.Create(1, "АУ-000016", StockOperationKind.ServiceAct, header, 7, Now);
+        act.SetLine(11, 2);
+        act.Post(7, false, Now);
+        Assert.Empty(act.MovementDeltas());
+        Assert.Equal("stock.service_act.order_required", Assert.Throws<BusinessRuleException>(() =>
+            StockDocument.Create(1, "АУ-000017", StockOperationKind.ServiceAct, header with { SalesOrderId = null }, 7, Now)).Code);
+        Assert.Equal("stock.service_act.purchase_order_required", Assert.Throws<BusinessRuleException>(() =>
+            StockDocument.Create(1, "АП-000001", StockOperationKind.SupplierServiceAct, header with { SalesOrderId = null }, 7, Now)).Code);
+        Assert.Equal("item.bundle_not_stocked", Assert.Throws<BusinessRuleException>(() =>
+            StockDocument.Create(1, "АУ-000018", StockOperationKind.ServiceAct, header, 7, Now).SetBundle(4, 1, [(11, 1m)])).Code);
+
+        Assert.Equal(("ОТ", "АУ-000016", "АП"), (StockDocument.CounterPrefix(StockOperationKind.ServiceAct),
+            StockDocument.NumberFromCounter(StockOperationKind.ServiceAct, "ОТ-000016"), StockDocument.CounterPrefix(StockOperationKind.SupplierServiceAct)));
+        Assert.Equal((StockOperationKind.Shipment, StockOperationKind.Receipt, StockOperationKind.CustomerReturn),
+            (StockOperationKinds.OrderKind(StockOperationKind.ServiceAct), StockOperationKinds.OrderKind(StockOperationKind.SupplierServiceAct),
+                StockOperationKinds.OrderKind(StockOperationKind.CustomerReturn)));
+        Assert.True(StockDocument.WithCustomer(StockOperationKind.ServiceAct) && StockDocument.WithSupplier(StockOperationKind.SupplierServiceAct));
+        Assert.DoesNotContain(StockOperationKind.ServiceAct, StockDocument.Kinds);
+        Assert.Contains(StockOperationKind.ServiceAct, StockDocument.AllKinds);
+        Assert.Equal("stock.service_act.goods", ServiceRules.ActGoods(["СВ-1"]).Code);
     }
 }

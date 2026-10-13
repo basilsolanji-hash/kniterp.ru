@@ -80,6 +80,7 @@ public static class DependencyInjection
         // Выработка для «Сотрудников» (ТЗ §6): заменяет их заглушку EmptyWorkOutputSource, зарегистрированную через TryAdd.
         services.AddScoped<Hr.IWorkOutputSource, Production.ProductionWorkOutputSource>();
         services.AddScoped<Purchasing.PurchaseService>();
+        services.AddScoped<Purchasing.PurchaseSettingsService>(); // D133
         services.AddScoped<Sales.SalesService>();
         services.AddScoped<Sales.CustomerInvoiceService>();
         services.AddScoped<Sales.SalesStageService>();
@@ -104,8 +105,11 @@ public static class DependencyInjection
         services.AddScoped<Crm.CrmMailingService>();
         services.AddScoped<Crm.CrmImportService>();
         services.AddScoped<Crm.CrmMessengerService>();
+        services.AddScoped<Crm.CrmDealSalesService>();
+        services.AddScoped<Common.ISalesOrderEvents, Crm.CrmSalesOrderEvents>(); // D683: «заказ подтверждён» → сделка выиграна
         services.AddScoped<Crm.CrmEmailTemplateService>();
         services.AddScoped<Crm.CrmMailboxService>();
+        services.AddScoped<Crm.CrmDealPhotoService>(); // D692: фото к сделке
         services.AddScoped<Crm.ICrmDashboardSource, Crm.CrmDashboardSource>(); // ТЗ CRM §6: блок главного экрана подключает база
         services.AddScoped<Organizations.LegalEntityService>();
         services.AddScoped<Catalog.NomenclatureService>();

@@ -49,7 +49,7 @@
         else if (_mode == "note")
         {
             <form class="inline-form" @onsubmit="AddNoteAsync" aria-label="@L("Новая заметка")">
-                <label class="wide">@L("Заметка") <input @bind="_note" maxlength="@CrmActivity.TextMaxLength" /></label>
+                <div class="wide"><CrmVoiceNote @bind-Value="_note" Label="@L("Заметка")" Rows="2" /></div> @* D693: диктовка, если браузер умеет *@
                 <button type="submit" disabled="@_busy">@L("Добавить")</button>
             </form>
         }

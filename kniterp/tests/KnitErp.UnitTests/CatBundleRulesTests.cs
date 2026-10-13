@@ -109,4 +109,29 @@ public sealed class CatBundleRulesTests
         Assert.Equal((0.5m, (decimal?)null), (item.WeightKg!.Value, item.MinStock));
         Assert.Equal("item.bundle_not_stocked", ServiceRules.BundleNotStocked(["НБ-1"]).Code);
     }
+
+    [Fact]
+    public void Return_is_proportional_to_shipped_composition_d352()
+    {
+        // Отгружено 3 набора: шапки 3, пряжа 0,105 кг; состав с тех пор мог измениться — возврат идёт от отгруженного.
+        var shipped = new Dictionary<long, decimal> { [1] = 3, [3] = 0.105m };
+        var precisions = new Dictionary<long, byte> { [1] = 0, [3] = 3 };
+        Assert.Equal([(1L, 1m), (3L, 0.035m)], BundleExpansion.Proportional(1, 3, shipped, precisions));
+        Assert.Equal([(1L, 3m), (3L, 0.105m)], BundleExpansion.Proportional(3, 3, shipped, precisions));
+        // Округление по точности и не больше отгруженного.
+        Assert.Equal([(1L, 2m), (3L, 0.07m)], BundleExpansion.Proportional(2, 3, shipped, precisions));
+        Assert.Equal("sales.return.bundle_exceeds",
+            Assert.Throws<BusinessRuleException>(() => BundleExpansion.Proportional(4, 3, shipped, precisions)).Code);
+        Assert.Equal("catalog.bundle.quantity", Assert.Throws<BusinessRuleException>(() => BundleExpansion.Proportional(0, 3, shipped, precisions)).Code);
+    }
+
+    [Fact]
+    public void Document_lines_in_order_terms_count_bundle_once_per_document_d352()
+    {
+        var lines = new (int Doc, long ItemId, decimal Quantity, long? BundleItemId, decimal? BundleQuantity)[]
+        {
+            (1, 1, 2, null, null), (1, 1, 3, 100, 3), (1, 2, 3, 100, 3), (1, 3, 0.105m, 100, 3), (2, 1, 1, 100, 1), (2, 2, 1, 100, 1),
+        };
+        Assert.Equal([(1, 1L, 2m), (1, 100L, 3m), (2, 100L, 1m)], KnitErp.Domain.Warehousing.BundleLines.InOrderTerms(lines));
+    }
 }

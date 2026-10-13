@@ -52,7 +52,7 @@ public sealed class ModuleExtensionTests(SqlTestHost host) : IClassFixture<SqlTe
     public async Task Confirming_sales_order_calls_module_handlers_in_the_same_transaction_and_keeps_crm_deal()
     {
         var org = await CreateOrgAsync();
-        long order;
+        long order, deal;
         await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
         {
             var units = await s.Catalog.ListUnitsAsync();
@@ -61,8 +61,14 @@ public sealed class ModuleExtensionTests(SqlTestHost host) : IClassFixture<SqlTe
             var customer = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Клиент»", null, null, false, true, null));
             order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(DateOnly.FromDateTime(host.Clock.UtcNow), customer, store, null, null, true, null));
             await s.Sales.SetOrderLineAsync(order, item, 2, 1000, null, (await s.Sales.GetOrderAsync(order)).RowVersion);
+            // D683 (сессия CRM): CrmDealId — составной внешний ключ на сделку своей организации, поэтому сделка настоящая.
+            await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+            {
+                deal = await crm.Deals.CreateAsync(new KnitErp.Domain.Crm.CrmDealValues("Сделка модуля", customer));
+            }
+
             var tracked = await s.Db.SalesOrders.SingleAsync(o => o.Id == order);
-            tracked.LinkCrmDeal(77);
+            tracked.LinkCrmDeal(deal);
             await s.Db.SaveChangesAsync();
         }
 
@@ -88,7 +94,7 @@ public sealed class ModuleExtensionTests(SqlTestHost host) : IClassFixture<SqlTe
         await using (var db = host.NewDb())
         {
             var saved = await db.SalesOrders.SingleAsync(o => o.Id == order);
-            Assert.Equal((KnitErp.Domain.Sales.SalesOrderStatus.Confirmed, 77L), (saved.Status, saved.CrmDealId));
+            Assert.Equal((KnitErp.Domain.Sales.SalesOrderStatus.Confirmed, (long?)deal), (saved.Status, saved.CrmDealId));
         }
     }
 

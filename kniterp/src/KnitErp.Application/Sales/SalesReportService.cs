@@ -144,7 +144,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task<SalesReportDto> ReportAsync(SalesReportFilter filter, CancellationToken ct = default)
     {
         var ctx = await DemandAsync(filter, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         return await BuildAsync(ctx, filter, own, ct);
     }
 
@@ -175,7 +175,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
     /// Строки отгрузок (+) и возвратов (−) по заказам за период: выручка без НДС = количество × (сумма − НДС) / количество строки заказа.
     /// Запрос, не список: его группирует SQL Server.
     /// </summary>
-    private IQueryable<Fact> Facts(AccessContext ctx, DateOnly from, DateOnly to, SalesReportFilter filter, bool own)
+    private IQueryable<Fact> Facts(AccessContext ctx, DateOnly from, DateOnly to, SalesReportFilter filter, HashSet<long>? own)
     {
         var org = ctx.OrganizationId;
         var docs = db.StockDocuments.AsNoTracking()
@@ -183,10 +183,10 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
                         && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn)
                         && d.DocumentDate >= from && d.DocumentDate <= to);
         var orders = db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == org);
-        if (own)
+        if (own is not null)
         {
-            var me = ctx.UserId;
-            orders = orders.Where(o => o.ResponsibleUserId == me);
+            var visible = own.ToList(); // D1110: свои или своего подразделения
+            orders = orders.Where(o => o.ResponsibleUserId != null && visible.Contains(o.ResponsibleUserId.Value));
         }
 
         if (filter.ManagerId is { } m)
@@ -266,7 +266,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
         };
     }
 
-    private async Task<SalesReportDto> BuildAsync(AccessContext ctx, SalesReportFilter filter, bool own, CancellationToken ct)
+    private async Task<SalesReportDto> BuildAsync(AccessContext ctx, SalesReportFilter filter, HashSet<long>? own, CancellationToken ct)
     {
         var amounts = ctx.Permissions.Has(Permissions.PriceView);
         var keyed = Keyed(Facts(ctx, filter.From, filter.To, filter, own), filter);
@@ -302,7 +302,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
             : rows.OrderByDescending(r => amounts ? r.Revenue : r.Quantity).ThenBy(r => r.Id is null).ThenBy(r => r.Name, StringComparer.CurrentCulture).ToList();
         var total = new SalesReportRowDto(null, null, null, null, rows.Sum(r => r.Quantity), amounts ? rows.Sum(r => r.Revenue ?? 0) : null,
             amounts ? rows.Sum(r => r.Cost ?? 0) : null, amounts && rows.All(r => r.CostComplete), totalOrders, perCustomer.Count);
-        return new SalesReportDto(filter, rows, total, perCustomer.Count(n => n >= 2), amounts, own);
+        return new SalesReportDto(filter, rows, total, perCustomer.Count(n => n >= 2), amounts, own is not null);
     }
 
     /// <summary>Названия ключей разреза; для периода — подпись и начало периода.</summary>
@@ -385,11 +385,11 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
         decimal bPercent = 15, CancellationToken ct = default)
     {
         var ctx = await DemandAsync(filter, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         return await AbcCoreAsync(ctx, filter, own, subject, basis, aPercent, bPercent, ct);
     }
 
-    private async Task<AbcDto> AbcCoreAsync(AccessContext ctx, SalesReportFilter filter, bool own, AbcSubject subject, AbcBasis basis, decimal aPercent,
+    private async Task<AbcDto> AbcCoreAsync(AccessContext ctx, SalesReportFilter filter, HashSet<long>? own, AbcSubject subject, AbcBasis basis, decimal aPercent,
         decimal bPercent, CancellationToken ct)
     {
         if (aPercent <= 0 || bPercent < 0 || aPercent + bPercent >= 100)
@@ -438,28 +438,29 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task<PlanFactDto> PlanFactAsync(DateOnly month, bool allManagers = false, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.SalesReportView, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         var today = await SalesCredit.TodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct);
         return await PlanFactCoreAsync(ctx, SalesPlan.MonthOf(month), own, allManagers, today, ct);
     }
 
-    private async Task<PlanFactDto> PlanFactCoreAsync(AccessContext ctx, DateOnly month, bool own, bool allManagers, DateOnly today, CancellationToken ct)
+    private async Task<PlanFactDto> PlanFactCoreAsync(AccessContext ctx, DateOnly month, HashSet<long>? own, bool allManagers, DateOnly today, CancellationToken ct)
     {
         var amounts = ctx.Permissions.Has(Permissions.PriceView);
         var end = month.AddMonths(1).AddDays(-1);
         var facts = await Facts(ctx, month, end, new SalesReportFilter(month, end), own)
             .GroupBy(f => f.ManagerId).Select(g => new { g.Key, Revenue = g.Sum(x => x.Revenue) })
             .ToDictionaryAsync(x => x.Key ?? 0, x => Money.Round(x.Revenue), ct);
+        var visiblePlans = own?.ToList() ?? [];
         var plans = await db.SalesPlans.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.Month == month)
-            .Where(p => !own || p.ManagerUserId == ctx.UserId).ToDictionaryAsync(p => p.ManagerUserId, ct);
+            .Where(p => own == null || visiblePlans.Contains(p.ManagerUserId)).ToDictionaryAsync(p => p.ManagerUserId, ct);
         var ids = facts.Keys.Where(k => k != 0).Concat(plans.Keys).ToHashSet();
-        if (allManagers && !own)
+        if (allManagers && own is null)
         {
             ids.UnionWith(await ActiveMembersAsync(ctx.OrganizationId, ct));
         }
-        else if (own)
+        else if (own is not null)
         {
-            ids.Add(ctx.UserId);
+            ids.UnionWith(own);
         }
 
         var names = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
@@ -475,7 +476,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
         var days = DateTime.DaysInMonth(month.Year, month.Month);
         var elapsed = today < month ? 0 : today > end ? 100 : Math.Round(today.Day * 100m / days, 1);
         var canEdit = amounts && ctx.Permissions.Has(Permissions.SalesPlanEdit);
-        return new PlanFactDto(month, rows, amounts, own, canEdit, elapsed);
+        return new PlanFactDto(month, rows, amounts, own is not null, canEdit, elapsed);
     }
 
     private async Task<List<long>> ActiveMembersAsync(long org, CancellationToken ct) =>
@@ -535,18 +536,19 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task<SalesFunnelDto> FunnelAsync(SalesReportFilter filter, CancellationToken ct = default)
     {
         var ctx = await DemandAsync(filter, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         return await FunnelCoreAsync(ctx, filter, own, ct);
     }
 
-    private async Task<SalesFunnelDto> FunnelCoreAsync(AccessContext ctx, SalesReportFilter filter, bool own, CancellationToken ct)
+    private async Task<SalesFunnelDto> FunnelCoreAsync(AccessContext ctx, SalesReportFilter filter, HashSet<long>? own, CancellationToken ct)
     {
         var amounts = ctx.Permissions.Has(Permissions.PriceView);
         var org = ctx.OrganizationId;
         var orders = db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == org && o.OrderDate >= filter.From && o.OrderDate <= filter.To);
-        if (own)
+        if (own is not null)
         {
-            orders = orders.Where(o => o.ResponsibleUserId == ctx.UserId);
+            var visible = own.ToList();
+            orders = orders.Where(o => o.ResponsibleUserId != null && visible.Contains(o.ResponsibleUserId.Value));
         }
 
         if (filter.ManagerId is { } m)
@@ -600,7 +602,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
             new(FunnelStage.Shipped, shipped.Count, Amount(shipped.Sum(o => moved[o.Id].Value)), Conversion(shipped.Count, confirmed.Count)),
             new(FunnelStage.Paid, fullyPaid.Count, Amount(fullyPaid.Sum(o => paid[o.Id])), Conversion(fullyPaid.Count, shipped.Count)),
         };
-        return new SalesFunnelDto(stages, list.Count - created.Count, amounts, own);
+        return new SalesFunnelDto(stages, list.Count - created.Count, amounts, own is not null);
     }
 
     // ---------- Отборы ----------
@@ -608,14 +610,14 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task<SalesReportOptionsDto> OptionsAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.SalesReportView, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         var org = ctx.OrganizationId;
         var managerIds = await db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == org && o.ResponsibleUserId != null)
             .Select(o => o.ResponsibleUserId!.Value).Distinct().ToListAsync(ct);
         managerIds.AddRange(await db.SalesPlans.AsNoTracking().Where(p => p.OrganizationId == org).Select(p => p.ManagerUserId).Distinct().ToListAsync(ct));
-        if (own)
+        if (own is not null)
         {
-            managerIds = [ctx.UserId];
+            managerIds = [.. own];
         }
 
         var managers = await db.Users.AsNoTracking().Where(u => managerIds.Contains(u.Id)).OrderBy(u => u.DisplayName)
@@ -627,7 +629,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
         var groups = await db.ItemGroups.AsNoTracking().Where(g => g.OrganizationId == org && !g.IsArchived).OrderBy(g => g.Name)
             .Select(g => new LookupDto(g.Id, g.Name)).ToListAsync(ct);
         var amounts = ctx.Permissions.Has(Permissions.PriceView);
-        return new SalesReportOptionsDto(managers, channels, groups, amounts, amounts && ctx.Permissions.Has(Permissions.SalesPlanEdit), own);
+        return new SalesReportOptionsDto(managers, channels, groups, amounts, amounts && ctx.Permissions.Has(Permissions.SalesPlanEdit), own is not null);
     }
 
     // ---------- Excel ----------
@@ -639,7 +641,7 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task<byte[]> ExportAsync(SalesReportFilter filter, ISpreadsheetFormat spreadsheet, CancellationToken ct = default)
     {
         var ctx = await DemandAsync(filter, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         var today = await SalesCredit.TodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct);
         var report = await BuildAsync(ctx, filter, own, ct);
         var abcCustomers = await AbcCoreAsync(ctx, filter, own, AbcSubject.Customer, AbcBasis.Revenue, 80, 15, ct);
@@ -722,12 +724,13 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
 
         var org = ctx.OrganizationId;
         var today = await SalesCredit.TodayAsync(db, org, clock.UtcNow, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         var query = db.SalesOrders.AsNoTracking()
             .Where(o => o.OrganizationId == org && o.Status == SalesOrderStatus.Confirmed && o.ShipDate != null && o.ShipDate <= today);
-        if (own)
+        if (own is not null)
         {
-            query = query.Where(o => o.ResponsibleUserId == ctx.UserId);
+            var visible = own.ToList();
+            query = query.Where(o => o.ResponsibleUserId != null && visible.Contains(o.ResponsibleUserId.Value));
         }
 
         var orders = await query.OrderBy(o => o.ShipDate).ThenBy(o => o.Id).Take(MaxShipTodayOrders)
@@ -785,11 +788,11 @@ public sealed class SalesReportService(IKnitErpDbContext db, IAccessGuard guard,
 
         var service = new SalesReportService(db, guard, user, clock);
         var today = await SalesCredit.TodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct);
-        var own = await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct);
+        var own = await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct);
         var data = await service.PlanFactCoreAsync(ctx, SalesPlan.MonthOf(today), own, false, today, ct);
         var plan = data.Plan ?? 0;
         var fact = data.Fact ?? 0;
-        return plan == 0 && fact == 0 ? null : new SalesPlanBlockDto(data.Month, plan, fact, data.ElapsedPercent, own);
+        return plan == 0 && fact == 0 ? null : new SalesPlanBlockDto(data.Month, plan, fact, data.ElapsedPercent, own is not null);
     }
 
     private async Task<AccessContext> DemandAsync(SalesReportFilter filter, CancellationToken ct)
