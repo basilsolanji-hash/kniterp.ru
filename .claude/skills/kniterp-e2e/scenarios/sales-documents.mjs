@@ -16,12 +16,16 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 // 1. Оформление документов: логотип и печать, флажки.
 await page.goto(`${BASE}/sales-documents-settings`); await ready(page);
 await page.waitForSelector('text=Что выводить в документах');
+// Прежнее сообщение закрывается, чтобы ожидание видело ответ именно на эту загрузку.
+const closeFlash = async () => { const x = page.locator('.flash button.link'); if (await x.count()) await x.first().click(); };
 for (const kind of ['Логотип', 'Печать']) {
+  await closeFlash();
   const card = page.locator(`.sx-image:has(b:text-is("${kind}"))`);
   await card.locator('input[type=file]').setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: png });
   await page.waitForSelector('text=Изображение загружено.');
 }
 // Файл не той сигнатуры — понятный отказ.
+await closeFlash();
 await page.locator('.sx-image:has(b:text-is("Подпись руководителя")) input[type=file]')
   .setInputFiles({ name: 'evil.png', mimeType: 'image/png', buffer: Buffer.from('<html><script>alert(1)</script>') });
 await page.waitForSelector('text=Изображение — PNG или JPEG.');
@@ -99,7 +103,7 @@ ok('подтверждение поставило письмо в очередь
 // 5. Отправить вручную: форма письма с шаблоном.
 await page.getByRole('button', { name: 'Отправить клиенту' }).click();
 await page.waitForSelector('text=Письмо клиенту');
-await page.getByRole('button', { name: 'Отправить', exact: true }).click();
+await page.locator('form.sx-mail-form').getByRole('button', { name: 'Отправить', exact: true }).click();
 await page.waitForSelector('text=Письмо поставлено в очередь');
 ok('ручная отправка');
 

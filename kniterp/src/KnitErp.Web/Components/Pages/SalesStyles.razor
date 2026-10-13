@@ -17,6 +17,8 @@
     form.sx-form > .w2 { grid-column: span 2; }
     form.sx-form > .w4 { grid-column: 1 / -1; }
     form.sx-form > label.inline { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+    form.sx-form > label > input[type=checkbox], form.sx-form > label > input[type=radio] { width: auto; flex: none; margin: 0; } /* флажок не тянется на всю ширину (390 px) */
+    form.sx-form > label.inline { flex-wrap: wrap; }
     form.sx-form > .sx-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin-top: 2px; }
     form.sx-form .sx-hint { font-size: 11px; color: var(--muted-2); }
     form.sx-form > .sx-legend, .sx-legend { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em;
