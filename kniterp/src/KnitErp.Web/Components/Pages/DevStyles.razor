@@ -4,8 +4,10 @@
 *@
 <style>
     .dev-switch { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
-    .dev-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(200px, 1fr); gap: 10px; overflow-x: auto; padding-bottom: 8px; }
+    .dev-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 8px; overflow-x: auto; padding-bottom: 8px; }
     .dev-col { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-width: 0; }
+    .dev-col.empty { background: transparent; padding: 8px 6px; }
+    .dev-col.empty h2 { flex-direction: column; gap: 0; font-size: 12px; font-weight: 500; color: var(--text-2); }
     .dev-col h2 { font-size: 13px; margin: 0 0 6px; display: flex; justify-content: space-between; gap: 6px; }
     .dev-col ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
     .dev-cardlet { border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; background: var(--surface); overflow-wrap: anywhere; }
@@ -87,6 +89,28 @@
         dl.dev-facts > div.wide { grid-column: auto; }
     }
     @@media (max-width: 899px) {
-        .dev-board { grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
+        .dev-board { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: 1fr !important; overflow-x: visible; }
+        .dev-col.empty { padding: 4px 8px; } .dev-col.empty h2 { margin: 0; flex-direction: row; } .dev-col.empty p { display: none; }
+    }
+    /* Пересмотр интерфейса 13.10 (ui-review §0 п. 4): одна главная кнопка, редкие действия — в меню «Ещё», пустые факты — одной строкой. */
+    .dev-actions { align-items: center; }
+    .dev-more { position: relative; display: inline-block; }
+    .dev-more-toggle::after { content: " ▾"; }
+    .dev-more-backdrop { position: fixed; inset: 0; z-index: 19; background: transparent; }
+    .dev-more-menu { position: absolute; z-index: 20; right: 0; top: calc(100% + 4px); min-width: 210px; display: flex; flex-direction: column; gap: 4px;
+        padding: 6px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 6px 18px var(--shadow-2); }
+    .dev-more-menu > button, .dev-more-menu > a.button { text-align: left; width: 100%; box-sizing: border-box; }
+    .dev-more-menu .danger-text { color: var(--bad-text); }
+    .dev-move { margin: 0 0 10px; }
+    .dev-missing { margin: 4px 0 10px; }
+    .dev-brief-missing { margin: 6px 0 0; }
+    /* Телефон: путь стадий — только текущая и соседние, разделы заполнения — под счётчиком не показываем (есть на компьютере). */
+    @@media (max-width: 720px) {
+        .dev-stage-path li:not(.current) { display: none; }
+        .dev-progress .dev-sections { display: none; }
+        .dev-more { flex: 1 1 100%; }
+        .dev-more-toggle { width: 100%; }
+        .dev-more-menu { left: 0; right: 0; }
+        .dev-move > * { flex: 1 1 100%; }
     }
 </style>

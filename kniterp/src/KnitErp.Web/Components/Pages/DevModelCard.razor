@@ -66,19 +66,6 @@ else
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
     }
 
-    @if (m.Hints is { Count: > 0 } hints && m.CanEdit)
-    {
-        <div class="panel dev-hints" aria-label="@L("Что дальше")">
-            <b>@L("Что дальше")</b>
-            <ul>
-                @foreach (var h in hints)
-                {
-                    <li>@L(h)</li>
-                }
-            </ul>
-        </div>
-    }
-
     @if (_options is not null)
     {
         <div class="panel">
@@ -88,6 +75,74 @@ else
     }
     else
     {
+        @* Пересмотр интерфейса 13.10 (ui-review §0 п. 4): одна главная кнопка — следующий шаг; частое — рядом, редкое — в «Ещё». *@
+        <div class="actions dev-actions">
+            @if (m.NextStage is { } next)
+            {
+                <button type="button" @onclick="() => MoveAsync(next)" disabled="@_busy">@L("Дальше: {0}", L(DevStages.Name(next)))</button>
+            }
+            @if (_canEdit && m.Stage == DevStage.Handed && m.NextVersionId is null)
+            {
+                <button type="button" @onclick="NewVersionAsync" disabled="@_busy">@L("Новая версия")</button>
+            }
+            @if (m.Stage == DevStage.Cancelled && _canEdit)
+            {
+                <button type="button" @onclick="RestoreAsync" disabled="@_busy">@L("Вернуть в работу")</button>
+            }
+            @if (m.CanEdit)
+            {
+                <button type="button" class="secondary" @onclick="EditAsync" disabled="@_busy">@L("Изменить")</button>
+            }
+            @if (m.MoveTargets.Count > 0)
+            {
+                <button type="button" class="secondary" aria-expanded="@(_moving ? "true" : "false")" @onclick="() => _moving = !_moving">@L("Другая стадия…")</button>
+            }
+            <DevMoreMenu>
+                    @if (_canEdit)
+                    {
+                        <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Создать похожую")</button>
+                    }
+                    <DevLabelLink Kind="model" Id="m.Id" />
+                    <a class="button secondary" href="dev/models/@(m.Id)/passport.pdf?inline=1" target="_blank" rel="noopener" data-enhance-nav="false"
+                       title="@L("Технический паспорт изделия (PDF)")">@L("Техпаспорт")</a>
+                    @if (m.CanEdit && !_cancelling)
+                    {
+                        <button type="button" class="secondary danger-text" @onclick="() => _cancelling = true" disabled="@_busy">@L("Отменить модель")</button>
+                    }
+            </DevMoreMenu>
+        </div>
+        @if (_moving && m.MoveTargets.Count > 0)
+        {
+            <div class="inline-form dev-move">
+                <select @bind="_target" aria-label="@L("Перевести на стадию")">
+                    <option value="">@L("Перевести на стадию…")</option>
+                    @foreach (var s in m.MoveTargets)
+                    {
+                        <option value="@((byte)s)">@L(DevStages.Name(s))</option>
+                    }
+                </select>
+                <input @bind="_moveComment" maxlength="@DevModel.ReasonMaxLength" placeholder="@L("комментарий к переходу")" aria-label="@L("Комментарий к переходу")" />
+                <button type="button" class="secondary" @onclick="MoveToSelectedAsync" disabled="@(_busy || _target.Length == 0)">@L("Перевести")</button>
+            </div>
+        }
+        @if (m.Hints is { Count: > 0 } hints && m.CanEdit)
+        {
+            <div class="panel dev-hints" aria-label="@L("Что дальше")">
+                <b>@L("Что дальше")</b>
+                <ul>
+                    @foreach (var h in hints)
+                    {
+                        <li>@L(h)</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        var missing = new List<string>();
+        if (m.CollectionName is null) { missing.Add(L("Коллекция")); }
+        if (m.CustomerName is null) { missing.Add(L("Заказчик")); }
+        if (m.PlannedLaunch is null) { missing.Add(L("Плановый запуск")); }
+        foreach (var a in m.Assignees.Where(a => a.Name is null)) { missing.Add(L(a.RoleName)); }
         <dl class="facts dev-facts">
             <div class="wide"><dt>@L("Стадия")</dt>
             <dd>
@@ -103,66 +158,35 @@ else
             }
             <div><dt>@L("Категория")</dt><dd>@L(m.CategoryName), @L(m.AudienceName)@(m.ChildSafety ? " · " + L("ТР ТС 007/2011") : "")</dd></div>
             <div><dt>@L("Рисунок")</dt><dd>@(m.HasPattern ? L("есть") : L("нет (гладь, ластик) — стадия «Рисунок» пропускается"))</dd></div>
-            <div><dt>@L("Коллекция")</dt><dd>@(m.CollectionName ?? "—")</dd></div>
-            <div><dt>@L("Заказчик")</dt><dd>@(m.CustomerName ?? "—")@(m.DealId is { } deal ? " · " + L("сделка № {0}", deal) : "")</dd></div>
-            <div><dt>@L("Плановый запуск")</dt><dd class="@(m.IsLate ? "late-text" : null)">@(m.PlannedLaunch?.ToString("dd.MM.yyyy") ?? "—")@(m.IsLate ? " — " + L("просрочено") : "")</dd></div>
-            <div><dt>@L("Приоритет")</dt><dd>@L(m.PriorityName)</dd></div>
-            @foreach (var a in m.Assignees)
+            @if (m.CollectionName is not null)
             {
-                <div><dt>@L(a.RoleName)</dt><dd>@(a.Name ?? "—")</dd></div>
+                <div><dt>@L("Коллекция")</dt><dd>@m.CollectionName</dd></div>
+            }
+            @if (m.CustomerName is not null)
+            {
+                <div><dt>@L("Заказчик")</dt><dd>@m.CustomerName@(m.DealId is { } deal ? " · " + L("сделка № {0}", deal) : "")</dd></div>
+            }
+            @if (m.PlannedLaunch is { } launch)
+            {
+                <div><dt>@L("Плановый запуск")</dt><dd class="@(m.IsLate ? "late-text" : null)">@launch.ToString("dd.MM.yyyy")@(m.IsLate ? " — " + L("просрочено") : "")</dd></div>
+            }
+            <div><dt>@L("Приоритет")</dt><dd>@L(m.PriorityName)</dd></div>
+            @foreach (var a in m.Assignees.Where(a => a.Name is not null))
+            {
+                <div><dt>@L(a.RoleName)</dt><dd>@a.Name</dd></div>
             }
             <div><dt>@L("Автор")</dt><dd>@m.CreatedBy, @Local(m.CreatedAtUtc)</dd></div>
         </dl>
+        @if (missing.Count > 0)
+        {
+            <p class="small muted dev-missing">@L("Не указано: {0}", string.Join(", ", missing))</p>
+        }
 
-        <div class="actions">
-            @if (m.NextStage is { } next)
-            {
-                <button type="button" @onclick="() => MoveAsync(next)" disabled="@_busy">@L("Дальше: {0}", L(DevStages.Name(next)))</button>
-            }
-            @if (m.MoveTargets.Count > 0)
-            {
-                <label class="inline-form" style="margin:0">
-                    <select @bind="_target" aria-label="@L("Перевести на стадию")">
-                        <option value="">@L("Перевести на стадию…")</option>
-                        @foreach (var s in m.MoveTargets)
-                        {
-                            <option value="@((byte)s)">@L(DevStages.Name(s))</option>
-                        }
-                    </select>
-                    <input @bind="_moveComment" maxlength="@DevModel.ReasonMaxLength" placeholder="@L("комментарий к переходу")" aria-label="@L("Комментарий к переходу")" />
-                    <button type="button" class="secondary" @onclick="MoveToSelectedAsync" disabled="@(_busy || _target.Length == 0)">@L("Перевести")</button>
-                </label>
-            }
-            @if (m.CanEdit)
-            {
-                <button type="button" class="secondary" @onclick="EditAsync" disabled="@_busy">@L("Изменить")</button>
-                @if (!_cancelling)
-                {
-                    <button type="button" class="secondary" @onclick="() => _cancelling = true" disabled="@_busy">@L("Отменить модель")</button>
-                }
-            }
-            @if (_canEdit)
-            {
-                @if (m.Stage == DevStage.Handed && m.NextVersionId is null)
-                {
-                    <button type="button" @onclick="NewVersionAsync" disabled="@_busy">@L("Новая версия")</button>
-                }
-
-                <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Создать похожую")</button>
-            }
-            @if (m.Stage == DevStage.Cancelled && _canEdit)
-            {
-                <button type="button" @onclick="RestoreAsync" disabled="@_busy">@L("Вернуть в работу")</button>
-            }
-            <DevLabelLink Kind="model" Id="m.Id" />
-            <a class="button secondary" href="dev/models/@(m.Id)/passport.pdf?inline=1" target="_blank" rel="noopener" data-enhance-nav="false"
-               title="@L("Технический паспорт изделия (PDF)")">@L("Техпаспорт")</a>
-        </div>
         @if (_cancelling)
         {
             <form class="inline-form" @onsubmit="CancelAsync">
                 <label>@L("Причина отмены") <input @bind="_reason" maxlength="@DevModel.ReasonMaxLength" required /></label>
-                <button type="submit" disabled="@_busy">@L("Отменить модель")</button>
+                <button type="submit" class="danger" disabled="@_busy">@L("Отменить модель")</button>
                 <button type="button" class="secondary" @onclick="() => _cancelling = false">@L("Не отменять")</button>
             </form>
         }
@@ -270,6 +294,8 @@ else
     private bool _busy;
     private bool _notFound;
     private bool _cancelling;
+    private bool _moving;
+
     private bool _canEdit;
     private bool _editingBrief;
     private string? _denied;
@@ -390,21 +416,41 @@ else
         else
         {
             var b = m.Brief;
-            <dl class="facts">
-                <dt>@L("Описание")</dt><dd style="white-space: pre-line">@(b.Description ?? "—")</dd>
-                <dt>@L("Размерный ряд")</dt><dd>@(b.SizeRange ?? "—")</dd>
-                <dt>@L("Цветовая гамма")</dt><dd>@(b.ColorRange ?? "—")</dd>
-                @if (m.CanSeeCost)
-                {
-                    <dt>@L("Целевая себестоимость")</dt><dd>@(b.TargetCost is { } cost ? Amounts.Format(cost) : "—")</dd>
-                    <dt>@L("Целевая цена")</dt><dd>@(b.TargetPrice is { } price ? Amounts.Format(price) : "—")</dd>
-                }
-                <dt>@L("Тираж")</dt><dd>@(b.RunQuantity is { } run ? L("{0} шт", run) : "—")</dd>
-                <dt>@L("Срок задания")</dt><dd>@(b.DueDate?.ToString("dd.MM.yyyy") ?? "—")</dd>
-                <dt>@L("Состав")</dt><dd>@(b.Composition ?? "—")</dd>
-                <dt>@L("Маркировка")</dt><dd>@(b.Labeling ?? "—")</dd>
-                <dt>@L("Уход")</dt><dd>@(b.Care ?? "—")</dd>
-            </dl>
+            // Пересмотр 13.10: только заполненное плитками, пустое — одной строкой «Не заполнено» (D719).
+            var filled = new List<(string Name, string Value, bool Wide)>();
+            var empty = new List<string>();
+            void Add(string name, string? value, bool wide = false)
+            {
+                if (string.IsNullOrWhiteSpace(value)) { empty.Add(name); } else { filled.Add((name, value, wide)); }
+            }
+
+            Add(L("Описание"), b.Description, true);
+            Add(L("Размерный ряд"), b.SizeRange);
+            Add(L("Цветовая гамма"), b.ColorRange);
+            if (m.CanSeeCost)
+            {
+                Add(L("Целевая себестоимость"), b.TargetCost is { } cost ? Amounts.Format(cost) : null);
+                Add(L("Целевая цена"), b.TargetPrice is { } price ? Amounts.Format(price) : null);
+            }
+
+            Add(L("Тираж"), b.RunQuantity is { } run ? L("{0} шт", run) : null);
+            Add(L("Срок задания"), b.DueDate?.ToString("dd.MM.yyyy"));
+            Add(L("Состав"), b.Composition);
+            Add(L("Маркировка"), b.Labeling);
+            Add(L("Уход"), b.Care);
+            @if (filled.Count > 0)
+            {
+                <dl class="facts dev-facts">
+                    @foreach (var f in filled)
+                    {
+                        <div class="@(f.Wide ? "wide" : null)"><dt>@f.Name</dt><dd style="white-space: pre-line">@f.Value</dd></div>
+                    }
+                </dl>
+            }
+            @if (empty.Count > 0)
+            {
+                <p class="small muted dev-brief-missing">@L("Не заполнено: {0}", string.Join(", ", empty))</p>
+            }
             <p class="muted small">@L("Эскиз и образцы для вдохновения прикладываются на вкладке «Файлы».")</p>
             @if (m.CanEdit)
             {
@@ -549,6 +595,7 @@ else
             await Models.MoveAsync(Id, (DevStage)s, _moveComment, _model!.RowVersion);
             _moveComment = null;
             _target = string.Empty;
+            _moving = false;
         }, L("Стадия изменена."))
         : Task.CompletedTask;
 

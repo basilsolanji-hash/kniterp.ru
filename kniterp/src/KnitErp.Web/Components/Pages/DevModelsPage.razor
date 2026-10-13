@@ -25,7 +25,6 @@ else
             <button type="button" @onclick="() => _creating = true" disabled="@_busy">@L("Новая модель")</button>
         }
     </div>
-    <p class="muted">@L("Путь модели: идея → задание → рисунок → пряжа и вязка → программа → образец → доработка → согласование → себестоимость → утверждено → передано в производство.")</p>
 
     @if (_error is not null)
     {
@@ -40,15 +39,12 @@ else
         </div>
     }
 
-    <ImportPanel ExportHref="dev/models.xlsx" TemplateHref="dev/models-template.xlsx" CanImport="@_options.CanEdit" ShownColumns="[0, 1, 3]"
-                 Hint="@L("Коллекция на сезон одним файлом: пустое название и дата запуска рассчитываются сами, задание дополняется из шаблона категории.")"
-                 Preview="s => Exchange.PreviewAsync(s)" Apply="rows => Exchange.ApplyAsync(rows)" Applied="ReloadAsync" />
-
     <div class="dev-switch" role="tablist">
         <button type="button" role="tab" class="@(_table ? "secondary" : "")" aria-selected="@(!_table ? "true" : "false")" @onclick="() => SwitchAsync(false)" disabled="@_busy">@L("Доска")</button>
         <button type="button" role="tab" class="@(_table ? "" : "secondary")" aria-selected="@(_table ? "true" : "false")" @onclick="() => SwitchAsync(true)" disabled="@_busy">@L("Таблица")</button>
     </div>
 
+    <FoldOnPhone Title="@L("Фильтры")">
     <form class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер или название")" /></label>
         <label>
@@ -97,13 +93,15 @@ else
         <label class="inline"><span><input type="checkbox" @bind="_overdue" /> @L("Только просроченные")</span></label>
         <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
     </form>
+    </FoldOnPhone>
 
     @if (!_table && _board is not null)
     {
-        <div class="dev-board">
+        @* Пустая стадия — узкая колонка, чтобы модели помещались без прокрутки вбок (пересмотр 13.10). *@
+        <div class="dev-board" style="grid-template-columns: @string.Join(" ", _board.Select(c => c.Models.Count == 0 ? "minmax(96px, .4fr)" : "minmax(170px, 1fr)"))">
             @foreach (var col in _board)
             {
-                <section class="dev-col" aria-label="@L(col.StageName)">
+                <section class="dev-col @(col.Models.Count == 0 ? "empty" : null)" aria-label="@L(col.StageName)">
                     <h2><span>@L(col.StageName)</span><span class="muted">@col.Models.Count@(col.Models.Count >= DevModelService.BoardColumnLimit ? "+" : "")</span></h2>
                     @if (col.Models.Count == 0)
                     {
@@ -170,6 +168,11 @@ else
             </div>
         }
     }
+
+    <ImportPanel ExportHref="dev/models.xlsx" TemplateHref="dev/models-template.xlsx" CanImport="@_options.CanEdit" ShownColumns="[0, 1, 3]"
+                 Hint="@L("Коллекция на сезон одним файлом: пустое название и дата запуска рассчитываются сами, задание дополняется из шаблона категории.")"
+                 Preview="s => Exchange.PreviewAsync(s)" Apply="rows => Exchange.ApplyAsync(rows)" Applied="ReloadAsync" />
+
 }
 
 @code {

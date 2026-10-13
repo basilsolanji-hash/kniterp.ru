@@ -29,7 +29,7 @@
                     <label>@L("Усадка после ВТО, %") <input type="number" min="-50" max="50" step="0.1" inputmode="decimal" @bind="_shrinkage" /></label>
                 </div>
                 <div class="actions">
-                    <button type="submit" disabled="@_busy">@L("Сохранить пряжу и вязку")</button>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Сохранить пряжу и вязку")</button>
                     <button type="button" class="secondary" @onclick="Cancel" disabled="@_busy">@L("Отмена")</button>
                 </div>
             </fieldset>

@@ -54,7 +54,7 @@ else
                     }
                 </datalist>
                 <label>@L("В изделии, шт") <input type="number" min="1" max="@DevDetail.MaxQuantity" step="1" inputmode="numeric" @bind="_quantity" /></label>
-                <button type="submit" disabled="@_busy">@L("Добавить деталь")</button>
+                <button type="submit" class="secondary" disabled="@_busy">@L("Добавить деталь")</button>
             </fieldset>
         </form>
     }

@@ -107,7 +107,7 @@ else
                         </select>
                     </label>
                     <label>@L("Пояснение для цеха") <input @bind="_note" maxlength="@DevModelOperation.NoteMaxLength" placeholder="@L("На второй день парить 2 секунды")" /></label>
-                    <button type="submit" disabled="@(_busy || _type.Length == 0)">@L("Добавить операцию")</button>
+                    <button type="submit" class="secondary" disabled="@(_busy || _type.Length == 0)">@L("Добавить операцию")</button>
                     <button type="button" class="secondary" @onclick="AddStandardAsync" disabled="@_busy">@L("Добавить стандартные (по этапам производства)")</button>
                 </fieldset>
             </form>

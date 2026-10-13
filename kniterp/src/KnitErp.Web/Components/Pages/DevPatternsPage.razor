@@ -65,6 +65,7 @@ else
         </div>
     }
 
+    <FoldOnPhone Title="@L("Фильтры")">
     <form class="inline-form" @onsubmit="LoadAsync">
         <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
             <label>@L("Поиск") <input @bind="_search" placeholder="@L("номер или название")" /></label>
@@ -97,6 +98,7 @@ else
             <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
         </fieldset>
     </form>
+    </FoldOnPhone>
 
     @if (_rows is null)
     {
