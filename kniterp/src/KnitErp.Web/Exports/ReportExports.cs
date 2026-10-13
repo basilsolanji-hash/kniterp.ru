@@ -123,6 +123,7 @@ public sealed class ReportExports(
         var source = new Dictionary<KnitErp.Domain.Sales.CostSource, string>
         {
             [KnitErp.Domain.Sales.CostSource.Purchases] = "закупкам", [KnitErp.Domain.Sales.CostSource.TechCard] = "техкарте",
+            [KnitErp.Domain.Sales.CostSource.Components] = "компонентам", [KnitErp.Domain.Sales.CostSource.Service] = "услуге (0)",
         };
         return spreadsheet.Write([new SheetData("Прибыльность", [grouping == ProfitGrouping.Item ? "Позиция" : "Покупатель", "Код", "Количество",
                 "Выручка без НДС", "Себестоимость", "Себестоимость полная", "Прибыль", "Маржа, %", "Себестоимость по", title],

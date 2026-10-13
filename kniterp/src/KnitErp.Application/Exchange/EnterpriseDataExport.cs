@@ -51,6 +51,9 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
         StockOperationKind.WriteOff => "Документ.СписаниеТоваров",
         StockOperationKind.ReturnToSupplier => "Документ.ВозвратТоваровПоставщику",
         StockOperationKind.CustomerReturn => "Документ.ВозвратТоваровОтПокупателя",
+        // D354 (сессия 4, Р1): акты услуг — те же документы реализации и поступления, строки — в табличной части «Услуги».
+        StockOperationKind.ServiceAct => "Документ.РеализацияТоваровУслуг",
+        StockOperationKind.SupplierServiceAct => "Документ.ПоступлениеТоваровУслуг",
         _ => throw new BusinessRuleException("exchange.kind", "Этот вид документа не выгружается."),
     };
 
@@ -129,7 +132,9 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             docs = docs.Where(d => EntityOf(d) == only).ToList();
         }
 
-        var itemIds = docs.SelectMany(d => d.Lines.Select(l => l.ItemId)).Distinct().ToList();
+        // D352 (сессия 4, Р2): документ по заказу покупателя выгружается строками заказа — комплект одной строкой, как в УПД.
+        static IReadOnlyList<(long ItemId, decimal Quantity)> Goods(StockDocument d) => d.SalesOrderId is not null ? d.OrderLines() : d.ItemTotals();
+        var itemIds = docs.SelectMany(Goods).Select(l => l.ItemId).Distinct().ToList();
         var items = await (from i in db.Items.AsNoTracking()
                            join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
                            where itemIds.Contains(i.Id)
@@ -137,7 +142,8 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             .ToDictionaryAsync(x => x.Id, ct);
         var counterpartyIds = docs.Where(d => d.CounterpartyId != null).Select(d => d.CounterpartyId!.Value).Distinct().ToList();
         var counterparties = await db.Counterparties.AsNoTracking().Where(c => counterpartyIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
-        var warehouseIds = docs.SelectMany(d => new[] { d.WarehouseId, d.TargetWarehouseId ?? d.WarehouseId }).Distinct().ToList();
+        var warehouseIds = docs.Where(d => !StockOperationKinds.IsServiceAct(d.Kind)) // D354: склад акта в файл не идёт
+            .SelectMany(d => new[] { d.WarehouseId, d.TargetWarehouseId ?? d.WarehouseId }).Distinct().ToList();
         var warehouses = await db.Warehouses.AsNoTracking().Where(w => warehouseIds.Contains(w.Id)).ToDictionaryAsync(w => w.Id, ct);
         var usedEntities = docs.Select(EntityOf).Distinct().Select(id => entities.Single(e => e.Id == id)).ToList();
 
@@ -196,7 +202,7 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             // Цены — из строк заказа: доля суммы строки заказа по количеству документа.
             IReadOnlyList<(long ItemId, decimal Quantity, decimal Amount, decimal Vat, decimal? VatPercent)> Priced(
                 IEnumerable<(long ItemId, decimal Quantity, decimal Amount, decimal Vat, decimal? VatPercent)> orderLines) =>
-                d.Lines.Select(l =>
+                Goods(d).Select(l =>
                 {
                     var match = orderLines.Where(o => o.ItemId == l.ItemId).ToList();
                     var qty = match.Sum(o => o.Quantity);
@@ -230,13 +236,14 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
                 element.Add(CounterpartyRef("Контрагент", counterparties[cid]));
             }
 
+            var act = StockOperationKinds.IsServiceAct(d.Kind);
             if (d.Kind == StockOperationKind.Transfer)
             {
                 element.Add(WarehouseRef("СкладОтправитель", d.WarehouseId), WarehouseRef("СкладПолучатель", d.TargetWarehouseId!.Value));
             }
-            else
+            else if (!act)
             {
-                element.Add(WarehouseRef("Склад", d.WarehouseId));
+                element.Add(WarehouseRef("Склад", d.WarehouseId)); // D354: у акта услуг склада нет
             }
 
             if (d.Comment is { } comment)
@@ -244,8 +251,8 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
                 element.Add(new XElement(Ed + "Комментарий", comment));
             }
 
-            var goods = new XElement(Ed + "Товары");
-            foreach (var l in d.Lines.OrderBy(l => items[l.ItemId].Code))
+            var goods = new XElement(Ed + (act ? "Услуги" : "Товары"));
+            foreach (var l in Goods(d).OrderBy(l => items[l.ItemId].Code))
             {
                 var row = new XElement(Ed + "Строка", ItemRef(l.ItemId), UnitRef(l.ItemId), new XElement(Ed + "Количество", Qty(l.Quantity)));
                 if (priced?.FirstOrDefault(p => p.ItemId == l.ItemId) is { Quantity: > 0 } p)

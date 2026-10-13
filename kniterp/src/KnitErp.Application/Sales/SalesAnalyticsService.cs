@@ -71,8 +71,16 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
     {
         var ctx = await DemandAsync(filter, ct);
         var lines = await SoldAsync(ctx, filter, ct);
-        var costs = await CostsAsync(ctx, filter.To, lines.Select(l => l.ItemId).Distinct().ToList(), ct);
-        decimal? CostOf(SoldLine l) => costs.TryGetValue(l.ItemId, out var c) ? Money.Round(c.Cost * l.Quantity) : null;
+        var costIds = lines.SelectMany(l => l.Components?.Select(c => c.ItemId) ?? [l.ItemId]).Distinct().ToList();
+        var costs = await CostsAsync(ctx, filter.To, costIds, ct);
+        // D354 (сессия 4, Р1): у услуги нет складской себестоимости — 0 (источник «услуга»), если она не куплена по акту поставщика.
+        var services = (await db.Items.AsNoTracking().Where(i => costIds.Contains(i.Id) && i.Type == KnitErp.Domain.Catalog.ItemType.Service)
+            .Select(i => i.Id).ToListAsync(ct)).ToHashSet();
+        // D352 (сессия 4, Р2): себестоимость комплекта — по компонентам, фактически ушедшим в его строках (состав на момент отгрузки),
+        // по той же оценке единицы, что у остальных позиций; неизвестна у одного компонента — неизвестна у комплекта.
+        decimal? CostOf(SoldLine l) => l.Components is { } parts
+            ? parts.All(p => costs.ContainsKey(p.ItemId)) ? parts.Sum(p => Money.Round(costs[p.ItemId].Cost * p.Quantity)) : null
+            : costs.TryGetValue(l.ItemId, out var c) ? Money.Round(c.Cost * l.Quantity) : services.Contains(l.ItemId) ? 0m : (decimal?)null;
 
         List<ProfitRowDto> rows;
         if (grouping == ProfitGrouping.Item)
@@ -80,9 +88,11 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
             var items = await ItemsAsync(lines.Select(l => l.ItemId), ct);
             rows = lines.GroupBy(l => l.ItemId).Select(g =>
             {
-                var known = costs.TryGetValue(g.Key, out var c);
+                var known = g.All(l => CostOf(l) is not null);
+                var source = g.Any(l => l.Components is not null) ? CostSource.Components
+                    : costs.TryGetValue(g.Key, out var c) ? c.Source : services.Contains(g.Key) ? CostSource.Service : CostSource.None;
                 return new ProfitRowDto(g.Key, items[g.Key].Code, items[g.Key].Name, items[g.Key].Symbol, g.Sum(l => l.Quantity), g.Sum(l => l.Revenue),
-                    known ? g.Sum(l => CostOf(l)!.Value) : 0, known, known ? c.Source : CostSource.None);
+                    known ? g.Sum(l => CostOf(l)!.Value) : 0, known, known ? source : CostSource.None);
             }).ToList();
         }
         else
@@ -90,7 +100,7 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
             var ids = lines.Select(l => l.CustomerId).Distinct().ToList();
             var names = await db.Counterparties.AsNoTracking().Where(c => ids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
             rows = lines.GroupBy(l => l.CustomerId).Select(g => new ProfitRowDto(g.Key, null, names[g.Key], null, null, g.Sum(l => l.Revenue),
-                    g.Sum(l => CostOf(l) ?? 0), g.All(l => costs.ContainsKey(l.ItemId)), CostSource.None))
+                    g.Sum(l => CostOf(l) ?? 0), g.All(l => CostOf(l) is not null), CostSource.None))
                 .ToList();
         }
 
@@ -112,14 +122,18 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
         return ctx;
     }
 
-    private sealed record SoldLine(long DocumentId, long CustomerId, long ItemId, decimal Quantity, decimal Revenue, decimal Vat);
+    /// <summary>Components — у комплекта (D352): фактически отгруженные (возвращённые) компоненты его разворота.</summary>
+    private sealed record SoldLine(
+        long DocumentId, long CustomerId, long ItemId, decimal Quantity, decimal Revenue, decimal Vat,
+        IReadOnlyList<(long ItemId, decimal Quantity)>? Components = null);
 
     /// <summary>Строки отгрузок (+) и возвратов (−) по заказам за период с выручкой и НДС по ценам заказа.</summary>
     private async Task<List<SoldLine>> SoldAsync(AccessContext ctx, SalesAnalyticsFilter filter, CancellationToken ct)
     {
         var docs = from d in db.StockDocuments.AsNoTracking()
                    where d.OrganizationId == ctx.OrganizationId && d.SalesOrderId != null && d.Status == StockDocumentStatus.Posted
-                         && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn)
+                         // D354 (сессия 4, Р1): акт оказания услуг — реализация услуг, как отгрузка.
+                         && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn || d.Kind == StockOperationKind.ServiceAct)
                          && d.DocumentDate >= filter.From && d.DocumentDate <= filter.To
                    join c in db.Counterparties.AsNoTracking() on d.CounterpartyId equals c.Id
                    select new { d, c.Name, c.Inn };
@@ -129,10 +143,12 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
             docs = docs.Where(x => x.Name.Contains(text) || x.Inn == text);
         }
 
+        // D352 (сессия 4, Р2): строки разворота комплекта — одной строкой комплекта (поиск — по коду и наименованию комплекта).
         var raw = from x in docs
                   from l in x.d.Lines
-                  join i in db.Items.AsNoTracking() on l.ItemId equals i.Id
-                  select new { x.d.Id, CustomerId = x.d.CounterpartyId!.Value, OrderId = x.d.SalesOrderId!.Value, x.d.Kind, l.ItemId, l.Quantity, i.Code, i.Name };
+                  join i in db.Items.AsNoTracking() on l.BundleItemId ?? l.ItemId equals i.Id
+                  select new { x.d.Id, CustomerId = x.d.CounterpartyId!.Value, OrderId = x.d.SalesOrderId!.Value, x.d.Kind, l.ItemId, l.Quantity,
+                      l.BundleItemId, l.BundleQuantity, i.Code, i.Name };
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var text = filter.Search.Trim();
@@ -142,14 +158,18 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
         var list = await raw.ToListAsync(ct);
         var orderIds = list.Select(r => r.OrderId).Distinct().ToList();
         var orders = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
-        return list.Select(r =>
-        {
-            var line = orders[r.OrderId].Lines.Single(l => l.ItemId == r.ItemId);
-            var sign = r.Kind == StockOperationKind.CustomerReturn ? -1 : 1;
-            var amount = Money.Round(r.Quantity * line.Amount / line.Quantity);
-            var vat = Money.Round(r.Quantity * line.VatAmount / line.Quantity);
-            return new SoldLine(r.Id, r.CustomerId, r.ItemId, sign * r.Quantity, sign * (amount - vat), sign * vat);
-        }).ToList();
+        return list.GroupBy(r => (r.Id, r.CustomerId, r.OrderId, r.Kind, Line: r.BundleItemId ?? r.ItemId))
+            .Select(g =>
+            {
+                var r = g.Key;
+                var quantity = g.First().BundleItemId is null ? g.Sum(x => x.Quantity) : g.Max(x => x.BundleQuantity ?? 0);
+                var line = orders[r.OrderId].Lines.Single(l => l.ItemId == r.Line);
+                var sign = r.Kind == StockOperationKind.CustomerReturn ? -1 : 1;
+                var amount = Money.Round(quantity * line.Amount / line.Quantity);
+                var vat = Money.Round(quantity * line.VatAmount / line.Quantity);
+                var components = g.First().BundleItemId is null ? null : g.Select(x => (x.ItemId, sign * x.Quantity)).ToList();
+                return new SoldLine(r.Id, r.CustomerId, r.Line, sign * quantity, sign * (amount - vat), sign * vat, components);
+            }).ToList();
     }
 
     /// <summary>
@@ -163,7 +183,9 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
             .Where(c => c.OrganizationId == ctx.OrganizationId && c.Status == TechCardStatus.Active).ToDictionaryAsync(c => c.ItemId, ct);
         var received = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == ctx.OrganizationId && d.PurchaseOrderId != null && d.Status == StockDocumentStatus.Posted
-                        && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.ReturnToSupplier) && d.DocumentDate <= asOf)
+                        // D354 (сессия 4, Р1): услуга, купленная по акту поставщика (доставка), — её закупочная себестоимость.
+                        && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.ReturnToSupplier || d.Kind == StockOperationKind.SupplierServiceAct)
+                        && d.DocumentDate <= asOf)
             .SelectMany(d => d.Lines.Select(l => new { OrderId = d.PurchaseOrderId!.Value, d.Kind, l.ItemId, l.Quantity }))
             .ToListAsync(ct);
         var orderIds = received.Select(r => r.OrderId).Distinct().ToList();

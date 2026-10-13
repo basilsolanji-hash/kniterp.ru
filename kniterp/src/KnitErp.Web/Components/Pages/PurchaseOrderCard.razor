@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Purchasing
 @using KnitErp.Domain.Warehousing
 @inject PurchaseService Purchases
+@inject KnitErp.Application.Catalog.PackService PackList
 @inject KnitErp.Application.Finance.MoneyService Money
 @inject NavigationManager Navigation
 
@@ -123,6 +124,12 @@ else
         }
     }
 
+    @if (_order.MainSupplierHint is { } hint)
+    {
+        @* D351 (сессия 4, Р5): подсказка, не обязательность. *@
+        <p class="notice">@L("Основной поставщик большинства позиций: {0}.", hint)</p>
+    }
+
     <h2 style="margin-top: 16px">@L("Строки ({0})", _order.Lines.Count)</h2>
 
     @if (editable)
@@ -134,11 +141,12 @@ else
                 <datalist id="po-items">
                     @foreach (var i in _options?.Items ?? [])
                     {
-                        <option value="@($"{i.Code} — {i.Name}")">@(i.Article is null ? i.UnitSymbol : $"{i.Article} · {i.UnitSymbol}")</option>
+                        <option value="@($"{i.Code} — {i.Name}")">@((i.SupplierArticle ?? i.Article) is { } art ? $"{art} · {i.UnitSymbol}" : i.UnitSymbol)</option>
                     }
                 </datalist>
             </label>
             <label>@L("Количество") <input @bind="_qtyText" inputmode="decimal" size="8" /></label>
+            <PackCount Packs="@PackLookup.Of(_packs, FindItem()?.Id)" Precision="@(FindItem()?.Precision ?? 0)" OnQuantity="q => _qtyText = q" />
             <label>@(_order.PricesIncludeVat ? L("Цена с НДС") : L("Цена без НДС")) <input @bind="_priceText" inputmode="decimal" size="10" /></label>
             <label>
                 @L("НДС")
@@ -171,7 +179,7 @@ else
                 @foreach (var l in _order.Lines)
                 {
                     <tr>
-                        <td>@l.Code</td>
+                        <td>@l.Code@if (l.SupplierArticle is { } sa) { <div class="muted small">@L("арт. поставщика {0}", sa)</div> }</td>
                         <td>@l.Name</td>
                         <td class="num">@Quantities.Format(l.Quantity)</td>
                         <td>@l.UnitSymbol</td>
@@ -224,6 +232,11 @@ else
         @if (_order.CanCreateDocuments && _order.Status == PurchaseOrderStatus.Confirmed && _order.Received != ReceiptState.Full)
         {
             <button type="button" @onclick="ReceiptAsync" disabled="@_busy">@L("Оформить поступление")</button>
+        }
+        @* D354 (сессия 4, Р1): строки-услуги (доработка, доставка) закрываются актом поставщика — без движений склада. *@
+        @if (_order.CanCreateDocuments && _order.Status == PurchaseOrderStatus.Confirmed && _order.Lines.Any(l => !l.Stocked && l.Left > 0))
+        {
+            <button type="button" class="secondary" @onclick="ServiceActAsync" disabled="@_busy">@L("Акт услуг поставщика")</button>
         }
         @if (_order.CanCreateDocuments && _order.Received != ReceiptState.None)
         {
@@ -365,7 +378,8 @@ else
             await LoadAsync();
             if (_order!.CanEdit)
             {
-                _options = await Purchases.GetOptionsAsync(_order.OrderDate);
+                _options = await Purchases.GetOptionsAsync(_order.OrderDate, _order.SupplierId); // D351: цены и артикулы этого поставщика
+                _packs = await PackList.AllAsync(); // D353: упаковки для ввода и скана — один раз
                 _accounts = CurrentAccess.Has(Permissions.PriceView) ? await Money.OptionsAsync() : [];
                 _vatText = _options.VatRates.FirstOrDefault()?.Percent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             }
@@ -406,6 +420,7 @@ else
             h.Expected is { } e ? DateOnly.FromDateTime(e) : null, h.Invoice, h.WithVat, h.Comment, long.TryParse(h.Entity, out var le) ? le : null),
             _order!.RowVersion);
         _header = null;
+        _options = await Purchases.GetOptionsAsync(DateOnly.FromDateTime(h.Date), long.Parse(h.Supplier)); // D351: другой поставщик — его цены
     }, L("Сохранено."));
 
     /// <summary>НДС по умолчанию — ставка позиции из номенклатуры.</summary>
@@ -414,6 +429,12 @@ else
     {
         if (FindItem() is { } item)
         {
+            // D353: скан штрихкода упаковки без количества — к строке добавляется коэффициент упаковки.
+            if (string.IsNullOrWhiteSpace(_qtyText) && PackLookup.ByBarcode(_packs, _itemText) is { } scanned)
+            {
+                _qtyText = Quantities.Format((_order!.Lines.FirstOrDefault(l => l.ItemId == item.Id)?.Quantity ?? 0) + scanned.Factor);
+            }
+
             _itemText = $"{item.Code} — {item.Name}";
             _vatText = item.VatPercent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             // Закупочная цена без НДС из карточки (D79) — если цену ещё не ввели.
@@ -430,8 +451,12 @@ else
         var code = _itemText.Split(" — ", 2)[0].Trim();
         return _options?.Items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
                ?? _options?.Items.FirstOrDefault(i => i.Article is not null && string.Equals(i.Article, code, StringComparison.OrdinalIgnoreCase))
-               ?? _options?.Items.FirstOrDefault(i => i.Barcodes is not null && i.Barcodes.Split(' ').Contains(code));
+               ?? _options?.Items.FirstOrDefault(i => i.SupplierArticle is not null && string.Equals(i.SupplierArticle, code, StringComparison.OrdinalIgnoreCase))
+               ?? _options?.Items.FirstOrDefault(i => i.Barcodes is not null && i.Barcodes.Split(' ').Contains(code))
+               ?? (PackLookup.ByBarcode(_packs, code) is { } pack ? _options?.Items.FirstOrDefault(i => i.Id == pack.ItemId) : null); // D353: штрихкод упаковки
     }
+
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Catalog.ItemPackDto>> _packs = PackLookup.Empty;
 
     private void EditLine(PurchaseOrderLineDto l)
     {
@@ -464,6 +489,8 @@ else
     private Task CancelAsync() => RunAsync(() => Purchases.CancelOrderAsync(Id, _order!.RowVersion), L("Заказ отменён."));
 
     private Task ReceiptAsync() => GoAsync(() => Purchases.CreateReceiptAsync(Id));
+
+    private Task ServiceActAsync() => GoAsync(() => Purchases.CreateServiceActAsync(Id));
 
     private Task ReturnAsync() => GoAsync(() => Purchases.CreateReturnAsync(Id));
 

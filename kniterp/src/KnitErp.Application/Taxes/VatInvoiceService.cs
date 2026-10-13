@@ -53,7 +53,9 @@ public sealed class VatInvoiceService(IKnitErpDbContext db, IAccessGuard guard, 
         await guard.DemandAsync(Permissions.PriceView, ct);
         EnsurePeriod(filter);
         var q = from d in db.StockDocuments.AsNoTracking()
-                where d.OrganizationId == ctx.OrganizationId && d.Kind == StockOperationKind.Shipment && d.SalesOrderId != null
+                // D354 (сессия 4, Р1): акт оказания услуг — тоже УПД (счёт-фактура), если не вошёл в УПД отгрузки той же датой.
+                where d.OrganizationId == ctx.OrganizationId && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.ServiceAct)
+                      && d.SalesOrderId != null
                       && (d.Status == StockDocumentStatus.Posted || (filter.IncludeCancelled && d.Status == StockDocumentStatus.Reversed))
                       && d.DocumentDate >= filter.From && d.DocumentDate <= filter.To
                 join c in db.Counterparties.AsNoTracking() on d.CounterpartyId equals c.Id
@@ -70,14 +72,23 @@ public sealed class VatInvoiceService(IKnitErpDbContext db, IAccessGuard guard, 
 
         var docs = await q.OrderBy(x => x.d.DocumentDate).ThenBy(x => x.d.Number).Take(MaxRows)
             .Select(x => new { x.d.Id, x.d.Number, x.d.DocumentDate, x.d.Status, OrderId = x.d.SalesOrderId!.Value, x.Name, x.Inn, x.Kpp, x.OrderNumber, x.Seller,
-                Lines = x.d.Lines.Select(l => new { l.ItemId, l.Quantity }).ToList() })
+                Lines = x.d.Lines.Select(l => new { l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }).ToList() })
             .ToListAsync(ct);
         var orderIds = docs.Select(d => d.OrderId).Distinct().ToList();
         var orders = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
-        return docs.Select(d =>
+        // D354: акты, вошедшие в УПД отгрузки (UpdMerge), — строками этой отгрузки, а не отдельным счётом-фактурой.
+        var candidates = await KnitErp.Application.Printing.UpdMerge.CandidatesAsync(db, ctx.OrganizationId, orderIds,
+            docs.Select(d => d.DocumentDate).Distinct().ToList(), ct);
+        var hosts = KnitErp.Application.Printing.UpdMerge.Hosts(candidates);
+        var merged = candidates.Where(c => hosts.ContainsKey(c.Id)).ToLookup(c => hosts[c.Id]);
+        return docs.Where(d => !hosts.ContainsKey(d.Id)).Select(d =>
         {
             var order = orders[d.OrderId];
-            var (amount, vat) = d.Lines.Aggregate((Amount: 0m, Vat: 0m), (acc, l) =>
+            // D352 (сессия 4, Р2): комплект — строкой заказа, как в УПД.
+            var ordered = BundleLines.InOrderTerms(d.Lines.Select(l => (0, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity)))
+                .Select(l => (l.ItemId, l.Quantity))
+                .Concat(d.Status == StockDocumentStatus.Posted ? merged[d.Id].SelectMany(a => a.OrderLines) : []);
+            var (amount, vat) = ordered.Aggregate((Amount: 0m, Vat: 0m), (acc, l) =>
             {
                 var (a, v) = Money.LineAmounts(l.Quantity, order.Lines.Single(x => x.ItemId == l.ItemId).NetPrice,
                     order.Lines.Single(x => x.ItemId == l.ItemId).VatPercent, order.PricesIncludeVat);
@@ -129,7 +140,9 @@ public sealed class VatInvoiceService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await DemandPurchaseViewAsync(ct);
         var rows = await (from d in db.StockDocuments.AsNoTracking()
-                          where d.OrganizationId == ctx.OrganizationId && d.Kind == StockOperationKind.Receipt && d.PurchaseOrderId != null
+                          // D354 (сессия 4, Р1): счёт-фактура поставщика бывает и к акту услуг (доставка, доработка).
+                          where d.OrganizationId == ctx.OrganizationId && d.PurchaseOrderId != null
+                                && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.SupplierServiceAct)
                                 && d.Status == StockDocumentStatus.Posted
                                 && !db.ReceivedVatInvoices.Any(i => i.ReceiptDocumentId == d.Id && i.Status == ReceivedVatInvoiceStatus.Registered)
                           join c in db.Counterparties.AsNoTracking() on d.CounterpartyId equals c.Id
@@ -149,9 +162,11 @@ public sealed class VatInvoiceService(IKnitErpDbContext db, IAccessGuard guard, 
         var receipt = await db.StockDocuments.AsNoTracking()
                           .SingleOrDefaultAsync(d => d.Id == cmd.ReceiptId && d.OrganizationId == ctx.OrganizationId, ct)
                       ?? throw new NotFoundException("Документ");
-        if (receipt.Kind != StockOperationKind.Receipt || receipt.PurchaseOrderId is null || receipt.Status != StockDocumentStatus.Posted)
+        if (receipt.Kind is not (StockOperationKind.Receipt or StockOperationKind.SupplierServiceAct) || receipt.PurchaseOrderId is null
+            || receipt.Status != StockDocumentStatus.Posted)
         {
-            throw new BusinessRuleException("purchase.vat_invoice.receipt", "Счёт-фактура регистрируется к проведённой приёмке по заказу поставщику.");
+            throw new BusinessRuleException("purchase.vat_invoice.receipt",
+                "Счёт-фактура регистрируется к проведённой приёмке или акту услуг поставщика по заказу поставщику.");
         }
 
         ReceivedVatInvoice.Validate(cmd.Number, cmd.Amount, cmd.VatAmount, cmd.Comment);

@@ -12026,7 +12026,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("operation_reasons", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_operation_reasons_kind", "[Kind] IN (1, 2, 3, 4, 5, 6, 7)");
+                            t.HasCheckConstraint("ck_operation_reasons_kind", "[Kind] IN (1, 2, 3, 4, 5, 6, 7, 8, 9)");
                         });
                 });
 
@@ -12346,22 +12346,28 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("stock_documents", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_stock_documents_counterparty", "([Kind] = 1) OR ([Kind] IN (5, 6, 7) AND [CounterpartyId] IS NOT NULL) OR ([Kind] NOT IN (1, 5, 6, 7) AND [CounterpartyId] IS NULL)");
+                            t.HasTrigger("tr_stock_documents_kind_locked");
 
-                            t.HasCheckConstraint("ck_stock_documents_kind", "[Kind] IN (1, 2, 3, 5, 6, 7)");
+                            t.HasCheckConstraint("ck_stock_documents_counterparty", "([Kind] = 1) OR ([Kind] IN (5, 6, 7, 8, 9) AND [CounterpartyId] IS NOT NULL) OR ([Kind] NOT IN (1, 5, 6, 7, 8, 9) AND [CounterpartyId] IS NULL)");
+
+                            t.HasCheckConstraint("ck_stock_documents_kind", "[Kind] IN (1, 2, 3, 5, 6, 7, 8, 9)");
 
                             t.HasCheckConstraint("ck_stock_documents_posted", "([Status] IN (2, 3) AND [PostedByUserId] IS NOT NULL AND [PostedAtUtc] IS NOT NULL AND [ReasonId] IS NOT NULL) OR ([Status] NOT IN (2, 3) AND [PostedByUserId] IS NULL)");
 
-                            t.HasCheckConstraint("ck_stock_documents_purchase_order", "[PurchaseOrderId] IS NULL OR [Kind] IN (1, 5)");
+                            t.HasCheckConstraint("ck_stock_documents_purchase_order", "[PurchaseOrderId] IS NULL OR [Kind] IN (1, 5, 9)");
 
                             t.HasCheckConstraint("ck_stock_documents_reversed", "([Status] = 3 AND [ReversedByUserId] IS NOT NULL AND [ReversedAtUtc] IS NOT NULL AND [ReversalReason] IS NOT NULL) OR ([Status] <> 3 AND [ReversedByUserId] IS NULL)");
 
-                            t.HasCheckConstraint("ck_stock_documents_sales_order", "[SalesOrderId] IS NULL OR [Kind] IN (6, 7)");
+                            t.HasCheckConstraint("ck_stock_documents_sales_order", "[SalesOrderId] IS NULL OR [Kind] IN (6, 7, 8)");
+
+                            t.HasCheckConstraint("ck_stock_documents_service_act_order", "([Kind] <> 8 OR [SalesOrderId] IS NOT NULL) AND ([Kind] <> 9 OR [PurchaseOrderId] IS NOT NULL)");
 
                             t.HasCheckConstraint("ck_stock_documents_status", "[Status] IN (1, 2, 3, 9)");
 
                             t.HasCheckConstraint("ck_stock_documents_target", "([Kind] = 3 AND [TargetWarehouseId] IS NOT NULL AND [TargetWarehouseId] <> [WarehouseId]) OR ([Kind] <> 3 AND [TargetWarehouseId] IS NULL)");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Warehousing.StockDocumentBatchLine", b =>
@@ -12425,6 +12431,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("BundleItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("BundleQuantity")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<long>("DocumentId")
                         .HasColumnType("bigint");
 
@@ -12436,15 +12448,23 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BundleItemId")
+                        .HasDatabaseName("ix_stock_document_lines_bundle")
+                        .HasFilter("[BundleItemId] IS NOT NULL");
+
                     b.HasIndex("ItemId");
 
-                    b.HasIndex("DocumentId", "ItemId")
+                    b.HasIndex("DocumentId", "ItemId", "BundleItemId")
                         .IsUnique()
-                        .HasDatabaseName("ux_stock_document_lines_doc_item");
+                        .HasDatabaseName("ux_stock_document_lines_doc_item_bundle");
 
                     b.ToTable("stock_document_lines", "kniterp", t =>
                         {
+                            t.HasTrigger("tr_stock_document_lines_bundle");
+
                             t.HasTrigger("tr_stock_document_lines_draft_only");
+
+                            t.HasCheckConstraint("ck_stock_document_lines_bundle", "([BundleItemId] IS NULL AND [BundleQuantity] IS NULL) OR ([BundleItemId] IS NOT NULL AND [BundleQuantity] IS NOT NULL AND [BundleQuantity] > 0)");
 
                             t.HasCheckConstraint("ck_stock_document_lines_quantity", "[Quantity] > 0");
                         });
@@ -17118,6 +17138,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("KnitErp.Domain.Warehousing.StockDocumentLine", b =>
                 {
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("BundleItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_document_lines_bundle");
+
                     b.HasOne("KnitErp.Domain.Warehousing.StockDocument", null)
                         .WithMany("Lines")
                         .HasForeignKey("DocumentId")

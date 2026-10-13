@@ -17,7 +17,7 @@ namespace KnitErp.IntegrationTests;
 
 /// <summary>
 /// Комплекты (D302): состав, доступность по компонентам за вычетом резерва, подсказка цены и себестоимость, права, ограничения базы,
-/// запрет складских документов и отгрузки комплекта до доработки сессии № 1 (запрос Р2).
+/// запрет складских документов для самого комплекта (отгрузка компонентами — CatBundleShipmentTests, D352).
 /// </summary>
 public sealed class CatBundlesTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
@@ -116,15 +116,18 @@ public sealed class CatBundlesTests(SqlTestHost host) : IClassFixture<SqlTestHos
                 await s.Documents.SetLineAsync(receipt, f.Bundle, 1, (await s.Documents.GetAsync(receipt)).RowVersion))).Code);
             Assert.DoesNotContain(f.Bundle, (await s.Documents.ListItemsForEntryAsync()).Select(i => i.Id));
 
-            // Заказ покупателя: комплект — одной строкой; счёт — одной строкой по цене комплекта; отгрузка — запрос Р2.
+            // Заказ покупателя: комплект — одной строкой; счёт — одной строкой по цене комплекта; отгрузка — компонентами (D352).
             var order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(Day, f.Customer, f.Store, Day, null, false, null));
             await s.Sales.SetOrderLineAsync(order, f.Bundle, 2, 2000m, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
             await s.Sales.ConfirmOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion);
             var line = (await s.Sales.GetOrderAsync(order)).Lines.Single();
-            Assert.Equal((true, false, false), (line.IsBundle, line.Stocked, line.Short));
+            // D352: у комплекта «Доступно» — сколько наборов собирается из компонентов; шапок нет — не хватает.
+            Assert.Equal((true, true, true, 0m), (line.IsBundle, line.Stocked, line.Short, line.Available));
             var invoice = await s.Invoices.CreateAsync(order, null, null);
             Assert.Equal(("НБ-1", 2m, 2000m), (await s.Invoices.GetAsync(invoice)).Lines.Select(l => (l.Code, l.Quantity, l.Price)).Single());
-            Assert.Equal("sales.order.bundle_shipment", (await Assert.ThrowsAsync<BusinessRuleException>(() => s.Sales.CreateShipmentAsync(order))).Code);
+            var shipment = await s.Sales.CreateShipmentAsync(order);
+            Assert.Equal(("Ш-1", 2m, f.Bundle, 2m), (await s.Documents.GetAsync(shipment)).Lines
+                .Select(l => (l.Code, l.Quantity, l.BundleItemId!.Value, l.BundleQuantity!.Value)).Single());
         }
 
         // Проверка рисков (шаг 1): партии, заказ поставщику и импорт Excel не обходят правила комплекта.
