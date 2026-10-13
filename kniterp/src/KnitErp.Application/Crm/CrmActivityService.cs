@@ -652,7 +652,7 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
         }
 
         var a = await db.CrmActivities.SingleAsync(x => x.Id == id && x.OrganizationId == ctx.OrganizationId, ct);
-        return (ctx, a.EnsureVersion(a.RowVersion, rowVersion));
+        return (ctx, await CrmConflict.EnsureVersionAsync(db, ctx.OrganizationId, a, nameof(CrmActivity), a.Id, "Задача", a.RowVersion, rowVersion, ct));
     }
 
     private void Audit(AccessContext ctx, string action, long id, string? before, string? after, string? reason) =>

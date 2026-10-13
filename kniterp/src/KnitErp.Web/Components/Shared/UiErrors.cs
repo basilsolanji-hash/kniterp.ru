@@ -19,6 +19,9 @@ public static class UiErrors
     {
         AccessDeniedException denied => L("Недостаточно прав: {0}. Обратитесь к администратору.", L(Permissions.Describe(denied.PermissionCode))),
         NotFoundException notFound => L("{0}: не найдено.", L(notFound.Entity)),
+        // D698: модуль указал объект и кто его изменил — «Сделка: изменил(а) Иванов 13.10 10:42. Обновите страницу и повторите.»
+        ConcurrencyConflictException { ObjectName: { } what, ChangedBy: { } who } c =>
+            L("{0}: изменил(а) {1}{2}. Обновите страницу и повторите.", L(what), who, c.ChangedAtLocal is { } at ? " " + at.ToString("dd.MM HH:mm") : ""),
         ConcurrencyConflictException => L("Данные изменены другим пользователем. Обновите страницу и повторите."),
         _ => KnitErp.Web.Localization.Text.Message(ex.Message),
     };

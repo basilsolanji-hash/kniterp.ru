@@ -82,6 +82,33 @@ public sealed class CrmReviewTests(SqlTestHost host) : IClassFixture<SqlTestHost
     }
 
     [SqlFact]
+    public async Task Concurrent_edit_says_who_changed_the_deal()
+    {
+        var (org, deal, _, _) = await DealWithOfferAsync();
+        var head = await host.CrmUserAsync(org, SystemRoles.SalesHead);
+        byte[] stale;
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            stale = (await crm.Deals.GetAsync(deal)).RowVersion;
+        }
+
+        await using (var h = host.Crm(head, org.OrganizationId))
+        {
+            var fresh = await h.Deals.GetAsync(deal);
+            await h.Deals.UpdateAsync(deal, fresh.Values with { Title = "Свитера ревизии — правка руководителя" }, fresh.RowVersion);
+        }
+
+        await using (var crm = host.Crm(org.OwnerUserId, org.OrganizationId))
+        {
+            var dto = await crm.Deals.GetAsync(deal);
+            var ex = await Assert.ThrowsAsync<ConcurrencyConflictException>(() => crm.Deals.UpdateAsync(deal, dto.Values with { Title = "Моя правка" }, stale));
+            Assert.Equal("Сделка", ex.ObjectName);
+            Assert.Equal(SystemRoles.NameOf(SystemRoles.SalesHead), ex.ChangedBy);
+            Assert.NotNull(ex.ChangedAtLocal);
+        }
+    }
+
+    [SqlFact]
     public async Task Long_offer_mail_still_gets_a_valid_feed_record()
     {
         var (org, deal, offerId, _) = await DealWithOfferAsync(lines: 60);
