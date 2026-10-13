@@ -178,6 +178,7 @@
             new("stock-documents?kind=5", "Возвраты поставщикам", Docs),
             new("vat-invoices/received", "Счета-фактуры полученные", a => a.Has(Permissions.PurchaseView) && a.Has(Permissions.PriceView)),
             Soon("purchase-planning", "Управление закупками"),
+            new("settings/purchases", "Настройки закупок", a => a.Has(Permissions.PurchaseView)), // D133
             new("learn/purchases", "Обучение", a => true),
         ]),
         new("money", "Деньги",

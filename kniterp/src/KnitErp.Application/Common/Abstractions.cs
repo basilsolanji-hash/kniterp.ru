@@ -261,6 +261,8 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.MarketplaceReportLine> MarketplaceReportLines { get; }
     DbSet<KnitErp.Domain.Sales.MarketplaceColumnMap> MarketplaceColumnMaps { get; }
     DbSet<KnitErp.Domain.Sales.CustomerOpeningBalance> CustomerOpeningBalances { get; } // D1146
+    DbSet<KnitErp.Domain.Purchasing.SupplierOpeningBalance> SupplierOpeningBalances { get; } // D133
+    DbSet<KnitErp.Domain.Purchasing.PurchaseSettings> PurchaseSettings { get; } // D133
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 

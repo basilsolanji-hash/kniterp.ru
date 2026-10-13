@@ -485,10 +485,15 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                    } into g
                                    select new { g.Key.SupplierId, g.Key.Kind, g.Key.Day, g.Key.Amount, g.Key.LineQuantity, Quantity = g.Sum() })
                     .ToListAsync(ct);
+                // D133: вводные остатки — в том же запросе, как оплата со знаком минус (наш долг увеличивает долг, наш аванс — уменьшает),
+                // без дня: в график оплат не попадают.
                 var paid = await db.SupplierPayments.AsNoTracking()
                     .Where(pay => pay.OrganizationId == org && pay.Status == SupplierPaymentStatus.Posted)
-                    .GroupBy(pay => new { pay.SupplierId, Day = pay.PaymentDate >= windowStart && pay.PaymentDate <= today ? (DateOnly?)pay.PaymentDate : null })
-                    .Select(g => new { g.Key.SupplierId, g.Key.Day, Sum = g.Sum(pay => pay.Amount) })
+                    .Select(pay => new { pay.SupplierId, Day = pay.PaymentDate >= windowStart && pay.PaymentDate <= today ? (DateOnly?)pay.PaymentDate : null, pay.Amount })
+                    .Concat(db.SupplierOpeningBalances.AsNoTracking().Where(b => b.OrganizationId == org && !b.IsCancelled)
+                        .Select(b => new { b.SupplierId, Day = (DateOnly?)null, Amount = -b.Amount }))
+                    .GroupBy(x => new { x.SupplierId, x.Day })
+                    .Select(g => new { g.Key.SupplierId, g.Key.Day, Sum = g.Sum(x => x.Amount) })
                     .ToListAsync(ct);
 
                 charts.Add(Chart("Закупки", "reports/supplier-balances", today, moved.Where(m => m.Day != null).Select(m => (m.Day!.Value,

@@ -1,0 +1,100 @@
+@page "/settings/purchases"
+@using KnitErp.Application.Purchasing
+@inject PurchaseSettingsService Settings
+
+@* D133 (D132 п. 3): настройки закупок организации — допуск поступления сверх заказа поставщику. *@
+<PageTitle>@L("Настройки закупок") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_s is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head"><h1>@L("Настройки закупок")</h1></div>
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    <form class="panel" @onsubmit="SaveAsync">
+        <h2>@L("Поступление по заказу")</h2>
+        <label>@L("Допуск поступления сверх заказа, %")
+            <input @bind="_percent" inputmode="decimal" disabled="@(!_s.CanEdit)" aria-label="@L("Допуск поступления сверх заказа, %")" /></label>
+        <p class="muted">@L("По позиции заказа можно принять не больше «заказано × (1 + допуск/100)». От 0 до 10%; 0 — сверх заказа нельзя, лишнее оформляется поступлением без заказа. Менять может пользователь с правом «Организация: изменение».")</p>
+        @if (_s.UpdatedAtUtc is { } at)
+        {
+            <p class="muted">@L("Изменено: {0}, {1}", _s.UpdatedBy ?? "—", TimeZones.ToLocal(at, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm"))</p>
+        }
+        @if (_s.CanEdit)
+        {
+            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+        }
+    </form>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private PurchaseSettingsDto? _s;
+    private string? _denied;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+    private string _percent = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Fill(await Settings.GetAsync());
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private void Fill(PurchaseSettingsDto s)
+    {
+        _s = s;
+        _percent = Quantities.Format(s.OverReceiptPercent);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy || _s is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            if (!Quantities.TryParse(_percent, out var percent))
+            {
+                throw new BusinessRuleException("purchase.settings.over_receipt", L("Допуск поступления сверх заказа — от 0 до 10%, не больше двух знаков после запятой."));
+            }
+
+            await Settings.SaveAsync(percent, _s.RowVersion);
+            Fill(await Settings.GetAsync());
+            _message = L("Настройки сохранены.");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

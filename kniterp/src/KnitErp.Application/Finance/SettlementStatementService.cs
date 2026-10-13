@@ -112,6 +112,7 @@ public sealed class SettlementStatementService(IKnitErpDbContext db, IAccessGuar
             .Where(p => EntityOf(p.MoneyAccountId, p.PurchaseOrderId is { } o ? purchaseEntities.GetValueOrDefault(o) : null) == entity.Id)
             .Select(p => new SettlementRowDto(p.PaymentDate,
                 p.CashOrderNumber is { } ko ? $"Оплата поставщику наличными, {ko}" : $"Оплата поставщику, {p.Number}", p.Amount, 0, 2)));
+        rows.AddRange(await KnitErp.Application.Purchasing.PurchaseOpeningBalances.SettlementRowsAsync(db, org, cp.Id, entity.Id, to, ct)); // D133
 
         var opening = rows.Where(r => r.Date < from).Sum(r => r.Debit - r.Credit);
         var period = rows.Where(r => r.Date >= from).OrderBy(r => r.Date).ThenBy(r => r.Rank).ThenBy(r => r.Document, StringComparer.Ordinal).ToList();

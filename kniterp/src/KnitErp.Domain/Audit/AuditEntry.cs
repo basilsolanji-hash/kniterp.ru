@@ -234,6 +234,8 @@ public static class AuditActions
     public const string PurchaseOrderCancelled = "purchase.order.cancelled";
     public const string SupplierPaymentCreated = "purchase.payment.created";
     public const string SupplierPaymentCancelled = "purchase.payment.cancelled";
+    public const string SupplierOpeningBalanceChanged = "purchase.opening_balance.changed"; // D133
+    public const string PurchaseSettingsChanged = "purchase.settings.changed"; // D133
     public const string SalesOrderCreated = "sales.order.created";
     public const string SalesOrderChanged = "sales.order.changed";
     public const string SalesOrderConfirmed = "sales.order.confirmed";
