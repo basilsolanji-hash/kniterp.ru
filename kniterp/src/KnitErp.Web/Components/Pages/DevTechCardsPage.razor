@@ -31,8 +31,8 @@ else
         <ul class="dev-tasks dev-tiles">
             @foreach (var r in _rows)
             {
-                <li>
-                    <a href="dev/tech/@r.DetailId"><b>@r.ModelNumber</b> @r.ModelName — @r.DetailName</a>
+                <li class="dev-row">
+                    <a class="dev-open" href="dev/tech/@r.DetailId"><b>@r.ModelNumber</b> @r.ModelName — @r.DetailName</a>
                     <div class="muted small">
                         @(r.MachineName ?? L("станок не выбран")) · @L(r.StageName)
                         @if (r.ThreadingRows == 0) { <span class="tag warn">@L("нет заправки")</span> }

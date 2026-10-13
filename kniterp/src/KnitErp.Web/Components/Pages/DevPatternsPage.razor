@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Development
 @inject DevPatternService Patterns
 @inject NavigationManager Nav
+@inject DevListState ListState
 
 @*
     Библиотека рисунков (D726, ТЗ §7): поиск по номеру и названию, виду, раппорту, числу цветов, классу машины и тегу; «использован в моделях».
@@ -104,6 +105,15 @@ else
     {
         <p class="muted">@L("Загрузка…")</p>
     }
+    else if (_rows.Count == 0 && NoFilters)
+    {
+        @* ui-review §0 п. 7: пустой список — что это и одна кнопка «создать первый» (по праву). *@
+        <p class="muted">@L("Рисунков пока нет. Библиотека хранит рисунки с версиями, цветами и колоритами — модели выбирают их отсюда.")</p>
+        @if (CurrentAccess.Has(Permissions.DevPattern) && !_creating)
+        {
+            <p><button type="button" class="secondary" @onclick="() => _creating = true" disabled="@_busy">@L("Создать первый рисунок")</button></p>
+        }
+    }
     else if (_rows.Count == 0)
     {
         <p class="muted">@L("Рисунков не найдено.")</p>
@@ -119,8 +129,8 @@ else
                 <tbody>
                     @foreach (var r in _rows)
                     {
-                        <tr>
-                            <td><a href="dev/patterns/@r.Id">@r.Number</a></td>
+                        <tr class="dev-row">
+                            <td><a class="dev-open" href="dev/patterns/@r.Id">@r.Number</a></td>
                             <td>@r.Name @if (r.ReadyForProgramming) { <span class="tag warn">@L("к программированию")</span> }</td>
                             <td>@L(r.KindName)</td>
                             <td class="num">@(r.RapportWidth is null ? "—" : $"{r.RapportWidth}×{r.RapportHeight?.ToString() ?? "—"}")</td>
@@ -159,8 +169,15 @@ else
     private string? _denied;
     private string? _message;
 
+    private bool NoFilters => string.IsNullOrWhiteSpace(_search) && _fKind.Length == 0 && _fColors is null && _fRapport is null && _fClass.Length == 0 && !_archived;
+
     protected override async Task OnInitializedAsync()
     {
+        if (ListState.Patterns is { } f)
+        {
+            (_search, _fKind, _fColors, _fRapport, _fClass, _archived) = (f.Search, f.Kind, f.Colors, f.Rapport, f.MachineClass, f.Archived);
+        }
+
         try
         {
             _options = await Patterns.OptionsAsync();
@@ -174,6 +191,7 @@ else
 
     private async Task LoadAsync()
     {
+        ListState.Patterns = new(_search, _fKind, _fColors, _fRapport, _fClass, _archived);
         _rows = await Patterns.ListAsync(new DevPatternFilter(_search, Enum.TryParse<DevPatternKind>(_fKind, out var k) ? k : null, _fColors, _fRapport,
             long.TryParse(_fClass, out var c) ? c : null, null, _archived));
     }

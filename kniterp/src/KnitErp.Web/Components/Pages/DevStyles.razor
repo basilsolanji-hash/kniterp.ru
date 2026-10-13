@@ -113,4 +113,12 @@
         .dev-more-menu { left: 0; right: 0; }
         .dev-move > * { flex: 1 1 100%; }
     }
+    /* ui-review §0 п. 6: объект открывается нажатием на любое место строки или карточки. Главная ссылка растягивается на всю строку
+       (настоящая ссылка: Ctrl и средняя кнопка — новая вкладка, Enter с клавиатуры); кнопки и ссылки внутри строки остаются над ней. */
+    .dev-row { position: relative; cursor: pointer; }
+    .dev-row:hover { background: var(--hover-wash); }
+    .dev-row a.dev-open::after { content: ""; position: absolute; inset: 0; }
+    .dev-row a.dev-open:focus-visible { outline: none; }
+    .dev-row:has(a.dev-open:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .dev-row button, .dev-row a:not(.dev-open), .dev-row input, .dev-row select { position: relative; z-index: 1; }
 </style>

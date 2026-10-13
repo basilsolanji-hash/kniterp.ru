@@ -98,7 +98,7 @@ else
                             <option value="@o.Id">@o.Name</option>
                         }
                     </select>
-                    <button type="button" class="secondary" @onclick="CopyAsync" disabled="@(_busy || _copyFrom.Length == 0)">@L("Скопировать")</button>
+                    <button type="button" class="secondary" @onclick="CopyAsync" disabled="@(_busy || _copyFrom.Length == 0)" title="@(_copyFrom.Length == 0 ? L("Сначала выберите деталь, откуда копировать") : null)">@L("Скопировать")</button>
                 </span>
             }
         </div>
