@@ -54,10 +54,41 @@ public static class CrmEvents
         if (settings.RepeatSaleDays is { } days)
         {
             var tz = await TimeZoneAsync(db, ctx.OrganizationId, ct);
+            var today = Today(nowUtc, tz);
+            // D685: по циклу клиента — средний интервал между его заказами; напоминание за неделю до ожидаемого заказа. Истории нет — N дней из настроек.
+            var cycle = await ClientCycleAsync(db, ctx.OrganizationId, deal.CounterpartyId, ct);
+            var (due, why) = cycle is { } c
+                ? (Math.Max(1, c.LastOrder.AddDays(c.Days - RepeatLeadDays).DayNumber - today.DayNumber),
+                   $"Клиент заказывает примерно раз в {c.Days} дн. (по {c.Orders} заказам) — следующий заказ ожидается около {c.LastOrder.AddDays(c.Days):dd.MM.yyyy}.")
+                : (days, "Сделка выиграна — напомните клиенту о новой партии.");
             db.CrmActivities.Add(CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Task, CrmTarget.Deal, deal.Id,
-                $"Предложить повторный заказ ({deal.Number})", "Сделка выиграна — напомните клиенту о новой партии.", DueInDays(nowUtc, tz, days),
-                deal.ResponsibleUserId, ctx.UserId, nowUtc, source: CrmActivitySource.Automation));
+                $"Предложить повторный заказ ({deal.Number})", why, DueInDays(nowUtc, tz, due), deal.ResponsibleUserId, ctx.UserId, nowUtc,
+                source: CrmActivitySource.Automation));
         }
+    }
+
+    /// <summary>За сколько дней до ожидаемого повторного заказа напомнить менеджеру (D685).</summary>
+    public const int RepeatLeadDays = 7;
+
+    /// <summary>
+    /// Цикл заказов клиента (D685): средний интервал в днях между датами его подтверждённых и закрытых заказов (не меньше двух заказов,
+    /// интервал 7…365 дней), дата последнего заказа. Нет истории — null.
+    /// </summary>
+    public static async Task<(int Days, int Orders, DateOnly LastOrder)?> ClientCycleAsync(IKnitErpDbContext db, long organizationId, long counterpartyId,
+        CancellationToken ct)
+    {
+        var dates = await db.SalesOrders.AsNoTracking()
+            .Where(o => o.OrganizationId == organizationId && o.CustomerId == counterpartyId
+                        && (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed || o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Closed))
+            .OrderByDescending(o => o.OrderDate).Select(o => o.OrderDate).Take(13).ToListAsync(ct);
+        var distinct = dates.Distinct().OrderBy(d => d).ToList();
+        if (distinct.Count < 2)
+        {
+            return null;
+        }
+
+        var avg = (distinct[^1].DayNumber - distinct[0].DayNumber) / (double)(distinct.Count - 1);
+        return ((int)Math.Clamp(Math.Round(avg), 7, 365), distinct.Count, distinct[^1]);
     }
 
     /// <summary>

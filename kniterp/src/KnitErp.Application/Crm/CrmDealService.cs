@@ -68,7 +68,8 @@ public sealed record CrmDealDto(
     CrmDealOutcome Outcome, string? LossReason, string? LossComment, string Counterparty, string? Contact, string Responsible, string? Source,
     string? Channel, string? Project, long? LeadId, string? LeadNumber, IReadOnlyList<CrmDealLineDto> Lines, IReadOnlyList<LookupDto> Participants,
     IReadOnlyList<CrmStageHistoryDto> History, IReadOnlyList<CrmLinkedOrderDto> Orders, int HiddenOrders, string CreatedBy, DateTime CreatedAtUtc,
-    DateTime? ClosedAtUtc, bool CanEdit, bool CanAll, bool CanSeeAmounts, bool CanCreateOrder, byte[] RowVersion)
+    DateTime? ClosedAtUtc, bool CanEdit, bool CanAll, bool CanSeeAmounts, bool CanCreateOrder, byte[] RowVersion, int? ClientCycleDays = null,
+    DateOnly? NextOrderExpected = null)
 {
     public string OutcomeName => CrmDeal.OutcomeName(Outcome);
     public decimal? Amount => CanSeeAmounts ? Values.Amount : null;
@@ -185,6 +186,8 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var (orders, hidden) = await LinkedOrdersAsync(ctx, id, ct);
         var values = new CrmDealValues(d.Title, d.CounterpartyId, d.ContactId, amounts ? d.Amount : 0, d.CurrencyCode, d.ExpectedCloseDate,
             d.ResponsibleUserId, d.ProjectId, d.ChannelId, d.SourceId);
+        // D685: цикл заказов клиента — с правом «Продажи: просмотр» (даты заказов — данные продаж).
+        var cycle = ctx.Permissions.Has(Permissions.SalesView) ? await CrmEvents.ClientCycleAsync(db, ctx.OrganizationId, d.CounterpartyId, ct) : null;
         return new CrmDealDto(d.Id, d.Number, values, d.PipelineId, pipeline, d.StageId,
             CrmSettingsService.Ordered(stages.Where(s => !s.IsArchived || s.Id == d.StageId))
                 .Select(s => new CrmStageDto(s.Id, s.PipelineId, s.Name, s.Color, s.Probability, s.Kind, s.IsArchived, 0, s.RowVersion)).ToList(),
@@ -198,7 +201,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
             orders, hidden, users[d.CreatedByUserId], d.CreatedAtUtc, d.ClosedAtUtc,
             ctx.Permissions.Has(Permissions.CrmEdit), CrmAccess.SeesAll(ctx), amounts,
             ctx.Permissions.Has(Permissions.CrmEdit) && ctx.Permissions.Has(Permissions.SalesEdit) && amounts && d.Outcome != CrmDealOutcome.Lost,
-            d.RowVersion);
+            d.RowVersion, cycle?.Days, cycle is { } c ? c.LastOrder.AddDays(c.Days) : null);
     }
 
     /// <summary>Новая сделка без лида — на первом рабочем этапе выбранной (или первой) воронки.</summary>
