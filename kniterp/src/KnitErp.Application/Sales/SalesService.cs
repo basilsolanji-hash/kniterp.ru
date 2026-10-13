@@ -148,10 +148,11 @@ public sealed partial class SalesService(
     {
         var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
         var q = db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == ctx.OrganizationId);
-        if (await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        if (await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct) is { } visibleManagers)
         {
-            // D1110: роль видит только свои заказы — где пользователь ответственный.
-            q = q.Where(o => o.ResponsibleUserId == ctx.UserId);
+            // D1110: роль видит свои заказы или заказы своего подразделения — по ответственному.
+            var visible = visibleManagers.ToList();
+            q = q.Where(o => o.ResponsibleUserId != null && visible.Contains(o.ResponsibleUserId.Value));
         }
 
         if (filter.CustomerId is { } customerId)
@@ -244,9 +245,10 @@ public sealed partial class SalesService(
         var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines)
                         .SingleOrDefaultAsync(o => o.Id == id && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Заказ покупателя");
-        if (order.ResponsibleUserId != ctx.UserId && await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        if (await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct) is { } visible
+            && !(order.ResponsibleUserId is { } responsible && visible.Contains(responsible)))
         {
-            throw new NotFoundException("Заказ покупателя"); // D1110: чужой заказ при видимости «Свои» — как несуществующий
+            throw new NotFoundException("Заказ покупателя"); // D1110: заказ вне видимости роли — как несуществующий
         }
 
         var itemIds = order.Lines.Select(l => l.ItemId).ToList();
@@ -1103,6 +1105,19 @@ public sealed partial class SalesService(
         var moved = docs.GroupBy(d => orders[d.OrderId].CustomerId).ToDictionary(g => g.Key, g => (
             Shipped: Money.Round(g.Where(d => d.Kind == StockOperationKind.Shipment).Sum(d => d.Quantity * orders[d.OrderId].UnitCostWithVat(d.ItemId))),
             Returned: Money.Round(g.Where(d => d.Kind == StockOperationKind.CustomerReturn).Sum(d => d.Quantity * orders[d.OrderId].UnitCostWithVat(d.ItemId)))));
+        // D1146: вводный остаток — долг покупателя к отгруженному, его аванс — к оплаченному.
+        foreach (var (customer, list) in await SalesOpeningBalances.ByCustomerAsync(db, org, customerId is { } one ? [one] : null, asOf, ct))
+        {
+            var debt = list.Where(b => b.Amount > 0).Sum(b => b.Amount);
+            var advance = -list.Where(b => b.Amount < 0).Sum(b => b.Amount);
+            var m = moved.GetValueOrDefault(customer);
+            moved[customer] = (m.Shipped + debt, m.Returned);
+            if (advance > 0)
+            {
+                paid[customer] = paid.GetValueOrDefault(customer) + advance;
+            }
+        }
+
         var customerIds = moved.Keys.Union(paid.Keys).ToList();
         var names = await db.Counterparties.AsNoTracking().Where(c => customerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         return customerIds.Select(id => new CustomerBalanceDto(id, names[id],

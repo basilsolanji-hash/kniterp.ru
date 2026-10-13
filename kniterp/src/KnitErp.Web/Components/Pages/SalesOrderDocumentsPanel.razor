@@ -56,6 +56,7 @@
     @if (d.Mails.Count > 0)
     {
         <h3 class="sx-sub-head">@L("Журнал писем")</h3>
+        <div class="scroll">
         <table class="sx-table compact">
             <thead><tr><th>@L("Когда")</th><th>@L("Письмо")</th><th>@L("Кому")</th><th>@L("Статус")</th><th></th></tr></thead>
             <tbody>
@@ -92,6 +93,7 @@
                 }
             </tbody>
         </table>
+        </div>
     }
 
     <h3 class="sx-sub-head">@L("Связанные документы")</h3>
@@ -101,6 +103,7 @@
     }
     else
     {
+        <div class="scroll">
         <table class="sx-table compact">
             <thead><tr><th>@L("Документ")</th><th>@L("Дата")</th><th>@L("Сведения")</th><th></th></tr></thead>
             <tbody>
@@ -169,6 +172,7 @@
                 }
             </tbody>
         </table>
+        </div>
     }
 
     @if (d.CanLink)
@@ -196,6 +200,7 @@
             }
             else
             {
+                <div class="scroll">
                 <table class="sx-table compact">
                     <tbody>
                         @foreach (var c in found)
@@ -211,6 +216,7 @@
                         }
                     </tbody>
                 </table>
+                </div>
             }
         }
     }

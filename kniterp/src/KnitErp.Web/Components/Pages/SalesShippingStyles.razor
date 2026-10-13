@@ -23,4 +23,8 @@
     @@media (max-width: 560px) {
         .sx-table td.ssh-qty input, .sx-table td.ssh-loc input { width: 100%; }
     }
+    /* Справочники отгрузки: название слева, действие справа, строки одной высоты. */
+    li.ship-ref { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    li.ship-ref .ship-ref-name { min-width: 0; overflow-wrap: anywhere; }
+    li.ship-ref button.link { flex: none; }
 </style>

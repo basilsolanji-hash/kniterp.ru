@@ -164,6 +164,26 @@ public static class SalesCredit
             Of(customer).Paid = sum;
         }
 
+        // D1146: вводный остаток — долг как отгрузка этой датой (срок — та же дата), аванс покупателя — как оплата.
+        foreach (var (customer, list) in await SalesOpeningBalances.ByCustomerAsync(db, org, customers, asOf, ct))
+        {
+            var ledger = Of(customer);
+            foreach (var (date, amount) in list)
+            {
+                if (amount > 0)
+                {
+                    ledger.ShippedRaw += amount;
+                    ledger.Open.Add(new OpenShipmentDto(0, "Вводный остаток", "—", date, null, amount, amount));
+                }
+                else
+                {
+                    ledger.Paid += -amount;
+                }
+            }
+
+            ledger.Open.Sort((a, b) => a.Date != b.Date ? a.Date.CompareTo(b.Date) : a.DocumentId.CompareTo(b.DocumentId));
+        }
+
         // FIFO: возвраты и оплаты гасят самые старые отгрузки.
         foreach (var ledger in result.Values)
         {
