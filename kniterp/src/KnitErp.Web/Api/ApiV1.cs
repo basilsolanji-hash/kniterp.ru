@@ -204,6 +204,11 @@ public static class ApiV1
             return ApiResult.Ok(await sales.GetOrderAsync(id, ct));
         }).AddEndpointFilter(IdempotencyAsync).WithSummary("Подтвердить заказ (rowVersion — из последнего ответа)");
 
+        // D354 (сессия 4, Р1): черновик акта оказания услуг на незакрытые строки-услуги заказа; проводится как складской документ.
+        api.MapPost("/sales-orders/{id:long}/service-act", async (SalesService sales, long id, CancellationToken ct) =>
+            ApiResult.Created(new IdDto(await sales.CreateServiceActAsync(id, ct))))
+            .AddEndpointFilter(IdempotencyAsync).WithSummary("Черновик акта оказания услуг по заказу покупателя");
+
         api.MapGet("/customer-payments", async (SalesService sales, DateOnly? from, DateOnly? to, string? search, int? offset, int? limit, CancellationToken ct) =>
             ApiResult.Ok(Paged(await sales.ListPaymentsAsync(from, to, search, ct), offset, limit)))
             .WithSummary("Оплаты покупателей");
@@ -244,6 +249,11 @@ public static class ApiV1
             await purchases.ConfirmOrderAsync(id, Convert.FromBase64String(body.RowVersion), ct);
             return ApiResult.Ok(await purchases.GetOrderAsync(id, ct));
         }).AddEndpointFilter(IdempotencyAsync).WithSummary("Подтвердить заказ поставщику");
+
+        // D354 (сессия 4, Р1): черновик акта услуг поставщика (доработка, доставка) на незакрытые строки-услуги заказа.
+        api.MapPost("/purchase-orders/{id:long}/service-act", async (PurchaseService purchases, long id, CancellationToken ct) =>
+            ApiResult.Created(new IdDto(await purchases.CreateServiceActAsync(id, ct))))
+            .AddEndpointFilter(IdempotencyAsync).WithSummary("Черновик акта услуг поставщика по заказу поставщику");
 
         api.MapGet("/stock-documents", async (StockDocumentService documents, StockOperationKind? kind, StockDocumentStatus? status, DateOnly? from,
                 DateOnly? to, long? warehouseId, string? search, long? tagId, int? offset, int? limit, CancellationToken ct) =>

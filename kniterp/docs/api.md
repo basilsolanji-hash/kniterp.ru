@@ -52,12 +52,14 @@ curl -X POST https://erp.example.ru/api/v1/customer-payments \
 | GET | `/api/v1/sales-orders?status=&from=&to=&search=`, `/api/v1/sales-orders/{id}` | просмотр продаж |
 | POST | `/api/v1/sales-orders` | создание заказов покупателя |
 | POST | `/api/v1/sales-orders/{id}/confirm` | подтверждение |
+| POST | `/api/v1/sales-orders/{id}/service-act` | черновик акта оказания услуг на незакрытые строки-услуги заказа (D354), ответ — `{"id": …}`; проводится как складской документ |
 | GET, POST | `/api/v1/customer-payments` | просмотр / ввод оплат |
 | GET | `/api/v1/purchase-orders`, `/api/v1/purchase-orders/{id}` | просмотр закупок |
 | GET | `/api/v1/money/balances?asOf=` | просмотр денег |
 | GET | `/api/v1/reports/cash-flow?from=&to=&legalEntityId=` | просмотр денег |
 | GET | `/api/v1/webhook-events` | — |
 | POST | `/api/v1/purchase-orders`, `/api/v1/purchase-orders/{id}/confirm` | создание / подтверждение заказов поставщику |
+| POST | `/api/v1/purchase-orders/{id}/service-act` | черновик акта услуг поставщика по заказу (D354) |
 | GET | `/api/v1/stock-documents?kind=&status=&from=&to=&warehouseId=&search=`, `/api/v1/stock-documents/{id}` | просмотр складских документов (в области складов) |
 | GET | `/api/v1/stock-documents/options?kind=Receipt` | склады, контрагенты и причины для нового документа |
 | POST | `/api/v1/stock-documents` | создание складских документов; `post: true` — ещё и проведение |

@@ -710,7 +710,6 @@
   "Отгрузка": "Joʻnatish",
   "Отгрузка покупателю": "Xaridorga joʻnatish",
   "Отгрузки": "Joʻnatishlar",
-  "Отгрузки и возвраты": "Joʻnatishlar va qaytarishlar",
   "Отказ в доступе": "Kirish rad etildi",
   "Отказаться от черновика": "Qoralamadan voz kechish",
   "Отклонения инвентаризации": "Inventarizatsiya ogʻishlari",
@@ -903,7 +902,6 @@
   "Поступление": "Kirim",
   "Поступление, перемещение, списание": "Kirim, koʻchirish, hisobdan chiqarish",
   "Поступления": "Kirimlar",
-  "Поступления и возвраты": "Kirimlar va qaytarishlar",
   "Потребность на выпуск": "Chiqarish uchun ehtiyoj",
   "Пояснение": "Izoh",
   "Пояснение недостачи": "Kamomad izohi",
@@ -3048,5 +3046,8 @@
   "УПД печатается по проведённой отгрузке или акту оказания услуг по заказу покупателя.": "UPD xaridor buyurtmasi bo‘yicha o‘tkazilgan jo‘natish yoki xizmat ko‘rsatish dalolatnomasi asosida chop etiladi.",
   "Услуги поставщика": "Yetkazib beruvchi xizmatlari",
   "Этих услуг нет в заказе: {0}. В акт входят только услуги заказа.": "Bu xizmatlar buyurtmada yo‘q: {0}. Dalolatnomaga faqat buyurtma xizmatlari kiradi.",
-  "услуге (0)": "xizmat (0)"
+  "услуге (0)": "xizmat (0)",
+  "В документе есть комплекты: загрузка из Excel заменила бы их строки. Измените строки вручную.": "Hujjatda to‘plamlar bor: Excel’dan yuklash ularning qatorlarini almashtirib yuboradi. Qatorlarni qo‘lda o‘zgartiring.",
+  "Отгрузки, акты и возвраты": "Jo‘natmalar, dalolatnomalar va qaytarishlar",
+  "Поступления, акты и возвраты": "Kirimlar, dalolatnomalar va qaytarishlar"
 }

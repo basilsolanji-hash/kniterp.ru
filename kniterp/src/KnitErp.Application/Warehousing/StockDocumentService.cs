@@ -424,6 +424,12 @@ public sealed class StockDocumentService(
             throw new BusinessRuleException("stock.service_act.import", "Строки акта услуг берутся из заказа — загрузка из Excel для акта не используется.");
         }
 
+        if (doc.Lines.Any(l => l.BundleItemId != null))
+        {
+            // Аудит D352: загрузка заменяет все строки — строки разворота комплектов (состав на момент отгрузки) молча пропали бы.
+            throw new BusinessRuleException("stock.import.bundles", "В документе есть комплекты: загрузка из Excel заменила бы их строки. Измените строки вручную.");
+        }
+
         var (rows, lines) = await StockEntry.ParseLinesAsync(db, spreadsheet, ctx.OrganizationId, file, ct);
         if (rows.Any(r => r.Errors.Count > 0))
         {
