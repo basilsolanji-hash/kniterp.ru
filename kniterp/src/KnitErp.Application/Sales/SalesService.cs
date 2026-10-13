@@ -1091,6 +1091,19 @@ public sealed partial class SalesService(
         var moved = docs.GroupBy(d => orders[d.OrderId].CustomerId).ToDictionary(g => g.Key, g => (
             Shipped: Money.Round(g.Where(d => d.Kind == StockOperationKind.Shipment).Sum(d => d.Quantity * orders[d.OrderId].UnitCostWithVat(d.ItemId))),
             Returned: Money.Round(g.Where(d => d.Kind == StockOperationKind.CustomerReturn).Sum(d => d.Quantity * orders[d.OrderId].UnitCostWithVat(d.ItemId)))));
+        // D1146: вводный остаток — долг покупателя к отгруженному, его аванс — к оплаченному.
+        foreach (var (customer, list) in await SalesOpeningBalances.ByCustomerAsync(db, org, customerId is { } one ? [one] : null, asOf, ct))
+        {
+            var debt = list.Where(b => b.Amount > 0).Sum(b => b.Amount);
+            var advance = -list.Where(b => b.Amount < 0).Sum(b => b.Amount);
+            var m = moved.GetValueOrDefault(customer);
+            moved[customer] = (m.Shipped + debt, m.Returned);
+            if (advance > 0)
+            {
+                paid[customer] = paid.GetValueOrDefault(customer) + advance;
+            }
+        }
+
         var customerIds = moved.Keys.Union(paid.Keys).ToList();
         var names = await db.Counterparties.AsNoTracking().Where(c => customerIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         return customerIds.Select(id => new CustomerBalanceDto(id, names[id],

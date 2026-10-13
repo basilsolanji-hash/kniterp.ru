@@ -5856,5 +5856,20 @@
   "по умолчанию: «{0}»": "standart: «{0}»",
   "штрихкод {0}": "shtrix-kod {0}",
   "Показаны только ваши покупатели и покупатели вашего подразделения — так настроено для вашей роли.": "Faqat sizning xaridorlaringiz va boʻlinmangiz xaridorlari koʻrsatilgan — rolingiz uchun shunday sozlangan.",
-  "Показаны только заказы, где ответственный — вы или сотрудник вашего подразделения, — так настроено для вашей роли.": "Faqat masʼuli — siz yoki boʻlinmangiz xodimi boʻlgan buyurtmalar koʻrsatilgan — rolingiz uchun shunday sozlangan."
+  "Показаны только заказы, где ответственный — вы или сотрудник вашего подразделения, — так настроено для вашей роли.": "Faqat masʼuli — siz yoki boʻlinmangiz xodimi boʻlgan buyurtmalar koʻrsatilgan — rolingiz uchun shunday sozlangan.",
+  "15 000 или −2 000": "15 000 yoki −2 000",
+  "Ввести остаток": "Qoldiqni kiritish",
+  "Вводный остаток": "Boshlangʻich qoldiq",
+  "Вводный остаток аннулирован.": "Boshlangʻich qoldiq bekor qilindi.",
+  "Вводный остаток расчётов": "Hisob-kitoblarning boshlangʻich qoldigʻi",
+  "Вводный остаток расчётов с покупателем введён или аннулирован": "Xaridor bilan hisob-kitoblarning boshlangʻich qoldigʻi kiritildi yoki bekor qilindi",
+  "Вводный остаток сохранён.": "Boshlangʻich qoldiq saqlandi.",
+  "Ввёл": "Kiritgan",
+  "Остаток уже аннулирован.": "Qoldiq allaqachon bekor qilingan.",
+  "По этому юрлицу остаток уже введён — аннулируйте его с причиной и введите новый.": "Ushbu yuridik shaxs boʻyicha qoldiq allaqachon kiritilgan — uni sababini koʻrsatib bekor qiling va yangisini kiriting.",
+  "Сальдо на дату начала учёта: долг покупателя — со знаком плюс, его аванс — со знаком минус. Учитывается в долге, кредитном контроле, дебиторке и акте сверки.": "Hisob boshlangan sanadagi saldo: xaridor qarzi — plyus belgisi bilan, uning avansi — minus belgisi bilan. Qarz, kredit nazorati, debitorlik qarzi va solishtirma dalolatnomasida hisobga olinadi.",
+  "Сальдо — не ноль, до копеек: долг покупателя со знаком плюс, его аванс — со знаком минус.": "Saldo — nol emas, tiyingacha: xaridor qarzi plyus belgisi bilan, uning avansi — minus belgisi bilan.",
+  "Укажите дату остатка.": "Qoldiq sanasini koʻrsating.",
+  "аванс покупателя": "xaridor avansi",
+  "долг покупателя": "xaridor qarzi"
 }

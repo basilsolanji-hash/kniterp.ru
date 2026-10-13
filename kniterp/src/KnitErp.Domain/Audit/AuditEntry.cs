@@ -260,6 +260,7 @@ public static class AuditActions
     public const string CustomerRefundCreated = "sales.refund.created";
     public const string CustomerRefundCancelled = "sales.refund.cancelled";
     public const string SalesAdvanceReleased = "sales.advance.released";
+    public const string CustomerOpeningBalanceChanged = "sales.opening_balance.changed"; // D1146
     public const string SalesMarkingChanged = "sales.marking.changed";
     // D1107, D1162, D1168–D1170 (продажи, аналитика): план продаж, каналы, отчёты маркетплейсов.
     public const string SalesPlanChanged = "sales.plan.changed";

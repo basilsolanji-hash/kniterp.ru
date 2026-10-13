@@ -8761,6 +8761,79 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("customer_mail_settings", "kniterp");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Sales.CustomerOpeningBalance", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<DateOnly>("BalanceDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("CancelledByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CustomerId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsCancelled")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("LegalEntityId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CancelledByUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "LegalEntityId");
+
+                    b.HasIndex("OrganizationId", "CustomerId", "LegalEntityId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_customer_opening_balances_active")
+                        .HasFilter("[IsCancelled] = 0");
+
+                    b.ToTable("customer_opening_balances", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_customer_opening_balances_amount", "[Amount] <> 0");
+
+                            t.HasCheckConstraint("ck_customer_opening_balances_cancelled", "([IsCancelled] = 1 AND [CancelledByUserId] IS NOT NULL AND [CancelReason] IS NOT NULL) OR ([IsCancelled] = 0 AND [CancelledByUserId] IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Sales.CustomerPayment", b =>
                 {
                     b.Property<long>("Id")
@@ -15197,6 +15270,44 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_customer_mail_settings_counterparty");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Sales.CustomerOpeningBalance", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CancelledByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_customer_opening_balances_cancelled_by");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_customer_opening_balances_created_by");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Catalog.Counterparty", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "CustomerId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_customer_opening_balances_customer");
+
+                    b.HasOne("KnitErp.Domain.Organizations.LegalEntity", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "LegalEntityId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_customer_opening_balances_entity");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Sales.CustomerPayment", b =>
