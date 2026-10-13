@@ -30,7 +30,7 @@ public sealed record DevStagePlan(IReadOnlyDictionary<DevStage, (int PlanDays, b
 /// Модели разработки (D701–D708): список и доска по стадиям, карточка, задание, исполнители, стадии и их история, файлы, «Мои задачи».
 /// Смотреть — «Разработка: просмотр», менять — «Разработка: изменение», утверждать — «Разработка: утверждение».
 /// </summary>
-public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)
+public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IImageShrinker? images = null)
 {
     public const int DefaultPageSize = 50;
 
@@ -396,6 +396,13 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             var last = await db.DevFiles.AsNoTracking()
                 .Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId && f.Kind == kind && f.FileName == name)
                 .MaxAsync(f => (int?)f.Version, ct) ?? 0;
+            // D729 (ТЗ §13): фото и образцы для вдохновения — до 2000 px по длинной стороне; эскизы, рисунки и документы не трогаем.
+            if (kind is DevFileKind.Photo or DevFileKind.Inspiration && images is not null && DevFileTypes.Detect(kind, name, content) is { } type
+                && images.Shrink(content, type, PhotoMaxSide) is { } smaller && smaller.Length > 0)
+            {
+                content = smaller;
+            }
+
             var file = DevFile.Create(ctx.OrganizationId, modelId, kind, name, content, last + 1, comment, clock.UtcNow, ctx.UserId);
             configure?.Invoke(file);
             db.DevFiles.Add(file);
@@ -490,6 +497,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             .OrderByDescending(t => t.ResponsibleNow).ThenByDescending(t => t.IsOverdue).ThenBy(t => t.StageDue ?? DateOnly.MaxValue)
             .ThenByDescending(t => t.Priority).ToList();
     }
+
+    public const int PhotoMaxSide = 2000;
 
     /// <summary>Номер счётчика «dev.model-000001» → «М-00001».</summary>
     public static string FormatNumber(string counter) =>

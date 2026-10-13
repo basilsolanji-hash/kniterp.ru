@@ -4,7 +4,7 @@
 @inject DevTechService Tech
 
 @* Детали модели (D711): у каждой — техзадание дессинатора и техкарта вязания для цеха. Сверху — пряжа и вязка модели (ТЗ §8). *@
-<DevKnittingBlock ModelId="ModelId" />
+<DevKnittingBlock ModelId="ModelId" OnModelChanged="OnModelChanged" />
 @if (_message is not null)
 {
     <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
@@ -69,6 +69,10 @@ else
 
     [Parameter]
     public bool CanEdit { get; set; }
+
+    /// <summary>Модель изменилась (пряжа и вязка) — карточка перечитывает её.</summary>
+    [Parameter]
+    public EventCallback OnModelChanged { get; set; }
 
     private IReadOnlyList<DevDetailRowDto>? _rows;
     private string? _name;

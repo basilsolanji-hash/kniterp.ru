@@ -111,8 +111,21 @@ public sealed class DevHandoffService(
 
             var programs = await db.DevFiles.AsNoTracking().Where(f => f.OrganizationId == org && f.ModelId == modelId && f.Kind == DevFileKind.MachineProgram)
                 .Select(f => f.FileName).Distinct().ToListAsync(ct);
-            var comment = $"Из разработки: модель {m.Number} «{m.Name}»" + (programs.Count == 0 ? "" : $"; программы: {string.Join(", ", programs)}")
-                          + (plan.Warnings.Count == 0 ? "" : $"; проверить нормы: {plan.Warnings.Count} замеч.");
+            // D729: рисунок модели — номер и версия; программы его версии. Сами файлы — в модели и рисунке (в техкарте производства вложений нет),
+            // путь к ним — в комментарии.
+            var pattern = m.PatternId is { } pid
+                ? await db.DevPatterns.AsNoTracking().Where(p => p.Id == pid && p.OrganizationId == org).Select(p => p.Number).SingleOrDefaultAsync(ct)
+                : null;
+            if (m.PatternId is { } pid2 && m.PatternVersion is { } pv)
+            {
+                programs.AddRange(await db.DevPatternFiles.AsNoTracking()
+                    .Where(f => f.OrganizationId == org && f.PatternId == pid2 && f.Version == pv && f.Kind == DevPatternFileKind.Program)
+                    .Select(f => f.FileName).Distinct().ToListAsync(ct));
+            }
+
+            var comment = $"Из разработки: модель {m.Number} «{m.Name}»" + (pattern is null ? "" : $"; рисунок {pattern}, версия {m.PatternVersion}")
+                          + (programs.Count == 0 ? "" : $"; программы: {string.Join(", ", programs.Distinct())}")
+                          + (plan.Warnings.Count == 0 ? "" : $"; проверить нормы: {plan.Warnings.Count} замеч.") + $"; файлы: dev/models/{m.Id}?tab=files";
             var cardId = await techCards.CreateAsync(itemId, 1, comment.Length > 500 ? comment[..500] : comment, ct);
             foreach (var line in plan.Lines)
             {

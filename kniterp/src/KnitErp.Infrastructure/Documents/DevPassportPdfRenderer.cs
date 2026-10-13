@@ -92,6 +92,27 @@ public sealed class DevPassportPdfRenderer : IDevPassportRenderer
             }
         }
 
+        if (p.Pattern is { } pt)
+        {
+            Heading(sec, "Рисунок");
+            var para = sec.AddParagraph();
+            para.AddFormattedText($"{pt.Number} «{pt.Name}», версия {pt.Version}", TextFormat.Bold);
+            para.AddText(" · " + string.Join(" · ", new[]
+            {
+                pt.Kind, pt.RapportWidth is { } rw ? $"раппорт {rw} петель × {pt.RapportHeight?.ToString(Ru) ?? "—"} рядов" : null,
+                pt.MaxFloatMm is { } f ? $"протяжка до {f.ToString("0.#", Ru)} мм" : null, pt.MachineClass, pt.Colorway is null ? null : $"колорит «{pt.Colorway}»",
+            }.OfType<string>()));
+            if (pt.Colors.Count > 0)
+            {
+                var t = Grid(sec, 12, 50, 24, 26, 74);
+                Header(t, "№", "Цвет", "Доля, %", "Нитеводитель", "Пряжа колорита");
+                foreach (var c in pt.Colors)
+                {
+                    Row(t, c.No.ToString(Ru), c.Name, c.Share?.ToString("0.##", Ru) ?? "—", c.Feeder?.ToString(Ru) ?? "—", c.Yarn ?? "—");
+                }
+            }
+        }
+
         if (p.Palette.Count > 0)
         {
             Heading(sec, "Палитра и пряжа");

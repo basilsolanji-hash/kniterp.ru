@@ -57,6 +57,10 @@
     [Parameter, EditorRequired]
     public long ModelId { get; set; }
 
+    /// <summary>После сохранения карточка перечитывает модель — у неё новая версия строки.</summary>
+    [Parameter]
+    public EventCallback OnModelChanged { get; set; }
+
     private DevModelDto? _m;
     private bool _editing;
     private string? _dye;
@@ -101,9 +105,11 @@
         _busy = true;
         _message = null;
         _isError = false;
+        var saved = false;
         try
         {
             await Gate.Run(() => Models.SetKnittingAsync(ModelId, _dye, _loops, _rows, _shrinkage, _m!.RowVersion));
+            saved = true;
             _message = L("Пряжа и вязка сохранены.");
             _editing = false;
         }
@@ -122,6 +128,11 @@
             {
                 _busy = false;
             }
+        }
+
+        if (saved)
+        {
+            await OnModelChanged.InvokeAsync();
         }
     }
 }

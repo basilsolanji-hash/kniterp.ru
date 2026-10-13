@@ -5703,7 +5703,6 @@
   "Сравнить": "Solishtirish",
   "Сравнить выбранные": "Tanlanganlarni solishtirish",
   "Фото образца № {0}": "№ {0} namuna fotosi",
-  "Фото — снимки модели, загруженные от создания образца до создания следующего.": "Foto — namuna yaratilganidan keyingisi yaratilgunga qadar yuklangan model suratlari.",
   "{0} петель × {1} рядов": "{0} halqa × {1} qator",
   "{0}, {1}: пряжа": "{0}, {1}: ip",
   "{0}, {1}: цвет на экране": "{0}, {1}: ekrandagi rang",
@@ -5868,5 +5867,16 @@
   "Точки измерения по категории изделия: в разделе «Размеры» модели кнопка «Заполнить по шаблону категории» добавит недостающие точки в табель мер.": "Buyum toifasi boʻyicha oʻlchash nuqtalari: modelning «Oʻlchamlar» boʻlimida «Toifa shabloni boʻyicha toʻldirish» tugmasi yetishmayotgan nuqtalarni oʻlchamlar jadvaliga qoʻshadi.",
   "Убрать точку {0}": "{0} nuqtasini olib tashlash",
   "Усадка после ВТО, %": "NIO dan keyingi kirishish, %",
-  "Шаблоны табеля мер": "Oʻlchamlar jadvali shablonlari"
+  "Шаблоны табеля мер": "Oʻlchamlar jadvali shablonlari",
+  "Версий рисунка на модель": "Modelga naqsh versiyalari",
+  "Возвращены": "Qaytarilgan",
+  "Выберите в модели рисунок и колорит — тогда можно посчитать другой колорит.": "Modelda naqsh va koloritni tanlang — shunda boshqa koloritni hisoblash mumkin.",
+  "Колорит рисунка": "Naqsh koloriti",
+  "Оставлены или проданы": "Qoldirilgan yoki sotilgan",
+  "Переданы": "Topshirilgan",
+  "Повторное использование рисунков": "Naqshlardan qayta foydalanish",
+  "Пока ни один рисунок не выбран в двух и более моделях.": "Hozircha birorta naqsh ikki yoki undan ortiq modelda tanlanmagan.",
+  "У заказчиков за период": "Davr ichida buyurtmachilarda",
+  "как в модели": "modeldagidek",
+  "моделей": "model"
 }

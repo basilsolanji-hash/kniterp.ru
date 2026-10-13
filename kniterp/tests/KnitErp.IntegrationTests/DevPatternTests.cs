@@ -170,6 +170,85 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
         await Assert.ThrowsAnyAsync<Exception>(() => db.Database.ExecuteSqlRawAsync("UPDATE [kniterp].[dev_pattern_files] SET [FileName] = 'x' WHERE [PatternId] = {0}", pattern));
     }
 
+    /// <summary>
+    /// D729: сценарий «другой колорит» в себестоимости, рисунок в техпаспорте, повторное использование рисунков в аналитике, фото до 2000 px.
+    /// </summary>
+    [SqlFact]
+    public async Task Colorway_cost_scenario_passport_reuse_and_photo_shrink()
+    {
+        var org = await CreateOrganizationAsync();
+        await using var all = host.As(org.OwnerUserId, org.OrganizationId);
+        var user = new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress };
+        var guard = new AccessGuard(all.Db, user, host.Clock);
+        var models = new DevModelService(all.Db, guard, user, host.Clock, new KnitErp.Infrastructure.Documents.SkiaImageShrinker());
+        var tech = new DevTechService(all.Db, guard, user, host.Clock, models);
+        var shop = new DevShopService(all.Db, guard, user, host.Clock, tech);
+        var patterns = new DevPatternService(all.Db, guard, user, host.Clock);
+        var costs = new DevCostService(all.Db, guard, user, host.Clock);
+        var settings = new DevSettingsService(all.Db, guard, user, host.Clock);
+
+        var kg = (await all.Catalog.ListUnitsAsync()).Single(u => u.Code == "166").Id;
+        var milk = await all.Catalog.CreateItemAsync(new ItemCommand("ПР-М", "Хлопок молочный", ItemType.RawMaterial, kg, null));
+        var red = await all.Catalog.CreateItemAsync(new ItemCommand("ПР-К", "Хлопок красный", ItemType.RawMaterial, kg, null));
+        var e7 = await settings.AddLookupAsync(DevLookupKind.MachineClass, "E7", 8);
+        var pattern = await patterns.CreateAsync(new DevPatternValues("Полосы", DevPatternKind.Stripes, 2, 2, null, e7, 20, null, null, null, null));
+        var color = await patterns.AddColorAsync(pattern, "Фон", 100, 1);
+        var p = await patterns.GetAsync(pattern);
+        var main = p.Colorways[0].Id;
+        var redway = await patterns.AddColorwayAsync(pattern, "Красный");
+        await patterns.SetYarnAsync(main, color, milk, null);
+        await patterns.SetYarnAsync(redway, color, red, null);
+
+        // Модель: палитра с той же пряжей, деталь с весом — норма пряжи; рисунок и колорит «Основной».
+        var model = await models.CreateAsync(new DevModelHeader("Шарф в полоску", null, DevCategory.Scarf, DevAudience.Unisex, false, true, null, null,
+            new DateOnly(2026, 12, 1), DevPriority.Normal, new Dictionary<DevRole, long?>()));
+        await tech.AddColorAsync(model, "Основной", milk, null, null);
+        var detail = await tech.AddDetailAsync(model, "Полотно", 1);
+        var d = await tech.DetailAsync(detail);
+        await tech.SetKnittingAsync(detail, null, null, null, 200m, null, d.RowVersion);
+        await patterns.LinkToModelAsync(model, pattern, 1, main, (await models.GetAsync(model)).RowVersion);
+
+        var basic = await costs.CostingAsync(model);
+        Assert.Contains(basic.Lines, l => l.ItemId == milk);
+        Assert.Equal(new[] { "Основной", "Красный" }, basic.Colorways!.Select(c => c.Name));
+        var other = await costs.CostingAsync(model, new DevCostScenario(ColorwayId: redway));
+        Assert.Contains(other.Lines, l => l.ItemId == red && l.OriginalItemId == milk);
+        Assert.DoesNotContain(other.Lines, l => l.ItemId == milk);
+
+        // Паспорт: рисунок с раппортом и пряжей колорита.
+        var passport = await new DevPassportService(all.Db, guard, host.Clock, models, tech, shop).BuildAsync(model);
+        Assert.Equal(("Р-00001", 1, "Основной"), (passport.Pattern!.Number, passport.Pattern.Version, passport.Pattern.Colorway!));
+        Assert.Contains("ПР-М", passport.Pattern.Colors.Single().Yarn);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(new KnitErp.Infrastructure.Documents.DevPassportPdfRenderer().Render(passport), 0, 4));
+
+        // Аналитика: рисунок во второй модели — повторное использование.
+        var second = await models.CreateAsync(new DevModelHeader("Шапка в полоску", null, DevCategory.Hat, DevAudience.Unisex, false, true, null, null,
+            new DateOnly(2026, 12, 1), DevPriority.Normal, new Dictionary<DevRole, long?>()));
+        await patterns.LinkToModelAsync(second, pattern, 1, redway, (await models.GetAsync(second)).RowVersion);
+        var report = await new DevAnalyticsService(all.Db, guard, host.Clock, SqlTestHost.Spreadsheet).ReportAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 9));
+        Assert.Equal(2, Assert.Single(report.PatternReuse!).Models);
+
+        // Фото 3000×1200 хранится уменьшенным до 2000 px по длинной стороне; маленькое — как загружено.
+        byte[] Png(int w, int h)
+        {
+            using var bmp = new SkiaSharp.SKBitmap(w, h);
+            bmp.Erase(SkiaSharp.SKColors.Teal);
+            using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+            return img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100).ToArray();
+        }
+
+        var big = await models.AddFileAsync(model, DevFileKind.Photo, "big.png", Png(3000, 1200), null);
+        var small = Png(800, 600);
+        var smallId = await models.AddFileAsync(model, DevFileKind.Photo, "small.png", small, null);
+        var stored = (await models.GetFileAsync(big)).Content;
+        using (var bmp = SkiaSharp.SKBitmap.Decode(stored))
+        {
+            Assert.Equal((2000, 800), (bmp.Width, bmp.Height));
+        }
+
+        Assert.Equal(small, (await models.GetFileAsync(smallId)).Content);
+    }
+
     private async Task<CreatedOrganization> CreateOrganizationAsync()
     {
         var inn = NextValidInn();
