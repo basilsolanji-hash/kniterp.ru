@@ -29,7 +29,6 @@ internal sealed class DevMachineConfiguration : IEntityTypeConfiguration<DevMach
     {
         b.ToTable("dev_machines", t =>
         {
-            t.HasCheckConstraint("ck_dev_machines_brand", "[Brand] IN (1, 2, 9)");
             t.HasCheckConstraint("ck_dev_machines_status", "[Status] BETWEEN 1 AND 3");
             t.HasCheckConstraint("ck_dev_machines_gauge", $"[Gauge] BETWEEN 1 AND {DevMachine.MaxGauge}");
             t.HasCheckConstraint("ck_dev_machines_feeders", $"[FeederCount] BETWEEN 1 AND {DevMachine.MaxFeeders}");
@@ -39,9 +38,14 @@ internal sealed class DevMachineConfiguration : IEntityTypeConfiguration<DevMach
         b.Property(x => x.Name).HasMaxLength(DevMachine.NameMaxLength).IsRequired();
         b.Property(x => x.Model).HasMaxLength(DevMachine.ModelMaxLength);
         b.Property(x => x.InventoryNumber).HasMaxLength(DevMachine.InventoryMaxLength);
+        b.Property(x => x.Gauge).HasPrecision(4, 1);
         b.Property(x => x.RowVersion).IsRowVersion();
-        b.Ignore(x => x.Parameters);
         DevKeys.Org(b);
+        // D734: производитель и тип — записи справочника разработки своей организации.
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.BrandId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_machines_brand");
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.TypeId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_machines_type");
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_machines_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.Name }).IsUnique().HasDatabaseName("ux_dev_machines_name");
     }

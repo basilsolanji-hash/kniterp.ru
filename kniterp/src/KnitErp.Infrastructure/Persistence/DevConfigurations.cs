@@ -168,7 +168,7 @@ internal sealed class DevLookupConfiguration : IEntityTypeConfiguration<DevLooku
     {
         b.ToTable("dev_lookups", t =>
         {
-            t.HasCheckConstraint("ck_dev_lookups_kind", "[Kind] BETWEEN 1 AND 7");
+            t.HasCheckConstraint("ck_dev_lookups_kind", "[Kind] BETWEEN 1 AND 14");
             t.HasCheckConstraint("ck_dev_lookups_number", $"[Number] IS NULL OR [Number] BETWEEN 0 AND {DevLookup.MaxNumber}");
         });
         b.HasKey(x => x.Id);

@@ -3,6 +3,7 @@
 @using System.Globalization
 @inject DevGate Gate
 @inject DevShopService Shop
+@inject DevTechService Tech
 
 @*
     Размеры (D713) — экран конструктора: размерная сетка (образцы 1, 2, 3… или 42–52), размеры деталей по размерам (длина с машины, после ВТО,
@@ -24,6 +25,20 @@ else
         <div class="panel">
             <h2>@L("Размерная сетка")</h2>
             <div class="inline-form">
+                @if (_scales.Count > 0 && s.CanEdit)
+                {
+                    @* D734: размерная шкала из справочника заполняет поле — дальше можно поправить руками. *@
+                    <label>
+                        @L("Шкала")
+                        <select value="" @onchange="e => ApplyScale(e.Value?.ToString())">
+                            <option value="">@L("выбрать…")</option>
+                            @foreach (var sc in _scales)
+                            {
+                                <option value="@sc">@sc</option>
+                            }
+                        </select>
+                    </label>
+                }
                 <label>@L("Размеры через запятую") <input @bind="_grid" placeholder="1, 2, 3, 4" /></label>
                 <label>@L("Базовый размер") <input @bind="_base" style="max-width: 90px" /></label>
                 @if (s.CanEdit)
@@ -225,6 +240,18 @@ else
         {
             _loaded = ModelId;
             await LoadAsync();
+            _scales = await Gate.Run(() => Tech.SuggestionsAsync(DevLookupKind.SizeScale));
+        }
+    }
+
+    private IReadOnlyList<string> _scales = [];
+
+    /// <summary>«РФ женская: 40, 42, 44» → «40, 42, 44»; шкала без двоеточия подставляется целиком.</summary>
+    private void ApplyScale(string? scale)
+    {
+        if (!string.IsNullOrWhiteSpace(scale))
+        {
+            _grid = scale.Contains(':') ? scale[(scale.IndexOf(':') + 1)..].Trim() : scale.Trim();
         }
     }
 

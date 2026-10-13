@@ -2,7 +2,10 @@ using KnitErp.Domain.Common;
 
 namespace KnitErp.Domain.Development;
 
-/// <summary>Производитель вязальной машины (D710). Числа хранятся в базе.</summary>
+/// <summary>
+/// Коды встроенных производителей (D710). С D734 производитель — запись справочника «Производители оборудования» (код —
+/// <see cref="DevLookup.Number"/>), полный список — <see cref="DevLookupCatalog"/>.
+/// </summary>
 public enum DevMachineBrand : byte
 {
     Stoll = 1,
@@ -38,11 +41,16 @@ public sealed class DevMachine
     public long Id { get; private set; }
     public long OrganizationId { get; private set; }
     public string Name { get; private set; } = string.Empty;
-    public DevMachineBrand Brand { get; private set; }
+    /// <summary>Производитель — запись справочника «Производители оборудования» (D734).</summary>
+    public long BrandId { get; private set; }
+
+    /// <summary>Тип оборудования — запись справочника «Типы оборудования» (D734).</summary>
+    public long? TypeId { get; private set; }
+
     public string? Model { get; private set; }
 
-    /// <summary>Класс машины (E7, E12…) — игл на дюйм.</summary>
-    public int Gauge { get; private set; }
+    /// <summary>Класс машины (E1,5 … E18) — игл на дюйм, с шагом 0,1.</summary>
+    public decimal Gauge { get; private set; }
 
     public int FeederCount { get; private set; }
     public int? WidthCm { get; private set; }
@@ -66,10 +74,13 @@ public sealed class DevMachine
         _ => "Не работает",
     };
 
-    /// <summary>Параметры для программы и техкарты: «STOLL CMS 530 · E7 · 8 нитеводителей».</summary>
-    public string Parameters => string.Join(" · ", new[]
+    /// <summary>Класс машины для вывода: «E7», «E1,5».</summary>
+    public static string GaugeText(decimal gauge) => "E" + gauge.ToString("0.#", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+
+    /// <summary>Параметры для программы и техкарты: «Stoll CMS 530 · E7 · 8 нитеводителей»; производитель — название записи справочника.</summary>
+    public string Parameters(string? brand) => string.Join(" · ", new[]
     {
-        $"{BrandName(Brand)}{(Model is null ? "" : " " + Model)}", $"E{Gauge}", $"{FeederCount} нитеводителей",
+        $"{brand}{(Model is null ? "" : " " + Model)}".Trim(), GaugeText(Gauge), $"{FeederCount} нитеводителей",
         WidthCm is { } w ? $"{w} см" : null, Systems is { } s ? $"{s} сист." : null,
     }.Where(p => p is not null));
 
@@ -82,14 +93,14 @@ public sealed class DevMachine
 
     public void Set(DevMachineValues v)
     {
-        if (!Enum.IsDefined(v.Brand))
+        if (v.BrandId <= 0)
         {
             throw new BusinessRuleException("dev.machine.brand", "Выберите марку станка.");
         }
 
-        if (v.Gauge is < 1 or > MaxGauge)
+        if (v.Gauge is < 1 or > MaxGauge || decimal.Round(v.Gauge, 1) != v.Gauge)
         {
-            throw new BusinessRuleException("dev.machine.gauge", $"Класс машины — от 1 до {MaxGauge}.");
+            throw new BusinessRuleException("dev.machine.gauge", $"Класс машины — от 1 до {MaxGauge}, с шагом 0,1.");
         }
 
         if (v.FeederCount is < 1 or > MaxFeeders)
@@ -103,7 +114,8 @@ public sealed class DevMachine
         }
 
         Name = DomainText.Require(v.Name, NameMaxLength, "Название");
-        Brand = v.Brand;
+        BrandId = v.BrandId;
+        TypeId = v.TypeId;
         Model = DomainText.Optional(v.Model, ModelMaxLength, "Модель");
         Gauge = v.Gauge;
         FeederCount = v.FeederCount;
@@ -132,8 +144,8 @@ public sealed class DevMachine
     public void SetArchived(bool archived) => IsArchived = archived;
 }
 
-public sealed record DevMachineValues(string? Name, DevMachineBrand Brand, string? Model, int Gauge, int FeederCount, int? WidthCm, int? Systems,
-    string? InventoryNumber);
+public sealed record DevMachineValues(string? Name, long BrandId, string? Model, decimal Gauge, int FeederCount, int? WidthCm, int? Systems,
+    string? InventoryNumber, long? TypeId = null);
 
 /// <summary>Комментарий к станку (D710): «перенёс, плохо работает» — кто, когда, что и как изменилось состояние. Только вставка.</summary>
 public sealed class DevMachineNote

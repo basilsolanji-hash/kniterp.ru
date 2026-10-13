@@ -24,6 +24,8 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 
     private long Kind(DevPatternKind kind) => DevTestLookups.PatternKind(host, _org, kind);
 
+    private long Brand(DevMachineBrand brand) => DevTestLookups.Id(host, _org, DevLookupKind.MachineBrand, (int)brand);
+
     private static int _innSeed = 972_000_000;
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
@@ -64,8 +66,8 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         await using (var k = As(org.OwnerUserId, org.OrganizationId))
         {
             // Справочники: станок, переплетение, операции, пряжа в номенклатуре.
-            machineId = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №3", DevMachineBrand.Stoll, "CMS 530", 7, 8, 130, 2, null));
-            var weave = await k.Settings.AddLookupAsync(DevLookupKind.Weave, "Ластик 2×2", null);
+            machineId = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №3", Brand(DevMachineBrand.Stoll), "CMS 530", 7, 8, 130, 2, null));
+            var weave = await k.Settings.AddLookupAsync(DevLookupKind.Weave, "Ластик 2×2 плотный", null);
             op = await k.Shop.AddOperationTypeAsync(new DevOperationValues("Вязание", "шт", 12.5m, 3m, 1));
             await k.Shop.AddOperationTypeAsync(new DevOperationValues("Упаковка в короба", "шт", 1m, 0.2m, 5));
             var kg = (await k.All.Catalog.ListUnitsAsync()).Single(u => u.Code == "166").Id;
@@ -149,13 +151,13 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 
             // Станок с занятым 8-м нитеводителем нельзя сменить на 6-нитеводительный.
             await using var owner = As(org.OwnerUserId, org.OrganizationId);
-            var small = await owner.Tech.CreateMachineAsync(new DevMachineValues("Shima №1", DevMachineBrand.ShimaSeiki, null, 12, 6, null, null, null));
+            var small = await owner.Tech.CreateMachineAsync(new DevMachineValues("Shima №1", Brand(DevMachineBrand.ShimaSeiki), null, 12, 6, null, null, null));
             d = await k.Tech.DetailAsync(front);
             Assert.Equal("dev.threading.feeder", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Tech.SetKnittingAsync(front, small, d.WeaveId, 180, 100m, d.Notes, d.RowVersion))).Code);
 
             // Дессинатор не меняет справочник станков, но пишет журнал станка.
-            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Tech.CreateMachineAsync(new DevMachineValues("Чужой", DevMachineBrand.Other, null, 5, 4, null, null, null)));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Tech.CreateMachineAsync(new DevMachineValues("Чужой", Brand(DevMachineBrand.Other), null, 5, 4, null, null, null)));
             await k.Tech.AddMachineNoteAsync(machineId, "перенёс, плохо работает", DevMachineStatus.Limited);
         }
 
@@ -170,7 +172,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var f8 = card.Feeders[0].Left!;
             Assert.Equal(("доп.1", "Хлопок 20/1 красный", 4, true), (f8.Yarn, f8.ItemName!, f8.Ends, f8.Paraffin));
             Assert.True(card.Feeders.Single(f => f.Feeder == 4).Right!.Elastic);
-            Assert.Equal(("Ластик 2×2", 180, DevMachineStatus.Limited), (card.Weave!, card.PlanKnitSeconds!.Value, card.MachineStatus!.Value));
+            Assert.Equal(("Ластик 2×2 плотный", 180, DevMachineStatus.Limited), (card.Weave!, card.PlanKnitSeconds!.Value, card.MachineStatus!.Value));
             // Размеры и упаковка — во вкладке «Размеры», операции — во вкладке «Операции» (в техкарту вязания не входят, D719).
             var sz = await k.Shop.SizesAsync(modelId);
             Assert.Equal("40 × 30 × 30 см", sz.PackBox);
@@ -223,7 +225,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             Assert.Equal(png, passport.Sketch);
             Assert.Equal(new[] { "Основной", "доп.1" }, passport.Palette.Select(c => c.Label));
             Assert.Equal(new[] { 4, 4 }, passport.Details.Select(d => d.Feeders.Count)); // 5 позиций на нитеводителях 8, 5 (обе стороны), 4, 1
-            Assert.Equal(("Ластик 2×2", "podvyaz.sin, версия 1"), (passport.Details[0].Weave!, passport.Details[0].Program!));
+            Assert.Equal(("Ластик 2×2 плотный", "podvyaz.sin, версия 1"), (passport.Details[0].Weave!, passport.Details[0].Program!));
             Assert.Equal(new[] { 14m, 16m, 18m, 20m }, passport.Sizes.Select(z => passport.Measures.Single().Values[z.Id]));
             Assert.Equal(new[] { "Вязание", "Убрать боковые нитки", "Упаковка в короба" }, passport.Operations.Select(o => o.Name));
             Assert.Equal("40 × 30 × 30 см", passport.PackBox);
@@ -262,7 +264,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         long detail, machine, model;
         await using (var k = As(a.OwnerUserId, a.OrganizationId))
         {
-            machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №1", DevMachineBrand.Stoll, null, 7, 8, null, null, null));
+            machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №1", Brand(DevMachineBrand.Stoll), null, 7, 8, null, null, null));
             model = await k.Models.CreateAsync(Header("Шапка"));
             detail = await k.Tech.AddDetailAsync(model, "Полотно", 1);
         }
@@ -304,7 +306,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         long model, detail, machine, sample;
         await using (var k = As(a.OwnerUserId, a.OrganizationId))
         {
-            machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №5", DevMachineBrand.Stoll, "CMS 530", 7, 8, null, null, null));
+            machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №5", Brand(DevMachineBrand.Stoll), "CMS 530", 7, 8, null, null, null));
             model = await k.Models.CreateAsync(Header("Шарф"));
             detail = await k.Tech.AddDetailAsync(model, "Полотно", 2);
             await k.Shop.SetSizeGridAsync(model, ["S", "M"], null);
@@ -444,7 +446,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             var main = await k.Tech.AddColorAsync(model, "Основной", cotton, null, null);
             var extra = await k.Tech.AddColorAsync(model, "доп.1", red, null, null);
             var detail = await k.Tech.AddDetailAsync(model, "Полотно", 2);
-            var machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №9", DevMachineBrand.Stoll, null, 7, 8, null, null, null));
+            var machine = await k.Tech.CreateMachineAsync(new DevMachineValues("STOLL №9", Brand(DevMachineBrand.Stoll), null, 7, 8, null, null, null));
             await k.Tech.SetKnittingAsync(detail, machine, null, 180, 100m, null, (await k.Tech.DetailAsync(detail)).RowVersion);
             await k.Tech.SetThreadingAsync(detail, [new DevThreadingRow(1, DevFeederSide.Left, main, null, 2, true, null, false),
                 new DevThreadingRow(2, DevFeederSide.Right, extra, null, 1, false, "N", false)], (await k.Tech.DetailAsync(detail)).RowVersion);

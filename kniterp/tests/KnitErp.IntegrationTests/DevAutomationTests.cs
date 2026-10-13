@@ -137,14 +137,14 @@ public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTest
 
         // Встроенные значения созданы организации при первом обращении; свой вариант — тут же в выборе модели.
         var options = await models.OptionsAsync();
-        Assert.Equal(Enum.GetValues<DevCategory>().Length, options.Categories!.Count);
-        var poncho = await settings.AddLookupAsync(DevLookupKind.Category, "Пончо", null);
+        Assert.Equal(DevLookupCatalog.Values(DevLookupKind.Category).Count, options.Categories!.Count);
+        var poncho = await settings.AddLookupAsync(DevLookupKind.Category, "Кейп", null);
         options = await models.OptionsAsync();
-        Assert.Contains(options.Categories!, c => c.Id == poncho && c.Name == "Пончо");
+        Assert.Contains(options.Categories!, c => c.Id == poncho && c.Name == "Кейп");
         var id = await models.CreateAsync(new DevModelHeader("", null, poncho, DevAudience.Women, false, true, null, null, new DateOnly(2026, 12, 1),
             DevPriority.Normal, new Dictionary<DevRole, long?>()));
         var m = await models.GetAsync(id);
-        Assert.Equal(("Пончо", "Пончо"), (m.CategoryName, m.Name)); // пустое название — по категории
+        Assert.Equal(("Кейп", "Кейп"), (m.CategoryName, m.Name)); // пустое название — по категории
 
         // Чужая категория и запись другого справочника — отказ.
         foreach (var wrong in new[] { foreignCategory, await settings.AddLookupAsync(DevLookupKind.Collection, "Лето", null) })
@@ -171,23 +171,70 @@ public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTest
         // Excel: своя категория по названию.
         var header = DevExchangeService.Columns.Take(12).ToList();
         var file = SqlTestHost.Spreadsheet.Write([new SheetData("Модели", header, [
-            (IReadOnlyList<string>)["Пончо «Туман»", "пончо", "", "", "", "", "", "нет", "", "", "", ""],
+            (IReadOnlyList<string>)["Кейп «Туман»", "кейп", "", "", "", "", "", "нет", "", "", "", ""],
         ])]);
         var plan = await exchange.PreviewAsync(new MemoryStream(file));
         Assert.True(plan.CanApply);
         Assert.Equal(1, (await exchange.ApplyAsync(plan.Rows)).Created);
-        Assert.Contains((await models.ListAsync(new DevModelFilter())).Rows, r => r.Name == "Пончо «Туман»" && r.CategoryName == "Пончо");
+        Assert.Contains((await models.ListAsync(new DevModelFilter())).Rows, r => r.Name == "Кейп «Туман»" && r.CategoryName == "Кейп");
 
         // Вид рисунка: свой вариант в выборе и в карточке рисунка; чужой — отказ.
         var user = new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress };
         var patterns = new DevPatternService(s.Db, new AccessGuard(s.Db, user, host.Clock), user, host.Clock);
-        Assert.Equal(Enum.GetValues<DevPatternKind>().Length, (await patterns.OptionsAsync()).Kinds.Count);
+        Assert.Equal(DevLookupCatalog.Values(DevLookupKind.PatternKind).Count, (await patterns.OptionsAsync()).Kinds.Count);
         var embroidery = await settings.AddLookupAsync(DevLookupKind.PatternKind, "Вышивка по трикотажу", null);
         Assert.Contains((await patterns.OptionsAsync()).Kinds, k => k.Id == embroidery);
         var pattern = await patterns.CreateAsync(new DevPatternValues("Цветы", embroidery, 10, 10, null, null, null, null, null, null, null));
         Assert.Equal("Вышивка по трикотажу", (await patterns.GetAsync(pattern)).KindName);
         Assert.Equal("dev.pattern.kind", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
             patterns.CreateAsync(new DevPatternValues("Чужой", poncho, 10, 10, null, null, null, null, null, null, null)))).Code);
+    }
+
+    /// <summary>
+    /// D734 (запрос владельца 13.10 §2): типовые справочники «Разработки» — организация получает каталог без дублей (повторно, после
+    /// переименования и при своей записи с тем же названием), станок — производитель и тип из справочника, класс E1,5, подсказки полей.
+    /// </summary>
+    [SqlFact]
+    public async Task Typical_lookups_are_seeded_once_and_machines_use_brand_and_type()
+    {
+        var org = await CreateOrganizationAsync();
+        var (_, settings, _, s) = As(org.OwnerUserId, org.OrganizationId);
+        await using var __ = s;
+        var user = new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress };
+        var guard = new AccessGuard(s.Db, user, host.Clock);
+        var models = new DevModelService(s.Db, guard, user, host.Clock);
+        var tech = new DevTechService(s.Db, guard, user, host.Clock, models);
+
+        // Своя запись заведена раньше каталога — встроенная с тем же названием не добавляется.
+        await settings.AddLookupAsync(DevLookupKind.Weave, "ластик 2×2", null);
+        var weaves = await settings.LookupsAsync(DevLookupKind.Weave);
+        Assert.Single(weaves, w => string.Equals(w.Name, "Ластик 2×2", StringComparison.OrdinalIgnoreCase));
+        foreach (var kind in Enum.GetValues<DevLookupKind>().Where(k => DevLookupCatalog.Values(k).Count > 0))
+        {
+            Assert.True((await settings.LookupsAsync(kind)).Count >= DevLookupCatalog.Values(kind).Count - (kind == DevLookupKind.Weave ? 1 : 0), kind.ToString());
+        }
+
+        // Переименованная встроенная не возвращается; повторное обращение ничего не дублирует.
+        var detail = (await settings.LookupsAsync(DevLookupKind.DetailName)).First(l => l.Name == "Спинка");
+        await settings.RenameLookupAsync(detail.Id, "Спинка изделия", detail.Number, detail.RowVersion);
+        var before = (await settings.LookupsAsync(DevLookupKind.DetailName, includeArchived: true)).Count;
+        var suggestions = await tech.SuggestionsAsync(DevLookupKind.DetailName);
+        Assert.Equal(before, (await settings.LookupsAsync(DevLookupKind.DetailName, includeArchived: true)).Count);
+        Assert.Contains("Спинка изделия", suggestions);
+        Assert.DoesNotContain("Спинка", suggestions);
+        Assert.Contains(await tech.SuggestionsAsync(DevLookupKind.SizeScale), x => x.StartsWith("РФ женская:", StringComparison.Ordinal));
+        Assert.Equal("dev.lookup.kind", (await Assert.ThrowsAsync<BusinessRuleException>(() => tech.SuggestionsAsync(DevLookupKind.Collection))).Code);
+
+        // Станок: свой производитель, тип из справочника, класс с десятыми; подсказки моделей у Shima Seiki.
+        var options = await tech.MachineOptionsAsync();
+        Assert.Contains("MACH2X", options.Brands.Single(b => b.Name == "Shima Seiki").Models);
+        var own = await settings.AddLookupAsync(DevLookupKind.MachineBrand, "Местный завод", null);
+        var circular = options.Types.Single(t => t.Name == "Кругловязальная").Id;
+        var id = await tech.CreateMachineAsync(new DevMachineValues("Круглый №1", own, "КО-30", 1.5m, 4, null, null, null, circular));
+        var m = (await tech.MachinesAsync()).Single(x => x.Id == id);
+        Assert.Equal(("Местный завод", "Кругловязальная", "Местный завод КО-30 · E1,5 · 4 нитеводителей"), (m.BrandName, m.TypeName!, m.Parameters));
+        Assert.Equal("dev.machine.brand", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            tech.CreateMachineAsync(new DevMachineValues("Чужая марка", circular, null, 7, 8, null, null, null)))).Code);
     }
 
     [SqlFact]

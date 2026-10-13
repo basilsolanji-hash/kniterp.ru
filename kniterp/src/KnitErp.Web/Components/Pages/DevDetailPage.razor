@@ -46,7 +46,10 @@ else
         <form @onsubmit="SaveKnittingAsync">
             <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !d.CanEdit)">
                 <div class="grid">
-                    <label>@L("Название детали") <input @bind="_name" maxlength="@DevDetail.NameMaxLength" required /></label>
+                    <label>@L("Название детали") <input @bind="_name" maxlength="@DevDetail.NameMaxLength" required list="dev-detail-names" /></label>
+                    @* D734: подсказки — справочники «Детали изделия» и «Виды пряжи»; ввод свободный. *@
+                    <datalist id="dev-detail-names">@foreach (var n in _detailNames) { <option value="@n"></option> }</datalist>
+                    <datalist id="dev-yarn-kinds">@foreach (var n in _yarnKinds) { <option value="@n"></option> }</datalist>
                     <label>@L("Деталей в изделии") <input type="number" min="1" max="@DevDetail.MaxQuantity" step="1" inputmode="numeric" @bind="_quantity" /></label>
                     <label>
                         @L("Станок")
@@ -54,7 +57,7 @@ else
                             <option value="">—</option>
                             @foreach (var m in d.Machines)
                             {
-                                <option value="@m.Id">@m.Name · E@(m.Gauge) · @L("{0} нитевод.", m.FeederCount)@(m.Status == DevMachineStatus.Working ? "" : " · " + L(m.StatusName))</option>
+                                <option value="@m.Id">@m.Name · @DevMachine.GaugeText(m.Gauge) · @L("{0} нитевод.", m.FeederCount)@(m.Status == DevMachineStatus.Working ? "" : " · " + L(m.StatusName))</option>
                             }
                         </select>
                     </label>
@@ -224,9 +227,18 @@ else
         }
     }
 
+    private IReadOnlyList<string> _detailNames = [];
+    private IReadOnlyList<string> _yarnKinds = [];
+
     private async Task LoadAsync()
     {
         _d = await Tech.DetailAsync(Id);
+        if (_detailNames.Count == 0)
+        {
+            _detailNames = await Tech.SuggestionsAsync(DevLookupKind.DetailName);
+            _yarnKinds = await Tech.SuggestionsAsync(DevLookupKind.YarnKind);
+        }
+
         _name = _d.Name;
         _quantity = _d.Quantity;
         _machine = _d.MachineId?.ToString() ?? string.Empty;
@@ -277,7 +289,7 @@ else
                 <label>@L("Режим") <input type="text" @bind="f.Mode" maxlength="@DevThreading.ModeMaxLength" /></label>
                 @if (f.Color.Length == 0)
                 {
-                    <label class="wide">@L("Какая нить") <input type="text" @bind="f.Label" maxlength="60" placeholder="@L("Разделитель (нейлон)")" /></label>
+                    <label class="wide">@L("Какая нить") <input type="text" @bind="f.Label" maxlength="60" placeholder="@L("Разделитель (нейлон)")" list="dev-yarn-kinds" /></label>
                 }
                 <div class="checks">
                     <label class="check"><input type="checkbox" @bind="f.Paraffin" /> @L("парафин")</label>

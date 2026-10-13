@@ -3,14 +3,20 @@ using KnitErp.Domain.Development;
 namespace KnitErp.Application.Development;
 
 public sealed record DevMachineDto(
-    long Id, string Name, DevMachineBrand Brand, string? Model, int Gauge, int FeederCount, int? WidthCm, int? Systems, string? InventoryNumber,
-    DevMachineStatus Status, bool IsArchived, string Parameters, int Programs, string? LastNote, DateTime? LastNoteAtUtc, byte[] RowVersion)
+    long Id, string Name, long BrandId, string BrandName, string? Model, decimal Gauge, int FeederCount, int? WidthCm, int? Systems, string? InventoryNumber,
+    DevMachineStatus Status, bool IsArchived, string Parameters, int Programs, string? LastNote, DateTime? LastNoteAtUtc, byte[] RowVersion,
+    long? TypeId = null, string? TypeName = null)
 {
     public string StatusName => DevMachine.StatusName(Status);
-    public string BrandName => DevMachine.BrandName(Brand);
 
-    public DevMachineValues ToValues() => new(Name, Brand, Model, Gauge, FeederCount, WidthCm, Systems, InventoryNumber);
+    public DevMachineValues ToValues() => new(Name, BrandId, Model, Gauge, FeederCount, WidthCm, Systems, InventoryNumber, TypeId);
 }
+
+/// <summary>Производитель для формы станка (D734): модели — подсказки поля «Модель» (своя модель вводится текстом).</summary>
+public sealed record DevBrandOptionDto(long Id, string Name, IReadOnlyList<string> Models);
+
+/// <summary>Списки формы станка (D734): производители и типы оборудования — справочники организации.</summary>
+public sealed record DevMachineOptionsDto(IReadOnlyList<DevBrandOptionDto> Brands, IReadOnlyList<DevOptionDto> Types);
 
 public sealed record DevMachineNoteDto(string Text, DevMachineStatus? StatusAfter, DateTime AtUtc, string User)
 {

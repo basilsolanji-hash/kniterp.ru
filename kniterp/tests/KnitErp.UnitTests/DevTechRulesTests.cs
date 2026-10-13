@@ -8,14 +8,16 @@ public sealed class DevTechRulesTests
 {
     private static readonly DateTime Now = new(2026, 10, 12, 9, 0, 0, DateTimeKind.Utc);
 
-    private static DevMachineValues Stoll(int feeders = 8) => new(" STOLL №3 ", DevMachineBrand.Stoll, "CMS 530", 7, feeders, 130, 2, "ИНВ-17");
+    private static DevMachineValues Stoll(int feeders = 8) => new(" STOLL №3 ", 1, "CMS 530", 7, feeders, 130, 2, "ИНВ-17");
 
     [Fact]
     public void Machine_parameters_and_status_log()
     {
         var m = DevMachine.Create(1, Stoll());
         Assert.Equal("STOLL №3", m.Name);
-        Assert.Equal("STOLL CMS 530 · E7 · 8 нитеводителей · 130 см · 2 сист.", m.Parameters);
+        Assert.Equal("Stoll CMS 530 · E7 · 8 нитеводителей · 130 см · 2 сист.", m.Parameters("Stoll"));
+        Assert.Equal("E1,5", DevMachine.GaugeText(1.5m));
+        Assert.Equal("dev.machine.gauge", Assert.Throws<BusinessRuleException>(() => DevMachine.Create(1, Stoll() with { Gauge = 7.25m })).Code);
         Assert.Equal(DevMachineStatus.Working, m.Status);
 
         var note = m.AddNote("перенёс, плохо работает", DevMachineStatus.Limited, Now, 5);

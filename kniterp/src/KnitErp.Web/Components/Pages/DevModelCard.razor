@@ -401,7 +401,8 @@ else
                             }
                             <label>@L("Тираж, шт") <input type="number" min="1" step="1" inputmode="numeric" @bind="_brief.RunQuantity" /></label>
                             <label>@L("Срок задания") <input type="date" @bind="_brief.DueDate" /></label>
-                            <label class="wide">@L("Состав") <input @bind="_brief.Composition" maxlength="@DevModel.ShortTextMaxLength" placeholder="@L("50% шерсть, 50% акрил")" /></label>
+                            <label class="wide">@L("Состав") <input @bind="_brief.Composition" maxlength="@DevModel.ShortTextMaxLength" placeholder="@L("50% шерсть, 50% акрил")" list="dev-compositions" /></label>
+                            <datalist id="dev-compositions">@foreach (var n in _compositions) { <option value="@n"></option> }</datalist>
                             <label class="wide">@L("Маркировка") <input @bind="_brief.Labeling" maxlength="@DevModel.ShortTextMaxLength" /></label>
                             <label class="wide">@L("Уход") <input @bind="_brief.Care" maxlength="@DevModel.ShortTextMaxLength" placeholder="@L("ручная стирка 30 °C")" /></label>
                         </div>
@@ -455,7 +456,7 @@ else
             @if (m.CanEdit)
             {
                 <div class="actions">
-                    <button type="button" class="secondary" @onclick="() => _editingBrief = true" disabled="@_busy">@L("Изменить задание")</button>
+                    <button type="button" class="secondary" @onclick="EditBriefAsync" disabled="@_busy">@L("Изменить задание")</button>
                     @if (m.HasTemplate)
                     {
                         <button type="button" class="secondary" @onclick="FillTemplateAsync" disabled="@_busy">@L("Заполнить из шаблона категории")</button>
@@ -538,6 +539,19 @@ else
     };
 
     private Task EditAsync() => RunAsync(async () => _options = await Models.OptionsAsync(), null);
+
+    private IReadOnlyList<string> _compositions = [];
+
+    /// <summary>D734: в задании подсказки состава — справочник «Составы» организации.</summary>
+    private Task EditBriefAsync() => RunAsync(async () =>
+    {
+        if (_compositions.Count == 0)
+        {
+            _compositions = await Tech.SuggestionsAsync(DevLookupKind.Composition);
+        }
+
+        _editingBrief = true;
+    }, null);
 
     private Task SaveAsync(DevModelHeader header) => RunAsync(async () =>
     {

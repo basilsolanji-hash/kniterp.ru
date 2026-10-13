@@ -31,13 +31,62 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
             .GroupBy(f => f.MachineId!.Value).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count, ct);
         var notes = await db.DevMachineNotes.AsNoTracking().Where(n => n.OrganizationId == org && ids.Contains(n.MachineId))
             .GroupBy(n => n.MachineId).Select(g => g.OrderByDescending(n => n.Id).First()).ToListAsync(ct);
+        var lookupIds = machines.Select(m => m.BrandId).Concat(machines.Select(m => m.TypeId).OfType<long>()).Distinct().ToList();
+        var names = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && lookupIds.Contains(l.Id)).ToDictionaryAsync(l => l.Id, l => l.Name, ct);
         return machines.Select(m =>
         {
             var last = notes.FirstOrDefault(n => n.MachineId == m.Id);
-            return new DevMachineDto(m.Id, m.Name, m.Brand, m.Model, m.Gauge, m.FeederCount, m.WidthCm, m.Systems, m.InventoryNumber, m.Status, m.IsArchived,
-                m.Parameters, programs.GetValueOrDefault(m.Id), last?.Text, last?.AtUtc, m.RowVersion);
+            var brand = names.GetValueOrDefault(m.BrandId) ?? "";
+            return new DevMachineDto(m.Id, m.Name, m.BrandId, brand, m.Model, m.Gauge, m.FeederCount, m.WidthCm, m.Systems, m.InventoryNumber, m.Status,
+                m.IsArchived, m.Parameters(brand), programs.GetValueOrDefault(m.Id), last?.Text, last?.AtUtc, m.RowVersion, m.TypeId,
+                m.TypeId is { } t ? names.GetValueOrDefault(t) : null);
         }).ToList();
     }
+
+    /// <summary>Списки формы станка (D734): производители с подсказками моделей и типы оборудования организации.</summary>
+    public async Task<DevMachineOptionsDto> MachineOptionsAsync(CancellationToken ct = default)
+    {
+        var ctx = await DemandAnyAsync(ct, Permissions.DevView, Permissions.ProductionStageMark);
+        var org = ctx.OrganizationId;
+        await DevLookupDefaults.EnsureAsync(db, org, ct);
+        var brands = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.MachineBrand && !l.IsArchived)
+            .OrderBy(l => l.SortOrder).ThenBy(l => l.Name).Select(l => new { l.Id, l.Name, l.Number }).ToListAsync(ct);
+        return new DevMachineOptionsDto(brands.Select(b => new DevBrandOptionDto(b.Id, b.Name, DevLookupCatalog.Models(b.Number))).ToList(),
+            await DevLookupDefaults.OptionsAsync(db, org, DevLookupKind.MachineType, ct));
+    }
+
+    /// <summary>
+    /// Подсказки полей ввода из справочников (D734): детали изделия, виды пряжи, составы, виды отделки, размерные шкалы. Поле остаётся
+    /// свободным — подсказка не ограничивает ввод.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> SuggestionsAsync(DevLookupKind kind, CancellationToken ct = default)
+    {
+        if (kind is not (DevLookupKind.DetailName or DevLookupKind.YarnKind or DevLookupKind.Composition or DevLookupKind.Finishing or DevLookupKind.SizeScale))
+        {
+            throw new BusinessRuleException("dev.lookup.kind", "Выберите справочник.");
+        }
+
+        var ctx = await DemandAnyAsync(ct, Permissions.DevView, Permissions.ProductionStageMark);
+        await DevLookupDefaults.EnsureAsync(db, ctx.OrganizationId, ct);
+        return await DevLookupDefaults.NamesAsync(db, ctx.OrganizationId, kind, ct);
+    }
+
+    /// <summary>Производитель и тип станка — записи справочника своей организации; новая ссылка — только на действующую.</summary>
+    private async Task<string> ValidateMachineAsync(AccessContext ctx, DevMachineValues v, DevMachine? current, CancellationToken ct)
+    {
+        var brand = await DevLookupDefaults.RequireAsync(db, ctx.OrganizationId, DevLookupKind.MachineBrand, v.BrandId, current?.BrandId, "dev.machine.brand",
+            "Производитель не найден или в архиве.", ct);
+        if (v.TypeId is { } type)
+        {
+            await DevLookupDefaults.RequireAsync(db, ctx.OrganizationId, DevLookupKind.MachineType, type, current?.TypeId, "dev.machine.type",
+                "Тип оборудования не найден или в архиве.", ct);
+        }
+
+        return brand.Name;
+    }
+
+    private async Task<string?> BrandNameAsync(DevMachine m, CancellationToken ct) =>
+        await db.DevLookups.AsNoTracking().Where(l => l.Id == m.BrandId && l.OrganizationId == m.OrganizationId).Select(l => l.Name).SingleOrDefaultAsync(ct);
 
     public async Task<IReadOnlyList<DevMachineNoteDto>> MachineNotesAsync(long machineId, CancellationToken ct = default)
     {
@@ -54,9 +103,10 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
     {
         var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
         var machine = DevMachine.Create(ctx.OrganizationId, values);
+        var brand = await ValidateMachineAsync(ctx, values, null, ct);
         await EnsureMachineNameAsync(ctx, machine.Name, null, ct);
         db.DevMachines.Add(machine);
-        return await SaveNewAsync(ctx, machine, () => machine.Id, AuditActions.DevSettingsChanged, $"Станок: {machine.Name}", machine.Parameters, ct);
+        return await SaveNewAsync(ctx, machine, () => machine.Id, AuditActions.DevSettingsChanged, $"Станок: {machine.Name}", machine.Parameters(brand), ct);
     }
 
     public async Task UpdateMachineAsync(long id, DevMachineValues values, byte[] rowVersion, CancellationToken ct = default)
@@ -66,10 +116,11 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
         {
             var m = await db.DevMachines.SingleOrDefaultAsync(x => x.Id == id && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Станок");
             m.EnsureVersion(m.RowVersion, rowVersion);
-            var before = m.Parameters;
+            var before = m.Parameters(await BrandNameAsync(m, ct));
+            var brand = await ValidateMachineAsync(ctx, values, m, ct);
             m.Set(values);
             await EnsureMachineNameAsync(ctx, m.Name, m.Id, ct);
-            Audit(ctx, AuditActions.DevSettingsChanged, "DevMachine", id, before, m.Parameters, $"Станок: {m.Name}");
+            Audit(ctx, AuditActions.DevSettingsChanged, "DevMachine", id, before, m.Parameters(brand), $"Станок: {m.Name}");
             await db.SaveOrConflictAsync(ct);
         });
     }
@@ -400,8 +451,9 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         var machine = await FindMachineAsync(ctx, machineId, ct);
+        var machineParams = machine.Parameters(await BrandNameAsync(machine, ct));
         return await models.AddFileCoreAsync(ctx, detail.ModelId, DevFileKind.MachineProgram, fileName, content, comment,
-            f => f.AttachProgram(detailId, machineId, $"{machine.Name}: {machine.Parameters}"), ct,
+            f => f.AttachProgram(detailId, machineId, $"{machine.Name}: {machineParams}"), ct,
             async file =>
             {
                 var d = await db.DevDetails.SingleAsync(x => x.Id == detailId, ct);
@@ -496,7 +548,8 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
                              select new DevSampleOptionDto(s.Id, s.No, z == null ? null : z.Name, s.Status)).Take(20).ToListAsync(ct);
         var facts = await FactsAsync(ctx, d.ModelId, detailId, colors, ct);
         var canEdit = !DevStages.IsFinal(m.Stage);
-        return new DevTechCardDto(m.Id, m.Number, m.Name, d.Id, d.Name, d.Quantity, machine?.Id, machine?.Name, machine?.Parameters, feederCount, machine?.Status,
+        var machineParameters = machine is null ? null : machine.Parameters(await BrandNameAsync(machine, ct));
+        return new DevTechCardDto(m.Id, m.Number, m.Name, d.Id, d.Name, d.Quantity, machine?.Id, machine?.Name, machineParameters, feederCount, machine?.Status,
             lastNote, d.WeaveId, weave, d.PlanKnitSeconds, d.PlanWeightGrams, m.Composition, d.Notes, feeders, palette,
             d.ProgramFileId, program?.FileName, program?.Version, program?.MachineParams, m.MainSketchFileId,
             canEdit && (ctx.Permissions.Has(Permissions.DevPattern) || ctx.Permissions.Has(Permissions.DevEdit)),
@@ -807,7 +860,7 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
                     : null;
                 var weave = d.WeaveId is { } wid ? await db.DevLookups.AsNoTracking().Where(l => l.Id == wid).Select(l => l.Name).SingleOrDefaultAsync(ct) : null;
                 return new DevLabelDto(LabelCode(m.Number, "D" + d.Id.ToString(CultureInfo.InvariantCulture)), $"{m.Number} · {d.Name}", m.Name,
-                    Lines(("Станок", machine is null ? null : $"{machine.Name} · E{machine.Gauge}"), ("Переплетение", weave),
+                    Lines(("Станок", machine is null ? null : $"{machine.Name} · {DevMachine.GaugeText(machine.Gauge)}"), ("Переплетение", weave),
                         ("Количество", d.Quantity > 1 ? d.Quantity.ToString(CultureInfo.InvariantCulture) : null),
                         ("Вес, г", d.PlanWeightGrams?.ToString("0.#", CultureInfo.InvariantCulture))), $"dev/tech/{d.Id}");
             }

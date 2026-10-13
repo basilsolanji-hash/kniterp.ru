@@ -24,7 +24,7 @@ else
         <h1>@L("Станки и программы")</h1>
         @if (CanSettings && _form is null)
         {
-            <button type="button" @onclick="() => _form = new MachineForm()" disabled="@_busy">@L("Добавить станок")</button>
+            <button type="button" @onclick="() => _form = new MachineForm { Brand = _options?.Brands.FirstOrDefault()?.Id ?? 0 }" disabled="@_busy">@L("Добавить станок")</button>
         }
     </div>
 
@@ -41,17 +41,38 @@ else
                 <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
                     <div class="grid">
                         <label>@L("Название") <input @bind="_form.Name" maxlength="@DevMachine.NameMaxLength" required placeholder="@L("STOLL №3")" /></label>
+                        @* D734: производитель и тип — справочники организации (свой вариант — в настройках); модель — подсказки по производителю или своя. *@
                         <label>
-                            @L("Марка")
-                            <select @bind="_form.Brand">
-                                @foreach (var b in Enum.GetValues<DevMachineBrand>())
+                            @L("Производитель")
+                            <select @bind="_form.Brand" required>
+                                @foreach (var b in _options?.Brands ?? [])
                                 {
-                                    <option value="@b">@L(DevMachine.BrandName(b))</option>
+                                    <option value="@b.Id">@b.Name</option>
+                                }
+                                @if (_form.Brand != 0 && _options?.Brands.All(b => b.Id != _form.Brand) == true)
+                                {
+                                    <option value="@_form.Brand">@L("текущий (в архиве)")</option>
                                 }
                             </select>
                         </label>
-                        <label>@L("Модель") <input @bind="_form.Model" maxlength="@DevMachine.ModelMaxLength" placeholder="CMS 530" /></label>
-                        <label>@L("Класс (E)") <input type="number" min="1" max="@DevMachine.MaxGauge" step="1" inputmode="numeric" @bind="_form.Gauge" /></label>
+                        <label>@L("Модель") <input @bind="_form.Model" maxlength="@DevMachine.ModelMaxLength" placeholder="CMS 530" list="dev-machine-models" /></label>
+                        <datalist id="dev-machine-models">
+                            @foreach (var model in _options?.Brands.FirstOrDefault(b => b.Id == _form.Brand)?.Models ?? [])
+                            {
+                                <option value="@model"></option>
+                            }
+                        </datalist>
+                        <label>
+                            @L("Тип оборудования")
+                            <select @bind="_form.Type">
+                                <option value="">—</option>
+                                @foreach (var t in _options?.Types ?? [])
+                                {
+                                    <option value="@t.Id">@t.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("Класс (E)") <input type="number" min="1" max="@DevMachine.MaxGauge" step="0.1" inputmode="decimal" @bind="_form.Gauge" /></label>
                         <label>@L("Нитеводителей") <input type="number" min="1" max="@DevMachine.MaxFeeders" step="1" inputmode="numeric" @bind="_form.Feeders" /></label>
                         <label>@L("Рабочая ширина, см") <input type="number" min="1" max="500" step="1" inputmode="numeric" @bind="_form.Width" /></label>
                         <label>@L("Систем") <input type="number" min="1" max="12" step="1" inputmode="numeric" @bind="_form.Systems" /></label>
@@ -153,9 +174,10 @@ else
         public long? Id { get; init; }
         public byte[] RowVersion { get; init; } = [];
         public string? Name { get; set; }
-        public DevMachineBrand Brand { get; set; } = DevMachineBrand.Stoll;
+        public long Brand { get; set; }
+        public string Type { get; set; } = string.Empty;
         public string? Model { get; set; }
-        public int Gauge { get; set; } = 7;
+        public decimal Gauge { get; set; } = 7;
         public int Feeders { get; set; } = 8;
         public int? Width { get; set; }
         public int? Systems { get; set; }
@@ -163,17 +185,18 @@ else
 
         public static MachineForm From(DevMachineDto m) => new()
         {
-            Id = m.Id, RowVersion = m.RowVersion, Name = m.Name, Brand = m.Brand, Model = m.Model, Gauge = m.Gauge, Feeders = m.FeederCount, Width = m.WidthCm,
+            Id = m.Id, RowVersion = m.RowVersion, Name = m.Name, Brand = m.BrandId, Type = m.TypeId?.ToString() ?? string.Empty, Model = m.Model, Gauge = m.Gauge, Feeders = m.FeederCount, Width = m.WidthCm,
             Systems = m.Systems, Inventory = m.InventoryNumber,
         };
 
-        public DevMachineValues ToValues() => new(Name, Brand, Model, Gauge, Feeders, Width, Systems, Inventory);
+        public DevMachineValues ToValues() => new(Name, Brand, Model, Gauge, Feeders, Width, Systems, Inventory, long.TryParse(Type, out var t) ? t : null);
     }
 
     private IReadOnlyList<DevMachineDto>? _machines;
     private IReadOnlyList<DevMachineNoteDto>? _notes;
     private IReadOnlyList<DevProgramDto>? _programs;
     private MachineForm? _form;
+    private DevMachineOptionsDto? _options;
     private long? _open;
     private string? _noteText;
     private string _noteStatus = string.Empty;
@@ -192,6 +215,7 @@ else
         try
         {
             _machines = await Tech.MachinesAsync(includeArchived: true);
+            _options = await Tech.MachineOptionsAsync();
         }
         catch (AccessDeniedException ex)
         {

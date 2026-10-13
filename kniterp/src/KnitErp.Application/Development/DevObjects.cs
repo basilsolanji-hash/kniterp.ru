@@ -47,6 +47,6 @@ public static class DevObjects
         var org = ctx.OrganizationId;
         return (await db.DevMachines.AsNoTracking().Where(m => m.OrganizationId == org && ids.Contains(m.Id))
                 .Select(m => new { m.Id, m.Name, m.Model, m.Gauge }).ToListAsync(ct))
-            .Select(m => new TaggedObjectDto(TaggedEntity.DevMachine, m.Id, m.Name, m.Model is null ? $"E{m.Gauge}" : $"{m.Model} · E{m.Gauge}", "dev/machines")).ToList();
+            .Select(m => new TaggedObjectDto(TaggedEntity.DevMachine, m.Id, m.Name, m.Model is null ? KnitErp.Domain.Development.DevMachine.GaugeText(m.Gauge) : $"{m.Model} · {KnitErp.Domain.Development.DevMachine.GaugeText(m.Gauge)}", "dev/machines")).ToList();
     }
 }

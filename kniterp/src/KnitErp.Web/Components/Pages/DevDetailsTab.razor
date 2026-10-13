@@ -61,8 +61,8 @@ else
 }
 
 @code {
-    private static IEnumerable<string> Suggestions =>
-        [L("Перед"), L("Спинка"), L("Рукав"), L("Воротник"), L("Планка"), L("Манжета"), L("Подвяз"), L("Капюшон"), L("Карман"), L("Полотно")];
+    /// <summary>D734: подсказки названия — справочник «Детали изделия» организации; деталь можно назвать и по-своему.</summary>
+    private IReadOnlyList<string> Suggestions { get; set; } = [];
 
     [Parameter, EditorRequired]
     public long ModelId { get; set; }
@@ -87,7 +87,11 @@ else
         if (_loaded != ModelId)
         {
             _loaded = ModelId;
-            _rows = await Gate.Run(() => Tech.DetailsAsync(ModelId));
+            await Gate.Run(async () =>
+            {
+                _rows = await Tech.DetailsAsync(ModelId);
+                Suggestions = await Tech.SuggestionsAsync(DevLookupKind.DetailName);
+            });
         }
     }
 

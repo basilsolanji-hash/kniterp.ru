@@ -25,6 +25,27 @@ public enum DevLookupKind : byte
 
     /// <summary>Вид рисунка (D733): жаккард, интарсия… и свои варианты; число — код встроенного значения.</summary>
     PatternKind = 7,
+
+    /// <summary>Производитель оборудования (D734): Stoll, Shima Seiki, Steiger… — у станка.</summary>
+    MachineBrand = 8,
+
+    /// <summary>Тип оборудования (D734): плосковязальная, кругловязальная, оверлок… — у станка.</summary>
+    MachineType = 9,
+
+    /// <summary>Деталь изделия (D734): подсказки названия детали — перед, спинка, рукав…</summary>
+    DetailName = 10,
+
+    /// <summary>Вид пряжи (D734): подсказки «какая нить» в заправке.</summary>
+    YarnKind = 11,
+
+    /// <summary>Состав (D734): подсказки поля «Состав» задания.</summary>
+    Composition = 12,
+
+    /// <summary>Вид отделки (D734): подсказки пояснений технолога.</summary>
+    Finishing = 13,
+
+    /// <summary>Размерная шкала (D734): «РФ женская: 40, 42…» — заполняет размерную сетку модели.</summary>
+    SizeScale = 14,
 }
 
 /// <summary>
@@ -60,16 +81,18 @@ public sealed class DevLookup
         DevLookupKind.ReworkReason => "Причины доработок",
         DevLookupKind.Category => "Категории изделий",
         DevLookupKind.PatternKind => "Виды рисунков",
+        DevLookupKind.MachineBrand => "Производители оборудования",
+        DevLookupKind.MachineType => "Типы оборудования",
+        DevLookupKind.DetailName => "Детали изделия",
+        DevLookupKind.YarnKind => "Виды пряжи",
+        DevLookupKind.Composition => "Составы",
+        DevLookupKind.Finishing => "Виды отделки",
+        DevLookupKind.SizeScale => "Размерные шкалы",
         _ => "Точки измерения",
     };
 
-    /// <summary>Встроенные значения справочника (D733): создаются организации при первом обращении к разработке; код — <see cref="Number"/>.</summary>
-    public static IReadOnlyList<(int Code, string Name)> BuiltIn(DevLookupKind kind) => kind switch
-    {
-        DevLookupKind.Category => Enum.GetValues<DevCategory>().Select(c => ((int)c, DevModel.CategoryName(c))).ToList(),
-        DevLookupKind.PatternKind => Enum.GetValues<DevPatternKind>().Select(k => ((int)k, DevPattern.KindName(k))).ToList(),
-        _ => [],
-    };
+    /// <summary>Встроенные значения справочника (D733, D734): создаются организации при первом обращении к разработке; код — <see cref="Number"/>.</summary>
+    public static IReadOnlyList<(int? Code, string Name)> BuiltIn(DevLookupKind kind) => DevLookupCatalog.Values(kind);
 
     public static DevLookup Create(long organizationId, DevLookupKind kind, string? name, int? number, int sortOrder)
     {

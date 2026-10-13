@@ -4728,7 +4728,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("dev_lookups", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_dev_lookups_kind", "[Kind] BETWEEN 1 AND 7");
+                            t.HasCheckConstraint("ck_dev_lookups_kind", "[Kind] BETWEEN 1 AND 14");
 
                             t.HasCheckConstraint("ck_dev_lookups_number", "[Number] IS NULL OR [Number] BETWEEN 0 AND 1000");
                         });
@@ -4742,14 +4742,15 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
-                    b.Property<byte>("Brand")
-                        .HasColumnType("tinyint");
+                    b.Property<long>("BrandId")
+                        .HasColumnType("bigint");
 
                     b.Property<int>("FeederCount")
                         .HasColumnType("int");
 
-                    b.Property<int>("Gauge")
-                        .HasColumnType("int");
+                    b.Property<decimal>("Gauge")
+                        .HasPrecision(4, 1)
+                        .HasColumnType("decimal(4,1)");
 
                     b.Property<string>("InventoryNumber")
                         .HasMaxLength(30)
@@ -4782,6 +4783,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<int?>("Systems")
                         .HasColumnType("int");
 
+                    b.Property<long?>("TypeId")
+                        .HasColumnType("bigint");
+
                     b.Property<int?>("WidthCm")
                         .HasColumnType("int");
 
@@ -4790,14 +4794,16 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAlternateKey("OrganizationId", "Id")
                         .HasName("ak_dev_machines_org_id");
 
+                    b.HasIndex("OrganizationId", "BrandId");
+
                     b.HasIndex("OrganizationId", "Name")
                         .IsUnique()
                         .HasDatabaseName("ux_dev_machines_name");
 
+                    b.HasIndex("OrganizationId", "TypeId");
+
                     b.ToTable("dev_machines", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_dev_machines_brand", "[Brand] IN (1, 2, 9)");
-
                             t.HasCheckConstraint("ck_dev_machines_feeders", "[FeederCount] BETWEEN 1 AND 32");
 
                             t.HasCheckConstraint("ck_dev_machines_gauge", "[Gauge] BETWEEN 1 AND 30");
@@ -15321,6 +15327,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasForeignKey("OrganizationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevLookup", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "BrandId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_machines_brand");
+
+                    b.HasOne("KnitErp.Domain.Development.DevLookup", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "TypeId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_dev_machines_type");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevMachineNote", b =>

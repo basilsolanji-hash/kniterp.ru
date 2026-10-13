@@ -3,6 +3,7 @@
 @using System.Globalization
 @inject DevGate Gate
 @inject DevShopService Shop
+@inject DevTechService Tech
 
 @*
     Технология модели (D715) — экран технолога: операции из справочника (операция, единица, норма, расценка), пояснение для цеха, своя
@@ -106,7 +107,8 @@ else
                             }
                         </select>
                     </label>
-                    <label>@L("Пояснение для цеха") <input @bind="_note" maxlength="@DevModelOperation.NoteMaxLength" placeholder="@L("На второй день парить 2 секунды")" /></label>
+                    <label>@L("Пояснение для цеха") <input @bind="_note" maxlength="@DevModelOperation.NoteMaxLength" placeholder="@L("На второй день парить 2 секунды")" list="dev-finishings" />
+                        <datalist id="dev-finishings">@foreach (var n in _finishings) { <option value="@n"></option> }</datalist></label>
                     <button type="submit" class="secondary" disabled="@(_busy || _type.Length == 0)" title="@(_type.Length == 0 ? L("Сначала выберите операцию из справочника") : null)">@L("Добавить операцию")</button>
                     <button type="button" class="secondary" @onclick="AddStandardAsync" disabled="@_busy">@L("Добавить стандартные (по этапам производства)")</button>
                 </fieldset>
@@ -129,13 +131,18 @@ else
     private string? _message;
     private bool _isError;
     private long _loaded;
+    private IReadOnlyList<string> _finishings = [];
 
     protected override async Task OnParametersSetAsync()
     {
         if (_loaded != ModelId)
         {
             _loaded = ModelId;
-            _o = await Gate.Run(() => Shop.OperationsAsync(ModelId));
+            await Gate.Run(async () =>
+            {
+                _o = await Shop.OperationsAsync(ModelId);
+                _finishings = await Tech.SuggestionsAsync(DevLookupKind.Finishing); // D734: подсказки — «Виды отделки»
+            });
         }
     }
 

@@ -290,7 +290,7 @@ public sealed class DevScreenshotTests(HrAppFixture app) : IClassFixture<HrAppFi
         // Справочники технолога: переплетение и операции.
         await Go(page, "dev/settings?section=lookups");
         await page.GetByRole(AriaRole.Tab, new() { Name = "Переплетения" }).ClickAsync();
-        await page.Locator("form.inline-form").Last.GetByLabel("Название").FillAsync("Ластик 2×2");
+        await page.Locator("form.inline-form").Last.GetByLabel("Название").FillAsync("Ластик 2×2 плотный");
         await Save(page, "Добавить", "Добавлено");
         await Go(page, "dev/settings?section=operations");
         foreach (var (name, norm, stage) in new[] { ("Вязание", "3", "Вязание"), ("Убрать боковые нитки", "0.3", ""), ("Парить", "0.1", "ВТО"),
@@ -334,7 +334,7 @@ public sealed class DevScreenshotTests(HrAppFixture app) : IClassFixture<HrAppFi
         await Ready(page);
         var detailUrl = page.Url;
         await page.GetByLabel("Станок").SelectOptionAsync(new SelectOptionValue { Index = 1 });
-        await page.GetByLabel("Переплетение").SelectOptionAsync(new SelectOptionValue { Label = "Ластик 2×2" });
+        await page.GetByLabel("Переплетение").SelectOptionAsync(new SelectOptionValue { Label = "Ластик 2×2 плотный" });
         await page.GetByLabel("Время вязания, мин").FillAsync("3");
         await page.GetByLabel("Вес детали, г").FillAsync("100");
         await page.GetByLabel("Важные комментарии для цеха").FillAsync("Внимательно читаем заправку.\nЕсли хлопок толщиной 20/1 — заправляем в 4 конца.\nЕсли хлопок толщиной 24/1 — заправляем в 5 концов.");
