@@ -41,7 +41,7 @@ public sealed record UpdPrintDto(
 /// по проведённой отгрузке по заказу, цены — из заказа. Формы печатаются по-русски: это документы для российского учёта.
 /// Права — как у денег продаж: «Продажи: просмотр» и «Цены и суммы».
 /// </summary>
-public sealed class PrintService(IKnitErpDbContext db, IAccessGuard guard)
+public sealed partial class PrintService(IKnitErpDbContext db, IAccessGuard guard)
 {
     private static readonly Dictionary<string, string> CurrencyNumeric = new() { ["RUB"] = "643", ["KZT"] = "398", ["UZS"] = "860", ["BYN"] = "933" };
 

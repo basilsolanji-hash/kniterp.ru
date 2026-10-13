@@ -97,6 +97,14 @@ public sealed class SalesOrderDocumentsService(IKnitErpDbContext db, IAccessGuar
     }
 
     /// <summary>Черновик письма: адрес покупателя, тема и текст по шаблону основного документа, отмеченный документ.</summary>
+    /// <summary>D1141: документы заказа для печати комплектом — заказ, действующие счета, проведённые отгрузки. Нужны «Цены и суммы».</summary>
+    public async Task<IReadOnlyList<SalesPrintableDto>> PrintSetAsync(long orderId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
+        await guard.DemandAsync(Permissions.PriceView, ct);
+        return await PrintablesAsync(ctx, await FindOrderAsync(ctx, orderId, ct), ct);
+    }
+
     public async Task<SalesMailDraftDto> DraftAsync(long orderId, SalesMailDocument document, long? documentId = null, CancellationToken ct = default)
     {
         var ctx = await DemandSendAsync(ct);
@@ -479,9 +487,17 @@ public sealed class SalesOrderDocumentsService(IKnitErpDbContext db, IAccessGuar
         return (ctx, message);
     }
 
-    private async Task<SalesOrder> FindOrderAsync(AccessContext ctx, long id, CancellationToken ct) =>
-        await db.SalesOrders.AsNoTracking().Include(o => o.Lines).SingleOrDefaultAsync(o => o.Id == id && o.OrganizationId == ctx.OrganizationId, ct)
-        ?? throw new NotFoundException("Заказ покупателя");
+    private async Task<SalesOrder> FindOrderAsync(AccessContext ctx, long id, CancellationToken ct)
+    {
+        var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).SingleOrDefaultAsync(o => o.Id == id && o.OrganizationId == ctx.OrganizationId, ct)
+                    ?? throw new NotFoundException("Заказ покупателя");
+        if (order.ResponsibleUserId != ctx.UserId && await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct))
+        {
+            throw new NotFoundException("Заказ покупателя"); // D1110: чужой заказ при видимости «Свои»
+        }
+
+        return order;
+    }
 
     private async Task EnsureCounterpartyAsync(AccessContext ctx, long id, CancellationToken ct)
     {

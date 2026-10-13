@@ -1,0 +1,166 @@
+@*
+    D1141: лист УПД (статус 1 или 2) или отдельного счёта-фактуры — для страницы печати одного документа и комплекта документов
+    (PrintSalesSetPage). Строки и графы — по приложению 1 к ПП РФ № 1137 (в ред. ПП № 26 от 23.01.2026); передаточная часть [8]–[19] —
+    по рекомендованной форме ФНС (письмо от 21.10.2013 № ММВ-20-3/96@). Статус 2 — передаточный документ без функции счёта-фактуры
+    (продавец без НДС или счёт-фактура выставляется отдельно). Печатается по-русски (D68, D71).
+*@
+@using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+
+@{ var r = Doc.Requisites; }
+<div class="sheet upd" style="@(Break ? "break-before: page" : null)">
+    @if (Doc.Reversed)
+    {
+        <div class="stamp">ОТГРУЗКА СТОРНИРОВАНА — СЧЁТ-ФАКТУРА АННУЛИРОВАН</div>
+    }
+    <div class="upd-head">
+        @if (Form == UpdForm.VatInvoice)
+        {
+            <div class="upd-status"><b>Счёт-фактура</b><p class="small">Приложение № 1 к постановлению Правительства РФ от 26.12.2011 № 1137</p></div>
+        }
+        else
+        {
+            <div class="upd-status">
+                <b>Универсальный передаточный документ</b>
+                <p>Статус: <b style="border: 1px solid #000; padding: 0 6px">@(Form == UpdForm.Status2 ? "2" : "1")</b></p>
+                <p class="small">1 — счёт-фактура и передаточный документ (акт)<br />2 — передаточный документ (акт)</p>
+                <p class="small">Документ составлен на 1 листе</p>
+            </div>
+        }
+        <div class="upd-fields">
+            <div><b>Счёт-фактура №</b> @Doc.Number от @PrintInvoicePage.Date(Doc.Date) <span class="code">(1)</span></div>
+            <div><b>Исправление №</b> -- от -- <span class="code">(1а)</span></div>
+            <div><b>Продавец:</b> @Doc.Seller.Name <span class="code">(2)</span></div>
+            <div><b>Адрес:</b> @Doc.Seller.Address <span class="code">(2а)</span></div>
+            <div><b>ИНН/КПП продавца:</b> @Doc.Seller.Inn@(Doc.Seller.Kpp is null ? "" : "/" + Doc.Seller.Kpp) <span class="code">(2б)</span></div>
+            <div><b>Грузоотправитель и его адрес:</b> он же <span class="code">(3)</span></div>
+            <div><b>Грузополучатель и его адрес:</b> @PrintInvoicePage.Party(Doc.Buyer with { Inn = null, Kpp = null }) <span class="code">(4)</span></div>
+            <div><b>К платёжно-расчётному документу</b> @(Doc.PaymentDocuments ?? "№ -- от --") <span class="code">(5)</span></div>
+            <div><b>Документ об отгрузке</b> № п/п 1–@Doc.Lines.Count № @Doc.ShipmentNumber от @Doc.Date.ToString("dd.MM.yyyy") <span class="code">(5а)</span></div>
+            <div><b>К счёту-фактуре (счетам-фактурам), выставленному (выставленным) при получении оплаты, частичной оплаты в счёт предстоящих поставок товаров (выполнения работ, оказания услуг), передачи имущественных прав</b> -- <span class="code">(5б)</span></div>
+            <div><b>Покупатель:</b> @Doc.Buyer.Name <span class="code">(6)</span></div>
+            <div><b>Адрес:</b> @Doc.Buyer.Address <span class="code">(6а)</span></div>
+            <div><b>ИНН/КПП покупателя:</b> @Doc.Buyer.Inn@(Doc.Buyer.Kpp is null ? "" : "/" + Doc.Buyer.Kpp) <span class="code">(6б)</span></div>
+            <div><b>Валюта: наименование, код</b> @Doc.Currency <span class="code">(7)</span></div>
+            <div><b>Идентификатор государственного контракта, договора (соглашения) (при наличии)</b> -- <span class="code">(8)</span></div>
+        </div>
+    </div>
+
+    <table class="goods" style="margin-top: 6px">
+        <thead>
+            <tr>
+                <th rowspan="2">Код товара/ работ, услуг</th><th rowspan="2">№ п/п</th>
+                <th rowspan="2">Наименование товара (описание выполненных работ, оказанных услуг), имущественного права</th>
+                <th rowspan="2">Код вида товара</th><th colspan="2">Единица измерения</th>
+                <th rowspan="2">Коли&shy;чество (объём)</th><th rowspan="2">Цена (тариф) за единицу измерения</th>
+                <th rowspan="2">Стоимость товаров (работ, услуг), имущественных прав без налога — всего</th><th rowspan="2">В том числе сумма акциза</th>
+                <th rowspan="2">Налоговая ставка</th><th rowspan="2">Сумма налога, предъявляемая покупателю</th>
+                <th rowspan="2">Стоимость товаров (работ, услуг), имущественных прав с налогом — всего</th>
+                <th colspan="2">Страна происхождения товара</th>
+                <th rowspan="2">Регистрационный номер декларации на товары или регистрационный номер партии товара, подлежащего прослеживаемости</th>
+                <th colspan="2">Количественная единица измерения товара, используемая в целях осуществления прослеживаемости</th>
+                <th rowspan="2">Количество товара, подлежащего прослеживаемости, в количественной единице измерения</th>
+                <th rowspan="2">Стоимость товара, подлежащего прослеживаемости, без НДС, в рублях и копейках</th>
+            </tr>
+            <tr><th>код</th><th>условное обозначение (национальное)</th><th>цифровой код</th><th>краткое наименование</th><th>код</th><th>условное обозначение</th></tr>
+            <tr class="small"><th>А</th><th>1</th><th>1а</th><th>1б</th><th>2</th><th>2а</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th><th>10а</th><th>11</th><th>12</th><th>12а</th><th>13</th><th>14</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var l in Doc.Lines)
+            {
+                <tr>
+                    <td>@l.Code</td>
+                    <td class="c">@l.No</td>
+                    <td>@l.Name</td>
+                    <td class="c">@(l.TnVedCode ?? "--")</td>
+                    <td class="c">@l.UnitCode</td>
+                    <td class="c">@l.UnitSymbol</td>
+                    <td class="n">@Quantities.Format(l.Quantity)</td>
+                    <td class="n">@Amounts.Format(l.Price)</td>
+                    <td class="n">@Amounts.Format(l.AmountWithoutVat)</td>
+                    <td class="c">без акциза</td>
+                    <td class="c">@Amounts.Vat(l.VatPercent)</td>
+                    <td class="n">@(l.VatPercent is null ? (r.VatExempt ? "Без налога (НДС)" : "без НДС") : Amounts.Format(l.VatAmount))</td>
+                    <td class="n">@Amounts.Format(l.Amount)</td>
+                    <td class="c">@(l.OriginCountryCode ?? "--")</td><td class="c">@(l.OriginCountryName ?? "--")</td>
+                    <td class="c">@(l.CustomsDeclaration ?? "--")</td><td class="c">--</td><td class="c">--</td><td class="c">--</td><td class="c">--</td>
+                </tr>
+            }
+            <tr>
+                <td colspan="8"><b>Всего к оплате</b></td>
+                <td class="n"><b>@Amounts.Format(Doc.TotalWithoutVat)</b></td>
+                <td class="c" colspan="2">X</td>
+                <td class="n"><b>@Amounts.Format(Doc.VatTotal)</b></td>
+                <td class="n"><b>@Amounts.Format(Doc.Total)</b></td>
+                <td colspan="7"></td>
+            </tr>
+        </tbody>
+    </table>
+    <p class="words">Всего к оплате: @Doc.TotalInWords</p>
+
+    <div class="sign">
+        @if (r.SoleProprietor)
+        {
+            <div>Индивидуальный предприниматель или иное уполномоченное лицо <SalesPrintSign Image="Deco.DirectorSignature" /> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
+            <div>@(r.Ogrn is null ? "" : "ОГРНИП " + r.Ogrn) <span class="line"></span><div class="small">(реквизиты свидетельства о государственной регистрации индивидуального предпринимателя)</div></div>
+        }
+        else
+        {
+            <div>Руководитель организации или иное уполномоченное лицо <SalesPrintSign Image="Deco.DirectorSignature" /> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
+            <div>Главный бухгалтер или иное уполномоченное лицо <SalesPrintSign Image="@(Deco.AccountantSignature ?? Deco.DirectorSignature)" /> @(r.AccountantName ?? r.DirectorName)<div class="small">(подпись) (ф.и.о.)</div></div>
+        }
+    </div>
+
+    @if (Form != UpdForm.VatInvoice)
+    {
+        <table class="plain" style="margin-top: 14px">
+            <tr><td colspan="2">Основание передачи (сдачи) / получения (приёмки): <b>@Doc.Basis</b> <span class="small">[8]</span></td></tr>
+            <tr><td colspan="2">Данные о транспортировке и грузе: <span class="line"></span> <span class="small">[9]</span></td></tr>
+            <tr>
+                <td style="width: 50%">Товар (груз) передал / услуги, результаты работ, права сдал <span class="small">[10]</span><br />
+                    @(r.SoleProprietor ? "Индивидуальный предприниматель" : r.DirectorPosition ?? "") <span class="line"></span> @r.DirectorName<div class="small">(должность) (подпись) (ф.и.о.)</div></td>
+                <td>Товар (груз) получил / услуги, результаты работ, права принял <span class="small">[15]</span><br />
+                    <span class="line"></span> <span class="line"></span> <span class="line"></span><div class="small">(должность) (подпись) (ф.и.о.)</div></td>
+            </tr>
+            <tr><td>Дата отгрузки, передачи (сдачи): <b>@PrintInvoicePage.Date(Doc.Date)</b> <span class="small">[11]</span></td>
+                <td>Дата получения (приёмки): «___» __________ 20__ г. <span class="small">[16]</span></td></tr>
+            <tr><td>Иные сведения об отгрузке, передаче: склад отгрузки — @Doc.Warehouse <span class="small">[12]</span></td>
+                <td>Иные сведения о получении, приёмке: <span class="line"></span> <span class="small">[17]</span></td></tr>
+            <tr><td>Ответственный за правильность оформления факта хозяйственной жизни <span class="small">[13]</span><br />
+                    @(r.SoleProprietor ? "Индивидуальный предприниматель" : r.DirectorPosition ?? "") <span class="line"></span> @r.DirectorName<div class="small">(должность) (подпись) (ф.и.о.)</div></td>
+                <td>Ответственный за правильность оформления факта хозяйственной жизни <span class="small">[18]</span><br />
+                    <span class="line"></span> <span class="line"></span> <span class="line"></span><div class="small">(должность) (подпись) (ф.и.о.)</div></td></tr>
+            <tr><td>Наименование экономического субъекта — составителя документа (в т. ч. комиссионера / агента): @Doc.Seller.Name, ИНН/КПП @Doc.Seller.Inn@(Doc.Seller.Kpp is null ? "" : "/" + Doc.Seller.Kpp) <span class="small">[14]</span></td>
+                <td>Наименование экономического субъекта — составителя документа: @Doc.Buyer.Name@(Doc.Buyer.Inn is null ? "" : ", ИНН/КПП " + Doc.Buyer.Inn + (Doc.Buyer.Kpp is null ? "" : "/" + Doc.Buyer.Kpp)) <span class="small">[19]</span></td></tr>
+            <tr><td>М. П.@if (Deco.Stamp is { } stamp) { <img class="sx-stamp sx-stamp-upd" src="@stamp.DataUri" alt="" /> }</td><td>М. П.</td></tr>
+        </table>
+    }
+    else if (Deco.Stamp is { } sfStamp)
+    {
+        <img class="sx-stamp sx-stamp-upd" src="@sfStamp.DataUri" alt="" />
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public UpdPrintDto Doc { get; set; } = null!;
+
+    [Parameter]
+    public SalesPrintDecorations Deco { get; set; } = SalesPrintDecorations.None;
+
+    [Parameter]
+    public UpdForm Form { get; set; } = UpdForm.Status1;
+
+    /// <summary>Лист начинается с новой страницы (в комплекте документов).</summary>
+    [Parameter]
+    public bool Break { get; set; }
+
+    /// <summary>Форма по запросу «?form=»: upd2 — УПД статус 2, sf — счёт-фактура; иначе — статус 2 у продавца без НДС, статус 1 у остальных.</summary>
+    public static UpdForm Parse(string? form, UpdPrintDto doc) => form switch
+    {
+        "upd1" => UpdForm.Status1,
+        "upd2" => UpdForm.Status2,
+        "sf" => UpdForm.VatInvoice,
+        _ => doc.Requisites.VatExempt ? UpdForm.Status2 : UpdForm.Status1,
+    };
+}

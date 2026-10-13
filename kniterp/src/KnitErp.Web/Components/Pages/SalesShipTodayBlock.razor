@@ -1,0 +1,52 @@
+@*
+    D1167: блок главного экрана «Отгрузить сегодня» (подключается ModuleUi.AddDashboardBlock в Program.cs). Данные — своим коротким
+    контекстом (SalesReportService.ShipTodayAsync). Без права «Продажи: просмотр» или без заказов к отгрузке — блок ничего не выводит;
+    сумма — только с правом «Цены и суммы».
+*@
+@using KnitErp.Application.Sales
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+
+@if (_data is { } d)
+{
+    <section class="dash-box span-4" aria-label="@L("Отгрузить сегодня")">
+        <h2><a href="sales-orders">@L("Отгрузить сегодня")</a></h2>
+        <div class="mini-stats">
+            <a href="sales-orders"><b>@d.DueToday</b><span>@L("Заказов на сегодня")</span></a>
+            <a href="sales-orders"><b class="@(d.Overdue > 0 ? "warn-text" : "")">@d.Overdue</b><span>@L("Просрочено отгрузить")</span></a>
+            @if (d.Amount is { } amount)
+            {
+                <a href="sales-orders"><b>@Amounts.Format(amount)</b><span>@L("Сумма к отгрузке")</span></a>
+            }
+        </div>
+        <table class="compact">
+            <tbody>
+                @foreach (var r in d.Top)
+                {
+                    <tr>
+                        <td><a href="sales-orders/@r.OrderId">@r.Number</a> @r.Customer
+                            <span class="@(r.ShipDate < d.Today ? "muted warn-text" : "muted")">@r.ShipDate.ToString("dd.MM")</span></td>
+                        <td class="num">@(r.LeftAmount is { } a ? Amounts.Format(a) : L("{0} шт.", Quantities.Format(r.LeftQuantity)))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private ShipTodayDto? _data;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _data = await SalesReportService.ShipTodayAsync(Factory, CurrentUser, Clock, default);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _data = null; // блок модуля не мешает главному экрану: нет доступа или данных — его просто нет
+        }
+    }
+}

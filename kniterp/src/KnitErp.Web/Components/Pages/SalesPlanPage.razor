@@ -1,0 +1,164 @@
+@page "/sales-plan"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Catalog
+@inject SalesReportService Reports
+
+@* D1162: план продаж менеджеров на месяц — ввод (право «Продажи: план продаж») и факт рядом. *@
+<PageTitle>@L("План продаж") — knitERP</PageTitle>
+<SalesStyles />
+<style>
+    .sp-table td.num, .sp-table th.num { text-align: right; white-space: nowrap; }
+    .sp-table td.sp-input { width: 160px; }
+    .sp-table td.sp-input input { text-align: right; }
+    .sp-table tfoot td { font-weight: 600; border-top: 2px solid var(--line); }
+    @@media (max-width: 560px) { .sp-table .opt { display: none; } .sp-table td.sp-input { width: auto; } }
+</style>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("План продаж")</h1>
+        <div class="sx-tools"><a class="button secondary" href="reports/sales">@L("Аналитика продаж")</a></div>
+    </div>
+    <p class="sx-lead">@L("План — выручка без НДС на месяц по менеджеру. Факт — отгрузки минус возвраты по заказам, где менеджер ответственный. Сумма 0 — плана нет.")</p>
+
+    <form class="sx-form" @onsubmit="ReloadAsync">
+        <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
+        <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button></div>
+    </form>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _message = null">×</button></div>
+    }
+
+    @if (!_data.AmountsVisible)
+    {
+        <p class="muted">@L("Суммы плана и факта скрыты: нет права «Цены и суммы».")</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table class="sp-table">
+                <thead>
+                    <tr><th>@L("Менеджер")</th><th class="num">@L("План")</th><th class="num">@L("Факт")</th><th class="num opt">@L("Выполнение")</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _data.Rows)
+                    {
+                        <tr @key="row.ManagerId">
+                            <td>@(row.Manager ?? L("Без ответственного"))</td>
+                            @if (_data.CanEdit && row.ManagerId is { } id)
+                            {
+                                <td class="num sp-input"><input inputmode="decimal" aria-label="@L("План: {0}", row.Manager ?? "")" value="@_inputs.GetValueOrDefault(id)"
+                                                                 @onchange="e => _inputs[id] = e.Value?.ToString()" disabled="@_busy" /></td>
+                            }
+                            else
+                            {
+                                <td class="num">@Amounts.Format(row.Plan)</td>
+                            }
+                            <td class="num">@Amounts.Format(row.Fact)</td>
+                            <td class="num opt">@(row.Percent is { } p ? p.ToString("0.#") + "%" : "—")</td>
+                            <td class="sx-row-actions">
+                                @if (_data.CanEdit && row.ManagerId is { } mid)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => SaveAsync(row, mid)" disabled="@_busy">@L("Сохранить")</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td>@L("Итого")</td>
+                        <td class="num">@Amounts.Format(_data.Plan)</td>
+                        <td class="num">@Amounts.Format(_data.Fact)</td>
+                        <td class="num opt">@(_data.Percent is { } tp ? tp.ToString("0.#") + "%" : "—")</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private PlanFactDto? _data;
+    private readonly Dictionary<long, string?> _inputs = [];
+    private DateTime _month;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+        _month = new DateTime(today.Year, today.Month, 1);
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _data = await Reports.PlanFactAsync(DateOnly.FromDateTime(_month), allManagers: true);
+        _inputs.Clear();
+        foreach (var r in _data.Rows.Where(r => r.ManagerId is not null))
+        {
+            _inputs[r.ManagerId!.Value] = r.Plan is > 0 ? r.Plan.Value.ToString("0.##") : null;
+        }
+    }
+
+    private Task ReloadAsync() => RunAsync(LoadAsync, null);
+
+    private Task SaveAsync(PlanFactRowDto row, long managerId) => RunAsync(async () =>
+    {
+        var amount = Decimals.Parse(_inputs.GetValueOrDefault(managerId), L("План")) ?? 0;
+        await Reports.SetPlanAsync(DateOnly.FromDateTime(_month), managerId, amount, row.PlanVersion);
+        await LoadAsync();
+    }, L("План сохранён."));
+
+    /// <summary>Одна операция за раз: у вкладки один DbContext.</summary>
+    private async Task RunAsync(Func<Task> action, string? done)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            await action();
+            _message = done;
+            _isError = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
