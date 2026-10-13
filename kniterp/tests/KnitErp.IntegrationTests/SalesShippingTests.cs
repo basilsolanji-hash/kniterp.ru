@@ -135,7 +135,8 @@ public sealed class SalesShippingTests(SqlTestHost host) : IClassFixture<SqlTest
         var c = await ConfirmedAsync(s, f, f.Customer, (f.Sweater, 2));
         var ship = await s.Sales.CreateShipmentAsync(c);
         await s.Documents.SetLineAsync(ship, f.Sweater, 3, (await s.Documents.GetAsync(ship)).RowVersion);
-        Assert.Equal("sales.shipment.exceeds_order", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+        // Слияние: проверка D129 (StockDocumentService) срабатывает раньше дублирующей D1159 — код базы.
+        Assert.Equal("sales.shipment.exceeds", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
             await s.Documents.PostAsync(ship, (await s.Documents.GetAsync(ship)).RowVersion))).Code);
 
         var other = await CreateOrgAsync();
@@ -195,7 +196,8 @@ public sealed class SalesShippingTests(SqlTestHost host) : IClassFixture<SqlTest
         Assert.Equal("sales.return.defects_posted", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
             await s.Documents.ReverseAsync(ret, "ошибка", (await s.Documents.GetAsync(ret)).RowVersion))).Code);
         var shipment = (await s.Sales.GetOrderAsync(order)).Documents.Single(d => d.Kind == StockOperationKind.Shipment).Id;
-        Assert.Equal("sales.shipment.reverse_after_return", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+        // Слияние: возвраты превышают остаток без этой отгрузки — сначала срабатывает проверка D129 базы.
+        Assert.Equal("stock.reverse.returns_exist", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
             await s.Documents.ReverseAsync(shipment, "ошибка", (await s.Documents.GetAsync(shipment)).RowVersion))).Code);
 
         // Кладовщик чужого склада качество возврата не правит.
