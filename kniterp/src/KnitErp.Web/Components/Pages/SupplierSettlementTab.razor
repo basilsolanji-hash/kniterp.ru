@@ -101,6 +101,9 @@ else
 
     private SupplierOpeningBalancesDto? _data;
     private string? _denied;
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
     private DateTime? _date;
     private string _entity = string.Empty;
     private string? _amount;
@@ -130,6 +133,9 @@ else
         {
             _entity = _data.LegalEntities[0].Id.ToString();
         }
+
+        // Дата по умолчанию — сегодня по часовому поясу организации (аудит 13.10: пустая дата не давала сохранить с первого раза).
+        _date ??= TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
     }
 
     private Task AddAsync() => RunAsync(async () =>
