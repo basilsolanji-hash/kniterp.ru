@@ -195,7 +195,7 @@ else
                                     <td>
                                         @if (editable)
                                         {
-                                            <button type="button" class="secondary" disabled="@(_busy || !_edits.ContainsKey(c.Id))" @onclick="() => SaveColorAsync(color)">@L("Сохранить")</button>
+                                            <button type="button" class="secondary" disabled="@(_busy || !_edits.ContainsKey(c.Id))" title="@(_edits.ContainsKey(c.Id) ? null : L("Нечего сохранять: строка не менялась"))" @onclick="() => SaveColorAsync(color)">@L("Сохранить")</button>
                                             <button type="button" class="secondary" disabled="@_busy" @onclick="() => RemoveColorAsync(color)" aria-label="@L("Убрать цвет {0}", c.No)">×</button>
                                         }
                                     </td>
@@ -334,7 +334,7 @@ else
             <ul class="dev-files">
                 @foreach (var u in p.UsedIn)
                 {
-                    <li><a href="dev/models/@u.ModelId">@u.Number</a> @u.Name <span class="muted small">· @L("версия {0}", u.Version?.ToString() ?? "—")@(u.Colorway is null ? "" : " · " + u.Colorway) · @L(u.StageName)</span></li>
+                    <li class="dev-row"><a class="dev-open" href="dev/models/@u.ModelId">@u.Number</a> @u.Name <span class="muted small">· @L("версия {0}", u.Version?.ToString() ?? "—")@(u.Colorway is null ? "" : " · " + u.Colorway) · @L(u.StageName)</span></li>
                 }
             </ul>
         }

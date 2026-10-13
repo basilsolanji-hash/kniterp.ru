@@ -26,7 +26,7 @@ else
         <ul class="dev-tasks">
             @foreach (var p in _programming)
             {
-                <li class="now"><a href="dev/patterns/@p.Id"><b>@p.Number</b> @p.Name</a>
+                <li class="now dev-row"><a class="dev-open" href="dev/patterns/@p.Id"><b>@p.Number</b> @p.Name</a>
                     <div class="muted small">@L(p.KindName) · @L("версия {0}", p.Version) · @L("нужна программа машины")</div></li>
             }
         </ul>
@@ -42,8 +42,8 @@ else
         <ul class="dev-tasks">
             @foreach (var t in _tasks)
             {
-                <li class="@(t.ResponsibleNow ? "now" : null)">
-                    <a href="dev/models/@t.ModelId"><b>@t.Number</b> @t.Name</a>
+                <li class="dev-row @(t.ResponsibleNow ? "now" : null)">
+                    <a class="dev-open" href="dev/models/@t.ModelId"><b>@t.Number</b> @t.Name</a>
                     <div class="muted small">
                         @L(t.StageName) · @string.Join(", ", t.MyRoles.Select(r => L(DevModel.RoleName(r))))
                         @if (t.ResponsibleNow) { <span class="tag info">@L("ваша стадия")</span> }

@@ -122,7 +122,7 @@ else
                     }
                 </select>
                 <input @bind="_moveComment" maxlength="@DevModel.ReasonMaxLength" placeholder="@L("комментарий к переходу")" aria-label="@L("Комментарий к переходу")" />
-                <button type="button" class="secondary" @onclick="MoveToSelectedAsync" disabled="@(_busy || _target.Length == 0)">@L("Перевести")</button>
+                <button type="button" class="secondary" @onclick="MoveToSelectedAsync" disabled="@(_busy || _target.Length == 0)" title="@(_target.Length == 0 ? L("Сначала выберите стадию") : null)">@L("Перевести")</button>
             </div>
         }
         @if (m.Hints is { Count: > 0 } hints && m.CanEdit)

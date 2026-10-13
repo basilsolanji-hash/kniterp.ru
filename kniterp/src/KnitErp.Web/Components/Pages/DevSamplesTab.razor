@@ -48,6 +48,7 @@ else
         @* ТЗ §8: сравнение образцов рядом — замеры, вес, фото. Отмечаются галочкой «Сравнить» в карточке образца. *@
         <div class="actions">
             <button type="button" class="secondary" disabled="@(_busy || _selected.Count < DevShopService.CompareMin || _selected.Count > DevShopService.CompareMax)"
+                    title="@(_selected.Count < DevShopService.CompareMin || _selected.Count > DevShopService.CompareMax ? L("Отметьте от {0} до {1} образцов", DevShopService.CompareMin, DevShopService.CompareMax) : null)"
                     @onclick="CompareAsync">@L("Сравнить выбранные") (@_selected.Count)</button>
             @if (_compare is not null)
             {

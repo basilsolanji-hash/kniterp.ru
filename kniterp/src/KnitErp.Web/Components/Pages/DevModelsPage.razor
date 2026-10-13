@@ -4,6 +4,7 @@
 @inject DevModelService Models
 @inject DevExchangeService Exchange
 @inject NavigationManager Navigation
+@inject DevListState ListState
 
 <PageTitle>@L("Модели в разработке") — knitERP</PageTitle>
 <DevStyles />
@@ -95,7 +96,16 @@ else
     </form>
     </FoldOnPhone>
 
-    @if (!_table && _board is not null)
+    @if (!_table && _board is not null && _board.All(c => c.Models.Count == 0) && NoFilters)
+    {
+        @* ui-review §0 п. 7: пустой список — пояснение и кнопка «создать первую» (по праву). *@
+        <p class="muted">@L("Моделей в разработке пока нет. Модель проходит путь от идеи до передачи в производство; доска показывает, кто на какой стадии.")</p>
+        @if (_options.CanEdit && !_creating)
+        {
+            <p><button type="button" class="secondary" @onclick="() => _creating = true" disabled="@_busy">@L("Создать первую модель")</button></p>
+        }
+    }
+    else if (!_table && _board is not null)
     {
         @* Пустая стадия — узкая колонка, чтобы модели помещались без прокрутки вбок (пересмотр 13.10). *@
         <div class="dev-board" style="grid-template-columns: @string.Join(" ", _board.Select(c => c.Models.Count == 0 ? "minmax(96px, .4fr)" : "minmax(170px, 1fr)"))">
@@ -110,8 +120,8 @@ else
                     <ul>
                         @foreach (var m in col.Models)
                         {
-                            <li class="dev-cardlet @(m.IsOverdue ? "late" : null)">
-                                <a href="dev/models/@m.Id">@m.Number</a> @m.Name
+                            <li class="dev-cardlet dev-row @(m.IsOverdue ? "late" : null)">
+                                <a class="dev-open" href="dev/models/@m.Id">@m.Number</a> @m.Name
                                 <div class="meta">
                                     <span>@L(m.CategoryName)</span>
                                     @if (m.CustomerName is not null) { <span>@m.CustomerName</span> }
@@ -144,8 +154,8 @@ else
                     }
                     @foreach (var m in _page.Rows)
                     {
-                        <tr>
-                            <td><a href="dev/models/@m.Id">@m.Number</a></td>
+                        <tr class="dev-row">
+                            <td><a class="dev-open" href="dev/models/@m.Id">@m.Number</a></td>
                             <td>@m.Name</td>
                             <td><span class="tag @(m.IsOverdue ? "bad" : m.Stage == DevStage.Handed ? "ok" : "")">@L(m.StageName)</span></td>
                             <td>@L(m.CategoryName)</td>
@@ -203,8 +213,16 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        _table = View == "table";
-        _overdue = OverdueQuery == true;
+        if (ListState.Models is { } f && View is null && OverdueQuery is null)
+        {
+            (_search, _collection, _stage, _assignee, _customer, _overdue, _table, _pageNo) = (f.Search, f.Collection, f.Stage, f.Assignee, f.Customer, f.Overdue, f.Table, f.Page);
+        }
+        else
+        {
+            _table = View == "table";
+            _overdue = OverdueQuery == true;
+        }
+
         try
         {
             _options = await Models.OptionsAsync();
@@ -216,6 +234,8 @@ else
         }
     }
 
+    private bool NoFilters => string.IsNullOrWhiteSpace(_search) && _collection.Length == 0 && _assignee.Length == 0 && _customer.Length == 0 && !_overdue;
+
     private DevModelFilter Filter() => new(
         long.TryParse(_collection, out var c) ? c : null,
         _table && byte.TryParse(_stage, out var s) ? (DevStage)s : null,
@@ -226,6 +246,7 @@ else
     /// <summary>Доска или таблица — один вызов сервиса за раз (один DbContext у вкладки).</summary>
     private async Task LoadAsync()
     {
+        ListState.Models = new(_search, _collection, _stage, _assignee, _customer, _overdue, _table, _pageNo);
         if (_table)
         {
             _page = await Models.ListAsync(Filter(), _pageNo);

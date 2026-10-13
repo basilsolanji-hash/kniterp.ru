@@ -6445,5 +6445,16 @@
   "Не заполнено: {0}": "To‘ldirilmagan: {0}",
   "Не указано: {0}": "Ko‘rsatilmagan: {0}",
   "Открыть все модели": "Barcha modellarni ochish",
-  "Разделы настроек": "Sozlamalar bo‘limlari"
+  "Разделы настроек": "Sozlamalar bo‘limlari",
+  "Моделей в разработке пока нет. Модель проходит путь от идеи до передачи в производство; доска показывает, кто на какой стадии.": "Ishlab chiqilayotgan modellar hozircha yo‘q. Model g‘oyadan ishlab chiqarishga topshirishgacha yo‘l bosadi; doska kim qaysi bosqichda ekanini ko‘rsatadi.",
+  "Нечего сохранять: строка не менялась": "Saqlanadigan narsa yo‘q: qator o‘zgarmagan",
+  "Отметьте от {0} до {1} образцов": "{0} tadan {1} tagacha namunani belgilang",
+  "Рисунков пока нет. Библиотека хранит рисунки с версиями, цветами и колоритами — модели выбирают их отсюда.": "Rasmlar hozircha yo‘q. Kutubxona rasmlarni versiyalari, ranglari va koloritlari bilan saqlaydi — modellar ularni shu yerdan tanlaydi.",
+  "Сначала выберите деталь, откуда копировать": "Avval qaysi detaldan nusxa olishni tanlang",
+  "Сначала выберите операцию из справочника": "Avval ma’lumotnomadan operatsiyani tanlang",
+  "Сначала выберите позицию": "Avval pozitsiyani tanlang",
+  "Сначала выберите склад": "Avval omborni tanlang",
+  "Сначала выберите стадию": "Avval bosqichni tanlang",
+  "Создать первую модель": "Birinchi modelni yaratish",
+  "Создать первый рисунок": "Birinchi rasmni yaratish"
 }

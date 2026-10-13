@@ -433,6 +433,42 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
     /// D726 (ТЗ §7): библиотека рисунков → новый рисунок → сетка CSV и доли по файлу → пряжа колорита → утверждение → рисунок в модели;
     /// карточка рисунка на телефоне без горизонтальной прокрутки.
     /// </summary>
+    /// <summary>ui-review §0 п. 6–7: карточка доски открывается нажатием на любое место, «назад» к списку — с тем же поиском.</summary>
+    [SqlFact]
+    public Task Row_opens_model_and_list_keeps_filters() => RunAsync("dev-rows", false, async page =>
+    {
+        var name = "Строка " + Guid.NewGuid().ToString("N")[..6];
+        await CreateModelAsync(page, "Другая " + Guid.NewGuid().ToString("N")[..6]); // чтобы поиск действительно отбирал
+        await CreateModelAsync(page, name);
+        var modelUrl = page.Url;
+        await page.GotoAsync("dev/models");
+        await Ready(page);
+
+        // Ввод в первые секунды после открытия может потеряться — повторяем и проверяем результат.
+        var card = page.Locator("li.dev-cardlet", new() { HasText = name });
+        var other = page.Locator("li.dev-cardlet").Filter(new() { HasNotText = name });
+        for (var i = 0; i < 5 && (i == 0 || await other.CountAsync() > 0 || await card.CountAsync() == 0); i++)
+        {
+            await page.GetByLabel("Поиск", new() { Exact = true }).FillAsync(name);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Показать", Exact = true }).ClickAsync();
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            await page.WaitForTimeoutAsync(300);
+        }
+
+        await Assertions.Expect(card).ToHaveCountAsync(1);
+        await Assertions.Expect(other).ToHaveCountAsync(0);
+
+        // Нажатие в середину карточки (не на номер) открывает модель.
+        await card.ClickAsync();
+        await page.WaitForURLAsync(modelUrl);
+        await Ready(page);
+        await page.GetByRole(AriaRole.Link, new() { Name = "← Модели в разработке" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/dev/models$"));
+        await Ready(page);
+        await Assertions.Expect(page.GetByLabel("Поиск", new() { Exact = true })).ToHaveValueAsync(name);
+        await Assertions.Expect(page.Locator("li.dev-cardlet")).ToHaveCountAsync(1);
+    });
+
     [SqlFact]
     public Task Pattern_library_card_and_model_link() => RunAsync("dev-pattern", false, async page =>
     {
