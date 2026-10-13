@@ -15,12 +15,35 @@
     .crm-card a.crm-title { font-weight: 600; display: block; overflow-wrap: anywhere; }
     .crm-card .crm-meta { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 8px; }
     .crm-card .crm-move { display: flex; justify-content: space-between; gap: 6px; margin-top: 4px; }
-    .crm-card .crm-move button { padding: 0 8px; }
+    .crm-card .crm-move button { padding: 2px 8px; max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .crm-col.empty { min-height: 0; }
+    .crm-col.empty .crm-cards { display: none; }
+    /* Перетаскивание — только мышью; на сенсорном экране подсказка о нём лишняя (D699). */
+    @@media (pointer: coarse) { .crm-drag-hint { display: none; } }
     .crm-more { font-size: 12px; color: var(--muted); margin: 6px 2px 0; }
     .crm-ribbon { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 12px; padding: 0; list-style: none; }
     .crm-ribbon button { font-weight: 400; background: var(--line); color: var(--text); border-radius: 999px; }
     .crm-ribbon button.current { background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; }
     .crm-ribbon button.passed { background: var(--accent-soft-2); }
+    .crm-ribbon button.passed::before { content: "✓ "; }
+    /* Текущий этап — не «бледная» отключённая кнопка, а читаемая отметка (D699). */
+    .crm-ribbon button.current:disabled { opacity: 1; cursor: default; }
+    /* D699: панель «Дальше» — одно главное действие по состоянию сделки. */
+    .crm-next { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--accent-line);
+                border-radius: 10px; background: var(--accent-soft-2); }
+    .crm-next-label { font-weight: 600; }
+    .crm-next-hint { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; color: var(--text-2); }
+    /* Сообщение об итоге действия: внизу экрана, не перекрывает нажатия (pointer-events) — кроме кнопки «×». */
+    .crm-toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 70; width: max-content; max-width: min(560px, calc(100vw - 32px));
+                 box-sizing: border-box; display: flex; align-items: center; gap: 10px; margin: 0; box-shadow: 0 8px 24px var(--shadow); pointer-events: none; }
+    .crm-toast { background-color: var(--surface); background-image: linear-gradient(var(--accent-soft-2), var(--accent-soft-2)); }
+    .crm-toast.error { background-image: linear-gradient(var(--bad-bg-2), var(--bad-bg-2)); }
+    .crm-toast > span { min-width: 0; overflow-wrap: anywhere; }
+    .crm-toast > button { pointer-events: auto; padding: 0 8px; flex: 0 0 auto; }
+    .crm-toc { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+    #pipelines, #automation, #voice, #messengers, #mailbox, #templates, #references { scroll-margin-top: 72px; }
+    .crm-quick { margin-left: 8px; text-decoration: none; }
+    .crm-layout td.nowrap { white-space: nowrap; }
     .crm-dups { border: 1px solid color-mix(in srgb, var(--warn-text) 45%, transparent); background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
     .crm-dups ul { margin: 4px 0 0; padding-left: 18px; }
     .crm-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 16px; margin: 8px 0; }
@@ -81,10 +104,16 @@
     .crm-chat-reply textarea { flex: 1 1 auto; min-width: 0; }
     @@media (max-width: 599px) {
         .crm-chats { grid-template-columns: minmax(0, 1fr); }
+        .crm-chat-view.empty { display: none; }
         .crm-feed-item { grid-template-columns: 1fr; }
         .crm-board { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
         .crm-col { min-height: 0; }
         .crm-summary { grid-template-columns: 1fr 1fr; }
+        .crm-wide-only { display: none; }
+        /* Ассистент в правом нижнем углу не закрывает последние кнопки страницы; сообщение — выше него. */
+        .crm-layout, .crm-day-list:last-child { padding-bottom: 72px; }
+        .crm-toast { bottom: 84px; }
+        .crm-next > a.button, .crm-next > button { flex: 1 1 100%; text-align: center; }
     }
     /* Отчёты CRM (D685–D689): вкладки разрезов переносятся на телефоне; матрицы «менеджер × этап / месяц» — в .scroll. */
     .crm-report-tabs { flex-wrap: wrap; }

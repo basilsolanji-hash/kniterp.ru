@@ -127,6 +127,17 @@ if (!builder.Configuration.GetValue<bool>("MoySklad:WorkerDisabled"))
     builder.Services.AddHostedService<KnitErp.Web.Exchange.MoySkladImportWorker>();
 }
 
+// D145–D150: автоматизация волны 2 (регулярные операции, автозакрытие, напоминания) и курсы ЦБ (D146); в тестовых стендах — Automation:WorkerDisabled.
+if (!builder.Configuration.GetValue<bool>("Automation:WorkerDisabled"))
+{
+    builder.Services.AddHostedService<KnitErp.Web.Automation.AutomationWorker>();
+    if (builder.Configuration.GetValue("Automation:CbrRates:Enabled", true))
+    {
+        builder.Services.AddHttpClient(nameof(KnitErp.Web.Automation.CbrRateWorker), c => c.Timeout = TimeSpan.FromSeconds(30));
+        builder.Services.AddHostedService<KnitErp.Web.Automation.CbrRateWorker>();
+    }
+}
+
 // D102: тело запросов API — как и ответы: перечисления строками («Receipt»), имена в camelCase.
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddOpenApi("v1", o =>
@@ -173,6 +184,7 @@ if (!string.IsNullOrWhiteSpace(proxyNetwork))
 
 builder.Services.AddScoped<KnitErp.Web.Exports.ReportExports>();
 builder.Services.AddScoped<KnitErp.Web.Components.Pages.DevGate>(); // D718: очередь запросов разработки в вкладке
+builder.Services.AddScoped<KnitErp.Web.Components.Pages.DevListState>(); // D732: фильтры списков разработки на время вкладки
 builder.Services.AddHealthChecks().AddCheck<KnitErp.Web.Security.DatabaseHealthCheck>("database");
 
 // Ключи cookie и антиподделки — в базе, зашифрованные мастер-ключом: сессии переживают перезапуск и несколько серверов,

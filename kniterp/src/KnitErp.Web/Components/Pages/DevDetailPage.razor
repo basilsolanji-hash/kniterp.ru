@@ -79,7 +79,7 @@ else
                 }
                 @if (d.CanEdit)
                 {
-                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
+                    <div class="actions"><button type="submit" class="secondary" disabled="@_busy">@L("Сохранить")</button></div>
                 }
             </fieldset>
         </form>
@@ -98,7 +98,7 @@ else
                             <option value="@o.Id">@o.Name</option>
                         }
                     </select>
-                    <button type="button" class="secondary" @onclick="CopyAsync" disabled="@(_busy || _copyFrom.Length == 0)">@L("Скопировать")</button>
+                    <button type="button" class="secondary" @onclick="CopyAsync" disabled="@(_busy || _copyFrom.Length == 0)" title="@(_copyFrom.Length == 0 ? L("Сначала выберите деталь, откуда копировать") : null)">@L("Скопировать")</button>
                 </span>
             }
         </div>
@@ -232,7 +232,7 @@ else
         _machine = _d.MachineId?.ToString() ?? string.Empty;
         _weave = _d.WeaveId?.ToString() ?? string.Empty;
         _minutes = DevFormat.MinutesFromSeconds(_d.PlanKnitSeconds);
-        _grams = _d.PlanWeightGrams;
+        _grams = DevFormat.Trim(_d.PlanWeightGrams);
         _notes = _d.Notes;
         _slots.Clear();
         foreach (var t in _d.Threading)

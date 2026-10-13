@@ -29,7 +29,14 @@ public sealed record CrmOfferRowDto(long Id, string Number, DateOnly Date, DateO
 /// (HTML, «Сохранить как PDF» — тем же механизмом печати, что УПД), отправка письмом контакту. Создание КП фиксируется активностью
 /// «КП отправлено» и (если включено) двигает сделку на этап «КП отправлено». Нужны crm.edit и право «Цены и суммы».
 /// </summary>
-public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IEmailSender mail)
+/// <summary>PDF коммерческого предложения (D696) — тем же движком и оформлением, что счёт и УПД (реализация — в Infrastructure).</summary>
+public interface ICrmOfferPdfRenderer
+{
+    byte[] Offer(CrmOfferDto offer, KnitErp.Application.Sales.SalesPrintDecorations decorations);
+}
+
+public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IEmailSender mail,
+    ICrmOfferPdfRenderer? pdf = null)
 {
     public async Task<IReadOnlyList<LookupDto>> PriceTypesAsync(CancellationToken ct = default)
     {
@@ -120,6 +127,49 @@ public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, IC
     }
 
     /// <summary>
+    /// PDF КП (D696): права — как у печатной формы (crm.view, «Цены и суммы», видимость сделки); логотип и подпись руководителя — из настроек
+    /// документов основного юрлица (как у заказа покупателя). Сервер без рендерера — «не найдено».
+    /// </summary>
+    public async Task<EmailAttachment> PdfAsync(long id, CancellationToken ct = default)
+    {
+        var offer = await GetAsync(id, ct);
+        if (pdf is null)
+        {
+            throw new NotFoundException("PDF");
+        }
+
+        var ctx = await guard.CurrentAsync(ct);
+        var entity = await db.LegalEntities.AsNoTracking().Where(e => e.OrganizationId == ctx.OrganizationId && e.IsDefault).Select(e => (long?)e.Id)
+            .FirstOrDefaultAsync(ct);
+        var deco = KnitErp.Application.Sales.SalesPrintDecorations.None;
+        if (entity is { } entityId)
+        {
+            var flags = (await db.SalesDocumentSettings.AsNoTracking().SingleOrDefaultAsync(s => s.OrganizationId == ctx.OrganizationId && s.LegalEntityId == entityId, ct))
+                        ?.Flags ?? KnitErp.Domain.Sales.SalesDocumentFlags.Default;
+            var kinds = new List<KnitErp.Domain.Sales.SalesDocumentImageKind>();
+            if (flags.LogoOnOrder)
+            {
+                kinds.Add(KnitErp.Domain.Sales.SalesDocumentImageKind.Logo);
+            }
+
+            if (flags.StampOnOrder)
+            {
+                kinds.AddRange([KnitErp.Domain.Sales.SalesDocumentImageKind.Stamp, KnitErp.Domain.Sales.SalesDocumentImageKind.DirectorSignature]);
+            }
+
+            var images = kinds.Count == 0 ? [] : await db.SalesDocumentImages.AsNoTracking()
+                .Where(i => i.OrganizationId == ctx.OrganizationId && i.LegalEntityId == entityId && kinds.Contains(i.Kind)).ToListAsync(ct);
+            KnitErp.Application.Sales.SalesPrintImage? Image(KnitErp.Domain.Sales.SalesDocumentImageKind k) =>
+                images.FirstOrDefault(i => i.Kind == k) is { } i ? new KnitErp.Application.Sales.SalesPrintImage(i.ContentType, i.Content) : null;
+            deco = new KnitErp.Application.Sales.SalesPrintDecorations(Image(KnitErp.Domain.Sales.SalesDocumentImageKind.Logo),
+                Image(KnitErp.Domain.Sales.SalesDocumentImageKind.Stamp), Image(KnitErp.Domain.Sales.SalesDocumentImageKind.DirectorSignature));
+        }
+
+        var safe = new string(offer.Number.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c is '/' or '\\' ? '-' : c).ToArray());
+        return new EmailAttachment($"КП {safe}.pdf", "application/pdf", pdf.Offer(offer, deco));
+    }
+
+    /// <summary>
     /// Отправить КП письмом (D626): текст письма с таблицей позиций и итогом; активность «Письмо» на сделке; адрес в журнале — маской.
     /// </summary>
     public async Task SendAsync(long id, string? to, string? message, CancellationToken ct = default)
@@ -142,8 +192,10 @@ public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, IC
         await EnsureOfferQuotaAsync(ctx, ct);
         await CrmEmailTemplateService.EnsureEmailQuotaAsync(db, ctx, clock.UtcNow, ct);
         var (replyTo, replyName) = await CrmEmailTemplateService.ReplyToAsync(db, ctx.UserId, ct);
+        // D696: КП — вложением PDF (как счёт и УПД у продаж); без рендерера — только текст письма.
+        var attachment = pdf is null ? null : await PdfAsync(id, ct);
         if (!await mail.SendAsync(new EmailMessage(address, subject, text, CrmEmailHtml.FromText(text, $"Ответ на это письмо придёт менеджеру: {replyName}."), replyTo,
-                replyName), ct))
+                replyName, Attachments: attachment is null ? null : [attachment]), ct))
         {
             throw new BusinessRuleException("crm.mail.failed", "Письмо не отправлено: почтовый сервер не принял его. Попробуйте позже.");
         }

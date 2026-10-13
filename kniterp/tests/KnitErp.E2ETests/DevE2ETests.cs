@@ -38,7 +38,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Стадия изменена");
         await page.GetByRole(AriaRole.Button, new() { Name = "Дальше: Рисунок", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex(Regex.Escape(name)) })).ToContainTextAsync("Рисунок");
-        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Образец" });
+        await DevUi.MoveToStageAsync(page, "Образец");
         await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex(Regex.Escape(name)) })).ToContainTextAsync("Образец");
 
@@ -63,7 +63,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(column).ToContainTextAsync(name);
         await page.GetByRole(AriaRole.Tab, new() { Name = "Таблица" }).ClickAsync();
         await Assertions.Expect(page.Locator("table")).ToContainTextAsync(name);
-        await page.GotoAsync("dev/settings");
+        await page.GotoAsync("dev/settings?section=templates");
         await Ready(page);
         await Assertions.Expect(page.Locator("main")).ToContainTextAsync("Себестоимость");
         await Assertions.Expect(page.Locator("main")).ToContainTextAsync("Шаблоны задания по категориям");
@@ -98,7 +98,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
     public Task Automation_fills_name_brief_and_moves_stage_by_file() => RunAsync("dev-automation", false, async page =>
     {
         // Шаблон задания для категории «Жилет».
-        await page.GotoAsync("dev/settings");
+        await page.GotoAsync("dev/settings?section=templates");
         await Ready(page);
         var row = page.Locator("tr", new() { HasText = "Жилет" }).First;
         await row.GetByRole(AriaRole.Button, new() { Name = "Изменить", Exact = true }).ClickAsync();
@@ -128,6 +128,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
 
         // «Создать похожую» открывает новую модель на «Идее» с тем же заданием.
         var url = page.Url;
+        await DevUi.OpenMoreAsync(page);
         await page.GetByRole(AriaRole.Button, new() { Name = "Создать похожую", Exact = true }).ClickAsync();
         await page.WaitForURLAsync(u => u != url && Regex.IsMatch(u, @"/dev/models/\d+$"));
         await Ready(page);
@@ -239,7 +240,9 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await AssertNoHorizontalScrollAsync(page, "образец у заказчика");
 
         // D725: технический паспорт открывается из карточки модели как PDF.
+        await DevUi.OpenMoreAsync(page);
         var passportHref = await page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" }).GetAttributeAsync("href") ?? throw new InvalidOperationException("нет ссылки");
+        await DevUi.CloseMoreAsync(page);
         var passport = await page.APIRequest.GetAsync(new Uri(new Uri(page.Url), "/" + passportHref).ToString());
         Assert.Equal(200, passport.Status);
         Assert.Equal("application/pdf", passport.Headers["content-type"]);
@@ -247,13 +250,13 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
 
         // D750: утверждённая модель — панель передачи в производство с нормами и причиной, почему пока нельзя.
         // D746: без сохранённого расчёта себестоимости утвердить нельзя — сначала версия расчёта.
-        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
+        await DevUi.MoveToStageAsync(page, "Утверждено");
         await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Alert)).ToContainTextAsync("сохраните расчёт себестоимости");
         await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
         await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить версию расчёта", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Сохранена версия расчёта" })).ToBeVisibleAsync();
-        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
+        await DevUi.MoveToStageAsync(page, "Утверждено");
         await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждено");
         await Assertions.Expect(page.Locator(".dev-handoff")).ToContainTextAsync("Нет ни одной нормы пряжи");
@@ -264,7 +267,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.Locator(".dev-cost-tiles")).ToContainTextAsync("Маржа");
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Сохранить версию расчёта", Exact = true })).ToBeVisibleAsync();
         await AssertNoHorizontalScrollAsync(page, "себестоимость");
-        await page.GotoAsync("dev/settings");
+        await page.GotoAsync("dev/settings?section=cost");
         await Ready(page);
         await Assertions.Expect(page.GetByLabel("Ставка работы за минуту")).ToBeVisibleAsync();
 
@@ -399,7 +402,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         // Расчёт себестоимости и утверждение.
         await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
         await Click(page, "Сохранить версию расчёта", "Сохранена версия расчёта");
-        await page.GetByLabel("Перевести на стадию").SelectOptionAsync(new SelectOptionValue { Label = "Утверждено" });
+        await DevUi.MoveToStageAsync(page, "Утверждено");
         await page.GetByRole(AriaRole.Button, new() { Name = "Перевести", Exact = true }).ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждено");
 
@@ -421,6 +424,7 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GotoAsync(modelUrl);
         await Ready(page);
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Новая версия", Exact = true })).ToBeVisibleAsync();
+        await DevUi.OpenMoreAsync(page);
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" })).ToBeVisibleAsync();
         await AssertNoHorizontalScrollAsync(page, "переданная модель");
     });
@@ -429,6 +433,42 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
     /// D726 (ТЗ §7): библиотека рисунков → новый рисунок → сетка CSV и доли по файлу → пряжа колорита → утверждение → рисунок в модели;
     /// карточка рисунка на телефоне без горизонтальной прокрутки.
     /// </summary>
+    /// <summary>ui-review §0 п. 6–7: карточка доски открывается нажатием на любое место, «назад» к списку — с тем же поиском.</summary>
+    [SqlFact]
+    public Task Row_opens_model_and_list_keeps_filters() => RunAsync("dev-rows", false, async page =>
+    {
+        var name = "Строка " + Guid.NewGuid().ToString("N")[..6];
+        await CreateModelAsync(page, "Другая " + Guid.NewGuid().ToString("N")[..6]); // чтобы поиск действительно отбирал
+        await CreateModelAsync(page, name);
+        var modelUrl = page.Url;
+        await page.GotoAsync("dev/models");
+        await Ready(page);
+
+        // Ввод в первые секунды после открытия может потеряться — повторяем и проверяем результат.
+        var card = page.Locator("li.dev-cardlet", new() { HasText = name });
+        var other = page.Locator("li.dev-cardlet").Filter(new() { HasNotText = name });
+        for (var i = 0; i < 5 && (i == 0 || await other.CountAsync() > 0 || await card.CountAsync() == 0); i++)
+        {
+            await page.GetByLabel("Поиск", new() { Exact = true }).FillAsync(name);
+            await page.GetByRole(AriaRole.Button, new() { Name = "Показать", Exact = true }).ClickAsync();
+            await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+            await page.WaitForTimeoutAsync(300);
+        }
+
+        await Assertions.Expect(card).ToHaveCountAsync(1);
+        await Assertions.Expect(other).ToHaveCountAsync(0);
+
+        // Нажатие в середину карточки (не на номер) открывает модель.
+        await card.ClickAsync();
+        await page.WaitForURLAsync(modelUrl);
+        await Ready(page);
+        await page.GetByRole(AriaRole.Link, new() { Name = "← Модели в разработке" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/dev/models$"));
+        await Ready(page);
+        await Assertions.Expect(page.GetByLabel("Поиск", new() { Exact = true })).ToHaveValueAsync(name);
+        await Assertions.Expect(page.Locator("li.dev-cardlet")).ToHaveCountAsync(1);
+    });
+
     [SqlFact]
     public Task Pattern_library_card_and_model_link() => RunAsync("dev-pattern", false, async page =>
     {

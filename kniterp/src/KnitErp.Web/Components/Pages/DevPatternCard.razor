@@ -28,7 +28,7 @@ else if (_p is null)
 else
 {
     var p = _p;
-    var editable = p.CanEdit && p.Status is DevPatternStatus.Draft or DevPatternStatus.Review;
+    var editable = p.CanEdit && p.IsEditable;
     <p><a href="dev/patterns">← @L("Библиотека рисунков")</a></p>
     <div class="page-head">
         <h1>@p.Number · @p.Name <span class="tag @(p.Status == DevPatternStatus.Approved ? "ok" : p.Status == DevPatternStatus.Review ? "warn" : null)">@L(p.StatusName)</span></h1>
@@ -39,34 +39,43 @@ else
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
     }
+    @if (p.CanEdit && !p.IsEditable && p.Status != DevPatternStatus.Archived)
+    {
+        <div class="flash" role="status">@L("Версия {0} утверждена — чтобы изменить рисунок, создайте новую версию.", p.CurrentVersion)</div>
+    }
     @if (p.ReadyForProgrammingAtUtc is not null && !p.HasProgram)
     {
         <div class="flash" role="status">@L("Рисунок готов к программированию — ждёт программу машины от программиста {0}.", p.Programmer ?? "—")</div>
     }
 
-    <div class="actions">
-        @if (p.CanEdit && p.Status == DevPatternStatus.Draft)
+    @* Пересмотр 13.10 (ui-review §0 п. 4): главная кнопка — следующий шаг рисунка; копия и архив — в «Ещё». *@
+    var canApprove = p.CanApprove && p.IsEditable;
+    var toReview = p.CanEdit && p.Status == DevPatternStatus.Draft && p.IsEditable;
+    <div class="actions dev-actions">
+        @if (toReview)
         {
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Review)">@L("На проверку")</button>
+            <button type="button" class="@(canApprove ? "secondary" : null)" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Review)">@L("На проверку")</button>
         }
-        @if (p.CanApprove && p.Status is DevPatternStatus.Draft or DevPatternStatus.Review)
+        @if (canApprove)
         {
             <button type="button" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Approved)">@L("Утвердить рисунок")</button>
         }
-        @if (p.CanEdit && p.Status is DevPatternStatus.Review or DevPatternStatus.Approved)
+        @if (p.CanEdit && p.Status == DevPatternStatus.Review)
         {
             <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть в черновик")</button>
         }
         @if (p.CanEdit && p.Status != DevPatternStatus.Archived)
         {
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => _versionForm = !_versionForm">@L("Новая версия")</button>
+            <button type="button" class="@(p.IsEditable ? "secondary" : null)" disabled="@_busy" @onclick="() => _versionForm = !_versionForm">@L("Новая версия")</button>
             <button type="button" class="secondary" disabled="@_busy" @onclick="ReadyAsync">@L("Рисунок готов к программированию")</button>
-            <button type="button" class="secondary" disabled="@_busy" @onclick="CopyAsync">@L("Скопировать рисунок")</button>
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Archived)">@L("В архив")</button>
+            <DevMoreMenu>
+                    <button type="button" class="secondary" disabled="@_busy" @onclick="CopyAsync">@L("Скопировать рисунок")</button>
+                    <button type="button" class="secondary danger-text" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Archived)">@L("В архив")</button>
+            </DevMoreMenu>
         }
         @if (p.CanEdit && p.Status == DevPatternStatus.Archived)
         {
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть из архива")</button>
+            <button type="button" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть из архива")</button>
         }
     </div>
     @if (_versionForm)
@@ -131,7 +140,7 @@ else
                             </select>
                         </label>
                         <label class="wide">@L("Описание") <textarea @bind="_form.Note" maxlength="@DevPattern.NoteMaxLength" rows="2"></textarea></label>
-                        <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить свойства")</button></div>
+                        <div class="actions"><button type="submit" class="secondary" disabled="@_busy">@L("Сохранить свойства")</button></div>
                     </fieldset>
                 </form>
             }
@@ -151,7 +160,7 @@ else
             }
         </div>
 
-        <div class="panel">
+        <div class="panel wide">
             <h2>@L("Цвета и доли в раппорте")</h2>
             @if (p.Colors.Count == 0)
             {
@@ -186,7 +195,7 @@ else
                                     <td>
                                         @if (editable)
                                         {
-                                            <button type="button" class="secondary" disabled="@(_busy || !_edits.ContainsKey(c.Id))" @onclick="() => SaveColorAsync(color)">@L("Сохранить")</button>
+                                            <button type="button" class="secondary" disabled="@(_busy || !_edits.ContainsKey(c.Id))" title="@(_edits.ContainsKey(c.Id) ? null : L("Нечего сохранять: строка не менялась"))" @onclick="() => SaveColorAsync(color)">@L("Сохранить")</button>
                                             <button type="button" class="secondary" disabled="@_busy" @onclick="() => RemoveColorAsync(color)" aria-label="@L("Убрать цвет {0}", c.No)">×</button>
                                         }
                                     </td>
@@ -325,7 +334,7 @@ else
             <ul class="dev-files">
                 @foreach (var u in p.UsedIn)
                 {
-                    <li><a href="dev/models/@u.ModelId">@u.Number</a> @u.Name <span class="muted small">· @L("версия {0}", u.Version?.ToString() ?? "—")@(u.Colorway is null ? "" : " · " + u.Colorway) · @L(u.StageName)</span></li>
+                    <li class="dev-row"><a class="dev-open" href="dev/models/@u.ModelId">@u.Number</a> @u.Name <span class="muted small">· @L("версия {0}", u.Version?.ToString() ?? "—")@(u.Colorway is null ? "" : " · " + u.Colorway) · @L(u.StageName)</span></li>
                 }
             </ul>
         }

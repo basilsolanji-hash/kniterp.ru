@@ -35,7 +35,7 @@ else
                         }
                     </select>
                 </label>
-                <button type="submit" disabled="@_busy">@L("Новый образец")</button>
+                <button type="submit" class="secondary" disabled="@_busy">@L("Новый образец")</button>
             </fieldset>
         </form>
     }
@@ -48,6 +48,7 @@ else
         @* ТЗ §8: сравнение образцов рядом — замеры, вес, фото. Отмечаются галочкой «Сравнить» в карточке образца. *@
         <div class="actions">
             <button type="button" class="secondary" disabled="@(_busy || _selected.Count < DevShopService.CompareMin || _selected.Count > DevShopService.CompareMax)"
+                    title="@(_selected.Count < DevShopService.CompareMin || _selected.Count > DevShopService.CompareMax ? L("Отметьте от {0} до {1} образцов", DevShopService.CompareMin, DevShopService.CompareMax) : null)"
                     @onclick="CompareAsync">@L("Сравнить выбранные") (@_selected.Count)</button>
             @if (_compare is not null)
             {
@@ -233,7 +234,7 @@ else
                         <label>@L("Передан") <input type="date" @bind="_handOn" required /></label>
                         <label>@L("Вернуть до") <input type="date" @bind="_returnBy" /></label>
                         <label>@L("Комментарий") <input @bind="_handNote" maxlength="@DevSample.CustodyNoteMaxLength" /></label>
-                        <button type="submit" disabled="@_busy">@L("Передать")</button>
+                        <button type="submit" class="secondary" disabled="@_busy">@L("Передать")</button>
                         <button type="button" class="secondary" @onclick="() => _handFor = null">@L("Отмена")</button>
                     </form>
                 }
@@ -356,7 +357,7 @@ else
                         </label>
                     }
                     <label>@L("Что не так / комментарий") <input @bind="_decisionComment" maxlength="@DevSample.CommentMaxLength" /></label>
-                    <button type="submit" disabled="@_busy">@L("Записать решение")</button>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Записать решение")</button>
                 </form>
             }
             @if (data.CanEdit && smp.Status == DevSampleStatus.Rework && _rework.TryGetValue(smp.Id, out var rf))
@@ -375,7 +376,7 @@ else
                         </select>
                     </label>
                     <label>@L("Срок") <input type="date" @bind="rf.Due" /></label>
-                    <button type="submit" disabled="@_busy">@L("Сохранить план доработки")</button>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Сохранить план доработки")</button>
                 </form>
             }
             @if ((data.CanEdit || data.CanRecord) && _making.TryGetValue(smp.Id, out var mf))
@@ -404,7 +405,7 @@ else
                         </select>
                     </label>
                     <label>@L("Время сборки, мин") <input type="number" min="0" max="10000" step="1" inputmode="numeric" style="max-width: 100px" @bind="mf.Minutes" /></label>
-                    <button type="submit" disabled="@_busy">@L("Сохранить паспорт")</button>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Сохранить паспорт")</button>
                 </form>
             }
         </div>

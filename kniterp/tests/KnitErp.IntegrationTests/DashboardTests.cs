@@ -53,6 +53,36 @@ public sealed class DashboardTests(SqlTestHost host) : IClassFixture<SqlTestHost
         Assert.InRange(counter.Count - first, 1, 6);
     }
 
+    /// <summary>D141: «Нам должны покупатели» учитывает вводные остатки покупателей (D1146), как «Мы должны поставщикам» — D133; лимит запросов тот же.</summary>
+    [SqlFact]
+    public async Task Customer_opening_balances_count_in_receivables_within_query_limit()
+    {
+        var f = await SeedAsync();
+        decimal before;
+        long old;
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            before = (await s.Dashboard.GetAsync(refresh: true)).Finance!.CustomerDebt!.Value;
+            var entity = (await s.LegalEntities.ListAsync()).Single().Id;
+            old = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Старый клиент»", null, null, false, true, null));
+            var advance = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Аванс»", null, null, false, true, null));
+            await s.Sales.AddOpeningBalanceAsync(old, entity, Day.AddDays(-30), 5_000m, null);
+            await s.Sales.AddOpeningBalanceAsync(advance, entity, Day.AddDays(-30), -1_200m, null);
+            await s.Sales.AddOpeningBalanceAsync(f.Customer, entity, Day.AddDays(-30), -100m, null);
+        }
+
+        var counter = new CommandCounter();
+        await using var db = host.NewDb(counter);
+        var finance = (await NewDashboard(db, Owner(f)).GetAsync()).Finance!;
+        Assert.InRange(counter.Count, 1, 30);
+
+        // Долг 5 000 — в сумме и в списке должников; аванс 1 200 — не долг; аванс 100 покупателя заказа уменьшает его долг.
+        Assert.Equal(before + 5_000m - 100m, finance.CustomerDebt);
+        Assert.Equal(5_000m, finance.TopDebtors.Single(d => d.Id == old).Debt);
+        await using var s2 = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+        Assert.Equal((await s2.Sales.BalancesAsync()).Where(x => x.Debt > 0).Sum(x => x.Debt), finance.CustomerDebt);
+    }
+
     [SqlFact]
     public async Task Money_on_accounts_and_cash_desks_of_all_legal_entities()
     {

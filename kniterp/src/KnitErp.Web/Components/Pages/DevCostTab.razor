@@ -135,7 +135,7 @@ else
         <form class="inline-form" @onsubmit="SaveAsync">
             <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
                 <label>@L("Комментарий к версии") <input @bind="_note" maxlength="@DevCostRun.NoteMaxLength" placeholder="@L("например: хлопок 24/1 вместо 20/1")" /></label>
-                <button type="submit" disabled="@_busy">@L("Сохранить версию расчёта")</button>
+                <button type="submit" class="secondary" disabled="@_busy">@L("Сохранить версию расчёта")</button>
             </fieldset>
         </form>
     }
@@ -173,7 +173,7 @@ else
                         </select>
                     </label>
                     <label>@L("На изделие") <input type="number" min="0.000001" step="any" inputmode="decimal" style="max-width: 90px" @bind="_accQty" /></label>
-                    <button type="submit" class="secondary" disabled="@(_busy || _accItem.Length == 0)">@L("Добавить")</button>
+                    <button type="submit" class="secondary" disabled="@(_busy || _accItem.Length == 0)" title="@(_accItem.Length == 0 ? L("Сначала выберите позицию") : null)">@L("Добавить")</button>
                 </form>
             }
         </div>

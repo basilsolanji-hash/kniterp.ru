@@ -396,14 +396,22 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                    } into g
                                    select new { g.Key.CustomerId, g.Key.Name, g.Key.Kind, g.Key.Day, g.Key.Amount, g.Key.LineQuantity, Quantity = g.Sum() })
                     .ToListAsync(ct);
-                var paid = await (from pay in db.CustomerPayments.AsNoTracking()
-                                  where pay.OrganizationId == org && pay.Status == CustomerPaymentStatus.Posted
-                                  join cp in db.Counterparties.AsNoTracking() on pay.CustomerId equals cp.Id
-                                  group pay.Amount by new
-                                  {
-                                      pay.CustomerId, cp.Name,
-                                      Day = pay.PaymentDate >= windowStart && pay.PaymentDate <= today ? (DateOnly?)pay.PaymentDate : null,
-                                  } into g
+                // D141: вводные остатки покупателей (D1146) и возвраты денег покупателю (D1154) — в том же запросе, как оплата со знаком
+                // минус (долг покупателя его увеличивает, аванс — уменьшает), без дня: в график поступлений не попадают. Как D133 у поставщиков.
+                var paid = await (from x in db.CustomerPayments.AsNoTracking()
+                                      .Where(pay => pay.OrganizationId == org && pay.Status == CustomerPaymentStatus.Posted)
+                                      .Select(pay => new
+                                      {
+                                          pay.CustomerId,
+                                          Day = pay.PaymentDate >= windowStart && pay.PaymentDate <= today ? (DateOnly?)pay.PaymentDate : null,
+                                          pay.Amount,
+                                      })
+                                      .Concat(db.CustomerOpeningBalances.AsNoTracking().Where(b => b.OrganizationId == org && !b.IsCancelled)
+                                          .Select(b => new { b.CustomerId, Day = (DateOnly?)null, Amount = -b.Amount }))
+                                      .Concat(db.CustomerRefunds.AsNoTracking().Where(r => r.OrganizationId == org && r.Status == CustomerRefundStatus.Posted)
+                                          .Select(r => new { r.CustomerId, Day = (DateOnly?)null, Amount = -r.Amount }))
+                                  join cp in db.Counterparties.AsNoTracking() on x.CustomerId equals cp.Id
+                                  group x.Amount by new { x.CustomerId, cp.Name, x.Day } into g
                                   select new { g.Key.CustomerId, g.Key.Name, g.Key.Day, Sum = g.Sum() })
                     .ToListAsync(ct);
 

@@ -30,6 +30,7 @@ internal sealed class DevPatternConfiguration : IEntityTypeConfiguration<DevPatt
         b.Property(x => x.Note).HasMaxLength(DevPattern.NoteMaxLength);
         b.Property(x => x.ReadyForProgrammingAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.CreatedAtUtc).HasColumnType("datetime2(3)");
+        b.Property(x => x.ChangedAtUtc).HasColumnType("datetime2(3)");
         b.Property(x => x.RowVersion).IsRowVersion();
         DevKeys.Org(b);
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_patterns_org_id");
@@ -168,5 +169,24 @@ internal sealed class DevCategoryMeasureConfiguration : IEntityTypeConfiguration
         b.Property(x => x.Step).HasPrecision(6, 2);
         DevKeys.Org(b);
         b.HasIndex(x => new { x.OrganizationId, x.Category, x.Name }).IsUnique().HasDatabaseName("ux_dev_category_measures_name");
+    }
+}
+
+/// <summary>Снимки цветов версий рисунка (ревью 13.10) — только вставка (триггер); версия — этого же рисунка.</summary>
+internal sealed class DevPatternVersionColorConfiguration : IEntityTypeConfiguration<DevPatternVersionColor>
+{
+    public void Configure(EntityTypeBuilder<DevPatternVersionColor> b)
+    {
+        b.ToTable("dev_pattern_version_colors", t => t.HasTrigger("tr_dev_pattern_version_colors_immutable"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).UseIdentityColumn();
+        b.Property(x => x.ColorName).HasMaxLength(DevPatternColor.NameMaxLength).IsRequired();
+        b.Property(x => x.SharePercent).HasPrecision(5, 2);
+        b.Property(x => x.Colorway).HasMaxLength(DevPatternColorway.NameMaxLength);
+        b.Property(x => x.Yarn).HasMaxLength(300);
+        DevKeys.Org(b);
+        b.HasOne<DevPatternVersion>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PatternId, x.Version })
+            .HasPrincipalKey(v => new { v.OrganizationId, v.PatternId, v.Version }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_pattern_version_colors_version");
+        b.HasIndex(x => new { x.OrganizationId, x.PatternId, x.Version }).HasDatabaseName("ix_dev_pattern_version_colors_version");
     }
 }

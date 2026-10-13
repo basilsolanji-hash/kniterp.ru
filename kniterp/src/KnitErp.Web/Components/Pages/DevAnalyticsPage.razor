@@ -132,7 +132,7 @@ else
                     <ul class="dev-files">
                         @foreach (var x in reuse)
                         {
-                            <li><a href="dev/patterns/@x.PatternId">@x.Number</a> @x.Name — <b>@x.Models</b> @L("моделей")</li>
+                            <li class="dev-row"><a class="dev-open" href="dev/patterns/@x.PatternId">@x.Number</a> @x.Name — <b>@x.Models</b> @L("моделей")</li>
                         }
                     </ul>
                 }
@@ -151,8 +151,8 @@ else
                             <tbody>
                                 @foreach (var x in so)
                                 {
-                                    <tr>
-                                        <td><a href="dev/models/@x.ModelId?tab=samples">@x.Number</a> @x.ModelName</td>
+                                    <tr class="dev-row">
+                                        <td><a class="dev-open" href="dev/models/@x.ModelId?tab=samples">@x.Number</a> @x.ModelName</td>
                                         <td class="num">№ @x.No</td>
                                         <td>@x.Recipient</td>
                                         <td>@x.HandedOn.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</td>
@@ -181,8 +181,8 @@ else
                                 <tbody>
                                     @foreach (var p in pf)
                                     {
-                                        <tr>
-                                            <td><a href="dev/models/@p.ModelId">@p.Number</a> @p.Name</td>
+                                        <tr class="dev-row">
+                                            <td><a class="dev-open" href="dev/models/@p.ModelId">@p.Number</a> @p.Name</td>
                                             <td class="num">@Amounts.Format(p.TargetCost)</td>
                                             <td class="num">@Amounts.Format(p.CalculatedCost)</td>
                                             <td class="num @(p.Difference > 0 ? "late-text" : null)">@(p.Difference is { } d ? (d > 0 ? "+" : "") + Amounts.Format(d) : "—")</td>

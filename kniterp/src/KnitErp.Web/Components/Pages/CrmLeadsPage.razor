@@ -31,10 +31,12 @@ else
 
     @if (_options.CanEdit)
     {
+        @* D699: на телефоне ввод лида свёрнут под «+ Новый лид» — список лидов виден сразу. *@
+        <FoldOnPhone Title="@L("+ Новый лид")">
         <details class="panel" open="@_pasteOpen">
             <summary>@L("Умная вставка: вставьте сообщение клиента")</summary>
-            <p class="muted small">@L("Скопируйте сообщение из мессенджера или письма — телефон, почта, ИНН, компания, имя и количество подставятся в поля сами. Проверьте и нажмите «Добавить лид».")</p>
-            <textarea rows="4" @bind="_paste" aria-label="@L("Сообщение клиента")" placeholder="@L("Здравствуйте! Нужно 300 свитеров с логотипом к декабрю. ООО «Ромашка», ИНН … С уважением, Анна, +7 900 000-00-01")"></textarea>
+            <p class="muted small">@L("Скопируйте сообщение из мессенджера или письма — телефон, почта, ИНН, компания, имя и количество подставятся в поля сами, как только вы выйдете из поля. Проверьте и нажмите «Добавить лид».")</p>
+            <textarea rows="4" @bind="_paste" @bind:after="ParsePaste" aria-label="@L("Сообщение клиента")" placeholder="@L("Здравствуйте! Нужно 300 свитеров с логотипом к декабрю. ООО «Ромашка», ИНН … С уважением, Анна, +7 900 000-00-01")"></textarea>
             <div class="actions"><button type="button" class="secondary" @onclick="ParsePaste" disabled="@_busy">@L("Разобрать")</button></div>
         </details>
         <form class="inline-form" @onsubmit="CreateAsync" aria-label="@L("Быстрый ввод лида")">
@@ -61,11 +63,12 @@ else
             <button type="submit" disabled="@_busy">@L("Добавить лид")</button>
         </form>
         <CrmDuplicates Items="_duplicates" />
+        </FoldOnPhone>
     }
 
     @if (_options.CanAll)
     {
-        <CrmImportPanel Kind="CrmImportKind.Leads" Applied="ReloadAsync" />
+        <div class="crm-wide-only"><CrmImportPanel Kind="CrmImportKind.Leads" Applied="ReloadAsync" /></div>
     }
 
     <FoldOnPhone Title="@L("Фильтры")">

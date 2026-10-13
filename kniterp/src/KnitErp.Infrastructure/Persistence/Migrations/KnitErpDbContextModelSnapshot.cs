@@ -597,6 +597,53 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Automation.AutomationSettings", b =>
+                {
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("AutoClosePurchaseOrders")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("AutoCloseSalesOrders")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("OverdueRepeatDays")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("PaymentRemindersEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RecurringOperationsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("RemindDaysBefore")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("UpdatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("OrganizationId");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.ToTable("automation_settings", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_automation_settings_remind_days", "[RemindDaysBefore] BETWEEN 0 AND 30");
+
+                            t.HasCheckConstraint("ck_automation_settings_repeat_days", "[OverdueRepeatDays] BETWEEN 0 AND 60");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.BundleComponent", b =>
                 {
                     b.Property<long>("Id")
@@ -4095,6 +4142,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("StaleLeadDays")
                         .HasColumnType("int");
 
+                    b.Property<bool>("VoiceDictation")
+                        .HasColumnType("bit");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DefaultResponsibleUserId");
@@ -5442,6 +5492,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int?>("ApprovedVersion")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ChangedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<long?>("CopiedFromPatternId")
                         .HasColumnType("bigint");
 
@@ -5787,6 +5843,62 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("dev_pattern_versions", "kniterp", t =>
                         {
                             t.HasTrigger("tr_dev_pattern_versions_immutable");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevPatternVersionColor", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ColorName")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("ColorNo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Colorway")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long?>("ColorwayId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("Feeder")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PatternId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("SharePercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Yarn")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "PatternId", "Version")
+                        .HasDatabaseName("ix_dev_pattern_version_colors_version");
+
+                    b.ToTable("dev_pattern_version_colors", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_dev_pattern_version_colors_immutable");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -6395,6 +6507,72 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Finance.CurrencyRate", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("char(3)")
+                        .IsFixedLength();
+
+                    b.Property<int>("Nominal")
+                        .HasColumnType("int");
+
+                    b.Property<long?>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("RateDate")
+                        .HasColumnType("date");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<byte>("Source")
+                        .HasColumnType("tinyint");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("UpdatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Value")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.HasIndex("CurrencyCode", "RateDate")
+                        .IsUnique()
+                        .HasDatabaseName("ux_currency_rates_cbr")
+                        .HasFilter("[OrganizationId] IS NULL");
+
+                    b.HasIndex("OrganizationId", "CurrencyCode", "RateDate")
+                        .IsUnique()
+                        .HasDatabaseName("ux_currency_rates_manual")
+                        .HasFilter("[OrganizationId] IS NOT NULL");
+
+                    b.ToTable("currency_rates", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_currency_rates_code", "LEN([CurrencyCode]) = 3");
+
+                            t.HasCheckConstraint("ck_currency_rates_source", "([Source] = 1 AND [OrganizationId] IS NULL) OR ([Source] = 2 AND [OrganizationId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_currency_rates_value", "[Value] > 0 AND [Nominal] >= 1");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Finance.CustomerPaymentAllocation", b =>
                 {
                     b.Property<long>("Id")
@@ -6722,6 +6900,167 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                             t.HasCheckConstraint("ck_money_operations_transfer_item", "[Kind] <> 3 OR ([CashFlowItemId] IS NULL AND [EmployeeId] IS NULL)");
 
                             t.HasCheckConstraint("ck_money_operations_transfer_orders", "[Kind] = 3 OR ([CashOrderNumber] IS NULL AND [TargetCashOrderNumber] IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Finance.RecurringOperation", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<long>("AccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<string>("Basis")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<long?>("CashFlowItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Day")
+                        .HasColumnType("int");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateOnly>("NextDate")
+                        .HasColumnType("date");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Party")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<byte>("Period")
+                        .HasColumnType("tinyint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("OrganizationId", "Id")
+                        .HasName("ak_recurring_operations_org_id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "AccountId");
+
+                    b.HasIndex("OrganizationId", "CashFlowItemId");
+
+                    b.HasIndex("OrganizationId", "IsArchived", "NextDate")
+                        .HasDatabaseName("ix_recurring_operations_next");
+
+                    b.ToTable("recurring_operations", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_recurring_operations_amount", "[Amount] > 0");
+
+                            t.HasCheckConstraint("ck_recurring_operations_day", "([Period] = 2 AND [Day] BETWEEN 1 AND 7) OR ([Period] <> 2 AND [Day] BETWEEN 1 AND 31)");
+
+                            t.HasCheckConstraint("ck_recurring_operations_end", "[EndDate] IS NULL OR [EndDate] >= [StartDate]");
+
+                            t.HasCheckConstraint("ck_recurring_operations_kind", "[Kind] IN (1, 2)");
+
+                            t.HasCheckConstraint("ck_recurring_operations_period", "[Period] IN (1, 2, 3)");
+                        });
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Finance.RecurringOperationRun", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("DecidedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateOnly>("DueDate")
+                        .HasColumnType("date");
+
+                    b.Property<long?>("MoneyOperationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("RecurringOperationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("SkipReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<byte>("Status")
+                        .HasColumnType("tinyint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DecidedByUserId");
+
+                    b.HasIndex("OrganizationId", "MoneyOperationId");
+
+                    b.HasIndex("OrganizationId", "Status")
+                        .HasDatabaseName("ix_recurring_operation_runs_status");
+
+                    b.HasIndex("OrganizationId", "RecurringOperationId", "DueDate")
+                        .IsUnique()
+                        .HasDatabaseName("ux_recurring_operation_runs_due");
+
+                    b.ToTable("recurring_operation_runs", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_recurring_operation_runs_amount", "[Amount] > 0");
+
+                            t.HasCheckConstraint("ck_recurring_operation_runs_status", "([Status] = 1 AND [MoneyOperationId] IS NULL AND [DecidedAtUtc] IS NULL) OR ([Status] = 2 AND [MoneyOperationId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL) OR ([Status] = 3 AND [MoneyOperationId] IS NULL AND [DecidedAtUtc] IS NOT NULL AND [SkipReason] IS NOT NULL)");
                         });
                 });
 
@@ -9634,6 +9973,76 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Purchasing.SupplierUpdImport", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("FileHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .IsUnicode(false)
+                        .HasColumnType("char(64)")
+                        .IsFixedLength();
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateOnly>("InvoiceDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("InvoiceNumber")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("LineCount")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PurchaseOrderId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ReceiptDocumentId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SellerInn")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(12)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "FileHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_supplier_upd_imports_file");
+
+                    b.HasIndex("OrganizationId", "PurchaseOrderId");
+
+                    b.HasIndex("OrganizationId", "ReceiptDocumentId");
+
+                    b.ToTable("supplier_upd_imports", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_supplier_upd_imports_hash", "LEN([FileHash]) = 64");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Sales.CustomerInvoice", b =>
                 {
                     b.Property<long>("Id")
@@ -9795,8 +10204,16 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<bool>("NoAutoSend")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("NoPaymentReminders")
+                        .HasColumnType("bit");
+
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
+
+                    b.Property<Guid>("ReminderToken")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWID()");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -9805,6 +10222,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasColumnType("rowversion");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ReminderToken")
+                        .IsUnique()
+                        .HasDatabaseName("ux_customer_mail_settings_reminder_token");
 
                     b.HasIndex("OrganizationId", "CounterpartyId")
                         .IsUnique()
@@ -11081,7 +11502,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("ck_sales_mail_messages_dedup", "[DedupKey] IS NULL OR [IsAuto] = 1");
 
-                            t.HasCheckConstraint("ck_sales_mail_messages_kind", "[Kind] IN (1, 2, 3, 4)");
+                            t.HasCheckConstraint("ck_sales_mail_messages_kind", "[Kind] IN (1, 2, 3, 4, 5, 6)");
 
                             t.HasCheckConstraint("ck_sales_mail_messages_sent", "([Status] = 2 AND [SentAtUtc] IS NOT NULL) OR ([Status] <> 2 AND [SentAtUtc] IS NULL)");
 
@@ -11153,7 +11574,7 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.ToTable("sales_mail_templates", "kniterp", t =>
                         {
-                            t.HasCheckConstraint("ck_sales_mail_templates_kind", "[Kind] IN (1, 2, 3, 4)");
+                            t.HasCheckConstraint("ck_sales_mail_templates_kind", "[Kind] IN (1, 2, 3, 4, 5, 6)");
                         });
                 });
 
@@ -13522,6 +13943,21 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Automation.AutomationSettings", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithOne()
+                        .HasForeignKey("KnitErp.Domain.Automation.AutomationSettings", "OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_automation_settings_updated_by");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Catalog.BundleComponent", b =>
                 {
                     b.HasOne("KnitErp.Domain.Catalog.Item", null)
@@ -15327,6 +15763,23 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_dev_pattern_versions_pattern");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Development.DevPatternVersionColor", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevPatternVersion", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PatternId", "Version")
+                        .HasPrincipalKey("OrganizationId", "PatternId", "Version")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_pattern_version_colors_version");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Development.DevSample", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -15609,6 +16062,20 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Finance.CurrencyRate", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_currency_rates_updated_by");
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Finance.CustomerPaymentAllocation", b =>
                 {
                     b.HasOne("KnitErp.Domain.Access.UserAccount", null)
@@ -15737,6 +16204,67 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasPrincipalKey("OrganizationId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_money_operations_target");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Finance.RecurringOperation", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_recurring_operations_created_by");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Organizations.LegalEntityAccount", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "AccountId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_recurring_operations_account");
+
+                    b.HasOne("KnitErp.Domain.Finance.CashFlowItem", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "CashFlowItemId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_recurring_operations_cash_flow_item");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Finance.RecurringOperationRun", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("DecidedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_recurring_operation_runs_decided_by");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Finance.MoneyOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "MoneyOperationId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_recurring_operation_runs_money");
+
+                    b.HasOne("KnitErp.Domain.Finance.RecurringOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "RecurringOperationId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_recurring_operation_runs_template");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Finance.SupplierPaymentAllocation", b =>
@@ -16695,6 +17223,38 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_supplier_payments_supplier");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Purchasing.SupplierUpdImport", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_supplier_upd_imports_created_by");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Purchasing.PurchaseOrder", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PurchaseOrderId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_supplier_upd_imports_order");
+
+                    b.HasOne("KnitErp.Domain.Warehousing.StockDocument", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "ReceiptDocumentId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_supplier_upd_imports_receipt");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Sales.CustomerInvoice", b =>

@@ -1,0 +1,126 @@
+@page "/settings/automation"
+@using KnitErp.Application.Automation
+@inject AutomationSettingsService Settings
+
+@* D145: настройки автоматизации организации — напоминания об оплате (D148), автозакрытие заказов (D150), регулярные операции (D147). *@
+<PageTitle>@L("Настройки автоматизации") — knitERP</PageTitle>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_s is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="page-head"><h1>@L("Настройки автоматизации")</h1></div>
+    <p class="muted">@L("Автоматика ничего не проводит молча: создаёт черновики, ставит письма в очередь или закрывает то, что уже выполнено, — с записью в журнал «автоматически». Каждую можно выключить.")</p>
+    @if (_message is not null)
+    {
+        <div class="@(_messageIsError ? "flash error" : "flash")" role="@(_messageIsError ? "alert" : "status")">@_message</div>
+    }
+
+    <form class="panel" @onsubmit="SaveAsync">
+        <h2>@L("Напоминания покупателям об оплате")</h2>
+        <label class="inline"><input type="checkbox" @bind="_f.PaymentRemindersEnabled" disabled="@(!_s.CanEdit)" /> @L("Напоминать покупателям об оплате счетов письмом")</label>
+        <label>@L("За сколько дней до срока напомнить") <input type="number" min="0" max="30" step="1" @bind="_f.RemindDaysBefore" disabled="@(!_s.CanEdit)" /></label>
+        <label>@L("Повтор напоминания о просрочке, дней (0 — одно)") <input type="number" min="0" max="60" step="1" @bind="_f.OverdueRepeatDays" disabled="@(!_s.CanEdit)" /></label>
+        <p class="muted">@L("Письмо со счётом уходит, если у счёта есть срок, он не оплачен, у покупателя указана почта для документов и он не отписался. О просрочке — не больше трёх писем. Ответственный за заказ видит приближающийся срок в уведомлениях. Тексты писем — в") <a href="sales-documents-settings">@L("настройках документов продаж")</a>.</p>
+
+        <h2>@L("Автозакрытие заказов")</h2>
+        <label class="inline"><input type="checkbox" @bind="_f.AutoCloseSalesOrders" disabled="@(!_s.CanEdit)" /> @L("Закрывать заказ покупателя, отгруженный и оплаченный полностью")</label>
+        <label class="inline"><input type="checkbox" @bind="_f.AutoClosePurchaseOrders" disabled="@(!_s.CanEdit)" /> @L("Закрывать заказ поставщику, поступивший и оплаченный полностью")</label>
+        <p class="muted">@L("Заказ с черновиком возврата или другого складского документа не закрывается. Вернуть закрытый заказ в работу можно кнопкой в его карточке.")</p>
+
+        <h2>@L("Регулярные операции")</h2>
+        <label class="inline"><input type="checkbox" @bind="_f.RecurringOperationsEnabled" disabled="@(!_s.CanEdit)" /> @L("Создавать черновики регулярных операций по расписанию")</label>
+        <p class="muted"><a href="money/recurring">@L("Регулярные операции")</a> · <a href="money/currency-rates">@L("Курсы валют")</a></p>
+
+        @if (_s.UpdatedAtUtc is { } at)
+        {
+            <p class="muted">@L("Изменено: {0}, {1}", _s.UpdatedBy ?? "—", TimeZones.ToLocal(at, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm"))</p>
+        }
+        @if (_s.CanEdit)
+        {
+            <button type="submit" disabled="@_busy">@L("Сохранить")</button>
+        }
+        else
+        {
+            <p class="muted">@L("Менять настройки может пользователь с правом «Организация: изменение».")</p>
+        }
+    </form>
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private AutomationSettingsDto? _s;
+    private Form _f = new();
+    private string? _denied;
+    private bool _busy;
+    private string? _message;
+    private bool _messageIsError;
+
+    private sealed class Form
+    {
+        public bool PaymentRemindersEnabled { get; set; }
+        public int RemindDaysBefore { get; set; }
+        public int OverdueRepeatDays { get; set; }
+        public bool AutoCloseSalesOrders { get; set; }
+        public bool AutoClosePurchaseOrders { get; set; }
+        public bool RecurringOperationsEnabled { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Fill(await Settings.GetAsync());
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private void Fill(AutomationSettingsDto s)
+    {
+        _s = s;
+        _f = new Form
+        {
+            PaymentRemindersEnabled = s.PaymentRemindersEnabled, RemindDaysBefore = s.RemindDaysBefore, OverdueRepeatDays = s.OverdueRepeatDays,
+            AutoCloseSalesOrders = s.AutoCloseSalesOrders, AutoClosePurchaseOrders = s.AutoClosePurchaseOrders, RecurringOperationsEnabled = s.RecurringOperationsEnabled,
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy || _s is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _messageIsError = false;
+        try
+        {
+            await Settings.SaveAsync(new AutomationSettingsCommand(_f.PaymentRemindersEnabled, _f.RemindDaysBefore, _f.OverdueRepeatDays, _f.AutoCloseSalesOrders,
+                _f.AutoClosePurchaseOrders, _f.RecurringOperationsEnabled), _s.RowVersion);
+            Fill(await Settings.GetAsync());
+            _message = L("Настройки сохранены.");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _messageIsError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -150,7 +150,15 @@ else
         {
             <form class="sx-form" @onsubmit="() => SaveTemplateAsync(t)">
                 <div class="sx-legend">@L(SalesMailMessage.KindName(t.Kind)) — @TriggerName(t.Kind)</div>
-                <label class="inline w4"><input type="checkbox" @bind="t.AutoSend" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Отправлять автоматически")</label>
+                @if (t.Kind is SalesMailKind.PaymentReminder or SalesMailKind.PaymentOverdue)
+                {
+                    @* D148: напоминания включаются и настраиваются в «Настройках автоматизации», здесь — только текст. *@
+                    <p class="w4 muted small">@L("Включаются в «Настройках автоматизации». Подстановка {Срок} — срок оплаты, {Сумма} — неоплаченный остаток; ссылка «отписаться» добавляется сама.") <a href="settings/automation">@L("Настройки автоматизации")</a></p>
+                }
+                else
+                {
+                    <label class="inline w4"><input type="checkbox" @bind="t.AutoSend" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Отправлять автоматически")</label>
+                }
                 <label class="w4">@L("Тема") <input @bind="t.Subject" maxlength="@SalesMailTemplate.SubjectMaxLength" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /></label>
                 <label class="w4">@L("Текст") <textarea rows="5" @bind="t.Body" maxlength="@SalesMailTemplate.BodyMaxLength" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)"></textarea></label>
                 @if (_data.CanEdit)
@@ -235,6 +243,8 @@ else
         SalesMailKind.Order => L("при подтверждении заказа"),
         SalesMailKind.Invoice => L("при выставлении счёта"),
         SalesMailKind.Upd => L("при проведении отгрузки"),
+        SalesMailKind.PaymentReminder => L("за несколько дней до срока оплаты счёта"),
+        SalesMailKind.PaymentOverdue => L("когда срок оплаты счёта прошёл"),
         _ => L("при переходе заказа на этап"),
     };
 

@@ -15,7 +15,7 @@ else if (_s is null)
 }
 else
 {
-    <div class="page-head"><h1>@L("Настройки закупок")</h1></div>
+    <div class="page-head"><h1>@L("Настройки закупок")</h1><a class="button secondary" href="settings/automation">@L("Настройки автоматизации")</a></div>
     <ReadOnlyNote When="@(!_s.CanEdit)" />
     @if (_message is not null)
     {

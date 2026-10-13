@@ -18,6 +18,15 @@ public sealed class NotFoundException(string entity) : Exception($"{entity}: н�
     public string Entity { get; } = entity;
 }
 
-/// <summary>Данные изменил другой пользователь → HTTP 409, без тихой перезаписи.</summary>
-public sealed class ConcurrencyConflictException()
-    : Exception("Данные изменены другим пользователем. Обновите страницу и повторите.");
+/// <summary>
+/// Данные изменил другой пользователь → HTTP 409, без тихой перезаписи. D698 (сессия CRM): модуль может указать, что за объект и кто его
+/// изменил («Сделку изменил Иванов в 10:42») — сообщение по умолчанию прежнее.
+/// </summary>
+public sealed class ConcurrencyConflictException(string? objectName = null, string? changedBy = null, DateTime? changedAtLocal = null)
+    : Exception("Данные изменены другим пользователем. Обновите страницу и повторите.")
+{
+    public string? ObjectName { get; } = objectName;
+    public string? ChangedBy { get; } = changedBy;
+    /// <summary>Когда — уже по часовому поясу организации.</summary>
+    public DateTime? ChangedAtLocal { get; } = changedAtLocal;
+}

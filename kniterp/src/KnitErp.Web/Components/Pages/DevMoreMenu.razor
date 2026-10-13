@@ -1,0 +1,27 @@
+@*
+    Меню «Ещё ▾» экранов «Разработки» (D731): редкие действия. Закрывается после выбора пункта, щелчком вне меню и клавишей Escape.
+*@
+<div class="dev-more @(_open ? "open" : null)" @onkeydown="OnKey">
+    <button type="button" class="secondary dev-more-toggle" aria-haspopup="true" aria-expanded="@(_open ? "true" : "false")"
+            aria-label="@L("Ещё действия")" @onclick="() => _open = !_open">@L("Ещё")</button>
+    @if (_open)
+    {
+        <div class="dev-more-backdrop" @onclick="() => _open = false"></div>
+        <div class="dev-more-menu" role="menu" @onclick="() => _open = false">@ChildContent</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public RenderFragment? ChildContent { get; set; }
+
+    private bool _open;
+
+    private void OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            _open = false;
+        }
+    }
+}

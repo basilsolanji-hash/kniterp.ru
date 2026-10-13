@@ -81,6 +81,7 @@ public sealed class WebAppProcess : IAsyncDisposable
         info.Environment["ASPNETCORE_URLS"] = BaseUrl;
         info.Environment["ConnectionStrings__KnitErp"] = connectionString;
         info.Environment["Webhooks__Disabled"] = "true";
+        info.Environment["Automation__WorkerDisabled"] = "true"; // D145: автоматика и курсы ЦБ в e2e не работают сами (без сети, без автозакрытия)
         // D125: ссылки для сотрудников строятся только от адреса сервера из настроек — в тестах это адрес запущенного приложения.
         info.Environment["App__PublicUrl"] = BaseUrl.TrimEnd('/');
         info.Environment["Kestrel__Certificates__Default__Path"] = certificate;

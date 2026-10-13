@@ -311,7 +311,7 @@ public sealed class CrmContactService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.CrmEdit, ct);
         var c = await CrmAccess.Contacts(db, ctx).Include(x => x.Channels).SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new NotFoundException("Контакт");
-        return (ctx, c.EnsureVersion(c.RowVersion, rowVersion));
+        return (ctx, await CrmConflict.EnsureVersionAsync(db, ctx.OrganizationId, c, nameof(CrmContact), c.Id, "Контакт", c.RowVersion, rowVersion, ct));
     }
 
     private void Audit(AccessContext ctx, string action, long id, string? before, string? after) =>

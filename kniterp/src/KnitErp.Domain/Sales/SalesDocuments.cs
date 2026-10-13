@@ -138,6 +138,12 @@ public enum SalesMailKind : byte
     Invoice = 2,
     Upd = 3,
     Stage = 4,
+
+    /// <summary>D148: напоминание об оплате счёта до срока.</summary>
+    PaymentReminder = 5,
+
+    /// <summary>D148: напоминание о просроченной оплате счёта.</summary>
+    PaymentOverdue = 6,
 }
 
 public enum SalesMailStatus : byte
@@ -239,10 +245,19 @@ public sealed class CustomerMailSettings
     public long CounterpartyId { get; private set; }
     public string? Email { get; private set; }
     public bool NoAutoSend { get; private set; }
+
+    /// <summary>D148: покупатель отписался от напоминаний об оплате (ссылкой из письма или менеджер по его просьбе).</summary>
+    public bool NoPaymentReminders { get; private set; }
+
+    /// <summary>D148: ключ ссылки «отписаться от напоминаний» в письме — случайный, по нему нельзя узнать покупателя.</summary>
+    public Guid ReminderToken { get; private set; } = Guid.NewGuid();
+
     public byte[] RowVersion { get; private set; } = [];
 
     public static CustomerMailSettings Create(long organizationId, long counterpartyId) =>
-        new() { OrganizationId = organizationId, CounterpartyId = counterpartyId };
+        new() { OrganizationId = organizationId, CounterpartyId = counterpartyId, ReminderToken = Guid.NewGuid() };
+
+    public void SetPaymentReminders(bool allowed) => NoPaymentReminders = !allowed;
 
     public void Set(string? email, bool noAutoSend)
     {
@@ -386,6 +401,8 @@ public sealed class SalesMailMessage
         SalesMailKind.Invoice => "Счёт",
         SalesMailKind.Upd => "УПД",
         SalesMailKind.Stage => "Статус заказа",
+        SalesMailKind.PaymentReminder => "Напоминание об оплате",
+        SalesMailKind.PaymentOverdue => "Просрочка оплаты",
         _ => "Письмо",
     };
 
@@ -423,7 +440,7 @@ public static class SalesMailText
 {
     public const int MaxRecipients = 5;
 
-    public static readonly IReadOnlyList<string> Placeholders = ["{Номер}", "{Дата}", "{Покупатель}", "{Сумма}", "{Этап}", "{Организация}"];
+    public static readonly IReadOnlyList<string> Placeholders = ["{Номер}", "{Дата}", "{Покупатель}", "{Сумма}", "{Этап}", "{Организация}", "{Срок}"];
 
     public static (string Subject, string Body) Default(SalesMailKind kind) => kind switch
     {
@@ -433,6 +450,10 @@ public static class SalesMailText
             "Здравствуйте!\n\nНаправляем счёт на оплату {Номер} от {Дата} на сумму {Сумма}. Счёт — во вложении.\n\nС уважением,\n{Организация}"),
         SalesMailKind.Upd => ("УПД {Номер} от {Дата}",
             "Здравствуйте!\n\nТовар отгружен. УПД {Номер} от {Дата} на сумму {Сумма} — во вложении.\n\nС уважением,\n{Организация}"),
+        SalesMailKind.PaymentReminder => ("Напоминание об оплате счёта {Номер} от {Дата}",
+            "Здравствуйте!\n\nНапоминаем: срок оплаты счёта {Номер} от {Дата} — {Срок}, к оплате {Сумма}. Счёт — во вложении. Если вы уже оплатили, не обращайте внимания на это письмо.\n\nС уважением,\n{Организация}"),
+        SalesMailKind.PaymentOverdue => ("Просрочена оплата счёта {Номер} от {Дата}",
+            "Здравствуйте!\n\nСрок оплаты счёта {Номер} от {Дата} — {Срок} — прошёл, к оплате {Сумма}. Счёт — во вложении. Пожалуйста, оплатите его или сообщите, если оплата уже в пути.\n\nС уважением,\n{Организация}"),
         _ => ("Заказ {Номер}: {Этап}",
             "Здравствуйте!\n\nСтатус вашего заказа {Номер} от {Дата}: {Этап}.\n\nС уважением,\n{Организация}"),
     };
@@ -446,6 +467,10 @@ public static class SalesMailText
             .Replace("{Сумма}", amount is { } a ? a.ToString("#,0.00", CultureInfo.GetCultureInfo("ru-RU")) + " " + currency : "—", StringComparison.Ordinal)
             .Replace("{Этап}", stage ?? "—", StringComparison.Ordinal)
             .Replace("{Организация}", organization, StringComparison.Ordinal);
+
+    /// <summary>D148: срок оплаты в напоминании («{Срок}»); в других письмах — прочерк.</summary>
+    public static string RenderDue(string text, DateOnly? due) =>
+        text.Replace("{Срок}", due is { } d ? d.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) : "—", StringComparison.Ordinal);
 
     /// <summary>Адреса через запятую или точку с запятой, до пяти; пусто — null. Неверный адрес — понятный отказ.</summary>
     public static string? NormalizeRecipients(string? value)

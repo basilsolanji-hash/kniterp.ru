@@ -149,6 +149,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevPatternColor> DevPatternColors => Set<KnitErp.Domain.Development.DevPatternColor>();
     public DbSet<KnitErp.Domain.Development.DevPatternColorway> DevPatternColorways => Set<KnitErp.Domain.Development.DevPatternColorway>();
     public DbSet<KnitErp.Domain.Development.DevPatternColorwayYarn> DevPatternColorwayYarns => Set<KnitErp.Domain.Development.DevPatternColorwayYarn>();
+    public DbSet<KnitErp.Domain.Development.DevPatternVersionColor> DevPatternVersionColors => Set<KnitErp.Domain.Development.DevPatternVersionColor>();
     public DbSet<KnitErp.Domain.Development.DevCategoryMeasure> DevCategoryMeasures => Set<KnitErp.Domain.Development.DevCategoryMeasure>();
     public DbSet<KnitErp.Domain.Development.DevModelAccessory> DevModelAccessories => Set<KnitErp.Domain.Development.DevModelAccessory>();
     public DbSet<KnitErp.Domain.Development.DevCostRun> DevCostRuns => Set<KnitErp.Domain.Development.DevCostRun>();
@@ -221,6 +222,11 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.CustomerOpeningBalance> CustomerOpeningBalances => Set<KnitErp.Domain.Sales.CustomerOpeningBalance>(); // D1146
     public DbSet<KnitErp.Domain.Purchasing.SupplierOpeningBalance> SupplierOpeningBalances => Set<KnitErp.Domain.Purchasing.SupplierOpeningBalance>(); // D133
     public DbSet<KnitErp.Domain.Purchasing.PurchaseSettings> PurchaseSettings => Set<KnitErp.Domain.Purchasing.PurchaseSettings>(); // D133
+    public DbSet<KnitErp.Domain.Automation.AutomationSettings> AutomationSettings => Set<KnitErp.Domain.Automation.AutomationSettings>(); // D145
+    public DbSet<KnitErp.Domain.Finance.CurrencyRate> CurrencyRates => Set<KnitErp.Domain.Finance.CurrencyRate>(); // D146
+    public DbSet<KnitErp.Domain.Finance.RecurringOperation> RecurringOperations => Set<KnitErp.Domain.Finance.RecurringOperation>(); // D147
+    public DbSet<KnitErp.Domain.Finance.RecurringOperationRun> RecurringOperationRuns => Set<KnitErp.Domain.Finance.RecurringOperationRun>(); // D147
+    public DbSet<KnitErp.Domain.Purchasing.SupplierUpdImport> SupplierUpdImports => Set<KnitErp.Domain.Purchasing.SupplierUpdImport>(); // D149
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней

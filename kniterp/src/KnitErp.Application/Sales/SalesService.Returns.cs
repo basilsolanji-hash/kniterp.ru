@@ -490,10 +490,10 @@ public sealed partial class SalesService
             var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).SingleOrDefaultAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)
                         ?? throw new NotFoundException("Заказ покупателя");
             await db.LockAsync($"kniterp.allocation.customer.{ctx.OrganizationId}.{order.CustomerId}", ct);
-            var released = await ReleaseCoreAsync(ctx, order, ct);
+            var (released, closed) = await ReleaseCoreAsync(ctx, order, ct);
             if (released <= 0)
             {
-                throw new BusinessRuleException("sales.refund.no_overpayment", "Переплаты по заказу нет — переводить в аванс нечего.");
+                throw closed is { } t ? ReleaseClosed(t, order) : new BusinessRuleException("sales.refund.no_overpayment", "Переплаты по заказу нет — переводить в аванс нечего.");
             }
 
             await db.SaveChangesAsync(ct);
@@ -507,22 +507,35 @@ public sealed partial class SalesService
         }
     }
 
-    private async Task<decimal> ReleaseCoreAsync(AccessContext ctx, SalesOrder order, CancellationToken ct)
+    /// <summary>
+    /// Снять переплату с разносок заказа (сначала поздние). D140: разноски в закрытом периоде (дата — поздняя из дат оплаты и заказа,
+    /// D133) не трогаются — как у общего разносчика; Closed — дата закрытия, если переплата осталась из-за них.
+    /// </summary>
+    private async Task<(decimal Released, DateOnly? Closed)> ReleaseCoreAsync(AccessContext ctx, SalesOrder order, CancellationToken ct)
     {
         var need = await OverpaidAsync(ctx, order, ct);
         if (need <= 0)
         {
-            return 0;
+            return (0, null);
         }
 
+        var closedThrough = await ClosedPeriod.ClosedThroughAsync(db, ctx.OrganizationId, ct);
         var released = 0m;
         var allocations = await db.CustomerPaymentAllocations
             .Where(a => a.OrganizationId == ctx.OrganizationId && a.OrderId == order.Id && a.RemovedAtUtc == null).OrderByDescending(a => a.Id).ToListAsync(ct);
+        var paymentIds = allocations.Select(a => a.PaymentId).Distinct().ToList();
+        var paymentDates = await db.CustomerPayments.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && paymentIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.PaymentDate, ct);
         foreach (var a in allocations)
         {
             if (need <= 0)
             {
                 break;
+            }
+
+            if (PaymentAllocator.IsClosed(closedThrough, paymentDates[a.PaymentId], order.OrderDate))
+            {
+                continue;
             }
 
             var take = Math.Min(need, a.Amount);
@@ -537,9 +550,16 @@ public sealed partial class SalesService
             released += take;
         }
 
-        Audit(ctx, AuditActions.SalesAdvanceReleased, nameof(SalesOrder), order.Id, null, $"{released:0.00}", $"{order.Number}: переплата после возврата — аванс покупателя");
-        return released;
+        if (released > 0)
+        {
+            Audit(ctx, AuditActions.SalesAdvanceReleased, nameof(SalesOrder), order.Id, null, $"{released:0.00}", $"{order.Number}: переплата после возврата — аванс покупателя");
+        }
+
+        return (released, need > 0 ? closedThrough : null);
     }
+
+    private static BusinessRuleException ReleaseClosed(DateOnly through, SalesOrder order) =>
+        new BusinessRuleException("period.closed", $"Период закрыт по {through:dd.MM.yyyy}: разноски оплат на заказ {order.Number} — в закрытом периоде, перевести переплату в аванс нельзя. Открыть период может Владелец.");
 
     /// <summary>
     /// Возврат денег покупателю (D1154): переплата по заказу сначала переводится в аванс, затем из аванса покупателя (оплаты от старых
@@ -559,11 +579,16 @@ public sealed partial class SalesService
             var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).SingleOrDefaultAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)
                         ?? throw new NotFoundException("Заказ покупателя");
             await db.LockAsync($"kniterp.allocation.customer.{ctx.OrganizationId}.{order.CustomerId}", ct);
-            await ReleaseCoreAsync(ctx, order, ct);
+            var (_, closed) = await ReleaseCoreAsync(ctx, order, ct);
             await db.SaveChangesAsync(ct);
             var free = await FreeAdvancesAsync(ctx, order.CustomerId, ct);
             if (cmd.Amount > free.Sum(f => f.Free))
             {
+                if (closed is { } t)
+                {
+                    throw ReleaseClosed(t, order);
+                }
+
                 throw new BusinessRuleException("sales.refund.exceeds", $"Вернуть можно не больше аванса покупателя: {free.Sum(f => f.Free):0.00}.");
             }
 

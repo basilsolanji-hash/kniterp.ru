@@ -232,6 +232,8 @@ else
         @if (_order.CanCreateDocuments && _order.Status == PurchaseOrderStatus.Confirmed && _order.Received != ReceiptState.Full)
         {
             <button type="button" @onclick="ReceiptAsync" disabled="@_busy">@L("Оформить поступление")</button>
+            @* D149: поступление из XML УПД поставщика — сопоставление строк с позициями заказа. *@
+            <a class="button secondary" href="purchase-orders/upd-import?order=@Id">@L("Загрузить УПД (XML)")</a>
         }
         @* D354 (сессия 4, Р1): строки-услуги (доработка, доставка) закрываются актом поставщика — без движений склада. *@
         @if (_order.CanCreateDocuments && _order.Status == PurchaseOrderStatus.Confirmed && _order.Lines.Any(l => !l.Stocked && l.Left > 0))
