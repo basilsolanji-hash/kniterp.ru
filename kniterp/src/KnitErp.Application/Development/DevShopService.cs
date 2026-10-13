@@ -4,6 +4,7 @@ using KnitErp.Domain.Access;
 using KnitErp.Domain.Audit;
 using KnitErp.Domain.Common;
 using KnitErp.Domain.Development;
+using KnitErp.Domain.Organizations;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 
@@ -377,6 +378,95 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         });
     }
 
+    /// <summary>
+    /// Заполнить табель мер по шаблону категории модели (ТЗ §9): добавляются точки шаблона, которых в табеле ещё нет (по названию),
+    /// в порядке шаблона и в пределах <see cref="DevMeasure.MaxPerModel"/>. Возвращает, сколько точек добавлено.
+    /// </summary>
+    public async Task<int> ApplyMeasureTemplateAsync(long modelId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        var added = 0;
+        await RunAsync(async () =>
+        {
+            var model = await tech.FindEditableModelAsync(ctx, modelId, ct);
+            var template = await db.DevCategoryMeasures.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.Category == model.Category)
+                .OrderBy(x => x.SortOrder).ThenBy(x => x.Id).ToListAsync(ct);
+            var existing = await db.DevMeasures.Where(m => m.OrganizationId == ctx.OrganizationId && m.ModelId == modelId)
+                .Select(m => new { m.Name, m.SortOrder }).ToListAsync(ct);
+            var names = new HashSet<string>(existing.Select(e => e.Name), StringComparer.OrdinalIgnoreCase);
+            var order = existing.Count == 0 ? 0 : existing.Max(e => e.SortOrder);
+            var count = existing.Count;
+            var addedNames = new List<string>();
+            foreach (var t in template)
+            {
+                if (names.Contains(t.Name))
+                {
+                    continue;
+                }
+
+                if (count >= DevMeasure.MaxPerModel)
+                {
+                    if (addedNames.Count == 0)
+                    {
+                        throw new BusinessRuleException("dev.measure.limit", $"В табеле мер — не больше {DevMeasure.MaxPerModel} точек.");
+                    }
+
+                    break;
+                }
+
+                db.DevMeasures.Add(DevMeasure.Create(ctx.OrganizationId, modelId, t.Name, t.Tolerance, t.Step, ++order));
+                names.Add(t.Name);
+                addedNames.Add(t.Name);
+                count++;
+            }
+
+            if (addedNames.Count > 0)
+            {
+                Audit(ctx, nameof(DevModel), modelId, null, string.Join(", ", addedNames), $"{model.Number}: табель мер по шаблону категории");
+                await db.SaveOrConflictAsync(ct);
+            }
+
+            added = addedNames.Count;
+        });
+        return added;
+    }
+
+    /// <summary>Вес изделия по размерам, г (ТЗ §8): только размеры этой модели; пустое значение снимает вес.</summary>
+    public async Task SetSizeWeightsAsync(long modelId, IReadOnlyList<(long SizeId, decimal? Grams)> weights, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var model = await tech.FindEditableModelAsync(ctx, modelId, ct);
+            var ids = weights.Select(w => w.SizeId).Distinct().ToList();
+            var sizes = await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId && ids.Contains(s.Id)).ToListAsync(ct);
+            if (sizes.Count != ids.Count)
+            {
+                throw new NotFoundException("Размер");
+            }
+
+            var changed = new List<string>();
+            foreach (var (sizeId, grams) in weights)
+            {
+                var size = sizes.Single(s => s.Id == sizeId);
+                var value = grams is { } g ? decimal.Round(g, 2) : (decimal?)null;
+                if (size.WeightGrams == value)
+                {
+                    continue;
+                }
+
+                size.SetWeight(value);
+                changed.Add($"{size.Name} — {value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—"} г");
+            }
+
+            if (changed.Count > 0)
+            {
+                Audit(ctx, nameof(DevModel), modelId, null, string.Join("; ", changed), $"{model.Number}: вес изделия по размерам");
+                await db.SaveOrConflictAsync(ct);
+            }
+        });
+    }
+
     // ---------- Образцы и факт цеха ----------
 
     public async Task<DevSamplesDto> SamplesAsync(long modelId, CancellationToken ct = default)
@@ -399,9 +489,47 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var plan = await db.DevMeasureValues.AsNoTracking().Where(v => v.OrganizationId == org && mids.Contains(v.MeasureId)).ToListAsync(ct);
         var sampleIds = samples.Select(s => s.s.Id).ToList();
         var actual = await db.DevSampleMeasures.AsNoTracking().Where(v => v.OrganizationId == org && sampleIds.Contains(v.SampleId)).ToListAsync(ct);
+        var reasons = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.ReworkReason)
+            .OrderBy(l => l.SortOrder).ThenBy(l => l.Name).Select(l => new { l.Id, l.Name, l.IsArchived }).ToListAsync(ct);
+        var reasonNames = reasons.ToDictionary(r => r.Id, r => r.Name);
+        var today = await DevTechService.LocalTodayAsync(db, org, clock.UtcNow, ct);
+        var customer = model.CustomerId is { } cid
+            ? await db.Counterparties.AsNoTracking().Where(c => c.Id == cid && c.OrganizationId == org).Select(c => c.Name).SingleOrDefaultAsync(ct)
+            : null;
+
+        // ТЗ §8 (D728): колорит, люди паспорта и доработки, фото образца.
+        var colorwayIds = samples.Select(x => x.s.ColorwayId).OfType<long>().Distinct().ToList();
+        var colorways = colorwayIds.Count == 0
+            ? []
+            : await db.DevPatternColorways.AsNoTracking().Where(c => c.OrganizationId == org && colorwayIds.Contains(c.Id))
+                .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var users = await ActiveUsersAsync(org, ct);
+        var people = users.ToDictionary(u => u.Id, u => u.Name);
+        var otherPeople = samples.SelectMany(x => new[] { x.s.KnittedByUserId, x.s.AssembledByUserId, x.s.ReworkAssigneeUserId }).OfType<long>().Distinct()
+            .Where(id => !people.ContainsKey(id)).ToList();
+        foreach (var (uid, name) in await UserNamesAsync(otherPeople.Cast<long?>(), ct))
+        {
+            people[uid] = name;
+        }
+
+        var photos = await db.DevFiles.AsNoTracking()
+            .Where(f => f.OrganizationId == org && f.ModelId == modelId && f.SampleId != null && sampleIds.Contains(f.SampleId.Value))
+            .OrderBy(f => f.UploadedAtUtc).ThenBy(f => f.Id).Select(f => new { f.Id, SampleId = f.SampleId!.Value }).ToListAsync(ct);
+        string? Person(long? id) => id is { } v ? people.GetValueOrDefault(v) : null;
+
         return new DevSamplesDto(samples.Select(x =>
             {
                 var s = x.s;
+                var facts = details.Select(d => (d.Quantity, Fact: factDtos.FirstOrDefault(f => f.SampleId == s.Id && f.DetailId == d.Id))).ToList();
+                var timed = facts.Where(f => f.Fact?.KnitSeconds is not null).ToList();
+                var weighed = facts.Where(f => f.Fact?.WeightGrams is not null).ToList();
+                var making = new DevSampleMakingDto(s.ColorwayId is { } cw ? colorways.GetValueOrDefault(cw) : null, s.PatternVersion, s.YarnBatch,
+                    s.KnittedByUserId, Person(s.KnittedByUserId), s.AssembledByUserId, Person(s.AssembledByUserId), s.AssemblyMinutes,
+                    timed.Count == 0 ? null : decimal.Round(timed.Sum(f => (decimal)f.Fact!.KnitSeconds!.Value * f.Quantity) / 60m, 1),
+                    weighed.Count == 0 ? null : weighed.Sum(f => f.Fact!.WeightGrams!.Value * f.Quantity));
+                var rework = s.ReworkWhat is null && s.ReworkAssigneeUserId is null && s.ReworkDueDate is null
+                    ? null
+                    : new DevSampleReworkDto(s.ReworkWhat, s.ReworkAssigneeUserId, Person(s.ReworkAssigneeUserId), s.ReworkDueDate);
                 return new DevSampleDto(s.Id, s.No, s.SizeId, sizes.FirstOrDefault(z => z.Id == s.SizeId)?.Name, s.Status, s.Comment, s.CreatedAtUtc, x.User,
                     details.Select(d => (d.Name,
                         factDtos.FirstOrDefault(f => f.SampleId == s.Id && f.DetailId == d.Id),
@@ -418,10 +546,60 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
                         return new DevSampleMeasureDto(m.Id, m.Name, p, m.Tolerance, fact, null, false);
                     }).ToList(),
-                    s.RowVersion);
+                    s.RowVersion, s.ReasonId is { } rid ? reasonNames.GetValueOrDefault(rid) : null, s.Custody, s.CustodyRecipient, s.HandedOn, s.ReturnBy,
+                    s.CustodyClosedOn, s.CustodyNote, DevSample.IsReturnOverdue(s.Custody, s.ReturnBy, today), making, rework,
+                    photos.Where(p => p.SampleId == s.Id).Select(p => p.Id).ToList());
             }).ToList(),
             sizes, ctx.Permissions.Has(Permissions.DevEdit) && !DevStages.IsFinal(model.Stage),
-            ctx.Permissions.Has(Permissions.DevSample) && !DevStages.IsFinal(model.Stage), (await tech.SettingsAsync(org, ct)).FactTolerancePercent);
+            ctx.Permissions.Has(Permissions.DevSample) && !DevStages.IsFinal(model.Stage), (await tech.SettingsAsync(org, ct)).FactTolerancePercent,
+            reasons.Where(r => !r.IsArchived).Select(r => new DevOptionDto(r.Id, r.Name)).ToList(), customer, today,
+            ctx.Permissions.Has(Permissions.DevEdit) && model.Stage != DevStage.Cancelled, ctx.Permissions.Has(Permissions.DevEdit), users);
+    }
+
+    /// <summary>Сколько образцов сравниваем рядом (ТЗ §8): меньше двух — нечего сравнивать, больше шести — не помещается на экран.</summary>
+    public const int CompareMin = 2, CompareMax = 6;
+
+    /// <summary>
+    /// Сравнение образцов модели рядом (ТЗ §8 «замеры, вес, фото»): статус, размер, решение, факт вязания и веса по деталям против плана,
+    /// общий вес, замеры с отклонением и выходом за допуск. Строится из тех же данных, что и вкладка «Образцы» (<see cref="SamplesAsync"/>).
+    /// </summary>
+    public async Task<DevSampleCompareDto> CompareSamplesAsync(long modelId, IReadOnlyList<long> sampleIds, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        var org = ctx.OrganizationId;
+        var ids = (sampleIds ?? []).Distinct().ToList();
+        if (ids.Count is < CompareMin or > CompareMax)
+        {
+            throw new BusinessRuleException("dev.sample.compare", $"Для сравнения выберите от {CompareMin} до {CompareMax} образцов модели.");
+        }
+
+        var all = await SamplesAsync(modelId, ct); // чужая организация или нет модели → NotFoundException
+        var chosen = all.Samples.Where(s => ids.Contains(s.Id)).OrderBy(s => s.No).ToList();
+        if (chosen.Count != ids.Count)
+        {
+            throw new NotFoundException("Образец");
+        }
+
+        // Тот же порядок деталей, что в SamplesAsync, — чтобы сопоставить кортеж детали с количеством деталей в изделии.
+        var details = await db.DevDetails.AsNoTracking().Where(d => d.OrganizationId == org && d.ModelId == modelId).OrderBy(d => d.SortOrder).ThenBy(d => d.Id)
+            .Select(d => new { d.Id, d.Name, d.Quantity }).ToListAsync(ct);
+
+        var items = chosen.Select(s =>
+        {
+            var rows = s.Details.Select((d, i) =>
+            {
+                var meta = i < details.Count ? details[i] : null;
+                return new DevSampleCompareDetailDto(meta?.Id ?? d.Fact?.DetailId ?? 0, d.Detail, meta?.Quantity ?? 1, d.PlanKnitSeconds, d.Fact?.KnitSeconds,
+                    d.PlanWeightGrams, d.Fact?.WeightGrams);
+            }).ToList();
+            var weighed = rows.Where(r => r.FactWeightGrams is not null).ToList();
+            decimal? total = weighed.Count == 0 ? null : weighed.Sum(r => r.FactWeightGrams!.Value * r.Quantity);
+            // Фото — только свои фото образца (DevFile.SampleId, D728).
+            return new DevSampleCompareItemDto(s.Id, s.No, s.Size, s.Status, s.Reason, s.Comment, s.CreatedAtUtc, rows, total, s.Measures, s.PhotoFileIds ?? []);
+        }).ToList();
+
+        var measureNames = chosen[0].Measures.Select(m => m.Name).ToList();
+        return new DevSampleCompareDto(modelId, items, measureNames, details.Select(d => d.Name).ToList());
     }
 
     /// <summary>Новый образец (№ следующий в модели) в размере сетки.</summary>
@@ -446,6 +624,7 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
 
             var sample = DevSample.Create(ctx.OrganizationId, modelId, no, sizeId, clock.UtcNow, ctx.UserId);
+            sample.LinkPattern(model.ColorwayId, model.PatternVersion); // D728: колорит и версия рисунка — с модели на момент создания
             db.DevSamples.Add(sample);
             await db.SaveOrConflictAsync(ct);
             Audit(ctx, nameof(DevModel), modelId, null, $"образец № {no}", $"{model.Number}: образец");
@@ -456,7 +635,8 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         return id;
     }
 
-    public async Task DecideSampleAsync(long sampleId, DevSampleStatus status, string? comment, byte[] rowVersion, CancellationToken ct = default)
+    public async Task DecideSampleAsync(long sampleId, DevSampleStatus status, string? comment, byte[] rowVersion, long? reasonId = null,
+        CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
         await RunAsync(async () =>
@@ -465,10 +645,137 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             s.EnsureVersion(s.RowVersion, rowVersion);
             var model = await tech.FindEditableModelAsync(ctx, s.ModelId, ct);
             var before = DevSample.StatusName(s.Status);
-            s.Decide(status, comment);
-            Audit(ctx, nameof(DevModel), s.ModelId, before, DevSample.StatusName(s.Status), $"{model.Number}: образец № {s.No}{(s.Comment is null ? "" : ": " + s.Comment)}");
+            string? reason = null;
+            if (reasonId is { } rid)
+            {
+                // D768: причина — из справочника своей организации, вид «причина доработки», не в архиве.
+                reason = await db.DevLookups.AsNoTracking()
+                             .Where(l => l.Id == rid && l.OrganizationId == ctx.OrganizationId && l.Kind == DevLookupKind.ReworkReason && !l.IsArchived)
+                             .Select(l => l.Name).SingleOrDefaultAsync(ct)
+                         ?? throw new NotFoundException("Причина доработки");
+            }
+
+            s.Decide(status, comment, reasonId);
+            Audit(ctx, nameof(DevModel), s.ModelId, before, DevSample.StatusName(s.Status), $"{model.Number}: образец № {s.No}{(reason is null || s.ReasonId is null ? "" : ", причина: " + reason)}{(s.Comment is null ? "" : ": " + s.Comment)}");
             await db.SaveOrConflictAsync(ct);
         });
+    }
+
+    /// <summary>
+    /// Паспорт образца (ТЗ §8, D728): партия пряжи, кто вязал, кто собирал, время сборки. Пишут конструктор и цех; люди — активные
+    /// пользователи организации (уже записанного неактивного можно оставить).
+    /// </summary>
+    public async Task SetSampleMakingAsync(long sampleId, string? yarnBatch, long? knittedBy, long? assembledBy, int? assemblyMinutes, byte[] rowVersion,
+        CancellationToken ct = default)
+    {
+        var ctx = await DemandEditOrSampleAsync(ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var model = await tech.FindEditableModelAsync(ctx, s.ModelId, ct);
+            await EnsureActiveMembersAsync(ctx, [knittedBy, assembledBy], [s.KnittedByUserId, s.AssembledByUserId], ct);
+            s.SetMaking(yarnBatch, knittedBy, assembledBy, assemblyMinutes);
+            var names = await UserNamesAsync([s.KnittedByUserId, s.AssembledByUserId], ct);
+            Audit(ctx, nameof(DevModel), s.ModelId, null,
+                $"партия: {s.YarnBatch ?? "—"}, вязал: {names.GetValueOrDefault(s.KnittedByUserId ?? 0) ?? "—"}, собирал: "
+                + $"{names.GetValueOrDefault(s.AssembledByUserId ?? 0) ?? "—"}, сборка: {s.AssemblyMinutes?.ToString(CultureInfo.InvariantCulture) ?? "—"} мин",
+                $"{model.Number}: паспорт образца № {s.No}", AuditActions.DevSampleRecorded);
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>План доработки образца «На доработку» (ТЗ §8): что меняем, кто (активный пользователь), срок.</summary>
+    public async Task PlanReworkAsync(long sampleId, string? what, long? assigneeUserId, DateOnly? dueDate, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var model = await tech.FindEditableModelAsync(ctx, s.ModelId, ct);
+            await EnsureActiveMembersAsync(ctx, [assigneeUserId], [s.ReworkAssigneeUserId], ct);
+            s.PlanRework(what, assigneeUserId, dueDate);
+            var names = await UserNamesAsync([s.ReworkAssigneeUserId], ct);
+            Audit(ctx, nameof(DevModel), s.ModelId, null,
+                $"доработка: {s.ReworkWhat}; кто: {names.GetValueOrDefault(s.ReworkAssigneeUserId ?? 0) ?? "—"}; срок: "
+                + (s.ReworkDueDate?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? "—"), $"{model.Number}: образец № {s.No}");
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>Фото образца (ТЗ §8, D728): файл модели вида «Фото», привязанный к образцу; правила файлов модели — те же (предел, стадия).</summary>
+    public async Task<long> AddSamplePhotoAsync(long sampleId, string? fileName, byte[] content, CancellationToken ct = default)
+    {
+        var ctx = await DemandEditOrSampleAsync(ct);
+        var s = await db.DevSamples.AsNoTracking().Where(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId)
+                    .Select(x => new { x.ModelId, x.No }).SingleOrDefaultAsync(ct)
+                ?? throw new NotFoundException("Образец");
+        return await tech.AddModelFileAsync(ctx, s.ModelId, DevFileKind.Photo, fileName, content, $"Образец № {s.No}",
+            f => f.AttachToSample(sampleId), ct);
+    }
+
+    /// <summary>
+    /// Передать образец заказчику (D723): кому, дата передачи, «вернуть до». Контрагент — заказчик модели. Отменённой модели — нельзя;
+    /// у переданной в производство — можно (образец для продаж). Журнал — запись «Образец у заказчика».
+    /// </summary>
+    public async Task HandSampleAsync(long sampleId, string? recipient, DateOnly on, DateOnly? returnBy, string? note, byte[] rowVersion,
+        CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var model = await db.DevModels.AsNoTracking().Where(m => m.Id == s.ModelId && m.OrganizationId == ctx.OrganizationId)
+                .Select(m => new { m.Number, m.Stage, m.CustomerId }).SingleAsync(ct);
+            if (model.Stage == DevStage.Cancelled)
+            {
+                throw new BusinessRuleException("dev.model.cancelled", "Модель отменена — сначала верните её в работу.");
+            }
+
+            s.HandToCustomer(model.CustomerId, recipient, on, returnBy, note);
+            Audit(ctx, nameof(DevModel), s.ModelId, null,
+                $"передан: {s.CustodyRecipient}, {on:dd.MM.yyyy}" + (returnBy is { } r ? $", вернуть до {r:dd.MM.yyyy}" : ", без возврата"),
+                $"{model.Number}: образец № {s.No}", AuditActions.DevSampleCustody);
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>Образец вернули, оставили у заказчика или продали ему (D723). Возможно и после передачи модели в производство или отмены.</summary>
+    public async Task CloseSampleCustodyAsync(long sampleId, DevSampleCustody result, DateOnly on, string? note, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var number = await db.DevModels.AsNoTracking().Where(m => m.Id == s.ModelId && m.OrganizationId == ctx.OrganizationId).Select(m => m.Number).SingleAsync(ct);
+            var before = DevSample.CustodyName(s.Custody);
+            s.CloseCustody(result, on, note);
+            Audit(ctx, nameof(DevModel), s.ModelId, before, $"{DevSample.CustodyName(s.Custody)}, {on:dd.MM.yyyy}", $"{number}: образец № {s.No}",
+                AuditActions.DevSampleCustody);
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>Образцы у заказчиков сейчас (D723): по всем моделям, сначала просроченные; для аналитики и напоминаний.</summary>
+    public async Task<IReadOnlyList<DevSampleOutDto>> SamplesOutAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        return await SamplesOut(db, ctx.OrganizationId, await DevTechService.LocalTodayAsync(db, ctx.OrganizationId, clock.UtcNow, ct), ct);
+    }
+
+    internal static async Task<IReadOnlyList<DevSampleOutDto>> SamplesOut(IKnitErpDbContext db, long org, DateOnly today, CancellationToken ct)
+    {
+        var rows = await (from s in db.DevSamples.AsNoTracking()
+                          join m in db.DevModels.AsNoTracking() on s.ModelId equals m.Id
+                          where s.OrganizationId == org && m.OrganizationId == org && s.Custody == DevSampleCustody.AtCustomer
+                          select new { s.Id, s.No, s.ModelId, m.Number, m.Name, s.CustodyRecipient, s.HandedOn, s.ReturnBy })
+            .Take(500).ToListAsync(ct);
+        return rows.Select(x => new DevSampleOutDto(x.Id, x.No, x.ModelId, x.Number, x.Name, x.CustodyRecipient ?? "", x.HandedOn!.Value, x.ReturnBy,
+                DevSample.IsReturnOverdue(DevSampleCustody.AtCustomer, x.ReturnBy, today)))
+            .OrderByDescending(x => x.Overdue).ThenBy(x => x.ReturnBy ?? DateOnly.MaxValue).ThenBy(x => x.HandedOn).ToList();
     }
 
     /// <summary>
@@ -534,12 +841,7 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
     /// </summary>
     public async Task<DevSaveResult> SetSampleMeasuresAsync(long sampleId, IReadOnlyList<DevCellEdit> edits, CancellationToken ct = default)
     {
-        var ctx = await guard.CurrentAsync(ct);
-        if (!ctx.Permissions.Has(Permissions.DevEdit) && !ctx.Permissions.Has(Permissions.DevSample))
-        {
-            await guard.DemandAsync(Permissions.DevSample, ct);
-        }
-
+        var ctx = await DemandEditOrSampleAsync(ct);
         DevSaveResult result = new(0, []);
         await RunAsync(async () =>
         {
@@ -763,11 +1065,52 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
     private IQueryable<DevSizeDto> Sizes(long org, long modelId) =>
         db.DevModelSizes.AsNoTracking().Where(s => s.OrganizationId == org && s.ModelId == modelId).OrderBy(s => s.SortOrder)
-            .Select(s => new DevSizeDto(s.Id, s.Name, s.IsBase, s.PerBox));
+            .Select(s => new DevSizeDto(s.Id, s.Name, s.IsBase, s.PerBox, s.WeightGrams));
 
     private async Task<(List<long> MeasureIds, List<long> SizeIds)> MeasureScopeAsync(AccessContext ctx, long modelId, CancellationToken ct) =>
         (await db.DevMeasures.Where(m => m.OrganizationId == ctx.OrganizationId && m.ModelId == modelId).Select(m => m.Id).ToListAsync(ct),
          await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId).Select(s => s.Id).ToListAsync(ct));
+
+    /// <summary>Конструктор («изменение») или цех («результат вязки образца»).</summary>
+    private async Task<AccessContext> DemandEditOrSampleAsync(CancellationToken ct)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        if (!ctx.Permissions.Has(Permissions.DevEdit) && !ctx.Permissions.Has(Permissions.DevSample))
+        {
+            await guard.DemandAsync(Permissions.DevSample, ct);
+        }
+
+        return ctx;
+    }
+
+    private async Task<List<DevOptionDto>> ActiveUsersAsync(long org, CancellationToken ct) =>
+        await (from m in db.OrganizationMembers.AsNoTracking()
+               join u in db.Users.AsNoTracking() on m.UserId equals u.Id
+               where m.OrganizationId == org && m.Status == MembershipStatus.Active
+               orderby u.DisplayName
+               select new DevOptionDto(u.Id, u.DisplayName)).ToListAsync(ct);
+
+    /// <summary>Новые люди (не те, что уже записаны) — только активные пользователи организации.</summary>
+    private async Task EnsureActiveMembersAsync(AccessContext ctx, IEnumerable<long?> users, IEnumerable<long?> unchanged, CancellationToken ct)
+    {
+        var check = users.OfType<long>().Distinct().Except(unchanged.OfType<long>()).ToList();
+        if (check.Count == 0)
+        {
+            return;
+        }
+
+        var active = await db.OrganizationMembers.CountAsync(m => m.OrganizationId == ctx.OrganizationId && check.Contains(m.UserId) && m.Status == MembershipStatus.Active, ct);
+        if (active != check.Count)
+        {
+            throw new BusinessRuleException("dev.model.assignee", "Исполнитель должен быть активным пользователем организации.");
+        }
+    }
+
+    private async Task<Dictionary<long, string>> UserNamesAsync(IEnumerable<long?> users, CancellationToken ct)
+    {
+        var ids = users.OfType<long>().Distinct().ToList();
+        return ids.Count == 0 ? [] : await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+    }
 
     private async Task RunAsync(Func<Task> action)
     {

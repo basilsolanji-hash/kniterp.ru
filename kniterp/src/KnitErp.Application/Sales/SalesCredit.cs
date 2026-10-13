@@ -138,6 +138,7 @@ public static class SalesCredit
 
         var terms = await TermsAsync(db, org, docs.Select(d => d.AgreementId), ct);
         var paid = await payments.GroupBy(p => p.CustomerId).Select(g => new { g.Key, Sum = g.Sum(p => p.Amount) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+        await SalesRefunds.SubtractAsync(db, org, customers, asOf, paid, ct); // D1154: возвраты денег покупателю уменьшают оплату
 
         var result = new Dictionary<long, CustomerLedger>();
         CustomerLedger Of(long id) => result.TryGetValue(id, out var l) ? l : result[id] = new CustomerLedger(id);
@@ -161,6 +162,26 @@ public static class SalesCredit
         foreach (var (customer, sum) in paid)
         {
             Of(customer).Paid = sum;
+        }
+
+        // D1146: вводный остаток — долг как отгрузка этой датой (срок — та же дата), аванс покупателя — как оплата.
+        foreach (var (customer, list) in await SalesOpeningBalances.ByCustomerAsync(db, org, customers, asOf, ct))
+        {
+            var ledger = Of(customer);
+            foreach (var (date, amount) in list)
+            {
+                if (amount > 0)
+                {
+                    ledger.ShippedRaw += amount;
+                    ledger.Open.Add(new OpenShipmentDto(0, "Вводный остаток", "—", date, null, amount, amount));
+                }
+                else
+                {
+                    ledger.Paid += -amount;
+                }
+            }
+
+            ledger.Open.Sort((a, b) => a.Date != b.Date ? a.Date.CompareTo(b.Date) : a.DocumentId.CompareTo(b.DocumentId));
         }
 
         // FIFO: возвраты и оплаты гасят самые старые отгрузки.

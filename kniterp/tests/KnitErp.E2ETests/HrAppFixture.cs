@@ -108,6 +108,26 @@ public sealed class HrAppFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>Класс машины в справочнике разработки (D726) — для утверждения рисунка. Возвращает название.</summary>
+    public async Task<string> CreateMachineClassAsync(string name, int feeders)
+    {
+        await using var s = _host.As(_org!.OwnerUserId, _org.OrganizationId);
+        var user = new TestUser { UserId = _org.OwnerUserId, OrganizationId = _org.OrganizationId, ClientAddress = _host.ClientAddress };
+        await new KnitErp.Application.Development.DevSettingsService(s.Db, new KnitErp.Application.Access.AccessGuard(s.Db, user, _host.Clock), user, _host.Clock)
+            .AddLookupAsync(KnitErp.Domain.Development.DevLookupKind.MachineClass, name, feeders);
+        return name;
+    }
+
+    /// <summary>Пряжа в номенклатуре организации (сырьё, кг) — для палитры модели и норм техкарты (D751). Возвращает название.</summary>
+    public async Task<string> CreateYarnAsync(string name)
+    {
+        await using var s = _host.As(_org!.OwnerUserId, _org.OrganizationId);
+        var kg = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "166").Id;
+        await s.Catalog.CreateItemAsync(new KnitErp.Application.Catalog.ItemCommand("ПР-" + Guid.NewGuid().ToString("N")[..6], name,
+            KnitErp.Domain.Catalog.ItemType.RawMaterial, kg, null));
+        return name;
+    }
+
     /// <summary>
     /// Табель «Вязального цеха» за текущий месяц и отметка Петровой на сегодня (часовой пояс организации): в рабочий день — больничный
     /// (блок «Смена сегодня» покажет её среди не вышедших), в выходной или праздник — выход сверх графика (она на смене).

@@ -1,0 +1,102 @@
+@*
+    D1141: транспортная накладная по форме приложения № 4 к постановлению Правительства РФ от 21.12.2020 № 2200 (разделы 1–17)
+    по проведённой отгрузке. Заполняются грузоотправитель, грузополучатель, адрес доставки из заказа, груз (наименования, масса нетто
+    по весу позиций), сопроводительный документ (УПД); перевозчик, транспорт, места и масса брутто, время подачи — от руки.
+*@
+@using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+
+@{
+    var u = Form.Upd;
+    var r = u.Requisites;
+    var cargo = string.Join("; ", u.Lines.Select(l => $"{l.Name} — {Quantities.Format(l.Quantity)} {l.UnitSymbol}"));
+}
+<div class="sheet portrait ttn" style="@(Break ? "break-before: page" : null)">
+    @if (u.Reversed)
+    {
+        <div class="stamp">ОТГРУЗКА СТОРНИРОВАНА — НАКЛАДНАЯ АННУЛИРОВАНА</div>
+    }
+    <p class="small sx-right">Приложение № 4 к постановлению Правительства Российской Федерации от 21 декабря 2020 г. № 2200</p>
+    <h1 style="text-align: center; border: 0">Транспортная накладная</h1>
+    <table>
+        <tr><td style="width: 50%">Дата <b>@u.Date.ToString("dd.MM.yyyy")</b> № <b>@u.ShipmentNumber</b></td>
+            <td>Заказ (заявка): дата <b>@Form.OrderDate.ToString("dd.MM.yyyy")</b> № <b>@Form.OrderNumber</b></td></tr>
+    </table>
+
+    <h2 class="sx-ttn">1. Грузоотправитель</h2>
+    <table><tr><td>@PrintInvoicePage.Party(u.Seller)<div class="small">(реквизиты, позволяющие идентифицировать грузоотправителя)</div></td></tr></table>
+
+    <h2 class="sx-ttn">2. Грузополучатель</h2>
+    <table>
+        <tr><td>@PrintInvoicePage.Party(u.Buyer)<div class="small">(реквизиты, позволяющие идентифицировать грузополучателя)</div></td></tr>
+        <tr><td>Адрес места доставки груза: <b>@(Form.DeliveryAddress ?? u.Buyer.Address)</b></td></tr>
+    </table>
+
+    <h2 class="sx-ttn">3. Груз</h2>
+    <table>
+        <tr><td style="width: 38%">Наименование груза</td><td>@cargo</td></tr>
+        <tr><td>Количество грузовых мест, маркировка, вид упаковки</td><td>&nbsp;</td></tr>
+        <tr><td>Масса груза брутто, кг</td><td>&nbsp;</td></tr>
+        <tr><td>Масса груза нетто, кг</td><td>@(Form.TotalNetKg is { } kg ? Quantities.Format(kg) : "")</td></tr>
+        <tr><td>Размеры (высота, ширина, длина), м; объём, м³</td><td>&nbsp;</td></tr>
+        <tr><td>Опасный груз: класс, номер ООН</td><td>не является опасным</td></tr>
+    </table>
+
+    <h2 class="sx-ttn">4. Сопроводительные документы на груз</h2>
+    <table><tr><td>Универсальный передаточный документ № @u.ShipmentNumber от @u.Date.ToString("dd.MM.yyyy"); @u.Basis</td></tr></table>
+
+    <h2 class="sx-ttn">5. Указания грузоотправителя</h2>
+    <table><tr><td>Параметры транспортного средства, указания по погрузке и выгрузке, по креплению груза: <span class="sx-blank"></span></td></tr></table>
+
+    <h2 class="sx-ttn">6. Приём груза</h2>
+    <table>
+        <tr><td style="width: 38%">Адрес места погрузки</td><td>@(r.LegalAddress ?? u.Seller.Address) (склад: @u.Warehouse)</td></tr>
+        <tr><td>Дата и время подачи транспортного средства под погрузку (заявленные / фактические)</td><td>&nbsp;</td></tr>
+        <tr><td>Масса груза брутто, кг; количество грузовых мест</td><td>&nbsp;</td></tr>
+        <tr><td>Грузоотправитель (уполномоченное лицо)</td><td>@(r.SoleProprietor ? "Индивидуальный предприниматель" : r.DirectorPosition ?? "") <SalesPrintSign Image="Deco.DirectorSignature" /> @r.DirectorName</td></tr>
+        <tr><td>Водитель</td><td><span class="sx-blank"></span><div class="small">(подпись, ф. и. о.)</div></td></tr>
+    </table>
+
+    <h2 class="sx-ttn">7. Сдача груза</h2>
+    <table>
+        <tr><td style="width: 38%">Адрес места выгрузки</td><td>@(Form.DeliveryAddress ?? u.Buyer.Address)</td></tr>
+        <tr><td>Дата и время прибытия / выгрузки</td><td>&nbsp;</td></tr>
+        <tr><td>Масса груза брутто, кг; количество грузовых мест; состояние груза</td><td>&nbsp;</td></tr>
+        <tr><td>Грузополучатель (уполномоченное лицо)</td><td><span class="sx-blank"></span><div class="small">(должность, подпись, ф. и. о.)</div></td></tr>
+        <tr><td>Водитель</td><td><span class="sx-blank"></span><div class="small">(подпись, ф. и. о.)</div></td></tr>
+    </table>
+
+    @foreach (var (no, title) in Blank)
+    {
+        <h2 class="sx-ttn">@no. @title</h2>
+        <table><tr><td style="height: 22px">&nbsp;</td></tr></table>
+    }
+
+    <h2 class="sx-ttn">16. Дата составления, подписи сторон</h2>
+    <table>
+        <tr><td style="width: 50%">Грузоотправитель: @u.Seller.Name<br />@r.DirectorName <SalesPrintSign Image="Deco.DirectorSignature" />
+                @if (Deco.Stamp is { } stamp) { <img class="sx-stamp sx-stamp-upd" src="@stamp.DataUri" alt="" /> }</td>
+            <td>Перевозчик: <span class="sx-blank"></span><div class="small">(подпись, ф. и. о., дата)</div></td></tr>
+    </table>
+
+    <h2 class="sx-ttn">17. Отметки грузоотправителей, грузополучателей, перевозчиков</h2>
+    <table><tr><td style="height: 30px">&nbsp;</td></tr></table>
+</div>
+
+@code {
+    private static readonly (int No, string Title)[] Blank =
+    [
+        (8, "Условия перевозки"), (9, "Информация о принятии заказа (заявки) к исполнению"), (10, "Перевозчик"),
+        (11, "Транспортное средство (тип, марка, грузоподъёмность, регистрационный номер)"), (12, "Оговорки и замечания перевозчика"),
+        (13, "Прочие условия"), (14, "Переадресовка"), (15, "Стоимость услуг перевозчика и порядок расчёта провозной платы"),
+    ];
+
+    [Parameter, EditorRequired]
+    public ShipmentFormDto Form { get; set; } = null!;
+
+    [Parameter]
+    public SalesPrintDecorations Deco { get; set; } = SalesPrintDecorations.None;
+
+    [Parameter]
+    public bool Break { get; set; }
+}

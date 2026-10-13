@@ -156,7 +156,7 @@ document.addEventListener('pointerdown', function (e) {
 
 // Выбор темы в меню профиля (кнопки data-theme-choice): сразу применяется и запоминается в браузере.
 function kniterpMarkTheme() {
-    var current = document.documentElement.getAttribute('data-theme') || 'dark';
+    var current = document.documentElement.getAttribute('data-theme') || 'light';
     document.querySelectorAll('[data-theme-choice]').forEach(function (b) {
         var on = b.getAttribute('data-theme-choice') === current;
         b.classList.toggle('added', on);
@@ -192,15 +192,15 @@ document.addEventListener('click', function (e) {
 function kniterpSyncMascot() {
     var el = document.querySelector('knit-assistant');
     if (!el) return;
-    var t = document.documentElement.getAttribute('data-theme') || 'dark';
+    var t = document.documentElement.getAttribute('data-theme') || 'light';
     if (t === 'auto') t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     if (el.getAttribute('theme') !== t) el.setAttribute('theme', t);
 }
 // Улучшенная навигация Blazor может переписать атрибуты <html> — тема и размер восстанавливаются из браузера.
 new MutationObserver(function () {
     if (!document.documentElement.getAttribute('data-theme')) {
-        var t = 'dark';
-        try { t = localStorage.getItem('kniterp.theme') || 'dark'; } catch (err) { }
+        var t = 'light';
+        try { t = localStorage.getItem('kniterp.theme') || 'light'; } catch (err) { }
         document.documentElement.setAttribute('data-theme', t);
     }
     if (!document.documentElement.getAttribute('data-density')) {

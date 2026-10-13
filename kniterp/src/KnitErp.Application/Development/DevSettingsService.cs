@@ -228,12 +228,13 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
     {
         var ctx = await guard.DemandAsync(Permissions.DevCostView, ct);
         var s = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct) ?? DevSettings.Defaults(ctx.OrganizationId);
-        return new DevCostSettingsDto(s.YarnWastePercent, s.OverheadPercent, s.LaborRatePerMinute, s.MarkupPercent, ctx.Permissions.Has(Permissions.DevSettings));
+        return new DevCostSettingsDto(s.YarnWastePercent, s.OverheadPercent, s.LaborRatePerMinute, s.MarkupPercent, ctx.Permissions.Has(Permissions.DevSettings),
+            s.RequireCostForApproval, s.MinMarginPercent);
     }
 
     /// <summary>Условия расчёта себестоимости; в журнал — что изменены, без сумм ставки.</summary>
     public async Task SaveCostSettingsAsync(decimal yarnWastePercent, decimal overheadPercent, decimal? laborRatePerMinute, decimal markupPercent,
-        CancellationToken ct = default)
+        bool requireCostForApproval = true, decimal? minMarginPercent = null, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
         await guard.DemandAsync(Permissions.DevCostView, ct);
@@ -243,7 +244,7 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
             var settings = await db.DevSettings.SingleOrDefaultAsync(x => x.OrganizationId == org, ct);
             var isNew = settings is null;
             settings ??= DevSettings.Defaults(org);
-            settings.SetCosting(yarnWastePercent, overheadPercent, laborRatePerMinute, markupPercent);
+            settings.SetCosting(yarnWastePercent, overheadPercent, laborRatePerMinute, markupPercent, requireCostForApproval, minMarginPercent);
             if (isNew)
             {
                 db.DevSettings.Add(settings);
@@ -276,6 +277,69 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
             }
 
             Audit(ctx, AuditActions.DevSettingsChanged, null, null, t.IsEmpty ? "очищен" : "сохранён", $"Шаблон задания: {DevModel.CategoryName(template.Category)}");
+            await db.SaveOrConflictAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    // ---------- Шаблоны табеля мер по категориям (D729, ТЗ §9) ----------
+
+    public async Task<IReadOnlyList<DevCategoryMeasureDto>> CategoryMeasuresAsync(DevCategory category, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        return await db.DevCategoryMeasures.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.Category == category)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
+            .Select(x => new DevCategoryMeasureDto(x.Id, x.Category, x.Name, x.Tolerance, x.Step, x.SortOrder)).ToListAsync(ct);
+    }
+
+    public async Task<long> AddCategoryMeasureAsync(DevCategory category, string? name, decimal tolerance, decimal? step, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
+        var org = ctx.OrganizationId;
+        var existing = await db.DevCategoryMeasures.Where(x => x.OrganizationId == org && x.Category == category)
+            .Select(x => new { x.Name, x.SortOrder }).ToListAsync(ct);
+        if (existing.Count >= DevCategoryMeasure.MaxPerCategory)
+        {
+            throw new BusinessRuleException("dev.measure.limit", $"В шаблоне табеля мер — не больше {DevCategoryMeasure.MaxPerCategory} точек.");
+        }
+
+        var item = DevCategoryMeasure.Create(org, category, name, decimal.Round(tolerance, 2), step is { } st ? decimal.Round(st, 2) : null,
+            existing.Count == 0 ? 1 : existing.Max(x => x.SortOrder) + 1);
+        if (existing.Any(x => string.Equals(x.Name, item.Name, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new BusinessRuleException("dev.measure.duplicate", $"Точка «{item.Name}» уже есть в шаблоне.");
+        }
+
+        db.DevCategoryMeasures.Add(item);
+        try
+        {
+            await using var tx = await db.BeginTransactionAsync(ct);
+            await db.SaveOrConflictAsync(ct);
+            Audit(ctx, AuditActions.DevSettingsChanged, item.Id, null, item.Name, $"Шаблон табеля мер: {DevModel.CategoryName(category)}");
+            await db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return item.Id;
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    public async Task RemoveCategoryMeasureAsync(long id, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
+        var item = await db.DevCategoryMeasures.SingleOrDefaultAsync(x => x.Id == id && x.OrganizationId == ctx.OrganizationId, ct)
+                   ?? throw new NotFoundException("Точка шаблона");
+        try
+        {
+            db.DevCategoryMeasures.Remove(item);
+            Audit(ctx, AuditActions.DevSettingsChanged, id, item.Name, "убрана", $"Шаблон табеля мер: {DevModel.CategoryName(item.Category)}");
             await db.SaveOrConflictAsync(ct);
         }
         catch

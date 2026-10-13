@@ -6,6 +6,9 @@ namespace KnitErp.Web.Components.Pages;
 /// <summary>Вывод величин модуля «Разработка»: время вязания, вес, сантиметры, проценты — коротко, по-русски с переводом единиц.</summary>
 public static class DevFormat
 {
+    /// <summary>Замечание расчёта (D767): шаблон переводится, подстановки (названия) — как есть.</summary>
+    public static string Note(KnitErp.Domain.Development.DevNote n) => L(n.Template, n.Args.Cast<object?>().ToArray());
+
     private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");
 
     /// <summary>«3 мин», «3 мин 30 с», «45 с».</summary>

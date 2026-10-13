@@ -15,7 +15,7 @@ public sealed record DevYarnLineDto(long ItemId, string ItemCode, string ItemNam
 
 /// <summary>Что спишется на образец (D721) и куда: склады и причины списания из области пользователя; документ, если уже создан.</summary>
 public sealed record DevYarnWriteOffDto(
-    long SampleId, int SampleNo, IReadOnlyList<DevYarnLineDto> Lines, IReadOnlyList<string> Warnings, IReadOnlyList<LookupWarehouseDto> Warehouses,
+    long SampleId, int SampleNo, IReadOnlyList<DevYarnLineDto> Lines, IReadOnlyList<DevNote> Warnings, IReadOnlyList<LookupWarehouseDto> Warehouses,
     IReadOnlyList<ReasonLookupDto> Reasons, long? DocumentId, string? DocumentNumber, StockDocumentStatus? DocumentStatus, string? Refusal);
 
 /// <summary>
@@ -97,7 +97,7 @@ public sealed class DevYarnService(IKnitErpDbContext db, IAccessGuard guard, ICu
     }
 
     /// <summary>Граммы пряжи образца по факту цеха → количество в единице позиции (кг или г, с округлением вверх по точности единицы).</summary>
-    private async Task<(List<DevYarnLineDto> Lines, List<string> Warnings)> LinesAsync(long org, DevSample s, CancellationToken ct)
+    private async Task<(List<DevYarnLineDto> Lines, List<DevNote> Warnings)> LinesAsync(long org, DevSample s, CancellationToken ct)
     {
         var facts = await (from f in db.DevSampleDetails.AsNoTracking()
                            join d in db.DevDetails.AsNoTracking() on f.DetailId equals d.Id
@@ -117,7 +117,7 @@ public sealed class DevYarnService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var warnings = result.Warnings.ToList();
         if (facts.Count == 0)
         {
-            warnings.Add("По образцу ещё нет факта цеха.");
+            warnings.Add(DevNote.Of(DevNotes.NoFact));
         }
 
         var lines = new List<DevYarnLineDto>();
@@ -131,7 +131,7 @@ public sealed class DevYarnService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
             else
             {
-                warnings.Add($"«{c.Name}»: единица «{c.Symbol}» — не кг и не г, количество введёт склад.");
+                warnings.Add(DevNote.Of(DevNotes.UnitForStock, c.Name, c.Symbol));
             }
         }
 

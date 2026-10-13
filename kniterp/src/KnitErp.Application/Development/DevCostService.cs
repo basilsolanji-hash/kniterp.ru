@@ -16,7 +16,7 @@ namespace KnitErp.Application.Development;
 /// </summary>
 public sealed record DevCostScenario(
     IReadOnlyDictionary<long, decimal>? Prices = null, IReadOnlyDictionary<long, long>? Replace = null, DevPriceMode Mode = DevPriceMode.Markup,
-    decimal? MarkupPercent = null, decimal? TargetPrice = null, string? Note = null);
+    decimal? MarkupPercent = null, decimal? TargetPrice = null, string? Note = null, long? ColorwayId = null);
 
 /// <summary>Строка расчёта на экране: откуда цена («закупка», «каталог», «вручную», «нет цены») и можно ли заменить материал.</summary>
 public sealed record DevCostLineDto(
@@ -32,8 +32,9 @@ public sealed record DevAccessoryDto(long Id, long ItemId, string Code, string N
 public sealed record DevCostingDto(
     IReadOnlyList<DevCostLineDto> Lines, decimal Yarn, decimal Accessories, decimal Labor, decimal Overhead, decimal Cost, decimal Price, decimal Margin,
     decimal? MarginPercent, decimal? TargetCost, decimal? TargetPrice, decimal? VersusTargetCost, decimal OverheadPercent, decimal YarnWastePercent,
-    decimal? LaborRatePerMinute, DevPriceMode Mode, decimal? MarkupPercent, IReadOnlyList<string> Warnings, IReadOnlyList<DevCostRunDto> Runs,
-    IReadOnlyList<DevAccessoryDto> AccessoryList, IReadOnlyList<DevOptionDto> Materials, IReadOnlyList<DevOptionDto> AccessoryOptions, bool CanEdit);
+    decimal? LaborRatePerMinute, DevPriceMode Mode, decimal? MarkupPercent, IReadOnlyList<DevNote> Warnings, IReadOnlyList<DevCostRunDto> Runs,
+    IReadOnlyList<DevAccessoryDto> AccessoryList, IReadOnlyList<DevOptionDto> Materials, IReadOnlyList<DevOptionDto> AccessoryOptions, bool CanEdit,
+    IReadOnlyList<DevOptionDto>? Colorways = null, long? CurrentColorwayId = null);
 
 /// <summary>
 /// Себестоимость и цена модели (D740–D745, этап 5 ТЗ). Видит только право «Разработка: себестоимость» (`dev.cost.view`); сохранить версию
@@ -66,7 +67,12 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
         return new DevCostingDto(lines, result.Yarn, result.Accessories, result.Labor, result.Overhead, result.Cost, result.Price, result.Margin,
             result.MarginPercent, m.TargetCost, m.TargetPrice, result.VersusTargetCost, settings.OverheadPercent, settings.YarnWastePercent,
             settings.LaborRatePerMinute, s.Mode, s.Mode == DevPriceMode.Markup ? s.MarkupPercent ?? settings.MarkupPercent : null, warnings, runs, accessories,
-            materials, accessoryOptions, ctx.Permissions.Has(Permissions.DevEdit) && !DevStages.IsFinal(m.Stage));
+            materials, accessoryOptions, ctx.Permissions.Has(Permissions.DevEdit) && !DevStages.IsFinal(m.Stage),
+            m.PatternId is { } pid
+                ? await db.DevPatternColorways.AsNoTracking().Where(c => c.OrganizationId == org && c.PatternId == pid).OrderBy(c => c.SortOrder)
+                    .Select(c => new DevOptionDto(c.Id, c.Name)).ToListAsync(ct)
+                : [],
+            m.ColorwayId);
     }
 
     /// <summary>Сохранить версию расчёта (D744): сервер пересчитывает по своим данным и условиям сценария; возвращает номер версии.</summary>
@@ -90,7 +96,7 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
                 s.Mode == DevPriceMode.Markup ? s.MarkupPercent ?? settings.MarkupPercent : null, result, clock.UtcNow, ctx.UserId);
             db.DevCostRuns.Add(run);
             db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, org, ctx.UserId, AuditActions.DevTechChanged, nameof(DevModel), modelId.ToString(), null,
-                $"версия {version}" + (s.Replace is { Count: > 0 } ? $", замена материала: {s.Replace.Count}" : ""), $"{m.Number}: расчёт себестоимости",
+                $"версия {version}" + (s.Replace is { Count: > 0 } ? $", замена материала: {s.Replace.Count}" : "") + (scenario.ColorwayId is null ? "" : ", другой колорит"), $"{m.Number}: расчёт себестоимости",
                 currentUser.CorrelationId));
             await db.SaveOrConflictAsync(ct);
             await tx.CommitAsync(ct);
@@ -182,12 +188,53 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
     // ---------- Расчёт ----------
 
-    private async Task<(List<DevCostLineDto> Lines, DevCostResult Result, DevSettings Settings, List<string> Warnings, DevCostScenario Scenario)> ComputeAsync(
+    /// <summary>Замены пряжи для колорита: колорит — того же рисунка, что выбран в модели; связь цвета палитры и цвета рисунка — по пряже.</summary>
+    private async Task<IReadOnlyDictionary<long, long>> ColorwayReplaceAsync(long org, DevModel m, long colorwayId, IReadOnlyDictionary<long, long>? manual,
+        CancellationToken ct)
+    {
+        if (m.PatternId is not { } pid || m.ColorwayId is not { } current)
+        {
+            throw new BusinessRuleException("dev.cost.colorway.none", "Выберите в модели рисунок и колорит — тогда можно посчитать другой колорит.");
+        }
+
+        if (!await db.DevPatternColorways.AnyAsync(c => c.Id == colorwayId && c.OrganizationId == org && c.PatternId == pid, ct))
+        {
+            throw new NotFoundException("Колорит");
+        }
+
+        var yarns = await db.DevPatternColorwayYarns.AsNoTracking()
+            .Where(y => y.OrganizationId == org && (y.ColorwayId == current || y.ColorwayId == colorwayId) && y.ItemId != null)
+            .Select(y => new { y.ColorwayId, y.ColorId, ItemId = y.ItemId!.Value }).ToListAsync(ct);
+        var result = new Dictionary<long, long>();
+        foreach (var from in yarns.Where(y => y.ColorwayId == current))
+        {
+            if (yarns.FirstOrDefault(y => y.ColorwayId == colorwayId && y.ColorId == from.ColorId) is { } to && to.ItemId != from.ItemId)
+            {
+                result.TryAdd(from.ItemId, to.ItemId);
+            }
+        }
+
+        foreach (var (k, v) in manual ?? new Dictionary<long, long>())
+        {
+            result[k] = v;
+        }
+
+        return result;
+    }
+
+    private async Task<(List<DevCostLineDto> Lines, DevCostResult Result, DevSettings Settings, List<DevNote> Warnings, DevCostScenario Scenario)> ComputeAsync(
         long org, DevModel m, DevCostScenario? scenario, CancellationToken ct)
     {
         var s = scenario ?? new DevCostScenario();
         var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
         var (norms, warnings) = await DevYarnNorms.ForModelAsync(db, org, m.Id, ct);
+
+        // D729: сценарий «другой колорит» — пряжа цветов рисунка в текущем колорите модели заменяется пряжей тех же цветов в выбранном
+        // колорите; ручные замены важнее.
+        if (s.ColorwayId is { } cwTo)
+        {
+            s = s with { Replace = await ColorwayReplaceAsync(org, m, cwTo, s.Replace, ct) };
+        }
 
         // Замена материала (сценарий «другая пряжа»): позиция — своей организации, вида «Сырьё» или «Материал»; единица — кг или г.
         var replaceIds = (s.Replace ?? new Dictionary<long, long>()).Values.Distinct().ToList();
@@ -217,7 +264,7 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
             else
             {
-                warnings.Add($"«{norm.Name}»: единица «{norm.Symbol}» — не кг и не г, в расчёт не вошла.");
+                warnings.Add(DevNote.Of(DevNotes.UnitForCost, norm.Name, norm.Symbol));
             }
         }
 
@@ -243,7 +290,7 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
                 : (0m, "нет цены");
             if (source == "нет цены")
             {
-                warnings.Add($"«{line.Name}»: нет цены ни в закупках, ни в каталоге — введите вручную.");
+                warnings.Add(DevNote.Of(DevNotes.NoPrice, line.Name));
             }
 
             priced.Add((line with { UnitPrice = price }, original, source));
@@ -267,13 +314,13 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
             else
             {
-                warnings.Add($"Операция «{o.Name}»: нет ни расценки, ни нормы и ставки за минуту — работа не учтена.");
+                warnings.Add(DevNote.Of(DevNotes.NoLabor, o.Name));
             }
         }
 
         if (operations.Count == 0)
         {
-            warnings.Add("Операций технолога нет — работа не учтена.");
+            warnings.Add(DevNote.Of(DevNotes.NoOperations));
         }
 
         var markup = s.Mode == DevPriceMode.Markup ? s.MarkupPercent ?? settings.MarkupPercent : (decimal?)null;

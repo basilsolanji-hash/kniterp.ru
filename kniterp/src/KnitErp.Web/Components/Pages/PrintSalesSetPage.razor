@@ -1,0 +1,220 @@
+@page "/print/sales-set/{OrderId:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject PrintService Print
+@inject SalesDocumentPrintService Extras
+@inject SalesOrderDocumentsService Documents
+@inject NavigationManager Nav
+
+@*
+    D1141: комплект документов заказа одной печатью — предпросмотр всех выбранных листов подряд, каждый с новой страницы
+    (книжные и альбомные листы в одном задании). Выбор форм и отгрузок — в строке вверху, она на бумагу не выводится.
+    PDF — «Сохранить как PDF» в окне печати; отдельные PDF счёта и УПД — в блоке «Документы и письма клиенту».
+*@
+<PageTitle>@L("Комплект документов") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 10mm; } }</style>
+<SalesPrintStyles />
+
+<div class="print-bar sx-set-bar">
+    <button type="button" data-print disabled="@(_sheets.Count == 0)">@L("Печать комплекта")</button>
+    <a href="sales-orders/@OrderId">@L("← К заказу")</a>
+    @if (_printables is not null)
+    {
+        <span class="sx-form-switch" role="group" aria-label="@L("Формы")">
+            @foreach (var (key, name) in Forms)
+            {
+                var on = _docs.Contains(key);
+                <a href="@Href(Toggle(_docs, key), _ships)" class="@(on ? "on" : null)" aria-pressed="@(on ? "true" : "false")">@L(name)</a>
+            }
+        </span>
+        @if (Shipments.Count > 1)
+        {
+            <span class="sx-form-switch" role="group" aria-label="@L("Отгрузки")">
+                @foreach (var s in Shipments)
+                {
+                    var on = _ships.Count == 0 || _ships.Contains(s.Id);
+                    <a href="@Href(_docs, ToggleShip(s.Id))" class="@(on ? "on" : null)" aria-pressed="@(on ? "true" : "false")">@s.Number</a>
+                }
+            </span>
+        }
+        <span class="small">@L("Листов: {0}. PDF — «Сохранить как PDF» в окне печати.", _sheets.Count)</span>
+    }
+</div>
+@if (_warnings.Count > 0)
+{
+    <div class="print-bar" style="display: block">
+        <b class="warn">@L("Проверьте перед печатью:")</b>
+        <ul style="margin: 4px 0 0 18px; padding: 0">
+            @foreach (var w in _warnings)
+            {
+                <li class="warn">@w</li>
+            }
+        </ul>
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_printables is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else if (_sheets.Count == 0)
+{
+    <div class="sheet portrait"><p>@L("Выберите формы вверху. Счёт печатается, если он выставлен; УПД, ТОРГ-12 и накладная — по проведённым отгрузкам.")</p></div>
+}
+else
+{
+    @for (var i = 0; i < _sheets.Count; i++)
+    {
+        var s = _sheets[i];
+        var brk = i > 0;
+        @switch (s)
+        {
+            case InvoiceSheetData inv:
+                <InvoiceSheet Doc="inv.Doc" Deco="inv.Deco" QrSvg="inv.Qr" Break="brk" />
+                break;
+            case UpdSheetData upd:
+                <UpdSheet Doc="upd.Doc" Deco="upd.Deco" Form="upd.Form" Break="brk" />
+                break;
+            case ShipmentSheetData { Ttn: true } ttn:
+                <TtnSheet Form="ttn.Form" Deco="ttn.Deco" Break="brk" />
+                break;
+            case ShipmentSheetData torg:
+                <Torg12Sheet Form="torg.Form" Deco="torg.Deco" Break="brk" />
+                break;
+        }
+    }
+}
+
+@code {
+    private static readonly (string Key, string Name)[] Forms =
+    [
+        ("invoice", "Счёт"), ("upd", "УПД"), ("sf", "Счёт-фактура"), ("torg12", "ТОРГ-12"), ("ttn", "Транспортная накладная"),
+    ];
+
+    [Parameter]
+    public long OrderId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "docs")]
+    public string? DocsQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "ship")]
+    public string? ShipQuery { get; set; }
+
+    private abstract record SheetData;
+
+    private sealed record InvoiceSheetData(InvoicePrintDto Doc, SalesPrintDecorations Deco, string? Qr) : SheetData;
+
+    private sealed record UpdSheetData(UpdPrintDto Doc, SalesPrintDecorations Deco, UpdForm Form) : SheetData;
+
+    private sealed record ShipmentSheetData(ShipmentFormDto Form, SalesPrintDecorations Deco, bool Ttn) : SheetData;
+
+    private IReadOnlyList<SalesPrintableDto>? _printables;
+    private HashSet<string> _docs = [];
+    private HashSet<long> _ships = [];
+    private readonly List<SheetData> _sheets = [];
+    private readonly List<string> _warnings = [];
+    private string? _error;
+
+    private List<SalesPrintableDto> Shipments => _printables?.Where(p => p.Document == SalesMailDocument.Upd).ToList() ?? [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _sheets.Clear();
+        _warnings.Clear();
+        _docs = (DocsQuery ?? "invoice,upd").Split(',', StringSplitOptions.RemoveEmptyEntries).Where(d => Forms.Any(f => f.Key == d)).ToHashSet();
+        _ships = (ShipQuery ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => long.TryParse(x, out var v) ? v : 0).Where(v => v > 0).ToHashSet();
+        try
+        {
+            _printables = await Documents.PrintSetAsync(OrderId);
+            if (_docs.Contains("invoice"))
+            {
+                foreach (var p in _printables.Where(p => p.Document == SalesMailDocument.Invoice))
+                {
+                    var deco = await Extras.DecorationsAsync(SalesMailDocument.Invoice, p.Id);
+                    _sheets.Add(new InvoiceSheetData(await Print.InvoiceAsync(p.Id), deco,
+                        deco.PaymentQr is { } qr ? KnitErp.Infrastructure.Documents.PaymentQrImage.Svg(qr) : null));
+                }
+            }
+
+            // Листы идут по отгрузкам: УПД, счёт-фактура, ТОРГ-12, накладная одной отгрузки — вместе. Сервис вызывается по очереди (один DbContext).
+            foreach (var p in Shipments.Where(p => _ships.Count == 0 || _ships.Contains(p.Id)))
+            {
+                var deco = await Extras.DecorationsAsync(SalesMailDocument.Upd, p.Id);
+                if (_docs.Contains("upd") || _docs.Contains("sf"))
+                {
+                    var upd = await Print.UpdAsync(p.Id);
+                    Warn(p.Number, upd.Warnings);
+                    if (_docs.Contains("upd"))
+                    {
+                        _sheets.Add(new UpdSheetData(upd, deco, UpdSheet.Parse(null, upd)));
+                    }
+
+                    if (_docs.Contains("sf"))
+                    {
+                        _sheets.Add(new UpdSheetData(upd, deco, UpdForm.VatInvoice));
+                    }
+                }
+
+                if (_docs.Contains("torg12") || _docs.Contains("ttn"))
+                {
+                    var form = await Print.ShipmentFormAsync(p.Id);
+                    Warn(p.Number, form.Warnings);
+                    if (_docs.Contains("torg12"))
+                    {
+                        _sheets.Add(new ShipmentSheetData(form, deco, false));
+                    }
+
+                    if (_docs.Contains("ttn"))
+                    {
+                        _sheets.Add(new ShipmentSheetData(form, deco, true));
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+
+    private void Warn(string number, IEnumerable<string> warnings)
+    {
+        foreach (var w in warnings.Select(w => $"{number}: {w}").Where(w => !_warnings.Contains(w)))
+        {
+            _warnings.Add(w);
+        }
+    }
+
+    private static HashSet<string> Toggle(HashSet<string> set, string key)
+    {
+        var copy = set.ToHashSet();
+        if (!copy.Remove(key))
+        {
+            copy.Add(key);
+        }
+
+        return copy;
+    }
+
+    private HashSet<long> ToggleShip(long id)
+    {
+        var all = Shipments.Select(s => s.Id).ToHashSet();
+        var copy = _ships.Count == 0 ? all : _ships.ToHashSet();
+        if (!copy.Remove(id))
+        {
+            copy.Add(id);
+        }
+
+        return copy.SetEquals(all) ? [] : copy;
+    }
+
+    private string Href(HashSet<string> docs, HashSet<long> ships) =>
+        $"print/sales-set/{OrderId}?docs={string.Join(',', Forms.Select(f => f.Key).Where(docs.Contains))}"
+        + (ships.Count == 0 ? "" : "&ship=" + string.Join(',', ships.Order()));
+}

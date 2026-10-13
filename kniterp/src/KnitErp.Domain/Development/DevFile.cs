@@ -22,6 +22,21 @@ public enum DevFileKind : byte
 public sealed class DevFile
 {
     public const int MaxBytes = 50 * 1024 * 1024;
+
+    /// <summary>Аудит 2026-10-12: предел хранилища одной модели — версии файлов не удаляются, без предела база растёт бесконечно.</summary>
+    public const long MaxBytesPerModel = 2L * 1024 * 1024 * 1024;
+
+    public const int MaxFilesPerModel = 1000;
+
+    /// <summary>Можно ли добавить к модели ещё один файл: уже есть <paramref name="files"/> файлов общим объёмом <paramref name="bytes"/>.</summary>
+    public static void EnsureQuota(int files, long bytes, int newBytes)
+    {
+        if (files >= MaxFilesPerModel || bytes + newBytes > MaxBytesPerModel)
+        {
+            throw new BusinessRuleException("dev.file.quota",
+                $"У модели исчерпан предел файлов: не больше {MaxFilesPerModel} файлов и {MaxBytesPerModel / 1024 / 1024 / 1024} ГБ вместе с версиями.");
+        }
+    }
     public const int FileNameMaxLength = 200;
     public const int CommentMaxLength = 300;
 
@@ -50,6 +65,19 @@ public sealed class DevFile
 
     /// <summary>Параметры станка на момент загрузки («STOLL CMS 530 · E7 · 8 нитеводителей») — программа хранится вместе с ними.</summary>
     public string? MachineParams { get; private set; }
+
+    /// <summary>Образец, к которому относится фото (D728) — задаётся до вставки.</summary>
+    public long? SampleId { get; private set; }
+
+    public void AttachToSample(long sampleId)
+    {
+        if (Kind != DevFileKind.Photo || Id != 0)
+        {
+            throw new BusinessRuleException("dev.file.sample", "К образцу прикладывается только новое фото.");
+        }
+
+        SampleId = sampleId;
+    }
 
     /// <summary>Привязать программу к детали и станку до сохранения (после вставки файл неизменяем).</summary>
     public void AttachProgram(long detailId, long machineId, string machineParams)

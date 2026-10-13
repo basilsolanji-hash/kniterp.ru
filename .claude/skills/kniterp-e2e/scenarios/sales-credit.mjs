@@ -65,6 +65,7 @@ await page.waitForSelector('.sx-price-hint');
 await page.locator('label:has-text("Количество") input').fill('10');
 await page.getByRole('button', { name: 'Добавить или изменить' }).click();
 await page.waitForSelector('section.scp');
+await page.waitForFunction(() => document.querySelector('section.scp')?.innerText.includes('превышение'), null, { timeout: 15000 }).catch(() => {});
 const panel = await plainText(page.locator('section.scp'));
 if (!panel.includes('превышение лимита на 5 000,00')) throw new Error('нет превышения в панели: ' + panel);
 await shot('s2-01-order-credit-panel');

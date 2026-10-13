@@ -3,7 +3,7 @@
 
 @* Поля шапки складского документа — общие для создания и правки черновика. *@
 <label>
-    @(StockDocument.IsOutgoing(Kind) ? L("Склад-отправитель") : L("Склад-получатель"))
+    @(StockOperationKinds.IsServiceAct(Kind) ? L("Склад заказа") : StockDocument.IsOutgoing(Kind) ? L("Склад-отправитель") : L("Склад-получатель"))
     <select @bind="Form.WarehouseId">
         @foreach (var w in Options.Warehouses)
         {

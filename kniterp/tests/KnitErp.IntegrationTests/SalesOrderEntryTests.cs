@@ -56,7 +56,7 @@ public sealed class SalesOrderEntryTests(SqlTestHost host) : IClassFixture<SqlTe
         // Повтор: шарф в архиве — пропущен; цена свитера — новая (по прайсу на сегодня), количество — как в образце.
         var baseType = (await s.Nomenclature.PriceTypesAsync()).Single(t => t.IsDefault).Id;
         await s.Nomenclature.SetPricesAsync(red46.ItemId, new Dictionary<long, decimal?> { [baseType] = 1100 });
-        await s.Catalog.ArchiveItemAsync(f.Scarf, (await s.Db.Items.AsNoTracking().SingleAsync(i => i.Id == f.Scarf)).RowVersion);
+        await s.Catalog.ArchiveItemAsync(f.Scarf, (await s.Db.Items.AsNoTracking().SingleAsync(i => i.Id == f.Scarf)).RowVersion, confirmed: true); // шарф есть в открытом заказе — архив только с подтверждением (каталог)
         var repeat = await s.Sales.RepeatOrderAsync(order);
         Assert.Equal(["ШФ-1: в архиве"], repeat.Skipped);
         var copy = await s.Sales.GetOrderAsync(repeat.OrderId);

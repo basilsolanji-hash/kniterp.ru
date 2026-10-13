@@ -1,0 +1,86 @@
+@page "/print/torg12/{Id:long}"
+@page "/print/ttn/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject PrintService Print
+@inject SalesDocumentPrintService Extras
+@inject NavigationManager Nav
+
+@* D1141: ТОРГ-12 и транспортная накладная по проведённой отгрузке; листы — Torg12Sheet и TtnSheet. *@
+<PageTitle>@(Ttn ? "Транспортная накладная" : "ТОРГ-12") @_form?.Upd.ShipmentNumber — knitERP</PageTitle>
+@if (Ttn)
+{
+    <style>@@media print { @@page { size: A4 portrait; margin: 10mm; } }</style>
+}
+else
+{
+    <style>@@media print { @@page { size: A4 landscape; margin: 7mm; } }</style>
+}
+<SalesPrintStyles />
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="stock-documents/@Id">@L("← К отгрузке")</a>
+    <span class="sx-form-switch" role="group" aria-label="@L("Форма документа")">
+        <a href="print/upd/@Id?form=upd1">@L("УПД, статус 1")</a>
+        <a href="print/upd/@Id?form=upd2">@L("УПД, статус 2")</a>
+        <a href="print/upd/@Id?form=sf">@L("Счёт-фактура")</a>
+        <a href="print/torg12/@Id" class="@(Ttn ? null : "on")">@L("ТОРГ-12")</a>
+        <a href="print/ttn/@Id" class="@(Ttn ? "on" : null)">@L("Транспортная накладная")</a>
+    </span>
+</div>
+@if (_form is { Warnings.Count: > 0 })
+{
+    <div class="print-bar" style="display: block">
+        <b class="warn">@L("Проверьте перед печатью:")</b>
+        <ul style="margin: 4px 0 0 18px; padding: 0">
+            @foreach (var w in _form.Warnings)
+            {
+                <li class="warn">@w</li>
+            }
+        </ul>
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="sheet"><p>@_error</p></div>
+}
+else if (_form is null)
+{
+    <div class="sheet"><p>@L("Загрузка…")</p></div>
+}
+else if (Ttn)
+{
+    <TtnSheet Form="_form" Deco="_deco" />
+}
+else
+{
+    <Torg12Sheet Form="_form" Deco="_deco" />
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private ShipmentFormDto? _form;
+    private SalesPrintDecorations _deco = SalesPrintDecorations.None;
+    private string? _error;
+
+    private bool Ttn => Nav.ToBaseRelativePath(Nav.Uri).StartsWith("print/ttn/", StringComparison.Ordinal);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _form = await Print.ShipmentFormAsync(Id);
+            _deco = await Extras.DecorationsAsync(SalesMailDocument.Upd, Id); // печать и подписи — по юрлицу отгрузки, как у УПД (D1120)
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

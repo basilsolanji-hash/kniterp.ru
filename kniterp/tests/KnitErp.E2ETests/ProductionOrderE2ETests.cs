@@ -388,7 +388,23 @@ public sealed class ProductionOrderE2ETests(AppFixture app) : IClassFixture<AppF
             {
                 await page.GetByLabel("Сотрудник", new() { Exact = true }).SelectOptionAsync(new SelectOptionValue { Label = "Петрова А. С. (0101)" });
                 await page.GetByLabel("Заказ", new() { Exact = true }).SelectOptionAsync(order.ToString());
-                await page.GetByLabel("План на смену").FillAsync("8");
+                // D413: сервер подставляет план после выбора заказа; ввод до подстановки под нагрузкой склеивался («108»).
+                var plan = page.GetByLabel("План на смену");
+                try
+                {
+                    await Assertions.Expect(plan).ToHaveValueAsync("10", new() { Timeout = 1500 });
+                }
+                catch (PlaywrightException)
+                {
+                    continue;
+                }
+
+                await plan.FillAsync("8");
+                if (await plan.InputValueAsync() != "8")
+                {
+                    continue;
+                }
+
                 await page.GetByRole(AriaRole.Button, new() { Name = "Назначить", Exact = true }).ClickAsync();
                 try
                 {

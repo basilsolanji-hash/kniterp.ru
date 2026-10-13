@@ -215,6 +215,9 @@ public interface ISalesPdfRenderer
     byte[] Upd(UpdPrintDto doc, SalesPrintDecorations decorations);
 
     byte[] Order(SalesOrderPrintDto doc, SalesPrintDecorations decorations);
+
+    /// <summary>D1142: прайс-лист — группы подзаголовками, остаток при складских правах.</summary>
+    byte[] PriceList(PriceListDto list);
 }
 
 public static class SalesDocumentPdf

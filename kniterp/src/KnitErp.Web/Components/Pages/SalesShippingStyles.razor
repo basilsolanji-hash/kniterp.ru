@@ -1,0 +1,30 @@
+@*
+    Стили отгрузки и возвратов (D1150–D1155): блок в карточке заказа и документа, строки сборки и сканирования. Сетки полей — общие
+    `sx-form` из SalesStyles; на телефоне 390 px — без горизонтальной прокрутки.
+*@
+<SalesStyles />
+<style>
+    .ssh { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 8px 0; }
+    .ssh-row { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 13px; }
+    .ssh-row .tag { margin-right: 4px; }
+    .ssh .sx-kv { margin: 6px 0 4px; }
+    .ssh form.sx-form { margin-top: 6px; }
+    .ssh table { margin-top: 6px; }
+    .ssh .inline-form { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; }
+    .ssh .inline-form input { min-width: 0; flex: 1 1 140px; }
+    .ssh-scan { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: flex-end; margin: 6px 0; }
+    .ssh-scan label { display: flex; flex-direction: column; gap: 3px; flex: 1 1 320px; min-width: 0; font-size: 12px; color: var(--text-2); }
+    .ssh-scan input { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; }
+    .ssh-codes { margin: 2px 0 0; padding: 0; list-style: none; font-size: 12px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+    .ssh-codes li { display: flex; gap: 8px; align-items: center; justify-content: space-between; border-bottom: 1px dashed var(--line); padding: 2px 0; }
+    .ssh-bad { color: var(--warn-text); }
+    .sx-table td.ssh-qty input { width: 90px; }
+    .sx-table td.ssh-loc input { width: 120px; }
+    @@media (max-width: 560px) {
+        .sx-table td.ssh-qty input, .sx-table td.ssh-loc input { width: 100%; }
+    }
+    /* Справочники отгрузки: название слева, действие справа, строки одной высоты. */
+    li.ship-ref { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    li.ship-ref .ship-ref-name { min-width: 0; overflow-wrap: anywhere; }
+    li.ship-ref button.link { flex: none; }
+</style>

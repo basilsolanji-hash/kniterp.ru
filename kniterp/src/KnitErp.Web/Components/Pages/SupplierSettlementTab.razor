@@ -1,0 +1,193 @@
+@*
+    D133: вкладка «Расчёты с поставщиком» карточки контрагента (подключается через ModuleUi): текущий долг и вводные остатки расчётов
+    на дату начала учёта. Открывается по нажатию вкладки, когда страница свободна, — сервис вызывается по очереди. Права проверяет сервис.
+*@
+@using KnitErp.Application.Purchasing
+@inject PurchaseService Purchases
+
+@if (_denied is not null)
+{
+    <p class="muted">@_denied</p>
+}
+else if (_data is not { } d)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")"><span>@_message</span></div>
+    }
+
+    @if (!d.IsSupplier)
+    {
+        <p class="muted">@L("Контрагент не отмечен как поставщик — вводный остаток расчётов с поставщиком ввести нельзя.")</p>
+    }
+
+    <p>
+        @L("Долг поставщику сейчас:") <b>@Amounts.Format(d.Debt)</b>
+        <span class="muted">@(d.Debt > 0 ? L("мы должны поставщику") : d.Debt < 0 ? L("аванс поставщику") : L("расчёты закрыты"))</span>
+        · <a href="settlement-statement?counterparty=@CounterpartyId">@L("Акт сверки")</a>
+    </p>
+
+    <h3 style="margin-top: 16px">@L("Вводный остаток расчётов с поставщиком")</h3>
+    <p class="muted">@L("Сальдо на дату начала учёта: наш долг поставщику — со знаком плюс, наш аванс поставщику — со знаком минус. Учитывается в долге поставщику, расчётах с поставщиками и акте сверки.")</p>
+
+    @if (d.Rows.Count > 0)
+    {
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Дата")</th><th>@L("Юрлицо")</th><th class="num">@L("Сумма")</th><th>@L("Комментарий")</th><th>@L("Ввёл")</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in d.Rows)
+                    {
+                        <tr class="@(r.IsCancelled ? "archived" : null)">
+                            <td data-label="@L("Дата")">@r.Date.ToString("dd.MM.yyyy")</td>
+                            <td data-label="@L("Юрлицо")">@r.LegalEntity</td>
+                            <td data-label="@L("Сумма")" class="num">@Amounts.Format(r.Amount) <span class="muted">@(r.Amount > 0 ? L("наш долг") : L("наш аванс"))</span></td>
+                            <td data-label="@L("Комментарий")">@(r.IsCancelled ? L("аннулирован: {0}", r.CancelReason ?? "") : r.Comment)</td>
+                            <td data-label="@L("Ввёл")">@r.CreatedBy</td>
+                            <td>
+                                @if (d.CanEdit && !r.IsCancelled)
+                                {
+                                    @if (_cancelId == r.Id)
+                                    {
+                                        <span class="inline-form">
+                                            <input @bind="_reason" placeholder="@L("Причина")" aria-label="@L("Причина аннулирования")" size="18" />
+                                            <button type="button" class="secondary" @onclick="() => CancelAsync(r)" disabled="@_busy">@L("Аннулировать")</button>
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <button type="button" class="link" @onclick="() => { _cancelId = r.Id; _reason = null; }">@L("Аннулировать")</button>
+                                    }
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else
+    {
+        <p class="muted">@L("Вводных остатков нет.")</p>
+    }
+
+    @if (d.CanEdit && d.IsSupplier)
+    {
+        <form class="inline-form" @onsubmit="AddAsync">
+            <label>@L("Дата") <input type="date" @bind="_date" /></label>
+            <label>
+                @L("Юрлицо")
+                <select @bind="_entity">
+                    @foreach (var e in d.LegalEntities)
+                    {
+                        <option value="@e.Id">@e.Name</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Сумма") <input @bind="_amount" inputmode="decimal" placeholder="@L("15 000 или −2 000")" /></label>
+            <label>@L("Комментарий") <input @bind="_comment" maxlength="500" /></label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Ввести остаток")</button>
+        </form>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long CounterpartyId { get; set; }
+
+    private SupplierOpeningBalancesDto? _data;
+    private string? _denied;
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private DateTime? _date;
+    private string _entity = string.Empty;
+    private string? _amount;
+    private string? _comment;
+    private long? _cancelId;
+    private string? _reason;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex); // без права «Цены и суммы» расчётов не видно
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _data = await Purchases.OpeningBalancesAsync(CounterpartyId);
+        if (string.IsNullOrEmpty(_entity) && _data.LegalEntities.Count > 0)
+        {
+            _entity = _data.LegalEntities[0].Id.ToString();
+        }
+
+        // Дата по умолчанию — сегодня по часовому поясу организации (аудит 13.10: пустая дата не давала сохранить с первого раза).
+        _date ??= TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+    }
+
+    private Task AddAsync() => RunAsync(async () =>
+    {
+        if (_date is not { } date)
+        {
+            throw new BusinessRuleException("purchase.opening.date", L("Укажите дату остатка."));
+        }
+
+        var text = (_amount ?? "").Replace('−', '-').Trim();
+        var negative = text.StartsWith('-');
+        if (!Quantities.TryParse(negative ? text[1..] : text, out var value))
+        {
+            throw new BusinessRuleException("purchase.number", L("Укажите число, например 1 220,50."));
+        }
+
+        await Purchases.AddOpeningBalanceAsync(CounterpartyId, long.Parse(_entity), DateOnly.FromDateTime(date), negative ? -value : value, _comment);
+        _amount = null;
+        _comment = null;
+        _message = L("Вводный остаток сохранён.");
+    });
+
+    private Task CancelAsync(SupplierOpeningBalanceDto row) => RunAsync(async () =>
+    {
+        await Purchases.CancelOpeningBalanceAsync(row.Id, _reason, row.RowVersion);
+        _cancelId = null;
+        _message = L("Вводный остаток аннулирован.");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

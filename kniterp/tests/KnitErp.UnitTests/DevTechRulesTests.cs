@@ -174,7 +174,8 @@ public sealed class DevTechRulesTests
         Assert.Equal(95.5m, mono.GramsByColor[7]);
         var noShares = DevNorms.Compute([new DevNormDetail("Шапка", 1, 95.5m, new Dictionary<long, decimal>())], [7L, 8L]);
         Assert.Empty(noShares.GramsByColor);
-        Assert.Contains("долей", Assert.Single(noShares.Warnings));
+        Assert.Equal(DevNotes.NoShares, Assert.Single(noShares.Warnings).Template);
+        Assert.Contains("долей", noShares.Warnings[0].ToString());
 
         // Единица: кг (166) — с округлением вверх по точности, г (163) — как есть, прочие — норму вводит производство.
         Assert.Equal(0.133m, DevNorms.ToUnit(132.2m, "166", 3));
@@ -206,5 +207,38 @@ public sealed class DevTechRulesTests
         Assert.Equal("dev.cost.percent", Assert.Throws<BusinessRuleException>(() => DevCosting.Compute(lines, 1001, DevPriceMode.Markup, 0, null, null)).Code);
         Assert.Throws<BusinessRuleException>(() => DevCosting.Compute([new(DevCostLineKind.Yarn, 1, "x", "кг", 1, -1, 0)], 0, DevPriceMode.Markup, 0, null, null));
         Assert.Throws<BusinessRuleException>(() => DevModelAccessory.Create(1, 1, 1, 0));
+    }
+
+    [Fact]
+    public void Approval_requires_saved_cost_and_reason_below_margin_threshold()
+    {
+        // D746: нет расчёта — отказ (если так настроено); маржа ниже порога — только с обоснованием; выше порога или без порога — можно.
+        Assert.Equal("dev.approve.cost", Assert.Throws<BusinessRuleException>(() => DevApprovalRules.Ensure(true, null, false, null, "ок")).Code);
+        DevApprovalRules.Ensure(false, null, false, null, null);
+        Assert.Equal("dev.approve.margin", Assert.Throws<BusinessRuleException>(() => DevApprovalRules.Ensure(true, 20m, true, 15m, " ")).Code);
+        Assert.Equal("dev.approve.margin", Assert.Throws<BusinessRuleException>(() => DevApprovalRules.Ensure(true, 20m, true, null, null)).Code);
+        DevApprovalRules.Ensure(true, 20m, true, 15m, "выставочный образец");
+        DevApprovalRules.Ensure(true, 20m, true, 25m, null);
+        DevApprovalRules.Ensure(true, null, true, -5m, null);
+        Assert.Throws<BusinessRuleException>(() => DevSettings.Defaults(1).SetCosting(0, 0, null, 0, true, 150m));
+    }
+
+    [Fact]
+    public void Sample_decision_reason_and_model_version()
+    {
+        // D768: доработка — с причиной из справочника или текстом; у принятого образца причины нет.
+        var s = DevSample.Create(1, 2, 1, null, Now, 3);
+        Assert.Equal("dev.sample.reason", Assert.Throws<BusinessRuleException>(() => s.Decide(DevSampleStatus.Rework, " ")).Code);
+        s.Decide(DevSampleStatus.Rework, null, 7);
+        Assert.Equal((DevSampleStatus.Rework, 7L), (s.Status, s.ReasonId!.Value));
+        s.Decide(DevSampleStatus.Accepted, null, 7);
+        Assert.Null(s.ReasonId);
+
+        // D769: номер версии — от 2, не от самой себя.
+        var (m, _) = DevModel.Create(1, "М-00002", new DevModelHeader("Шарф", null, DevCategory.Accessory, DevAudience.Unisex, false, false, null, null, null,
+            DevPriority.Normal, new Dictionary<DevRole, long?>()), Now, 3);
+        Assert.Throws<BusinessRuleException>(() => m.MarkVersionOf(5, 1));
+        m.MarkVersionOf(5, 2);
+        Assert.Equal((5L, 2), (m.PreviousVersionId!.Value, m.VersionNo));
     }
 }

@@ -114,6 +114,19 @@ public sealed class BundleService(IKnitErpDbContext db, IAccessGuard guard, ICur
     /// <summary>Добавить компонент или изменить его количество (на один комплект).</summary>
     public async Task SetComponentAsync(long bundleId, long componentItemId, decimal quantity, CancellationToken ct = default)
     {
+        try
+        {
+            await SetComponentAsyncCoreAsync(bundleId, componentItemId, quantity, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // аудит каталога (D347): транзакция откатилась — несохранённое не должно уйти следующим сохранением вкладки
+            throw;
+        }
+    }
+
+    private async Task SetComponentAsyncCoreAsync(long bundleId, long componentItemId, decimal quantity, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.BundleEdit, ct);
         var bundle = await FindAsync(ctx, bundleId, ct);
         BundleRules.EnsureBundle(bundle);

@@ -341,6 +341,56 @@ public sealed partial class SalesPdfRenderer : ISalesPdfRenderer // partial: К�
         return Render(doc);
     }
 
+    public byte[] PriceList(PriceListDto d)
+    {
+        var (doc, sec) = NewDocument($"Прайс-лист {d.PriceType}", landscape: false, 8.5);
+        Title(sec, $"Прайс-лист: {d.PriceType}");
+        Para(sec, $"{d.Organization} · на {Date(d.Date)} · цены в {d.CurrencyCode}, {(d.IncludesVat ? "с НДС" : "без НДС")}");
+        sec.AddParagraph().Format.SpaceAfter = Unit.FromMillimeter(2);
+        var t = d.StockShown ? Grid(sec, 26, 24, 82, 12, 22, 20) : Grid(sec, 28, 26, 98, 12, 22);
+        var h = t.AddRow();
+        h.HeadingFormat = true;
+        h.Format.Font.Bold = true;
+        string[] heads = d.StockShown ? ["Код", "Артикул", "Наименование", "Ед.", "Цена", "В наличии"] : ["Код", "Артикул", "Наименование", "Ед.", "Цена"];
+        for (var i = 0; i < heads.Length; i++)
+        {
+            Text(h.Cells[i], heads[i]);
+        }
+
+        string? group = null;
+        var first = true;
+        foreach (var r in d.Rows)
+        {
+            if (first || r.Group != group)
+            {
+                var g = t.AddRow();
+                g.Cells[0].MergeRight = heads.Length - 1;
+                g.Shading.Color = Colors.WhiteSmoke;
+                Text(g.Cells[0], r.Group ?? "Без группы", bold: true);
+                group = r.Group;
+                first = false;
+            }
+
+            var row = t.AddRow();
+            Text(row.Cells[0], r.Code);
+            Text(row.Cells[1], r.Article ?? string.Empty);
+            Text(row.Cells[2], r.Name);
+            Text(row.Cells[3], r.Unit);
+            Num(row.Cells[4], Money(r.Price));
+            if (d.StockShown)
+            {
+                Num(row.Cells[5], r.Stock is > 0 ? Quantity(r.Stock.Value) : "—");
+            }
+        }
+
+        if (d.Truncated)
+        {
+            Para(sec, $"Показаны первые {d.Rows.Count} позиций — уточните отбор.", bold: true);
+        }
+
+        return Render(doc);
+    }
+
     private static (Document, Section) NewDocument(string title, bool landscape, double fontSize)
     {
         EnsureFonts();
@@ -553,7 +603,7 @@ public sealed partial class SalesPdfRenderer : ISalesPdfRenderer // partial: К�
         string.Join(", ", new[] { p.Name, p.Inn is null ? null : $"ИНН {p.Inn}", p.Kpp is null ? null : $"КПП {p.Kpp}", p.Address }.Where(x => x is not null));
 
     /// <summary>Шрифт подключается один раз на процесс: PDFsharp не даёт сменить FontResolver после первого использования.</summary>
-    private static void EnsureFonts()
+    internal static void EnsureFonts()
     {
         if (_fontsReady)
         {

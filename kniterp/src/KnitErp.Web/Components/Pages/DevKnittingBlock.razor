@@ -1,0 +1,138 @@
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using System.Globalization
+@inject DevGate Gate
+@inject DevModelService Models
+
+@*
+    Пряжа и вязка модели (ТЗ §8): номер краски, плотность петель и рядов на 10 см, усадка после ВТО. Печатается в техническом паспорте.
+    Блок читает модель сам (своя версия строки) и ходит в базу через DevGate.
+*@
+<div class="panel">
+    <h2>@L("Пряжа и вязка")</h2>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    @if (_m is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else if (_editing)
+    {
+        <form @onsubmit="SaveAsync">
+            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                <div class="grid">
+                    <label>@L("Номер краски") <input @bind="_dye" maxlength="40" /></label>
+                    <label>@L("Петель на 10 см") <input type="number" min="0" max="500" step="0.1" inputmode="decimal" @bind="_loops" /></label>
+                    <label>@L("Рядов на 10 см") <input type="number" min="0" max="500" step="0.1" inputmode="decimal" @bind="_rows" /></label>
+                    <label>@L("Усадка после ВТО, %") <input type="number" min="-50" max="50" step="0.1" inputmode="decimal" @bind="_shrinkage" /></label>
+                </div>
+                <div class="actions">
+                    <button type="submit" disabled="@_busy">@L("Сохранить пряжу и вязку")</button>
+                    <button type="button" class="secondary" @onclick="Cancel" disabled="@_busy">@L("Отмена")</button>
+                </div>
+            </fieldset>
+        </form>
+    }
+    else
+    {
+        <dl class="facts dev-facts">
+            <div><dt>@L("Номер краски")</dt><dd>@(_m.DyeNumber ?? "—")</dd></div>
+            <div><dt>@L("Петель на 10 см")</dt><dd>@DevFormat.Number(_m.DensityLoops)</dd></div>
+            <div><dt>@L("Рядов на 10 см")</dt><dd>@DevFormat.Number(_m.DensityRows)</dd></div>
+            <div><dt>@L("Усадка после ВТО, %")</dt><dd>@DevFormat.Number(_m.ShrinkagePercent)</dd></div>
+        </dl>
+        @if (_m.CanEdit && CurrentAccess.Has(Permissions.DevEdit))
+        {
+            <div class="actions"><button type="button" class="secondary" @onclick="Edit" disabled="@_busy">@L("Изменить пряжу и вязку")</button></div>
+        }
+    }
+</div>
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    /// <summary>После сохранения карточка перечитывает модель — у неё новая версия строки.</summary>
+    [Parameter]
+    public EventCallback OnModelChanged { get; set; }
+
+    private DevModelDto? _m;
+    private bool _editing;
+    private string? _dye;
+    private decimal? _loops;
+    private decimal? _rows;
+    private decimal? _shrinkage;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            _editing = false;
+            _message = null;
+            _m = await Gate.Run(() => Models.GetAsync(ModelId));
+        }
+    }
+
+    private void Edit()
+    {
+        _dye = _m!.DyeNumber;
+        _loops = _m.DensityLoops;
+        _rows = _m.DensityRows;
+        _shrinkage = _m.ShrinkagePercent;
+        _message = null;
+        _editing = true;
+    }
+
+    private void Cancel() => _editing = false;
+
+    private async Task SaveAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        var saved = false;
+        try
+        {
+            await Gate.Run(() => Models.SetKnittingAsync(ModelId, _dye, _loops, _rows, _shrinkage, _m!.RowVersion));
+            saved = true;
+            _message = L("Пряжа и вязка сохранены.");
+            _editing = false;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _m = await Gate.Run(() => Models.GetAsync(ModelId));
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+
+        if (saved)
+        {
+            await OnModelChanged.InvokeAsync();
+        }
+    }
+}

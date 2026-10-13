@@ -53,6 +53,9 @@ public sealed class CatMoySkladHttpTests
         Assert.Contains("\"href\":\"https://api.moysklad.ru/api/remap/1.2/entity/product/0a1b2c3d-0000-0000-0000-000000000001\"", body);
         Assert.Contains("context/companysettings/pricetype/pt-1", body);
         Assert.DoesNotContain("buyPrice", body); // не меняем — не отправляем
+        // D336: тип тела и Accept — дословно, как ждёт МойСклад.
+        Assert.Equal("application/json", request.Content!.Headers.NonValidated["Content-Type"].ToString());
+        Assert.Equal("application/json;charset=utf-8", request.Headers.NonValidated["Accept"].ToString());
 
         await Assert.ThrowsAsync<ArgumentException>(() => client.UpdatePricesAsync(Token, MoySkladEntities.Product,
             [new MsPriceUpdate("../../entity/organization", [], 1m)]));
@@ -69,11 +72,49 @@ public sealed class CatMoySkladHttpTests
         Assert.Equal(400, ex.Status);
         Assert.Equal("товары: ответ 400 (код 1062: Неверное значение заголовка 'Accept'подробности)", ex.Message);
         Assert.DoesNotContain(Token, ex.Message);
-        Assert.Equal("application/json; charset=utf-8", handler.Requests.Single().Headers.Accept.ToString());
+        // D334: дословно, без пробела после «;» — иначе реальный МойСклад отвечает 400 (код 1062).
+        // NonValidated — сырое значение, которое уходит в сеть (GetValues сам переформатировал бы его с пробелом).
+        Assert.Equal("application/json;charset=utf-8", handler.Requests.Single().Headers.NonValidated["Accept"].ToString());
 
         // Тело не JSON — только раздел и код ответа.
         var (plain, _) = Create((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent("<html>bad</html>") });
         Assert.Equal("проверка доступа: ответ 400", (await Assert.ThrowsAsync<MoySkladException>(() => plain.CheckAsync(Token))).Message);
+    }
+
+    [Fact]
+    public async Task Accept_header_on_the_wire_is_exactly_what_moysklad_requires()
+    {
+        // D334: проверка байтов в сети (локальный HTTP-сервер) — внутренние представления заголовков .NET могут отличаться.
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var serve = Task.Run(async () =>
+        {
+            using var tcp = await listener.AcceptTcpClientAsync();
+            var stream = tcp.GetStream();
+            var buffer = new byte[8192];
+            var text = new StringBuilder();
+            while (!text.ToString().Contains("\r\n\r\n"))
+            {
+                var n = await stream.ReadAsync(buffer);
+                text.Append(Encoding.ASCII.GetString(buffer, 0, n));
+            }
+
+            var body = Encoding.UTF8.GetBytes("""{"meta":{"size":1},"rows":[{"id":"o-1","name":"ООО"}]}""");
+            var head = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(head);
+            await stream.WriteAsync(body);
+            return text.ToString();
+        });
+
+        var http = new HttpClient(MoySkladHttpClient.Handler());
+        MoySkladHttpClient.Configure(http);
+        http.BaseAddress = new Uri($"http://127.0.0.1:{port}/api/remap/1.2/");
+        Assert.Equal("ООО", await new MoySkladHttpClient(http).CheckAsync(Token));
+        var raw = await serve;
+        listener.Stop();
+        var accept = raw.Split("\r\n").Where(l => l.StartsWith("Accept:", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Equal(["Accept: application/json;charset=utf-8"], accept);
     }
 
     [Fact]

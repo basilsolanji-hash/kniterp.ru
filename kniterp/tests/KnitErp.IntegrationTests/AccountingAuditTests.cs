@@ -93,12 +93,15 @@ public sealed class AccountingAuditTests(SqlTestHost host) : IClassFixture<SqlTe
         var ex = await Assert.ThrowsAsync<BusinessRuleException>(async () =>
             await s.Documents.ReverseAsync(big, "Ошибка", (await s.Documents.GetAsync(big)).RowVersion));
         Assert.Equal("stock.reverse.returns_exist", ex.Code);
-        await s.Documents.ReverseAsync(small, "Ошибка", (await s.Documents.GetAsync(small)).RowVersion);
+        // D1159 (модуль «Продажи») строже: после проведённого возврата сторно отгрузки по заказу запрещено вовсе.
+        Assert.Equal("sales.shipment.reverse_after_return", (await Assert.ThrowsAsync<BusinessRuleException>(async () =>
+            await s.Documents.ReverseAsync(small, "Ошибка", (await s.Documents.GetAsync(small)).RowVersion))).Code);
         var line = (await s.Sales.GetOrderAsync(order)).Lines.Single();
-        Assert.Equal((60m, 50m), (line.Shipped, line.Returned));
+        Assert.Equal((100m, 50m), (line.Shipped, line.Returned));
 
-        // Сначала сторно возврата — затем и отгрузку можно сторнировать.
+        // Сначала сторно возврата — затем и отгрузки можно сторнировать.
         await s.Documents.ReverseAsync(ret, "Ошибка", (await s.Documents.GetAsync(ret)).RowVersion);
+        await s.Documents.ReverseAsync(small, "Ошибка", (await s.Documents.GetAsync(small)).RowVersion);
         await s.Documents.ReverseAsync(big, "Ошибка", (await s.Documents.GetAsync(big)).RowVersion);
         line = (await s.Sales.GetOrderAsync(order)).Lines.Single();
         Assert.Equal((0m, 0m), (line.Shipped, line.Returned));

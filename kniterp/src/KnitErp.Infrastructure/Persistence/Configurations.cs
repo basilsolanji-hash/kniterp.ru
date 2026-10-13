@@ -446,6 +446,7 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
             t.HasCheckConstraint("ck_items_min_price", "[MinPrice] IS NULL OR [MinPrice] >= 0");
             // D300: услуга — со ставкой НДС, без веса, объёма, неснижаемого остатка и модификаций.
             t.HasTrigger("tr_items_service_without_stock");
+            t.HasTrigger("tr_items_unit_locked"); // D339
             t.HasCheckConstraint("ck_items_service",
                 "[Type] <> 10 OR ([VatRateId] IS NOT NULL AND [WeightKg] IS NULL AND [VolumeM3] IS NULL AND [MinStock] IS NULL AND [ParentItemId] IS NULL)");
             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");
@@ -820,7 +821,7 @@ internal sealed class OperationReasonConfiguration : IEntityTypeConfiguration<Op
 {
     public void Configure(EntityTypeBuilder<OperationReason> b)
     {
-        b.ToTable("operation_reasons", t => t.HasCheckConstraint("ck_operation_reasons_kind", "[Kind] IN (1, 2, 3, 4, 5, 6, 7)"));
+        b.ToTable("operation_reasons", t => t.HasCheckConstraint("ck_operation_reasons_kind", "[Kind] IN (1, 2, 3, 4, 5, 6, 7, 8, 9)"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Kind).HasConversion<byte>();
@@ -1217,7 +1218,7 @@ internal sealed class SalesStageRuleConfiguration : IEntityTypeConfiguration<Sal
 {
     public void Configure(EntityTypeBuilder<SalesStageRule> b)
     {
-        b.ToTable("sales_stage_rules", t => t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 8"));
+        b.ToTable("sales_stage_rules", t => t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 9"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Trigger).HasConversion<byte>();
@@ -1430,15 +1431,20 @@ internal sealed class StockDocumentConfiguration : IEntityTypeConfiguration<Stoc
     {
         b.ToTable("stock_documents", t =>
         {
-            t.HasCheckConstraint("ck_stock_documents_kind", "[Kind] IN (1, 2, 3, 5, 6, 7)");
+            // D354 (сессия 4, Р1): 8 — акт оказания услуг по заказу покупателя, 9 — акт услуг поставщика по заказу поставщику.
+            t.HasCheckConstraint("ck_stock_documents_kind", "[Kind] IN (1, 2, 3, 5, 6, 7, 8, 9)");
             t.HasCheckConstraint("ck_stock_documents_status", "[Status] IN (1, 2, 3, 9)");
             t.HasCheckConstraint("ck_stock_documents_target",
                 "([Kind] = 3 AND [TargetWarehouseId] IS NOT NULL AND [TargetWarehouseId] <> [WarehouseId])"
                 + " OR ([Kind] <> 3 AND [TargetWarehouseId] IS NULL)");
             t.HasCheckConstraint("ck_stock_documents_counterparty",
-                "([Kind] = 1) OR ([Kind] IN (5, 6, 7) AND [CounterpartyId] IS NOT NULL) OR ([Kind] NOT IN (1, 5, 6, 7) AND [CounterpartyId] IS NULL)");
-            t.HasCheckConstraint("ck_stock_documents_sales_order", "[SalesOrderId] IS NULL OR [Kind] IN (6, 7)");
-            t.HasCheckConstraint("ck_stock_documents_purchase_order", "[PurchaseOrderId] IS NULL OR [Kind] IN (1, 5)");
+                "([Kind] = 1) OR ([Kind] IN (5, 6, 7, 8, 9) AND [CounterpartyId] IS NOT NULL) OR ([Kind] NOT IN (1, 5, 6, 7, 8, 9) AND [CounterpartyId] IS NULL)");
+            t.HasCheckConstraint("ck_stock_documents_sales_order", "[SalesOrderId] IS NULL OR [Kind] IN (6, 7, 8)");
+            t.HasCheckConstraint("ck_stock_documents_purchase_order", "[PurchaseOrderId] IS NULL OR [Kind] IN (1, 5, 9)");
+            t.HasCheckConstraint("ck_stock_documents_service_act_order",
+                "([Kind] <> 8 OR [SalesOrderId] IS NOT NULL) AND ([Kind] <> 9 OR [PurchaseOrderId] IS NOT NULL)");
+            // D354: вид документа не меняется — иначе строки-услуги акта оказались бы в складском документе в обход триггера строк.
+            t.HasTrigger("tr_stock_documents_kind_locked");
             t.HasCheckConstraint("ck_stock_documents_posted",
                 "([Status] IN (2, 3) AND [PostedByUserId] IS NOT NULL AND [PostedAtUtc] IS NOT NULL AND [ReasonId] IS NOT NULL)"
                 + " OR ([Status] NOT IN (2, 3) AND [PostedByUserId] IS NULL)");
@@ -1491,13 +1497,24 @@ internal sealed class StockDocumentLineConfiguration : IEntityTypeConfiguration<
         b.ToTable("stock_document_lines", t =>
         {
             t.HasCheckConstraint("ck_stock_document_lines_quantity", "[Quantity] > 0");
+            // D352 (сессия 4, Р2): строка разворота комплекта — комплект и количество наборов вместе.
+            t.HasCheckConstraint("ck_stock_document_lines_bundle",
+                "([BundleItemId] IS NULL AND [BundleQuantity] IS NULL) OR ([BundleItemId] IS NOT NULL AND [BundleQuantity] IS NOT NULL AND [BundleQuantity] > 0)");
             t.HasTrigger("tr_stock_document_lines_draft_only");
+            t.HasTrigger("tr_stock_document_lines_bundle");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.BundleQuantity).HasColumnType("decimal(18,6)");
         b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => new { x.DocumentId, x.ItemId }).IsUnique().HasDatabaseName("ux_stock_document_lines_doc_item");
+        b.HasOne<Item>().WithMany().HasForeignKey(x => x.BundleItemId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_document_lines_bundle");
+        // D352: позиция повторяется, если пришла из разных комплектов или отдельно и из комплекта; NULL в уникальном индексе
+        // SQL Server равен NULL — отдельная строка позиции по-прежнему одна.
+        b.HasIndex(x => new { x.DocumentId, x.ItemId, x.BundleItemId }).IsUnique().HasFilter(null)
+            .HasDatabaseName("ux_stock_document_lines_doc_item_bundle");
+        b.HasIndex(x => x.BundleItemId).HasFilter("[BundleItemId] IS NOT NULL").HasDatabaseName("ix_stock_document_lines_bundle");
     }
 }
 

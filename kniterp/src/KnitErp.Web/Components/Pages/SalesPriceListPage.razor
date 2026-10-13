@@ -1,0 +1,179 @@
+@page "/sales-price-list"
+@using KnitErp.Application.Sales
+@inject SalesPriceListService Prices
+
+@* D1142 (ТЗ §2): прайс-лист по виду цены и отбору — предпросмотр, PDF для печати и отправки, Excel со ссылками на фото. *@
+<PageTitle>@L("Прайс-лист") — knitERP</PageTitle>
+<SalesStyles />
+<style>
+    .pl-table td.num, .pl-table th.num { text-align: right; white-space: nowrap; }
+    .pl-table tr.pl-group > td { background: var(--accent-soft-2); font-weight: 600; }
+    .pl-table td.pl-photo a { white-space: nowrap; }
+    .sx-form label.pl-check { flex-direction: row; display: flex; gap: 6px; align-items: center; align-self: end; padding-bottom: 6px; min-width: 0; }
+    .sx-form label.pl-check input { width: auto; flex: none; margin: 0; }
+    @@media (max-width: 899px) { .pl-table .opt { display: none; } }
+</style>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Прайс-лист")</h1>
+        <div class="sx-tools">
+            <a class="button" href="@Href("pdf")" target="_blank" rel="noopener" data-enhance-nav="false" title="@L("PDF для печати и отправки клиенту")">PDF</a>
+            <a class="button secondary" href="@Href("xlsx")" download data-enhance-nav="false" title="@L("Выгрузить с текущими фильтрами")">Excel</a>
+        </div>
+    </div>
+
+    <form class="sx-form" @onsubmit="ReloadAsync">
+        <label>
+            @L("Вид цены")
+            <select @bind="_priceType">
+                @foreach (var t in _options.PriceTypes)
+                {
+                    <option value="@t.Id">@t.Name</option>
+                }
+            </select>
+        </label>
+        <label>
+            @L("Группа")
+            <select @bind="_group">
+                <option value="">@L("Все группы")</option>
+                @foreach (var g in _options.Groups)
+                {
+                    <option value="@g.Id">@g.Name</option>
+                }
+            </select>
+        </label>
+        @if (_options.CanSeeStock)
+        {
+            <label>
+                @L("Склад")
+                <select @bind="_warehouse">
+                    <option value="">@L("Все доступные")</option>
+                    @foreach (var w in _options.Warehouses)
+                    {
+                        <option value="@w.Id">@w.Name</option>
+                    }
+                </select>
+            </label>
+            <label class="pl-check"><input type="checkbox" @bind="_inStock" /> @L("Только в наличии")</label>
+        }
+        <label>@L("Поиск") <input @bind="_search" placeholder="@L("Код, артикул, название")" /></label>
+        <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button></div>
+    </form>
+
+    @if (_message is not null)
+    {
+        <div class="flash error" role="alert">@_message</div>
+    }
+
+    @if (_list is { } list)
+    {
+        <p class="sx-lead">@L("Позиций: {0}. Цены {1}, валюта {2}.", list.Rows.Count, list.IncludesVat ? L("с НДС") : L("без НДС"), list.CurrencyCode)
+            @if (list.Truncated) { <b>@L("Показаны первые {0} — уточните отбор.", list.Rows.Count)</b> }</p>
+        <div class="scroll">
+            <table class="sx-table compact pl-table">
+                <thead>
+                    <tr>
+                        <th>@L("Код")</th><th class="opt">@L("Артикул")</th><th>@L("Наименование")</th><th>@L("Ед.")</th><th class="num">@L("Цена")</th>
+                        @if (list.StockShown) { <th class="num">@L("В наличии")</th> }
+                        @if (list.PhotosShown) { <th class="opt">@L("Фото")</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (list.Rows.Count == 0)
+                    {
+                        <tr><td colspan="7" class="muted">@L("Нет позиций с ценой этого вида по отбору.")</td></tr>
+                    }
+                    @{ string? group = null; var first = true; }
+                    @foreach (var r in list.Rows)
+                    {
+                        if (first || r.Group != group)
+                        {
+                            group = r.Group;
+                            first = false;
+                            <tr class="pl-group"><td colspan="7">@(r.Group ?? L("Без группы"))</td></tr>
+                        }
+                        <tr>
+                            <td data-label="@L("Код")"><a href="catalog/items/@r.ItemId">@r.Code</a></td>
+                            <td data-label="@L("Артикул")" class="opt">@r.Article</td>
+                            <td data-label="@L("Наименование")">@r.Name</td>
+                            <td data-label="@L("Ед.")">@r.Unit</td>
+                            <td data-label="@L("Цена")" class="num">@Amounts.Format(r.Price)</td>
+                            @if (list.StockShown) { <td data-label="@L("В наличии")" class="num">@(r.Stock is > 0 ? Quantities.Format(r.Stock.Value) : "—")</td> }
+                            @if (list.PhotosShown) { <td data-label="@L("Фото")" class="opt pl-photo">@if (r.PhotoId is { } ph) { <a href="catalog/photos/@ph" target="_blank" rel="noopener">@L("открыть")</a> }</td> }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private PriceListOptionsDto? _options;
+    private PriceListDto? _list;
+    private string _priceType = string.Empty;
+    private string _group = string.Empty;
+    private string _warehouse = string.Empty;
+    private bool _inStock;
+    private string? _search;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+
+    private PriceListFilter Filter => new(long.TryParse(_priceType, out var t) ? t : null, long.TryParse(_group, out var g) ? g : null, _inStock,
+        long.TryParse(_warehouse, out var w) ? w : null, _search);
+
+    private string Href(string format) => KnitErp.Web.Exports.ExportLink.Build($"sales-price-list.{format}",
+        ("priceType", _priceType), ("group", _group), ("stock", _inStock ? "true" : null), ("warehouse", _warehouse), ("q", _search));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _options = await Prices.OptionsAsync();
+            _priceType = (_options.PriceTypes.FirstOrDefault(t => t.IsDefault) is { Id: > 0 } d ? d.Id : _options.PriceTypes.FirstOrDefault().Id).ToString();
+            _list = await Prices.BuildAsync(Filter);
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            _list = await Prices.BuildAsync(Filter);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

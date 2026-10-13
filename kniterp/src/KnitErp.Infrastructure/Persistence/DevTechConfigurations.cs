@@ -156,6 +156,7 @@ internal sealed class DevModelSizeConfiguration : IEntityTypeConfiguration<DevMo
         DevKeys.ToModel(b, "fk_dev_model_sizes_model");
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_model_sizes_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.Name }).IsUnique().HasDatabaseName("ux_dev_model_sizes_name");
+        b.Property(x => x.WeightGrams).HasPrecision(18, 6); // D728: вес изделия по размерам
     }
 }
 
@@ -219,18 +220,44 @@ internal sealed class DevSampleConfiguration : IEntityTypeConfiguration<DevSampl
 {
     public void Configure(EntityTypeBuilder<DevSample> b)
     {
-        b.ToTable("dev_samples", t => t.HasCheckConstraint("ck_dev_samples_status", "[Status] BETWEEN 1 AND 5"));
+        b.ToTable("dev_samples", t =>
+        {
+            t.HasCheckConstraint("ck_dev_samples_status", "[Status] BETWEEN 1 AND 5");
+            // D723: у заказчика — с датой передачи и «кому»; закрытая передача — с датой закрытия.
+            t.HasCheckConstraint("ck_dev_samples_custody", "[Custody] BETWEEN 0 AND 4");
+            t.HasCheckConstraint("ck_dev_samples_custody_out",
+                "[Custody] = 0 OR ([HandedOn] IS NOT NULL AND [CustodyRecipient] IS NOT NULL)");
+            t.HasCheckConstraint("ck_dev_samples_custody_closed", "[Custody] IN (0, 1) OR [CustodyClosedOn] IS NOT NULL");
+        });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Comment).HasMaxLength(DevSample.CommentMaxLength);
+        b.Property(x => x.Custody).HasConversion<byte>();
+        b.Property(x => x.CustodyRecipient).HasMaxLength(DevSample.RecipientMaxLength);
+        b.Property(x => x.CustodyNote).HasMaxLength(DevSample.CustodyNoteMaxLength);
         b.Property(x => x.RowVersion).IsRowVersion();
         DevKeys.Org(b);
         DevKeys.ToModel(b, "fk_dev_samples_model");
+        b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustodyCounterpartyId })
+            .HasPrincipalKey(c => new { c.OrganizationId, c.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_custody_counterparty");
+        b.HasIndex(x => new { x.OrganizationId, x.Custody }).HasFilter("[Custody] = 1").HasDatabaseName("ix_dev_samples_at_customer");
+        // D728: колорит и версия рисунка образца, партия пряжи, кто вязал и собирал, план доработки.
+        b.Property(x => x.YarnBatch).HasMaxLength(DevSample.BatchMaxLength);
+        b.Property(x => x.ReworkWhat).HasMaxLength(DevSample.ReworkMaxLength);
+        b.HasOne<DevPatternColorway>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ColorwayId }).HasPrincipalKey(c => new { c.OrganizationId, c.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_colorway");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.KnittedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_knitted_by");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.AssembledByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_assembled_by");
+        b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ReworkAssigneeUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_rework_assignee");
         b.HasOne<DevModelSize>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SizeId }).HasPrincipalKey(s => new { s.OrganizationId, s.Id })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_size");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_samples_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.ModelId, x.No }).IsUnique().HasDatabaseName("ux_dev_samples_no");
+        b.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc }).HasDatabaseName("ix_dev_samples_created");
+        // D768: причина доработки или отказа — запись справочника разработки своей организации.
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ReasonId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_reason");
         // D721: черновик списания пряжи на образец — документ склада своей организации.
         b.HasOne<KnitErp.Domain.Warehousing.StockDocument>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.YarnWriteOffDocumentId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_samples_yarn_writeoff");

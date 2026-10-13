@@ -20,7 +20,7 @@ public sealed class KnowledgeBaseTests(Xunit.Abstractions.ITestOutputHelper outp
         Assert.All(IndustryKnowledge.Entries, e =>
         {
             // Отраслевые статьи — kb-, статьи модулей — с префиксом модуля (docs/tz/assistant.md §4.5).
-            Assert.Matches("^(kb|prod|hr|cat)-[a-z0-9-]+$", e.Article.Id);
+            Assert.Matches("^(kb|prod|hr|cat|dev)-[a-z0-9-]+$", e.Article.Id);
             Assert.Matches("^(Отрасль|Модуль) · ", e.Article.Category);
             Assert.NotEmpty(e.Article.Body);
             Assert.NotEmpty(e.Sources);
@@ -38,6 +38,9 @@ public sealed class KnowledgeBaseTests(Xunit.Abstractions.ITestOutputHelper outp
     [InlineData("как исправить отметку на терминале", "prod-correction")]
     [InlineData("баллы отпуск болезнь табель", "prod-points")]
     [InlineData("маршрут изделия этапы", "prod-route")]
+    [InlineData("образец у заказчика не вернули", "dev-sample-customer")]
+    [InlineData("заправка нитеводителей деталь", "dev-threading")]
+    [InlineData("как передать модель в производство", "dev-handoff")]
     public void Search_finds_industry_and_program_answers(string query, string expected) =>
         Assert.Contains(HelpCenter.Search(query, 5), a => a.Id == expected);
 

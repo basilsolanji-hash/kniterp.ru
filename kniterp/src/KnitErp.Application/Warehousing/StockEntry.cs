@@ -47,6 +47,30 @@ internal static class StockEntry
         }
     }
 
+    /// <summary>D354 (сессия 4, Р1): строки акта услуг — только услуги своей организации.</summary>
+    public static async Task EnsureServicesAsync(IKnitErpDbContext db, long organizationId, IEnumerable<long> itemIds, CancellationToken ct)
+    {
+        var ids = itemIds.Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return;
+        }
+
+        var goods = await db.Items.AsNoTracking()
+            .Where(i => i.OrganizationId == organizationId && ids.Contains(i.Id) && i.Type != ItemType.Service)
+            .OrderBy(i => i.Code).Select(i => i.Code).ToListAsync(ct);
+        if (goods.Count > 0)
+        {
+            throw ServiceRules.ActGoods(goods);
+        }
+    }
+
+    /// <summary>D354: действующие услуги — для выбора строк акта.</summary>
+    public static IQueryable<EntryItemDto> ActiveServices(IKnitErpDbContext db, long organizationId) =>
+        db.Items.AsNoTracking().Where(i => i.OrganizationId == organizationId && !i.IsArchived && i.Type == ItemType.Service)
+            .OrderBy(i => i.Code)
+            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new EntryItemDto(i.Id, i.Code, i.Name, u.Symbol, u.Precision));
+
     /// <summary>Позиции из списка, которые не хранятся на складе (услуги, D300).</summary>
     public static async Task<HashSet<long>> NotStockedAsync(IKnitErpDbContext db, long organizationId, IEnumerable<long> itemIds, CancellationToken ct)
     {

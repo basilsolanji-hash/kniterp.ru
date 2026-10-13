@@ -221,6 +221,13 @@ public static class ServiceRules
     public static BusinessRuleException BundleNotStocked(IEnumerable<string> codes) =>
         new("item.bundle_not_stocked",
             $"Комплект не хранится на складе — в складском документе укажите его компоненты: {string.Join(", ", codes.Take(10))}.");
+
+    /// <summary>D354 (сессия 4, Р1): в акте услуг — только услуги; товар и комплект оформляются отгрузкой или поступлением.</summary>
+    public static BusinessRuleException ActGoods(IEnumerable<string> codes)
+    {
+        var list = string.Join(", ", codes.Take(10));
+        return new BusinessRuleException("stock.service_act.goods", $"В акте услуг — только услуги; товары оформляются отгрузкой или поступлением: {list}.");
+    }
 }
 
 /// <summary>

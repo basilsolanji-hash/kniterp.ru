@@ -136,7 +136,12 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevMachineBrand>().Select(KnitErp.Domain.Development.DevMachine.BrandName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevMachineStatus>().Select(KnitErp.Domain.Development.DevMachine.StatusName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevSampleStatus>().Select(KnitErp.Domain.Development.DevSample.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevSampleCustody>().Select(KnitErp.Domain.Development.DevSample.CustodyName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevPatternKind>().Select(KnitErp.Domain.Development.DevPattern.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevPatternStatus>().Select(KnitErp.Domain.Development.DevPattern.StatusName));
+        keys.UnionWith(["Вернули на фабрику"]); // DevSamplesTab.CloseLabel; остальные подписи совпадают с CustodyName
         keys.UnionWith(KnitErp.Domain.Development.DevCompleteness.SectionNames);
+        keys.UnionWith(KnitErp.Domain.Development.DevNotes.All);
         keys.UnionWith(KnitErp.Domain.Warehousing.OperationReason.Defaults.Select(d => d.Name));
 
         // CRM (D600–D699): статусы лидов, итоги сделок, виды справочников; готовая воронка и справочники выводятся как данные организации.
@@ -162,6 +167,11 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesMailDocument>().Select(KnitErp.Domain.Sales.SalesMailMessage.DocumentName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.SalesLinkKind>().Select(KnitErp.Domain.Sales.SalesDocumentLink.KindName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.CustomerInvoiceStatus>().Select(KnitErp.Domain.Sales.CustomerInvoice.StatusName));
+        // D1150–D1155 (продажи): сборка, отгрузки по нескольким заказам, доставка, качество возврата.
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.PickListStatus>().Select(KnitErp.Domain.Sales.SalesPickList.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.ShipmentGroupStatus>().Select(KnitErp.Domain.Sales.SalesShipmentGroup.StatusName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.DeliveryKind>().Select(KnitErp.Domain.Sales.SalesDeliveryMethod.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Sales.ReturnQuality>().Select(KnitErp.Domain.Sales.SalesReturnDetails.QualityName));
         var labels = File.ReadAllText(Path.Combine(WebDir, "Components", "Shared", "Labels.cs"));
         foreach (Match m in AuditLabel().Matches(labels))
         {

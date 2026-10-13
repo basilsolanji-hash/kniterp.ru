@@ -1,0 +1,273 @@
+@*
+    D1108, D1153, D1155: в карточке отгрузки и возврата от покупателя — коды маркировки «Честный ЗНАК» (сканер DataMatrix), причина
+    и качество возврата (годен / брак в карантин / брак в списание), ссылки на документы брака и печать корректировочного УПД.
+    Данные грузит карточка документа (SalesService.StockDocumentPanelAsync в своём LoadAsync) и передаёт параметром; здесь сервис
+    вызывается только по действию, затем OnChanged.
+*@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@using KnitErp.Domain.Warehousing
+@inject SalesService Sales
+
+@if (Data?.Return is { } r)
+{
+    <SalesShippingStyles />
+    <section class="ssh" aria-label="@L("Возврат от покупателя")">
+        <div class="ssh-row">
+            <b>@L("Возврат от покупателя")</b>
+            @if (r.TransferDocumentId is { } t)
+            {
+                <span>@L("Брак в карантин:") <a href="stock-documents/@t">@r.TransferDocumentNumber</a></span>
+            }
+            @if (r.WriteOffDocumentId is { } w)
+            {
+                <span>@L("Брак списан:") <a href="stock-documents/@w">@r.WriteOffDocumentNumber</a></span>
+            }
+            @if (r.CanPrintCorrection)
+            {
+                <a href="sales-print/ukd/@r.DocumentId" target="_blank" rel="noopener">@L("Корректировочный УПД")</a>
+            }
+        </div>
+        @if (r.CanEdit)
+        {
+            <form class="sx-form" @onsubmit="SaveDetailsAsync">
+                <label>
+                    @L("Причина возврата")
+                    <select @bind="_reason">
+                        <option value="">—</option>
+                        @foreach (var x in r.Reasons)
+                        {
+                            <option value="@x.Id">@x.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    @L("Склад карантина (брак)")
+                    <select @bind="_quarantine">
+                        <option value="">—</option>
+                        @foreach (var x in r.Warehouses)
+                        {
+                            <option value="@x.Id">@x.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    @L("Причина списания брака")
+                    <select @bind="_writeOff">
+                        <option value="">—</option>
+                        @foreach (var x in r.WriteOffReasons)
+                        {
+                            <option value="@x.Id">@L(x.Name)</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Комментарий к возврату") <input @bind="_comment" maxlength="@SalesReturnDetails.CommentMaxLength" /></label>
+                <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Сохранить причину и склады")</button></div>
+            </form>
+        }
+        else
+        {
+            <div class="sx-kv">
+                <div><span>@L("Причина возврата")</span><span>@(r.Reason ?? "—")</span></div>
+                <div><span>@L("Склад карантина (брак)")</span><span>@(r.QuarantineWarehouse ?? "—")</span></div>
+                <div><span>@L("Причина списания брака")</span><span>@(r.WriteOffReason is { } wr ? L(wr) : "—")</span></div>
+                @if (r.Comment is not null)
+                {
+                    <div><span>@L("Комментарий к возврату")</span><span>@r.Comment</span></div>
+                }
+            </div>
+        }
+        <div class="scroll">
+            <table class="compact sx-table">
+                <thead><tr><th>@L("Позиция")</th><th class="num">@L("Вернули")</th><th>@L("Качество")</th><th class="num">@L("Брака")</th>@if (r.CanEdit) { <th></th> }</tr></thead>
+                <tbody>
+                    @foreach (var l in r.Lines)
+                    {
+                        <tr>
+                            <td>@l.Code <span class="sx-sub">@l.Name</span></td>
+                            <td class="num">@Quantities.Format(l.Quantity) @l.UnitSymbol</td>
+                            @if (r.CanEdit)
+                            {
+                                <td>
+                                    <select value="@((byte)QualityOf(l))" @onchange="e => SetQuality(l.ItemId, e)"
+                                            aria-label="@L("Качество {0}", l.Code)">
+                                        <option value="1">@L("Годен")</option>
+                                        <option value="2">@L("Брак — в карантин")</option>
+                                        <option value="3">@L("Брак — списать")</option>
+                                    </select>
+                                </td>
+                                <td class="ssh-qty"><input value="@QtyOf(l)" @onchange="e => _qty[l.ItemId] = e.Value?.ToString()" inputmode="decimal" aria-label="@L("Брака {0}", l.Code)" /></td>
+                                <td><button type="button" class="secondary" @onclick="() => SaveQualityAsync(l)" disabled="@_busy">@L("Сохранить")</button></td>
+                            }
+                            else
+                            {
+                                <td>@L(l.QualityName)</td>
+                                <td class="num">@(l.DefectQuantity > 0 ? Quantities.Format(l.DefectQuantity) : "—")</td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (r.CanEdit)
+        {
+            <p class="muted small">@L("Годный товар остаётся на складе возврата. Брак при проведении возврата сразу перемещается в карантин или списывается — отдельными документами.")</p>
+        }
+        @Messages()
+    </section>
+}
+
+@if (Data?.Marking is { } m)
+{
+    <SalesShippingStyles />
+    <section class="ssh" aria-label="@L("Коды маркировки")">
+        <div class="ssh-row">
+            <b>@L("Коды маркировки «Честный ЗНАК»")</b>
+            <span class="@(m.Complete ? "" : "ssh-bad")">@(m.Complete ? L("все коды отсканированы") : L("не все коды отсканированы — документ не проведётся"))</span>
+            @if (m.Posted && m.Kind == StockOperationKind.Shipment)
+            {
+                <a href="sales-marking/@m.DocumentId/codes.csv" download data-enhance-nav="false">@L("Коды для вывода из оборота (CSV)")</a>
+            }
+        </div>
+        @if (m.CanEdit)
+        {
+            <form class="ssh-scan" @onsubmit="ScanAsync">
+                <label>@L("Сканер DataMatrix") <input @bind="_scan" autocomplete="off" placeholder="0104600000000000215ABC…" /></label>
+                <button type="submit" disabled="@_busy">@L("Добавить код")</button>
+            </form>
+        }
+        @foreach (var line in m.Lines)
+        {
+            <div>
+                <b>@line.Code</b> <span class="muted small">@line.Name · GTIN @(line.Gtin ?? "—")</span>
+                <span class="@(line.Complete ? "muted small" : "ssh-bad small")">@L("кодов {0} из {1}", line.Codes.Count, Quantities.Format(line.Quantity))</span>
+                <ul class="ssh-codes">
+                    @foreach (var c in line.Codes)
+                    {
+                        <li>
+                            <span>@c.Cis</span>
+                            @if (m.CanEdit)
+                            {
+                                <button type="button" class="secondary" @onclick="() => RemoveAsync(c)" disabled="@_busy" aria-label="@L("Удалить код {0}", c.Serial)">@L("Удалить")</button>
+                            }
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+        @Messages()
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long DocumentId { get; set; }
+
+    [Parameter]
+    public StockDocumentSalesDto? Data { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    private bool _busy;
+    private string? _error;
+    private string? _message;
+    private string? _scan;
+    private string? _reason;
+    private string? _quarantine;
+    private string? _writeOff;
+    private string? _comment;
+    private readonly Dictionary<long, ReturnQuality> _quality = [];
+    private readonly Dictionary<long, string?> _qty = [];
+    private ReturnPanelDto? _shown;
+
+    protected override void OnParametersSet()
+    {
+        if (Data?.Return is { } r && !ReferenceEquals(r, _shown))
+        {
+            _shown = r;
+            _reason = r.ReasonId?.ToString();
+            _quarantine = r.QuarantineWarehouseId?.ToString();
+            _writeOff = r.WriteOffReasonId?.ToString();
+            _comment = r.Comment;
+            _quality.Clear();
+            _qty.Clear();
+        }
+    }
+
+    private void SetQuality(long itemId, ChangeEventArgs e) =>
+        _quality[itemId] = byte.TryParse(e.Value?.ToString(), out var q) && Enum.IsDefined((ReturnQuality)q) ? (ReturnQuality)q : ReturnQuality.Good;
+
+    private ReturnQuality QualityOf(ReturnLineDto l) => _quality.TryGetValue(l.ItemId, out var q) ? q : l.Quality;
+
+    private string QtyOf(ReturnLineDto l) =>
+        _qty.TryGetValue(l.ItemId, out var q) ? q ?? "" : Quantities.Format(l.DefectQuantity > 0 ? l.DefectQuantity : l.Quantity);
+
+    private RenderFragment Messages() => __builder =>
+    {
+        if (_error is not null)
+        {
+            <div class="flash error" role="alert">@_error</div>
+        }
+
+        if (_message is not null)
+        {
+            <div class="flash" role="status">@_message</div>
+        }
+    };
+
+    private Task SaveDetailsAsync() => RunAsync(async () =>
+    {
+        await Sales.SetReturnDetailsAsync(DocumentId, new ReturnDetailsInput(Id(_reason), _comment, Id(_quarantine), Id(_writeOff)), Data!.Return!.RowVersion);
+        _message = L("Сохранено.");
+    });
+
+    private Task SaveQualityAsync(ReturnLineDto l) => RunAsync(async () =>
+    {
+        var quality = QualityOf(l);
+        decimal qty = 0;
+        if (quality != ReturnQuality.Good && !Quantities.TryParse(QtyOf(l), out qty))
+        {
+            throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));
+        }
+
+        await Sales.SetReturnQualityAsync(DocumentId, l.ItemId, quality, qty, Data!.Return!.RowVersion);
+        _message = L("Качество сохранено.");
+    });
+
+    private Task ScanAsync() => RunAsync(async () =>
+    {
+        var code = await Sales.ScanMarkingCodeAsync(DocumentId, _scan);
+        _scan = null;
+        _message = L("Код добавлен: {0}.", code);
+    });
+
+    private Task RemoveAsync(MarkingCodeDto c) => RunAsync(() => Sales.RemoveMarkingCodeAsync(DocumentId, c.Id));
+
+    private static long? Id(string? value) => long.TryParse(value, out var id) ? id : null;
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            await action();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

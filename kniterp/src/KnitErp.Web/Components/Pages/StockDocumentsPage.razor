@@ -69,7 +69,7 @@ else
             @L("Вид")
             <select @bind="_kind">
                 <option value="">@L("Все")</option>
-                @foreach (var k in StockDocument.Kinds)
+                @foreach (var k in StockDocument.AllKinds)
                 {
                     <option value="@((byte)k)">@L(StockDocument.KindName(k))</option>
                 }

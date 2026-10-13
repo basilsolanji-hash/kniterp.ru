@@ -20,18 +20,23 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
 {
     public const long MaxResponseBytes = 32L * 1024 * 1024;
     public const int MaxAttempts = 4;
+    public const string AcceptHeader = "application/json;charset=utf-8";
+    public const string ContentTypeHeader = "application/json";
     private const int WindowRequests = 45;
     private static readonly TimeSpan Window = TimeSpan.FromSeconds(3);
     private static readonly SemaphoreSlim Parallel = new(5, 5);
     private static readonly Queue<DateTime> Recent = new();
     private static readonly object Gate = new();
 
+    public string HeadersInfo => $"Accept: {AcceptHeader}";
+
     public static void Configure(HttpClient client)
     {
         client.BaseAddress = new Uri(MoySkladEntities.BaseUrl);
         client.Timeout = TimeSpan.FromSeconds(60);
-        // Значение заголовка — как в документации JSON API 1.2 («application/json;charset=utf-8»).
-        client.DefaultRequestHeaders.Accept.Add(MediaTypeWithQualityHeaderValue.Parse("application/json;charset=utf-8"));
+        // D334: МойСклад принимает Accept только дословно «application/json;charset=utf-8» (ошибка 1062 на реальном аккаунте).
+        // Типизированный заголовок .NET пишет «application/json; charset=utf-8» — с пробелом, поэтому значение — строкой без проверки.
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", AcceptHeader);
         client.DefaultRequestHeaders.AcceptEncoding.Add(new StringWithQualityHeaderValue("gzip"));
         client.DefaultRequestHeaders.UserAgent.ParseAdd("knitERP/1.0");
     }
@@ -66,7 +71,10 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
     }
 
     public Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default) =>
-        GetAsync<MsPage<MsRow>>(token, MoySkladEntities.StockAll, $"offset={Math.Max(0, offset)}&limit={Math.Clamp(limit, 1, 1000)}&stockMode=all", ct);
+        GetAsync<MsPage<MsRow>>(token, MoySkladEntities.StockAll, $"offset={Math.Max(0, offset)}&limit={Math.Clamp(limit, 1, 1000)}", ct);
+
+    public Task<MsPage<MsRow>> StockByStoreAsync(string token, int offset, int limit, CancellationToken ct = default) =>
+        GetAsync<MsPage<MsRow>>(token, MoySkladEntities.StockByStore, $"offset={Math.Max(0, offset)}&limit={Math.Clamp(limit, 1, 1000)}", ct);
 
     public async Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default) =>
         await GetAsync<List<MsPriceType>>(token, MoySkladEntities.PriceTypes, null, ct);
@@ -124,7 +132,10 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 if (json is not null)
                 {
-                    request.Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                    // D336: тип тела — дословно «application/json» (JSON всегда UTF-8): StringContent дописал бы «; charset=utf-8» с пробелом,
+                    // а МойСклад сверяет заголовки дословно (так было с Accept, ошибка 1062).
+                    request.Content = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(json));
+                    request.Content.Headers.TryAddWithoutValidation("Content-Type", ContentTypeHeader);
                 }
                 response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             }
@@ -238,6 +249,7 @@ public sealed class MoySkladHttpClient(HttpClient http) : IMoySkladClient
         MoySkladEntities.Variant => "модификации",
         MoySkladEntities.PriceTypes => "виды цен",
         MoySkladEntities.StockAll => "остатки",
+        MoySkladEntities.StockByStore => "остатки по складам",
         _ => entity,
     };
 

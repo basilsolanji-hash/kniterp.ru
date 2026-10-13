@@ -1,0 +1,15 @@
+@using KnitErp.Application.Sales
+@* Итоги отчёта маркетплейса (D1168) — ключ-значение. *@
+<div class="sx-kv">
+    <div><span>@L("Продажи")</span><span>@L("{0} шт. на {1}", Quantities.Format(Totals.SalesQuantity), Amounts.Format(Totals.SalesAmount))</span></div>
+    <div><span>@L("Возвраты")</span><span>@L("{0} шт. на {1}", Quantities.Format(Totals.ReturnsQuantity), Amounts.Format(Totals.ReturnsAmount))</span></div>
+    <div><span>@L("Комиссия")</span><span>@Amounts.Format(Totals.Commission)</span></div>
+    <div><span>@L("Логистика")</span><span>@Amounts.Format(Totals.Logistics)</span></div>
+    <div><span>@L("К перечислению")</span><span>@Amounts.Format(Totals.Payout)</span></div>
+    <div><span>@L("Строк / без позиции")</span><span>@Totals.Lines / @Totals.Unmatched</span></div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public MarketplaceTotalsDto Totals { get; set; } = default!;
+}

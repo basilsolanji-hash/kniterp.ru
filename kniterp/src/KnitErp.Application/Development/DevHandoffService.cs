@@ -21,7 +21,7 @@ public sealed record DevHandoffLineDto(long ItemId, string ItemCode, string Item
 /// </summary>
 public sealed record DevHandoffPreviewDto(
     bool CanHandOff, string? Refusal, string SuggestedCode, string SuggestedName, IReadOnlyList<DevOptionDto> Products,
-    IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<string> Route, IReadOnlyList<string> Warnings, long? ItemId, long? TechCardId,
+    IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<string> Route, IReadOnlyList<DevNote> Warnings, long? ItemId, long? TechCardId,
     byte[] RowVersion, string? SuggestedSizes = null, string? SuggestedColors = null, bool HasSketchPhoto = false);
 
 /// <summary>Итог передачи: черновик техкарты, позиция, сколько модификаций создано и добавлено ли фото эскиза (D753).</summary>
@@ -111,8 +111,21 @@ public sealed class DevHandoffService(
 
             var programs = await db.DevFiles.AsNoTracking().Where(f => f.OrganizationId == org && f.ModelId == modelId && f.Kind == DevFileKind.MachineProgram)
                 .Select(f => f.FileName).Distinct().ToListAsync(ct);
-            var comment = $"Из разработки: модель {m.Number} «{m.Name}»" + (programs.Count == 0 ? "" : $"; программы: {string.Join(", ", programs)}")
-                          + (plan.Warnings.Count == 0 ? "" : $"; проверить нормы: {plan.Warnings.Count} замеч.");
+            // D729: рисунок модели — номер и версия; программы его версии. Сами файлы — в модели и рисунке (в техкарте производства вложений нет),
+            // путь к ним — в комментарии.
+            var pattern = m.PatternId is { } pid
+                ? await db.DevPatterns.AsNoTracking().Where(p => p.Id == pid && p.OrganizationId == org).Select(p => p.Number).SingleOrDefaultAsync(ct)
+                : null;
+            if (m.PatternId is { } pid2 && m.PatternVersion is { } pv)
+            {
+                programs.AddRange(await db.DevPatternFiles.AsNoTracking()
+                    .Where(f => f.OrganizationId == org && f.PatternId == pid2 && f.Version == pv && f.Kind == DevPatternFileKind.Program)
+                    .Select(f => f.FileName).Distinct().ToListAsync(ct));
+            }
+
+            var comment = $"Из разработки: модель {m.Number} «{m.Name}»" + (pattern is null ? "" : $"; рисунок {pattern}, версия {m.PatternVersion}")
+                          + (programs.Count == 0 ? "" : $"; программы: {string.Join(", ", programs.Distinct())}")
+                          + (plan.Warnings.Count == 0 ? "" : $"; проверить нормы: {plan.Warnings.Count} замеч.") + $"; файлы: dev/models/{m.Id}?tab=files";
             var cardId = await techCards.CreateAsync(itemId, 1, comment.Length > 500 ? comment[..500] : comment, ct);
             foreach (var line in plan.Lines)
             {
@@ -184,7 +197,7 @@ public sealed class DevHandoffService(
         return await db.DevFiles.AsNoTracking().Where(f => f.Id == id).Select(f => f.Content).SingleAsync(ct);
     }
 
-    private sealed record Plan(IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<ProductionStage> Route, IReadOnlyList<string> Warnings);
+    private sealed record Plan(IReadOnlyList<DevHandoffLineDto> Lines, IReadOnlyList<ProductionStage> Route, IReadOnlyList<DevNote> Warnings);
 
     /// <summary>
     /// Нормы и маршрут (D751, D752): вес детали — из факта принятого образца, иначе последнего образца, иначе план; доли цветов — из того же
@@ -203,7 +216,7 @@ public sealed class DevHandoffService(
             }
             else
             {
-                warnings.Add($"«{n.Name}»: единица «{n.Symbol}» — не кг и не г, норму введёт производство.");
+                warnings.Add(DevNote.Of(DevNotes.UnitForProduction, n.Name, n.Symbol));
             }
         }
 

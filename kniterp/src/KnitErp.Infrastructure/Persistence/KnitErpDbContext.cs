@@ -143,6 +143,13 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates => Set<KnitErp.Domain.Development.DevCategoryTemplate>();
     public DbSet<KnitErp.Domain.Development.DevMachine> DevMachines => Set<KnitErp.Domain.Development.DevMachine>();
     public DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes => Set<KnitErp.Domain.Development.DevMachineNote>();
+    public DbSet<KnitErp.Domain.Development.DevPattern> DevPatterns => Set<KnitErp.Domain.Development.DevPattern>();
+    public DbSet<KnitErp.Domain.Development.DevPatternVersion> DevPatternVersions => Set<KnitErp.Domain.Development.DevPatternVersion>();
+    public DbSet<KnitErp.Domain.Development.DevPatternFile> DevPatternFiles => Set<KnitErp.Domain.Development.DevPatternFile>();
+    public DbSet<KnitErp.Domain.Development.DevPatternColor> DevPatternColors => Set<KnitErp.Domain.Development.DevPatternColor>();
+    public DbSet<KnitErp.Domain.Development.DevPatternColorway> DevPatternColorways => Set<KnitErp.Domain.Development.DevPatternColorway>();
+    public DbSet<KnitErp.Domain.Development.DevPatternColorwayYarn> DevPatternColorwayYarns => Set<KnitErp.Domain.Development.DevPatternColorwayYarn>();
+    public DbSet<KnitErp.Domain.Development.DevCategoryMeasure> DevCategoryMeasures => Set<KnitErp.Domain.Development.DevCategoryMeasure>();
     public DbSet<KnitErp.Domain.Development.DevModelAccessory> DevModelAccessories => Set<KnitErp.Domain.Development.DevModelAccessory>();
     public DbSet<KnitErp.Domain.Development.DevCostRun> DevCostRuns => Set<KnitErp.Domain.Development.DevCostRun>();
     public DbSet<KnitErp.Domain.Development.DevCostLine> DevCostLines => Set<KnitErp.Domain.Development.DevCostLine>();
@@ -194,6 +201,26 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.SalesMailAttachment> SalesMailAttachments => Set<KnitErp.Domain.Sales.SalesMailAttachment>();
     public DbSet<KnitErp.Domain.Sales.SalesDocumentLink> SalesDocumentLinks => Set<KnitErp.Domain.Sales.SalesDocumentLink>();
     public DbSet<KnitErp.Domain.Sales.SalesCreditApproval> SalesCreditApprovals => Set<KnitErp.Domain.Sales.SalesCreditApproval>();
+    // D1150–D1159, D1108 (продажи): сборка, отгрузка по нескольким заказам, доставка, возвраты, коды маркировки.
+    public DbSet<KnitErp.Domain.Sales.SalesPickList> SalesPickLists => Set<KnitErp.Domain.Sales.SalesPickList>();
+    public DbSet<KnitErp.Domain.Sales.SalesPickListLine> SalesPickListLines => Set<KnitErp.Domain.Sales.SalesPickListLine>();
+    public DbSet<KnitErp.Domain.Sales.SalesDeliveryMethod> SalesDeliveryMethods => Set<KnitErp.Domain.Sales.SalesDeliveryMethod>();
+    public DbSet<KnitErp.Domain.Sales.SalesShipmentGroup> SalesShipmentGroups => Set<KnitErp.Domain.Sales.SalesShipmentGroup>();
+    public DbSet<KnitErp.Domain.Sales.SalesShipmentGroupDocument> SalesShipmentGroupDocuments => Set<KnitErp.Domain.Sales.SalesShipmentGroupDocument>();
+    public DbSet<KnitErp.Domain.Sales.SalesReturnReason> SalesReturnReasons => Set<KnitErp.Domain.Sales.SalesReturnReason>();
+    public DbSet<KnitErp.Domain.Sales.SalesReturnDetails> SalesReturnDetails => Set<KnitErp.Domain.Sales.SalesReturnDetails>();
+    public DbSet<KnitErp.Domain.Sales.SalesReturnLine> SalesReturnLines => Set<KnitErp.Domain.Sales.SalesReturnLine>();
+    public DbSet<KnitErp.Domain.Sales.CustomerRefund> CustomerRefunds => Set<KnitErp.Domain.Sales.CustomerRefund>();
+    public DbSet<KnitErp.Domain.Sales.SalesMarkingCode> SalesMarkingCodes => Set<KnitErp.Domain.Sales.SalesMarkingCode>();
+    // D1107, D1162, D1168 (продажи, аналитика).
+    public DbSet<KnitErp.Domain.Sales.SalesPlan> SalesPlans => Set<KnitErp.Domain.Sales.SalesPlan>();
+    public DbSet<KnitErp.Domain.Sales.SalesChannelSettings> SalesChannelSettings => Set<KnitErp.Domain.Sales.SalesChannelSettings>();
+    public DbSet<KnitErp.Domain.Sales.MarketplaceReport> MarketplaceReports => Set<KnitErp.Domain.Sales.MarketplaceReport>();
+    public DbSet<KnitErp.Domain.Sales.MarketplaceReportLine> MarketplaceReportLines => Set<KnitErp.Domain.Sales.MarketplaceReportLine>();
+    public DbSet<KnitErp.Domain.Sales.MarketplaceColumnMap> MarketplaceColumnMaps => Set<KnitErp.Domain.Sales.MarketplaceColumnMap>();
+    public DbSet<KnitErp.Domain.Sales.CustomerOpeningBalance> CustomerOpeningBalances => Set<KnitErp.Domain.Sales.CustomerOpeningBalance>(); // D1146
+    public DbSet<KnitErp.Domain.Purchasing.SupplierOpeningBalance> SupplierOpeningBalances => Set<KnitErp.Domain.Purchasing.SupplierOpeningBalance>(); // D133
+    public DbSet<KnitErp.Domain.Purchasing.PurchaseSettings> PurchaseSettings => Set<KnitErp.Domain.Purchasing.PurchaseSettings>(); // D133
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней
@@ -207,6 +234,23 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public void DiscardChanges() => ChangeTracker.Clear();
 
     public Task ReloadAsync(object entity, CancellationToken cancellationToken = default) => Entry(entity).ReloadAsync(cancellationToken);
+
+    public async Task<string?> ItemUsageAsync(long organizationId, long? itemId, long? unitId, CancellationToken cancellationToken = default)
+    {
+        // Имена таблиц — из закрытого списка в коде (не из ввода); значения — параметрами.
+        var parts = KnitErp.Application.Common.ItemUsage.Tables.Keys.Select(key =>
+        {
+            var (table, column) = key.Contains(':') ? (key.Split(':')[0], key.Split(':')[1]) : (key, "ItemId");
+            return $"SELECT TOP 1 N'{key}' AS [Value] FROM [kniterp].[{table}] x JOIN [kniterp].[items] i ON i.[Id] = x.[{column}] " +
+                   "WHERE i.[OrganizationId] = @org AND (@item IS NULL OR i.[Id] = @item) AND (@unit IS NULL OR i.[UnitId] = @unit)";
+        });
+        var sql = "SELECT TOP 1 [Value] FROM (" + string.Join(" UNION ALL ", parts) + ") u";
+        return await Database.SqlQueryRaw<string>(sql,
+                new Microsoft.Data.SqlClient.SqlParameter("@org", organizationId),
+                new Microsoft.Data.SqlClient.SqlParameter("@item", (object?)itemId ?? DBNull.Value) { SqlDbType = System.Data.SqlDbType.BigInt },
+                new Microsoft.Data.SqlClient.SqlParameter("@unit", (object?)unitId ?? DBNull.Value) { SqlDbType = System.Data.SqlDbType.BigInt })
+            .FirstOrDefaultAsync(cancellationToken);
+    }
 
     public Task SavepointAsync(string name, CancellationToken cancellationToken = default) =>
         (Database.CurrentTransaction ?? throw new InvalidOperationException("Точка сохранения действует только внутри транзакции.")).CreateSavepointAsync(name, cancellationToken);

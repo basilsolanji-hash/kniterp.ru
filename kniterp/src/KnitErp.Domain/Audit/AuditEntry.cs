@@ -234,6 +234,8 @@ public static class AuditActions
     public const string PurchaseOrderCancelled = "purchase.order.cancelled";
     public const string SupplierPaymentCreated = "purchase.payment.created";
     public const string SupplierPaymentCancelled = "purchase.payment.cancelled";
+    public const string SupplierOpeningBalanceChanged = "purchase.opening_balance.changed"; // D133
+    public const string PurchaseSettingsChanged = "purchase.settings.changed"; // D133
     public const string SalesOrderCreated = "sales.order.created";
     public const string SalesOrderChanged = "sales.order.changed";
     public const string SalesOrderConfirmed = "sales.order.confirmed";
@@ -259,6 +261,25 @@ public static class AuditActions
     public const string SalesMailChanged = "sales.mail.changed";
     public const string SalesDocumentLinked = "sales.document.linked";
     public const string SalesDocumentUnlinked = "sales.document.unlinked";
+    // D1150–D1159, D1108 (продажи): сборка, отгрузка по нескольким заказам, возвраты, возврат денег, коды маркировки.
+    public const string SalesPickListCreated = "sales.pick_list.created";
+    public const string SalesPickListChanged = "sales.pick_list.changed";
+    public const string SalesShipmentGroupCreated = "sales.shipment_group.created";
+    public const string SalesShipmentGroupChanged = "sales.shipment_group.changed";
+    public const string SalesShippingSettingsChanged = "sales.shipping_settings.changed";
+    public const string SalesReturnChanged = "sales.return.changed";
+    public const string CustomerRefundCreated = "sales.refund.created";
+    public const string CustomerRefundCancelled = "sales.refund.cancelled";
+    public const string SalesAdvanceReleased = "sales.advance.released";
+    public const string CustomerOpeningBalanceChanged = "sales.opening_balance.changed"; // D1146
+    public const string SalesMarkingChanged = "sales.marking.changed";
+    // D1107, D1162, D1168–D1170 (продажи, аналитика): план продаж, каналы, отчёты маркетплейсов.
+    public const string SalesPlanChanged = "sales.plan.changed";
+    public const string SalesChannelChanged = "sales.channel.changed";
+    public const string MarketplaceColumnsChanged = "sales.marketplace_columns.changed";
+    public const string MarketplaceReportImported = "sales.marketplace_report.imported";
+    public const string MarketplaceReportResolved = "sales.marketplace_report.resolved";
+    public const string MarketplaceReportCancelled = "sales.marketplace_report.cancelled";
     public const string ReceivedVatInvoiceRegistered = "purchase.vat_invoice.registered";
     public const string ReceivedVatInvoiceCancelled = "purchase.vat_invoice.cancelled";
     public const string PeriodClosed = "period.closed";
@@ -282,6 +303,8 @@ public static class AuditActions
     public const string DevTechChanged = "dev.tech.changed";
     public const string DevMachineNoted = "dev.machine.noted";
     public const string DevSampleRecorded = "dev.sample.recorded";
+    public const string DevSampleCustody = "dev.sample.custody";
+    public const string DevPatternChanged = "dev.pattern.changed";
     // CRM (D600–D699). Телефоны и почты — только маской (D612).
     public const string CrmLeadCreated = "crm.lead.created";
     public const string CrmLeadChanged = "crm.lead.changed";

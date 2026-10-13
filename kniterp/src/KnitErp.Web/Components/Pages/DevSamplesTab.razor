@@ -7,6 +7,8 @@
 @*
     Образцы (D714): образец № 1, 2, 3 в размере сетки; по деталям — план и факт цеха (время, вес, доли цветов); замеры по табелю мер
     с отклонением (выход за допуск — красным); решение: принят, на доработку, отклонён. Факт цех вносит в техкарте вязания детали.
+    Образец у заказчика (D723): передать (кому, когда, вернуть до), вернули, оставили или продали.
+    Паспорт образца (ТЗ §8, D728): колорит и версия рисунка с модели, партия, кто вязал и собирал, время, вес; план доработки; фото образца.
 *@
 @if (_message is not null)
 {
@@ -41,14 +43,145 @@ else
     {
         <p class="muted">@L("Образцов пока нет.")</p>
     }
+    @if (data.Samples.Count >= DevShopService.CompareMin)
+    {
+        @* ТЗ §8: сравнение образцов рядом — замеры, вес, фото. Отмечаются галочкой «Сравнить» в карточке образца. *@
+        <div class="actions">
+            <button type="button" class="secondary" disabled="@(_busy || _selected.Count < DevShopService.CompareMin || _selected.Count > DevShopService.CompareMax)"
+                    @onclick="CompareAsync">@L("Сравнить выбранные") (@_selected.Count)</button>
+            @if (_compare is not null)
+            {
+                <button type="button" class="secondary" @onclick="() => _compare = null">@L("Скрыть сравнение")</button>
+            }
+        </div>
+    }
+    @if (_compare is { } cmp)
+    {
+        <div class="panel" data-test="dev-sample-compare">
+            <h2>@L("Сравнение образцов")</h2>
+            <div class="scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th></th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <th>@L("Образец № {0}", c.No)</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">@L("Статус")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td><span class="tag @(c.Status == DevSampleStatus.Accepted ? "ok" : c.Status is DevSampleStatus.Rework or DevSampleStatus.Rejected ? "bad" : "warn")">@L(c.StatusName)</span></td>
+                            }
+                        </tr>
+                        <tr>
+                            <th scope="row">@L("Размер")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td>@(c.Size ?? "—")</td>
+                            }
+                        </tr>
+                        <tr>
+                            <th scope="row">@L("Решение")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td class="small">@if (c.Reason is not null) { <span class="tag bad">@c.Reason</span> } @(c.Reason is null && c.Comment is null ? "—" : c.Comment)</td>
+                            }
+                        </tr>
+                        @if (cmp.MeasureNames.Count > 0)
+                        {
+                            <tr><th scope="rowgroup" colspan="@(cmp.Samples.Count + 1)">@L("Замеры, см: табель / факт (отклонение)")</th></tr>
+                            @for (var i = 0; i < cmp.MeasureNames.Count; i++)
+                            {
+                                var mi = i;
+                                <tr>
+                                    <th scope="row">@cmp.MeasureNames[mi]</th>
+                                    @foreach (var c in cmp.Samples)
+                                    {
+                                        var m = mi < c.Measures.Count ? c.Measures[mi] : null;
+                                        <td class="num">
+                                            @DevFormat.Cm(m?.Plan) / @DevFormat.Cm(m?.Fact)
+                                            @if (m?.Deviation is { } dv)
+                                            {
+                                                <span class="@(m.OutOfTolerance ? "late-text" : null)">(@((dv > 0 ? "+" : "") + DevFormat.Cm(dv)))</span>
+                                            }
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        }
+                        @if (cmp.DetailNames.Count > 0)
+                        {
+                            <tr><th scope="rowgroup" colspan="@(cmp.Samples.Count + 1)">@L("Детали: план / факт")</th></tr>
+                            @for (var i = 0; i < cmp.DetailNames.Count; i++)
+                            {
+                                var di = i;
+                                <tr>
+                                    <th scope="row">@cmp.DetailNames[di] · @L("Вес")</th>
+                                    @foreach (var c in cmp.Samples)
+                                    {
+                                        var d = di < c.Details.Count ? c.Details[di] : null;
+                                        <td class="num @(DevSettings.OverPlan(d?.FactWeightGrams, d?.PlanWeightGrams, _s.FactTolerancePercent) ? "late-text" : null)">@DevFormat.Grams(d?.PlanWeightGrams) / @DevFormat.Grams(d?.FactWeightGrams)</td>
+                                    }
+                                </tr>
+                                <tr>
+                                    <th scope="row">@cmp.DetailNames[di] · @L("Время")</th>
+                                    @foreach (var c in cmp.Samples)
+                                    {
+                                        var d = di < c.Details.Count ? c.Details[di] : null;
+                                        <td class="num @(DevSettings.OverPlan(d?.FactKnitSeconds, d?.PlanKnitSeconds, _s.FactTolerancePercent) ? "late-text" : null)">@DevFormat.Duration(d?.PlanKnitSeconds) / @DevFormat.Duration(d?.FactKnitSeconds)</td>
+                                    }
+                                </tr>
+                            }
+                        }
+                        <tr>
+                            <th scope="row">@L("Общий вес изделия")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td class="num">@DevFormat.Grams(c.TotalWeightGrams)</td>
+                            }
+                        </tr>
+                        <tr>
+                            <th scope="row">@L("Фото")</th>
+                            @foreach (var c in cmp.Samples)
+                            {
+                                <td>
+                                    @if (c.PhotoFileIds.Count == 0)
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                    @foreach (var fid in c.PhotoFileIds)
+                                    {
+                                        <a href="dev/files/@fid" target="_blank" rel="noopener" data-enhance-nav="false"><img class="dev-thumb" style="max-width: 96px; max-height: 96px" src="dev/files/@(fid)?inline=1" alt="@L("Фото образца № {0}", c.No)" loading="lazy" /></a>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="small muted">@L("Фото — снимки, загруженные кнопкой «Фото образца» в карточке образца.")</p>
+        </div>
+    }
     @foreach (var smp in data.Samples)
     {
         var sample = smp;
-        <div class="panel">
+        <div class="panel" data-test="dev-sample-@smp.No">
             <div class="page-head" style="margin: 0">
                 <h2>@L("Образец № {0}", smp.No)@(smp.Size is null ? "" : " · " + L("размер {0}", smp.Size))</h2>
                 <span class="actions" style="margin: 0; align-items: center">
                     <span class="tag @(smp.Status == DevSampleStatus.Accepted ? "ok" : smp.Status is DevSampleStatus.Rework or DevSampleStatus.Rejected ? "bad" : "warn")">@L(smp.StatusName)</span>
+                    @if (data.Samples.Count >= DevShopService.CompareMin)
+                    {
+                        <label class="small" style="display: inline-flex; gap: 4px; align-items: center">
+                            <input type="checkbox" checked="@_selected.Contains(smp.Id)" @onchange="e => ToggleCompare(sample.Id, e.Value is true)" />
+                            @L("Сравнить")
+                        </label>
+                    }
                     <DevLabelLink Kind="sample" Id="smp.Id" />
                     @if (data.CanEdit || data.CanRecord)
                     {
@@ -56,13 +189,92 @@ else
                     }
                 </span>
             </div>
-            @if (smp.Comment is not null)
+            @if (smp.Reason is not null || smp.Comment is not null)
             {
-                <p class="small">@smp.Comment</p>
+                <p class="small">@if (smp.Reason is not null) { <span class="tag bad">@smp.Reason</span> } @smp.Comment</p>
             }
             @if (_yarnFor == smp.Id)
             {
                 <DevYarnWriteOff SampleId="smp.Id" />
+            }
+            @* D723: образец у заказчика — кому, когда, вернуть до; вернули, оставили или продали. *@
+            @if (smp.Custody != DevSampleCustody.AtFactory)
+            {
+                <p class="small">
+                    <span class="tag @(smp.ReturnOverdue ? "bad" : smp.Custody == DevSampleCustody.AtCustomer ? "warn" : null)">@L(smp.CustodyName)</span>
+                    @smp.CustodyRecipient · @L("передан") @smp.HandedOn?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)
+                    @if (smp.Custody == DevSampleCustody.AtCustomer)
+                    {
+                        <span class="@(smp.ReturnOverdue ? "late-text" : null)">· @(smp.ReturnBy is { } rb ? L("вернуть до {0}", rb.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)) : L("без возврата"))</span>
+                    }
+                    else if (smp.CustodyClosedOn is { } closed)
+                    {
+                        <span>· @closed.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)</span>
+                    }
+                    @if (smp.CustodyNote is not null) { <span class="muted">· @smp.CustodyNote</span> }
+                </p>
+            }
+            @if (smp.Custody == DevSampleCustody.AtCustomer && data.CanCloseCustody)
+            {
+                <div class="actions">
+                    @foreach (var result in CloseResults)
+                    {
+                        var res = result;
+                        <button type="button" class="secondary" disabled="@_busy" @onclick="() => CloseCustodyAsync(sample, res)">@L(CloseLabel(res))</button>
+                    }
+                </div>
+            }
+            else if (data.CanHand && smp.Status != DevSampleStatus.Knitting && smp.Custody is DevSampleCustody.AtFactory or DevSampleCustody.Returned)
+            {
+                @if (_handFor == smp.Id)
+                {
+                    <form class="inline-form" @onsubmit="() => HandAsync(sample)">
+                        <label>@L("Кому") <input @bind="_handTo" maxlength="@DevSample.RecipientMaxLength" required /></label>
+                        <label>@L("Передан") <input type="date" @bind="_handOn" required /></label>
+                        <label>@L("Вернуть до") <input type="date" @bind="_returnBy" /></label>
+                        <label>@L("Комментарий") <input @bind="_handNote" maxlength="@DevSample.CustodyNoteMaxLength" /></label>
+                        <button type="submit" disabled="@_busy">@L("Передать")</button>
+                        <button type="button" class="secondary" @onclick="() => _handFor = null">@L("Отмена")</button>
+                    </form>
+                }
+                else
+                {
+                    <div class="actions"><button type="button" class="secondary" @onclick="() => OpenHand(sample)">@L("Передать заказчику")</button></div>
+                }
+            }
+            @if (smp.Making is { } mk && HasFacts(mk))
+            {
+                <dl class="facts dev-facts" data-test="dev-sample-making">
+                    @if (mk.Colorway is not null) { <div><dt>@L("Колорит")</dt><dd>@mk.Colorway</dd></div> }
+                    @if (mk.PatternVersion is { } pv) { <div><dt>@L("Версия рисунка")</dt><dd>@pv</dd></div> }
+                    @if (mk.YarnBatch is not null) { <div><dt>@L("Партия пряжи")</dt><dd>@mk.YarnBatch</dd></div> }
+                    @if (mk.KnittedBy is not null) { <div><dt>@L("Вязал")</dt><dd>@mk.KnittedBy</dd></div> }
+                    @if (mk.AssembledBy is not null) { <div><dt>@L("Собирал")</dt><dd>@mk.AssembledBy</dd></div> }
+                    @if (mk.KnitMinutes is { } km) { <div><dt>@L("Время вязки")</dt><dd>@DevFormat.Duration((int)Math.Round(km * 60m))</dd></div> }
+                    @if (mk.AssemblyMinutes is { } am) { <div><dt>@L("Время сборки")</dt><dd>@L("{0} мин", am)</dd></div> }
+                    @if (mk.WeightGrams is { } wg) { <div><dt>@L("Вес изделия")</dt><dd>@DevFormat.Grams(wg)</dd></div> }
+                </dl>
+            }
+            @if (smp.Rework is { } rw)
+            {
+                <p class="small" data-test="dev-sample-rework">
+                    <strong>@L("Доработка"):</strong> @(rw.What ?? "—")
+                    @if (rw.Assignee is not null) { <span>· @rw.Assignee</span> }
+                    @if (rw.DueDate is { } due) { <span>· @L("срок {0}", due.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture))</span> }
+                </p>
+            }
+            @if (smp.PhotoFileIds is { Count: > 0 } || data.CanEdit || data.CanRecord)
+            {
+                <div class="actions" style="align-items: center">
+                    @foreach (var fid in smp.PhotoFileIds ?? [])
+                    {
+                        <a href="dev/files/@fid" target="_blank" rel="noopener" data-enhance-nav="false"><img class="dev-thumb" style="max-width: 96px; max-height: 96px" src="dev/files/@(fid)?inline=1" alt="@L("Фото образца № {0}", smp.No)" loading="lazy" /></a>
+                    }
+                    @if (data.CanEdit || data.CanRecord)
+                    {
+                        <label class="file-pick" title="@L("До 50 МБ")">@L("Фото образца") <InputFile OnChange="e => UploadPhotoAsync(sample, e)" accept=".png,.jpg,.jpeg" capture="environment" disabled="@_busy" /></label>
+                    }
+                </div>
             }
             <div class="scroll">
                 <table>
@@ -130,8 +342,69 @@ else
                             }
                         </select>
                     </label>
+                    @if (data.Reasons is { Count: > 0 } reasons && _decision != ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture))
+                    {
+                        <label>
+                            @L("Причина")
+                            <select @bind="_reason">
+                                <option value="">—</option>
+                                @foreach (var r in reasons)
+                                {
+                                    <option value="@r.Id">@r.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
                     <label>@L("Что не так / комментарий") <input @bind="_decisionComment" maxlength="@DevSample.CommentMaxLength" /></label>
                     <button type="submit" disabled="@_busy">@L("Записать решение")</button>
+                </form>
+            }
+            @if (data.CanEdit && smp.Status == DevSampleStatus.Rework && _rework.TryGetValue(smp.Id, out var rf))
+            {
+                <h3>@L("План доработки")</h3>
+                <form class="inline-form" @onsubmit="() => PlanReworkAsync(sample)">
+                    <label>@L("Что меняем") <input @bind="rf.What" maxlength="@DevSample.ReworkMaxLength" required /></label>
+                    <label>
+                        @L("Кто")
+                        <select @bind="rf.Assignee">
+                            <option value="">—</option>
+                            @foreach (var u in UserOptions(data, smp.Rework?.AssigneeUserId, smp.Rework?.Assignee))
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Срок") <input type="date" @bind="rf.Due" /></label>
+                    <button type="submit" disabled="@_busy">@L("Сохранить план доработки")</button>
+                </form>
+            }
+            @if ((data.CanEdit || data.CanRecord) && _making.TryGetValue(smp.Id, out var mf))
+            {
+                <h3>@L("Паспорт образца")</h3>
+                <form class="inline-form" @onsubmit="() => SaveMakingAsync(sample)">
+                    <label>@L("Партия пряжи") <input @bind="mf.Batch" maxlength="@DevSample.BatchMaxLength" /></label>
+                    <label>
+                        @L("Кто вязал")
+                        <select @bind="mf.Knitted">
+                            <option value="">—</option>
+                            @foreach (var u in UserOptions(data, smp.Making?.KnittedByUserId, smp.Making?.KnittedBy))
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Кто собирал")
+                        <select @bind="mf.Assembled">
+                            <option value="">—</option>
+                            @foreach (var u in UserOptions(data, smp.Making?.AssembledByUserId, smp.Making?.AssembledBy))
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Время сборки, мин") <input type="number" min="0" max="10000" step="1" inputmode="numeric" style="max-width: 100px" @bind="mf.Minutes" /></label>
+                    <button type="submit" disabled="@_busy">@L("Сохранить паспорт")</button>
                 </form>
             }
         </div>
@@ -152,6 +425,7 @@ else
     private string _size = string.Empty;
     private string _decision = ((byte)DevSampleStatus.Accepted).ToString(CultureInfo.InvariantCulture);
     private string? _decisionComment;
+    private string _reason = string.Empty;
     private bool _busy;
     private string? _message;
     private bool _isError;
@@ -175,6 +449,7 @@ else
         var dirty = _facts.Where(kv => kv.Value != _wasFacts.GetValueOrDefault(kv.Key) && (_isError || kv.Key.Item1 != _resetSample)).ToList();
         _facts.Clear();
         _wasFacts.Clear();
+        _selected.IntersectWith(_s.Samples.Select(s => s.Id));
         foreach (var s in _s.Samples)
         {
             foreach (var m in s.Measures.Where(m => m.Fact is not null))
@@ -190,6 +465,183 @@ else
         }
 
         _resetSample = null;
+
+        // Формы паспорта и доработки — свои у каждого образца; после сохранения (новая версия строки) берут значения сервера.
+        var ids = _s.Samples.Select(x => x.Id).ToHashSet();
+        foreach (var gone in _making.Keys.Where(k => !ids.Contains(k)).ToList())
+        {
+            _making.Remove(gone);
+        }
+
+        foreach (var gone in _rework.Keys.Where(k => !ids.Contains(k)).ToList())
+        {
+            _rework.Remove(gone);
+        }
+
+        foreach (var s in _s.Samples)
+        {
+            if (!_making.TryGetValue(s.Id, out var mf) || !mf.Version.AsSpan().SequenceEqual(s.RowVersion))
+            {
+                _making[s.Id] = new MakingForm
+                {
+                    Version = s.RowVersion,
+                    Batch = s.Making?.YarnBatch,
+                    Knitted = s.Making?.KnittedByUserId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    Assembled = s.Making?.AssembledByUserId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    Minutes = s.Making?.AssemblyMinutes,
+                };
+            }
+
+            if (!_rework.TryGetValue(s.Id, out var rf) || !rf.Version.AsSpan().SequenceEqual(s.RowVersion))
+            {
+                _rework[s.Id] = new ReworkForm
+                {
+                    Version = s.RowVersion,
+                    What = s.Rework?.What,
+                    Assignee = s.Rework?.AssigneeUserId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    Due = s.Rework?.DueDate,
+                };
+            }
+        }
+    }
+
+    private sealed class MakingForm
+    {
+        public byte[] Version = [];
+        public string? Batch;
+        public string Knitted = string.Empty;
+        public string Assembled = string.Empty;
+        public int? Minutes;
+    }
+
+    private sealed class ReworkForm
+    {
+        public byte[] Version = [];
+        public string? What;
+        public string Assignee = string.Empty;
+        public DateOnly? Due;
+    }
+
+    private readonly Dictionary<long, MakingForm> _making = [];
+    private readonly Dictionary<long, ReworkForm> _rework = [];
+
+    /// <summary>Активные пользователи; уже записанный, но не активный человек остаётся в списке, чтобы не потеряться при сохранении.</summary>
+    private static IEnumerable<DevOptionDto> UserOptions(DevSamplesDto data, long? currentId, string? currentName)
+    {
+        var users = data.Users ?? [];
+        return currentId is { } id && users.All(u => u.Id != id) ? [.. users, new DevOptionDto(id, currentName ?? "#" + id)] : users;
+    }
+
+    private static bool HasFacts(DevSampleMakingDto m) =>
+        m.Colorway is not null || m.PatternVersion is not null || m.YarnBatch is not null || m.KnittedBy is not null || m.AssembledBy is not null
+        || m.KnitMinutes is not null || m.AssemblyMinutes is not null || m.WeightGrams is not null;
+
+    private static long? ParseId(string value) => long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private Task SaveMakingAsync(DevSampleDto s)
+    {
+        var f = _making[s.Id];
+        return RunAsync(() => Shop.SetSampleMakingAsync(s.Id, f.Batch, ParseId(f.Knitted), ParseId(f.Assembled), f.Minutes, f.Version), L("Паспорт образца сохранён."));
+    }
+
+    private Task PlanReworkAsync(DevSampleDto s)
+    {
+        var f = _rework[s.Id];
+        return RunAsync(() => Shop.PlanReworkAsync(s.Id, f.What, ParseId(f.Assignee), f.Due, f.Version), L("План доработки сохранён."));
+    }
+
+    private Task UploadPhotoAsync(DevSampleDto s, InputFileChangeEventArgs args) => RunAsync(async () =>
+    {
+        var file = args.File;
+        if (file.Size > DevFile.MaxBytes)
+        {
+            throw new BusinessRuleException("dev.file.size", "Файл модели — до 50 МБ.");
+        }
+
+        using var buffer = new MemoryStream();
+        await using (var stream = file.OpenReadStream(DevFile.MaxBytes))
+        {
+            await stream.CopyToAsync(buffer);
+        }
+
+        await Shop.AddSamplePhotoAsync(s.Id, file.Name, buffer.ToArray());
+    }, L("Фото загружено."));
+
+    private static readonly DevSampleCustody[] CloseResults = [DevSampleCustody.Returned, DevSampleCustody.Kept, DevSampleCustody.Sold];
+
+    private static string CloseLabel(DevSampleCustody c) => c switch
+    {
+        DevSampleCustody.Returned => "Вернули на фабрику",
+        DevSampleCustody.Kept => "Оставлен у заказчика",
+        _ => "Продан заказчику",
+    };
+
+    private long? _handFor;
+    private string? _handTo;
+    private DateOnly _handOn;
+    private DateOnly? _returnBy;
+    private string? _handNote;
+
+    private void OpenHand(DevSampleDto s)
+    {
+        var today = _s?.Today ?? DateOnly.FromDateTime(DateTime.Today);
+        _handFor = s.Id;
+        _handTo = s.CustodyRecipient ?? _s?.CustomerName;
+        _handOn = today;
+        _returnBy = today.AddDays(14);
+        _handNote = null;
+    }
+
+    private Task HandAsync(DevSampleDto s) => RunAsync(async () =>
+    {
+        await Shop.HandSampleAsync(s.Id, _handTo, _handOn, _returnBy, _handNote, s.RowVersion);
+        _handFor = null;
+    }, L("Образец передан заказчику."));
+
+    private Task CloseCustodyAsync(DevSampleDto s, DevSampleCustody result) =>
+        RunAsync(() => Shop.CloseSampleCustodyAsync(s.Id, result, _s?.Today ?? DateOnly.FromDateTime(DateTime.Today), null, s.RowVersion), L("Записано."));
+
+    // ТЗ §8: отмеченные для сравнения образцы и последнее построенное сравнение.
+    private readonly HashSet<long> _selected = [];
+    private DevSampleCompareDto? _compare;
+
+    private void ToggleCompare(long sampleId, bool on)
+    {
+        if (on)
+        {
+            _selected.Add(sampleId);
+        }
+        else
+        {
+            _selected.Remove(sampleId);
+        }
+    }
+
+    private async Task CompareAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            var ids = _selected.ToList();
+            _compare = await Gate.Run(() => Shop.CompareSamplesAsync(ModelId, ids));
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _compare = null;
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private Task CreateAsync() => RunAsync(() => Shop.CreateSampleAsync(ModelId, long.TryParse(_size, out var z) ? z : null), L("Образец создан."));
@@ -212,8 +664,10 @@ else
 
     private Task DecideAsync(DevSampleDto s) => RunAsync(async () =>
     {
-        await Shop.DecideSampleAsync(s.Id, (DevSampleStatus)byte.Parse(_decision, CultureInfo.InvariantCulture), _decisionComment, s.RowVersion);
+        await Shop.DecideSampleAsync(s.Id, (DevSampleStatus)byte.Parse(_decision, CultureInfo.InvariantCulture), _decisionComment, s.RowVersion,
+            long.TryParse(_reason, out var reason) ? reason : null);
         _decisionComment = null;
+        _reason = string.Empty;
     }, L("Решение записано."));
 
     private async Task RunAsync(Func<Task> action, string success)
@@ -226,6 +680,7 @@ else
         _busy = true;
         _message = null;
         _isError = false;
+        _compare = null; // после изменения образца сравнение устарело — строится заново кнопкой
         try
         {
             await Gate.Run(action);

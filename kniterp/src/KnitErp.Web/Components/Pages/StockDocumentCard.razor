@@ -3,7 +3,9 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Web.Components.Shared
 @inject StockDocumentService Documents
+@inject KnitErp.Application.Catalog.PackService PackList
 @inject StockBatchService BatchService
+@inject KnitErp.Application.Sales.SalesService SalesDocs
 
 <PageTitle>@(_doc?.Number ?? L("Документ")) — knitERP</PageTitle>
 
@@ -52,7 +54,7 @@ else
     {
         <dl class="facts">
             <dt>@L("Дата")</dt><dd>@_doc.DocumentDate.ToString("dd.MM.yyyy")</dd>
-            <dt>@(StockDocument.IsOutgoing(_doc.Kind) ? L("Склад-отправитель") : L("Склад-получатель"))</dt><dd>@_doc.WarehouseName</dd>
+            <dt>@(Act ? L("Склад заказа") : StockDocument.IsOutgoing(_doc.Kind) ? L("Склад-отправитель") : L("Склад-получатель"))</dt><dd>@_doc.WarehouseName</dd>
             @if (_doc.TargetWarehouseName is not null)
             {
                 <dt>@L("Куда")</dt><dd>@_doc.TargetWarehouseName</dd>
@@ -64,7 +66,8 @@ else
             @if (_doc.SalesOrderId is { } salesOrderId)
             {
                 <dt>@L("Заказ покупателя")</dt><dd><a href="sales-orders/@salesOrderId">@_doc.SalesOrderNumber</a>
-                    @if (_doc.Kind == StockOperationKind.Shipment && _doc.Status == StockDocumentStatus.Posted && CurrentAccess.Has(Permissions.PriceView))
+                    @if (_doc.Kind is StockOperationKind.Shipment or StockOperationKind.ServiceAct && _doc.Status == StockDocumentStatus.Posted
+                         && CurrentAccess.Has(Permissions.PriceView))
                     {
                         <span> · <a href="print/upd/@_doc.Id" target="_blank" rel="noopener">@L("Печать УПД")</a></span>
                     }
@@ -111,12 +114,21 @@ else
                 </datalist>
             </label>
             <label>@L("Количество") <input @bind="_qtyText" inputmode="decimal" size="10" /></label>
+            <PackCount Packs="@PackLookup.Of(_packs, EntryItem()?.Id)" Precision="@(EntryItem()?.Precision ?? 0)" OnQuantity="q => _qtyText = q" />
             <button type="submit" disabled="@_busy">@L("Добавить")</button>
         </form>
-        <div class="actions">
-            <a class="button secondary" href="stock-documents/template.xlsx" download data-enhance-nav="false">@L("Шаблон Excel")</a>
-            <label class="inline">@L("Загрузить строки из Excel (заменят текущие)") <InputFile OnChange="ImportAsync" accept=".xlsx" disabled="@_busy" /></label>
-        </div>
+        @if (Act)
+        {
+            @* D354 (сессия 4, Р1): в акте — услуги своего заказа; цена и НДС — из заказа, остаток склада не меняется. *@
+            <p class="muted small">@L("В акте — только услуги заказа. Цена и НДС берутся из заказа; акт не меняет остатки склада.")</p>
+        }
+        else
+        {
+            <div class="actions">
+                <a class="button secondary" href="stock-documents/template.xlsx" download data-enhance-nav="false">@L("Шаблон Excel")</a>
+                <label class="inline">@L("Загрузить строки из Excel (заменят текущие)") <InputFile OnChange="ImportAsync" accept=".xlsx" disabled="@_busy" /></label>
+            </div>
+        }
     }
 
     @if (_import is { Applied: false })
@@ -157,8 +169,37 @@ else
                 }
                 @foreach (var l in _doc.Lines)
                 {
-                    <tr class="@(l.Available is { } a && a < l.Quantity ? "short" : "")">
-                        <td>@l.Code</td>
+                    @if (l.BundleItemId is { } bundleId && _doc.Lines.First(x => x.BundleItemId == bundleId) == l)
+                    {
+                        @* D352 (сессия 4, Р2): комплект — заголовком над своими компонентами; меняется количество комплектов целиком. *@
+                        <tr>
+                            <td><b>@l.BundleCode</b></td>
+                            <td><b>@l.BundleName</b> <span class="muted">@L("комплект — компоненты ниже")</span></td>
+                            <td class="num">
+                                @if (_doc.CanEdit)
+                                {
+                                    <input value="@BundleQtyText(l)" @onchange="e => _bundleQty[bundleId] = e.Value?.ToString() ?? string.Empty" inputmode="decimal" size="6"
+                                           aria-label="@L("Количество комплекта {0}", l.BundleCode)" />
+                                }
+                                else
+                                {
+                                    <b>@Quantities.Format(l.BundleQuantity ?? 0)</b>
+                                }
+                            </td>
+                            <td>@l.BundleUnitSymbol</td>
+                            @if (showAvailable) { <td></td> }
+                            @if (_doc.CanEdit)
+                            {
+                                <td>
+                                    <button type="button" class="secondary" @onclick="() => SetBundleAsync(l)" disabled="@_busy">@L("Изменить")</button>
+                                    <ConfirmButton Class="secondary" OnConfirm="() => RemoveBundleAsync(l)" Disabled="@_busy" AriaLabel="@L("Удалить комплект {0}", l.BundleCode)" Question='@L("Удалить комплект со всеми компонентами?")'>@L("Удалить")</ConfirmButton>
+                                </td>
+                            }
+                        </tr>
+                    }
+                    var total = _doc.Lines.Where(x => x.ItemId == l.ItemId).Sum(x => x.Quantity);
+                    <tr class="@(l.Available is { } a && a < total ? "short" : "")">
+                        <td>@(l.BundleItemId is null ? l.Code : $"↳ {l.Code}")</td>
                         <td>@l.Name</td>
                         <td class="num">@Quantities.Format(l.Quantity)</td>
                         <td>@l.UnitSymbol</td>
@@ -166,9 +207,13 @@ else
                         {
                             <td class="num">@Quantities.Format(l.Available ?? 0)</td>
                         }
-                        @if (_doc.CanEdit)
+                        @if (_doc.CanEdit && l.BundleItemId is null)
                         {
                             <td><ConfirmButton Class="secondary" OnConfirm="() => RemoveLineAsync(l)" Disabled="@_busy" AriaLabel="@L("Удалить строку {0}", l.Code)" Question='@L("Удалить?")'>@L("Удалить")</ConfirmButton></td>
+                        }
+                        else if (_doc.CanEdit)
+                        {
+                            <td></td>
                         }
                     </tr>
                 }
@@ -313,8 +358,12 @@ else
         }
     }
 
+    <StockDocumentSalesPanel DocumentId="Id" Data="_sales" OnChanged="LoadAsync" /> @* D1108, D1153 (сессия «Продажи») *@
     <div class="actions" style="margin-top: 16px">
-        <LabelsButton Lines="@(_doc.Lines.Select(l => (l.ItemId, l.Quantity)))" />
+        @if (!Act)
+        {
+            <LabelsButton Lines="@(_doc.Lines.Select(l => (l.ItemId, l.Quantity)))" />
+        }
         @if (_doc.CanPost)
         {
             <button type="button" @onclick="PostAsync" disabled="@(_busy || _doc.Lines.Count == 0)">@L("Провести")</button>
@@ -334,7 +383,9 @@ else
     {
         <div class="panel">
             <h2>@L("Сторно")</h2>
-            <p class="muted">@L("Движения документа гасятся обратными, документ остаётся в истории со статусом «Сторнирован». Правильные данные вводятся новым документом.")</p>
+            <p class="muted">@(Act
+                ? L("Акт остаётся в истории со статусом «Сторнирован», услуги снова считаются незакрытыми. Правильные данные вводятся новым актом.")
+                : L("Движения документа гасятся обратными, документ остаётся в истории со статусом «Сторнирован». Правильные данные вводятся новым документом."))</p>
             <form class="inline-form" @onsubmit="ReverseAsync">
                 <label>@L("Причина сторно") <input @bind="_reverseReason" maxlength="500" size="40" /></label>
                 <button type="submit" class="secondary" disabled="@_busy">@L("Сторнировать")</button>
@@ -358,6 +409,17 @@ else
 
     private StockDocumentDto? _doc;
     private IReadOnlyList<EntryItemDto> _items = [];
+
+    /// <summary>D354 (сессия 4, Р1): акт услуг — без склада, партий, этикеток и загрузки из Excel.</summary>
+    private bool Act => _doc is not null && StockOperationKinds.IsServiceAct(_doc.Kind);
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Catalog.ItemPackDto>> _packs = PackLookup.Empty;
+
+    private EntryItemDto? EntryItem()
+    {
+        var code = _itemText.Split(" — ", 2)[0].Trim();
+        return _items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
+               ?? (PackLookup.ByBarcode(_packs, code) is { } pack ? _items.FirstOrDefault(i => i.Id == pack.ItemId) : null);
+    }
     private StockDocumentOptions? _options;
     private StockDocumentHeaderFields.Model? _header;
     private LineImportResult? _import;
@@ -377,7 +439,8 @@ else
             await LoadAsync();
             if (_doc!.CanEdit)
             {
-                _items = await Documents.ListItemsForEntryAsync();
+                _items = await Documents.ListItemsForEntryAsync(_doc.Kind);
+                _packs = await PackList.AllAsync(); // D353: упаковки для ввода и скана — один раз
             }
         }
         catch (AccessDeniedException ex)
@@ -404,7 +467,10 @@ else
     {
         _doc = await Documents.GetAsync(Id);
         _batches = await BatchService.ForDocumentAsync(Id);
+        _sales = await SalesDocs.StockDocumentPanelAsync(Id); // D1108, D1153 (сессия «Продажи»): коды маркировки, качество возврата
     }
+
+    private KnitErp.Application.Sales.StockDocumentSalesDto? _sales;
 
     private string? _scan;
 
@@ -482,9 +548,13 @@ else
 
     private Task AddLineAsync() => RunAsync(async () =>
     {
-        var code = _itemText.Split(" — ", 2)[0].Trim();
-        var item = _items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
-                   ?? throw new BusinessRuleException("stock.item.unknown", L("Позиция «{0}» не найдена. Выберите из списка.", _itemText));
+        var item = EntryItem() ?? throw new BusinessRuleException("stock.item.unknown", L("Позиция «{0}» не найдена. Выберите из списка.", _itemText));
+        // D353: скан штрихкода упаковки без количества — к строке добавляется коэффициент упаковки.
+        if (string.IsNullOrWhiteSpace(_qtyText) && PackLookup.ByBarcode(_packs, _itemText) is { } scanned)
+        {
+            _qtyText = Quantities.Format((_doc!.Lines.FirstOrDefault(l => l.ItemId == item.Id)?.Quantity ?? 0) + scanned.Factor);
+        }
+
         if (!Quantities.TryParse(_qtyText, out var qty))
         {
             throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));
@@ -496,6 +566,25 @@ else
     }, null);
 
     private Task RemoveLineAsync(StockDocumentLineDto line) => RunAsync(() => Documents.RemoveLineAsync(Id, line.ItemId, _doc!.RowVersion), null);
+
+    // D352 (сессия 4, Р2): количество комплекта в отгрузке или возврате по заказу — компоненты пересчитывает сервер.
+    private readonly Dictionary<long, string> _bundleQty = [];
+
+    private string BundleQtyText(StockDocumentLineDto l) =>
+        _bundleQty.TryGetValue(l.BundleItemId!.Value, out var text) ? text : Quantities.Format(l.BundleQuantity ?? 0);
+
+    private Task SetBundleAsync(StockDocumentLineDto l) => RunAsync(async () =>
+    {
+        if (!Quantities.TryParse(BundleQtyText(l), out var qty))
+        {
+            throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));
+        }
+
+        await Documents.SetBundleAsync(Id, l.BundleItemId!.Value, qty, _doc!.RowVersion);
+        _bundleQty.Remove(l.BundleItemId.Value);
+    }, L("Количество комплекта изменено."));
+
+    private Task RemoveBundleAsync(StockDocumentLineDto l) => RunAsync(() => Documents.RemoveBundleAsync(Id, l.BundleItemId!.Value, _doc!.RowVersion), null);
 
     private Task ImportAsync(InputFileChangeEventArgs e) => RunAsync(async () =>
     {
@@ -517,7 +606,8 @@ else
         }
     }, null);
 
-    private Task PostAsync() => RunAsync(() => Documents.PostAsync(Id, _doc!.RowVersion), L("Документ проведён, остатки изменены."));
+    private Task PostAsync() => RunAsync(() => Documents.PostAsync(Id, _doc!.RowVersion),
+        Act ? L("Акт проведён: услуги закрыты, остатки склада не менялись.") : L("Документ проведён, остатки изменены."));
 
     private Task CancelAsync() => RunAsync(() => Documents.CancelAsync(Id, _doc!.RowVersion), L("Документ отменён."));
 
@@ -525,7 +615,7 @@ else
     {
         await Documents.ReverseAsync(Id, _reverseReason, _doc!.RowVersion);
         _reverseReason = string.Empty;
-    }, L("Документ сторнирован, остатки возвращены."));
+    }, Act ? L("Акт сторнирован.") : L("Документ сторнирован, остатки возвращены."));
 
     /// <summary>Одна операция за раз, затем свежий документ: у вкладки один DbContext.</summary>
     private async Task RunAsync(Func<Task> action, string? success)

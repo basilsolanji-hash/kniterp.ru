@@ -1,0 +1,290 @@
+@page "/sales-shipments"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesService Sales
+@inject NavigationManager Navigation
+
+@*
+    D1151, D1152: отгрузки по нескольким заказам одного покупателя и склада — список, создание с логистикой (способ доставки,
+    трек-номер, места, вес) и справочники способов доставки и причин возврата.
+*@
+<PageTitle>@L("Отгрузки по нескольким заказам") — knitERP</PageTitle>
+<SalesShippingStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Отгрузки по нескольким заказам")</h1>
+        <div class="sx-tools">
+            <label>@L("Поиск") <input @bind="_search" @bind:after="ReloadAsync" placeholder="@L("Номер, покупатель, трек")" /></label>
+        </div>
+    </div>
+    <p class="sx-lead">@L("Одна машина — несколько заказов одного покупателя: по каждому заказу создаётся свой документ отгрузки (учёт «отгружено» по заказу не меняется), проводятся они вместе. Упаковочный лист, места, вес, способ доставки и трек-номер — в отгрузке.")</p>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    @if (_orders is { Count: > 0 })
+    {
+        <section class="panel" aria-label="@L("Новая отгрузка")">
+            <h2 style="margin: 0 0 6px">@L("Новая отгрузка")</h2>
+            <form class="sx-form" @onsubmit="CreateAsync">
+                <label class="w2">
+                    @L("Покупатель и склад")
+                    <select @bind="_key" @bind:after="() => _selected.Clear()">
+                        @foreach (var k in _orders.Select(o => (o.CustomerId, o.Customer, o.WarehouseId, o.Warehouse)).Distinct().OrderBy(k => k.Customer))
+                        {
+                            <option value="@($"{k.CustomerId}:{k.WarehouseId}")">@k.Customer — @k.Warehouse</option>
+                        }
+                    </select>
+                </label>
+                <label>
+                    @L("Способ доставки")
+                    <select @bind="_delivery">
+                        <option value="">—</option>
+                        @foreach (var m in _methods.Where(m => !m.IsArchived))
+                        {
+                            <option value="@m.Id">@m.Name</option>
+                        }
+                    </select>
+                </label>
+                <label>@L("Трек-номер") <input @bind="_tracking" maxlength="@SalesShipmentGroup.TrackingMaxLength" /></label>
+                <label>@L("Мест") <input @bind="_packages" inputmode="numeric" /></label>
+                <label>@L("Вес брутто, кг") <input @bind="_weight" inputmode="decimal" /></label>
+                <label class="w2">@L("Комментарий") <input @bind="_comment" maxlength="@SalesShipmentGroup.CommentMaxLength" /></label>
+                <div class="w4 scroll">
+                    <table class="compact sx-table">
+                        <thead><tr><th></th><th>@L("Заказ")</th><th>@L("Отгрузка")</th><th>@L("Сборка")</th><th>@L("В черновике отгрузки")</th></tr></thead>
+                        <tbody>
+                            @foreach (var o in Candidates)
+                            {
+                                <tr>
+                                    <td><input type="checkbox" checked="@_selected.Contains(o.OrderId)" @onchange="e => Toggle(o.OrderId, e)" aria-label="@L("Выбрать {0}", o.Number)" /></td>
+                                    <td><a href="sales-orders/@o.OrderId">@o.Number</a> <span class="sx-sub">@o.OrderDate.ToString("dd.MM.yyyy")</span></td>
+                                    <td>@(o.ShipDate?.ToString("dd.MM.yyyy") ?? "—")</td>
+                                    <td>@(o.PickList is { } p ? (o.Picked ? L("собран: {0}", p) : L("в задании {0}", p)) : "—")</td>
+                                    <td>@(o.Group ?? "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="sx-actions"><button type="submit" disabled="@(_busy || _selected.Count == 0)">@L("Создать отгрузку ({0})", _selected.Count)</button></div>
+            </form>
+        </section>
+    }
+
+    <div class="scroll">
+        <table class="sx-table">
+            <thead>
+                <tr><th>@L("Номер")</th><th>@L("Дата")</th><th>@L("Покупатель")</th><th>@L("Заказы")</th><th>@L("Доставка")</th><th class="num">@L("Мест")</th><th class="num">@L("Брутто, кг")</th><th>@L("Состояние")</th></tr>
+            </thead>
+            <tbody>
+                @if (_rows.Count == 0)
+                {
+                    <tr><td colspan="8" class="muted">@L("Отгрузок пока нет.")</td></tr>
+                }
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td><a href="sales-shipments/@r.Id">@r.Number</a></td>
+                        <td>@r.Date.ToString("dd.MM.yyyy")</td>
+                        <td>@r.Customer <span class="sx-sub">@r.Warehouse</span></td>
+                        <td>@r.Orders</td>
+                        <td>@(r.Delivery ?? "—") @if (r.TrackingNumber is { } t) { <span class="sx-sub">@t</span> }</td>
+                        <td class="num">@(r.Packages?.ToString() ?? "—")</td>
+                        <td class="num">@(r.GrossWeightKg?.ToString("#,0.###") ?? "—")</td>
+                        <td><span class="tag">@L(r.StatusName)</span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (CurrentAccess.Has(Permissions.SalesEdit))
+    {
+        <h2 style="margin-top: 20px">@L("Справочники отгрузки")</h2>
+        <div class="sx-kv" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); align-items: start">
+            <div>
+                <span>@L("Способы доставки")</span>
+                <ul class="sx-history">
+                    @foreach (var m in _methods)
+                    {
+                        <li class="ship-ref">
+                            <span class="ship-ref-name">@m.Name@if (L(m.KindName) != m.Name || m.IsArchived) { <span class="muted small"> · @(L(m.KindName) == m.Name ? L("в архиве") : L(m.KindName) + (m.IsArchived ? " · " + L("в архиве") : ""))</span> }</span>
+                            <button type="button" class="link" @onclick="() => ArchiveMethodAsync(m)" disabled="@_busy">@(m.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                        </li>
+                    }
+                </ul>
+                <form class="inline-form" @onsubmit="AddMethodAsync">
+                    <input @bind="_newMethod" maxlength="@SalesDeliveryMethod.NameMaxLength" placeholder="@L("СДЭК, Деловые линии…")" aria-label="@L("Способ доставки")" />
+                    <select @bind="_newKind" aria-label="@L("Вид доставки")">
+                        <option value="@DeliveryKind.Carrier">@L("Транспортная компания")</option>
+                        <option value="@DeliveryKind.OwnDelivery">@L("Своя доставка")</option>
+                        <option value="@DeliveryKind.Pickup">@L("Самовывоз")</option>
+                    </select>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
+                </form>
+            </div>
+            <div>
+                <span>@L("Причины возврата")</span>
+                <ul class="sx-history">
+                    @foreach (var x in _reasons)
+                    {
+                        <li class="ship-ref">
+                            <span class="ship-ref-name">@x.Name@if (x.IsArchived) { <span class="muted small"> · @L("в архиве")</span> }</span>
+                            <button type="button" class="link" @onclick="() => ArchiveReasonAsync(x)" disabled="@_busy">@(x.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                        </li>
+                    }
+                </ul>
+                <form class="inline-form" @onsubmit="AddReasonAsync">
+                    <input @bind="_newReason" maxlength="@SalesReturnReason.NameMaxLength" placeholder="@L("Не подошёл цвет")" aria-label="@L("Причина возврата")" />
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
+                </form>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<ShipmentGroupRowDto>? _rows;
+    private IReadOnlyList<OrderToShipDto>? _orders;
+    private IReadOnlyList<DeliveryMethodDto> _methods = [];
+    private IReadOnlyList<SalesReturnReasonDto> _reasons = [];
+    private readonly HashSet<long> _selected = [];
+    private string? _key;
+    private string? _search;
+    private string? _delivery;
+    private string? _tracking;
+    private string? _packages;
+    private string? _weight;
+    private string? _comment;
+    private string? _newMethod;
+    private DeliveryKind _newKind = DeliveryKind.Carrier;
+    private string? _newReason;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+
+    private IEnumerable<OrderToShipDto> Candidates => (_orders ?? []).Where(o => $"{o.CustomerId}:{o.WarehouseId}" == _key);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await ReloadAsync();
+            _orders = await Sales.OrdersToShipAsync();
+            _key = _orders.OrderBy(o => o.Customer).Select(o => $"{o.CustomerId}:{o.WarehouseId}").FirstOrDefault();
+            _methods = await Sales.DeliveryMethodsAsync(includeArchived: CurrentAccess.Has(Permissions.SalesEdit));
+            _reasons = CurrentAccess.Has(Permissions.SalesEdit) ? await Sales.ReturnReasonsAsync(includeArchived: true) : [];
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task ReloadAsync() => _rows = await Sales.ListShipmentGroupsAsync(new ShipmentGroupFilter(Search: _search));
+
+    private void Toggle(long id, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            _selected.Add(id);
+        }
+        else
+        {
+            _selected.Remove(id);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            var logistics = SalesShipmentCard.Logistics(_delivery, _tracking, _packages, _weight, _comment);
+            var ids = Candidates.Where(o => _selected.Contains(o.OrderId)).Select(o => o.OrderId).ToList();
+            Navigation.NavigateTo($"sales-shipments/{await Sales.CreateShipmentGroupAsync(ids, logistics)}");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task AddMethodAsync() => RunAsync(async () =>
+    {
+        await Sales.CreateDeliveryMethodAsync(_newMethod, _newKind);
+        _newMethod = null;
+    });
+
+    private Task ArchiveMethodAsync(DeliveryMethodDto m) => RunAsync(() => Sales.SetDeliveryMethodArchivedAsync(m.Id, !m.IsArchived, m.RowVersion));
+
+    private Task AddReasonAsync() => RunAsync(async () =>
+    {
+        await Sales.CreateReturnReasonAsync(_newReason);
+        _newReason = null;
+    });
+
+    private Task ArchiveReasonAsync(SalesReturnReasonDto r) => RunAsync(() => Sales.SetReturnReasonArchivedAsync(r.Id, !r.IsArchived, r.RowVersion));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = L("Сохранено.");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                _methods = await Sales.DeliveryMethodsAsync(includeArchived: true);
+                _reasons = await Sales.ReturnReasonsAsync(includeArchived: true);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}

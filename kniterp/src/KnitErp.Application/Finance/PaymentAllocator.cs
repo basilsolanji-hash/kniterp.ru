@@ -53,6 +53,8 @@ public static class PaidByOrder
 /// что заказ; на заказ — не больше его остатка к оплате; всего — не больше суммы платежа. Не разнесённое — аванс.
 /// Все изменения разносок одного контрагента идут по очереди (блокировка контрагента), поэтому одновременная разноска
 /// двух платежей на один заказ не превысит его сумму.
+/// D133 (D132 п. 2): дата разноски — поздняя из дат оплаты и заказа (раньше обоих зачёт состояться не мог); разноска, её изменение
+/// и снятие с такой датой в закрытом периоде запрещены (`period.closed`), автоматическая разноска и зачёт авансов такие пары пропускают.
 /// </summary>
 internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurrentUser currentUser, bool sales)
 {
@@ -107,6 +109,7 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
         await db.LockAsync(LockName(ctx, p.CounterpartyId), ct);
         var order = await OrderAsync(ctx, orderId, ct);
         await EnsureAllowedAsync(p, order, ct);
+        EnsureOpen(await ClosedThroughAsync(ctx, ct), p, order);
         var paidByOrder = await PaidAsync(ctx.OrganizationId, [orderId], ct);
         var outstanding = order.Total - paidByOrder.GetValueOrDefault(orderId);
         if (amount > outstanding)
@@ -134,7 +137,8 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
         await using var tx = await db.BeginTransactionAsync(ct);
         await db.LockAsync(LockName(ctx, p.CounterpartyId), ct);
         var left = await UnallocatedAsync(ctx, p, ct);
-        var open = await OpenOrdersAsync(ctx, p, ct);
+        var closed = await ClosedThroughAsync(ctx, ct);
+        var open = (await OpenOrdersAsync(ctx, p, ct)).Where(o => !IsClosed(closed, p.Date, o.Date)).ToList();
         var plan = PaymentDistribution.Distribute(left, open.Select(o => (o.Id, o.Outstanding)));
         foreach (var (orderId, part) in plan)
         {
@@ -159,7 +163,8 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
         await db.LockAsync(LockName(ctx, order.CounterpartyId), ct);
         var left = order.Total - (await PaidAsync(ctx.OrganizationId, [orderId], ct)).GetValueOrDefault(orderId);
         var applied = 0m;
-        foreach (var p in await AdvancesAsync(ctx, order, ct))
+        var closed = await ClosedThroughAsync(ctx, ct);
+        foreach (var p in (await AdvancesAsync(ctx, order, ct)).Where(a => !IsClosed(closed, a.Payment.Date, order.Date)))
         {
             if (left <= 0)
             {
@@ -181,7 +186,13 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
     public async Task<decimal> AvailableAdvancesAsync(AccessContext ctx, long orderId, CancellationToken ct)
     {
         var order = await OrderAsync(ctx, orderId, ct);
-        return order.Open ? (await AdvancesAsync(ctx, order, ct)).Sum(a => a.Unallocated) : 0;
+        if (!order.Open)
+        {
+            return 0;
+        }
+
+        var closed = await ClosedThroughAsync(ctx, ct);
+        return (await AdvancesAsync(ctx, order, ct)).Where(a => !IsClosed(closed, a.Payment.Date, order.Date)).Sum(a => a.Unallocated);
     }
 
     public async Task RemoveAsync(AccessContext ctx, long allocationId, byte[] rowVersion, CancellationToken ct)
@@ -195,6 +206,7 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
         allocation.EnsureVersion(allocation.RowVersion, rowVersion);
         var p = await PaymentAsync(ctx, allocation.PaymentId, ct);
         await db.LockAsync(LockName(ctx, p.CounterpartyId), ct);
+        EnsureOpen(await ClosedThroughAsync(ctx, ct), p, await OrderAsync(ctx, allocation.OrderId, ct));
         allocation.Remove(ctx.UserId, clock.UtcNow);
         var number = (await OrderNumbersAsync(ctx.OrganizationId, [allocation.OrderId], ct))[allocation.OrderId];
         Audit(ctx, AuditActions.PaymentAllocationRemoved, p.Id, $"{allocation.Amount:0.00}", null, $"{p.Number} → {number}");
@@ -251,6 +263,24 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
         }
 
         Audit(ctx, AuditActions.PaymentAllocated, p.Id, existing is null ? null : $"{existing.Amount:0.00}", $"{total:0.00}", $"{p.Number} → {order.Number}");
+    }
+
+    private Task<DateOnly?> ClosedThroughAsync(AccessContext ctx, CancellationToken ct) =>
+        KnitErp.Application.Warehousing.ClosedPeriod.ClosedThroughAsync(db, ctx.OrganizationId, ct);
+
+    /// <summary>D133: дата разноски — поздняя из дат оплаты и заказа.</summary>
+    private static DateOnly AllocationDate(DateOnly paymentDate, DateOnly orderDate) => paymentDate > orderDate ? paymentDate : orderDate;
+
+    private static bool IsClosed(DateOnly? closedThrough, DateOnly paymentDate, DateOnly orderDate) =>
+        closedThrough is { } t && AllocationDate(paymentDate, orderDate) <= t;
+
+    private static void EnsureOpen(DateOnly? closedThrough, PaymentInfo p, OrderInfo order)
+    {
+        if (closedThrough is { } t && IsClosed(t, p.Date, order.Date))
+        {
+            throw new BusinessRuleException("period.closed",
+                $"Период закрыт по {t:dd.MM.yyyy}: оплата {p.Number} и заказ {order.Number} — в закрытом периоде, их разноску менять нельзя. Открыть период может Владелец.");
+        }
     }
 
     private async Task EnsureAllowedAsync(PaymentInfo p, OrderInfo order, CancellationToken ct)
@@ -321,7 +351,9 @@ internal sealed class PaymentAllocator(IKnitErpDbContext db, IClock clock, ICurr
         sales
             ? db.CustomerPayments.AsNoTracking().Where(p => p.OrganizationId == org).Select(p => new PaymentInfo
             {
-                Id = p.Id, Number = p.Number, Date = p.PaymentDate, CounterpartyId = p.CustomerId, Amount = p.Amount,
+                Id = p.Id, Number = p.Number, Date = p.PaymentDate, CounterpartyId = p.CustomerId,
+                // D1154 (сессия «Продажи»): возвращённое покупателю деньгами из оплаты уже не разносится.
+                Amount = p.Amount - (db.CustomerRefunds.Where(r => r.PaymentId == p.Id && r.Status == CustomerRefundStatus.Posted).Sum(r => (decimal?)r.Amount) ?? 0),
                 Posted = p.Status == CustomerPaymentStatus.Posted, AccountId = p.MoneyAccountId,
             })
             : db.SupplierPayments.AsNoTracking().Where(p => p.OrganizationId == org).Select(p => new PaymentInfo

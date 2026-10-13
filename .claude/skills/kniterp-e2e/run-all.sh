@@ -6,6 +6,17 @@ set -u
 dir="$(cd "$(dirname "$0")" && pwd)"
 out="${E2E_DIR:?задайте E2E_DIR}/regress"
 mkdir -p "$out"
+# Тестовые фиды и шаблоны этикеток прошлых прогонов (лимиты на организацию: 10 и 30): только в базе e2e, по названиям из сценариев.
+if [ -n "${E2E_DB:-}" ]; then
+  docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$KNITERP_SA_PASSWORD" -d "$E2E_DB" \
+    -Q "DELETE FROM kniterp.catalog_feeds WHERE Name LIKE N'Маркет %' OR Name LIKE N'Host %'" >/dev/null || echo "очистка фидов не удалась"
+  # Шаблоны этикеток сценария cat-step5 («Ценник XXXXX», «Лист XXXXX»; лимит — 30 на организацию); основной шаблон не трогаем.
+  docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$KNITERP_SA_PASSWORD" -d "$E2E_DB" \
+    -Q "SET QUOTED_IDENTIFIER ON; DELETE FROM kniterp.label_templates WHERE (Name LIKE N'Ценник _____' OR Name LIKE N'Лист _____') AND Name NOT LIKE N'%мм%' AND IsDefault = 0" >/dev/null || echo "очистка шаблонов этикеток не удалась"
+  # Доп. поля сценариев cat-step11/14 («Сайт XXXXX», «Длина XXXXX», «Производитель XXXXX»; лимит — 30): в архив, не удаляются.
+  docker exec sql /opt/mssql-tools18/bin/sqlcmd -C -b -S localhost -U sa -P "$KNITERP_SA_PASSWORD" -d "$E2E_DB" \
+    -Q "SET QUOTED_IDENTIFIER ON; UPDATE kniterp.custom_field_definitions SET IsArchived = 1 WHERE IsArchived = 0 AND (Name LIKE N'Сайт _____' OR Name LIKE N'Длина _____' OR Name LIKE N'Производитель _____')" >/dev/null || echo "очистка доп. полей не удалась"
+fi
 fail=0
 for s in "$dir"/scenarios/cat-*.mjs; do
   name="$(basename "$s" .mjs)"

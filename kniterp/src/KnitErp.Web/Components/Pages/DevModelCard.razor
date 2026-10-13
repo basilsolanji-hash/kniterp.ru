@@ -28,6 +28,15 @@ else
     <p><a href="dev/models">@L("← Модели в разработке")</a></p>
     <div class="page-head">
         <h1>@m.Number · @m.Name <span class="tag @(m.Stage == DevStage.Cancelled ? "bad" : m.Stage == DevStage.Handed ? "ok" : "warn")">@L(m.StageName)</span></h1>
+        @if (m.VersionNo > 1 || m.NextVersionId is not null)
+        {
+            @* D769: версии модели — откуда эта и есть ли следующая. *@
+            <p class="small dev-versions">
+                @L("Версия {0}", m.VersionNo)
+                @if (m.PreviousVersionId is { } prev) { <span> · @L("на основе") <a href="dev/models/@prev">@m.PreviousNumber</a></span> }
+                @if (m.NextVersionId is { } nextVersion) { <span> · @L("следующая версия") <a href="dev/models/@nextVersion">@m.NextNumber</a></span> }
+            </p>
+        }
     </div>
     <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.DevModel" EntityId="Id" />
 
@@ -120,6 +129,7 @@ else
                             <option value="@((byte)s)">@L(DevStages.Name(s))</option>
                         }
                     </select>
+                    <input @bind="_moveComment" maxlength="@DevModel.ReasonMaxLength" placeholder="@L("комментарий к переходу")" aria-label="@L("Комментарий к переходу")" />
                     <button type="button" class="secondary" @onclick="MoveToSelectedAsync" disabled="@(_busy || _target.Length == 0)">@L("Перевести")</button>
                 </label>
             }
@@ -133,6 +143,11 @@ else
             }
             @if (_canEdit)
             {
+                @if (m.Stage == DevStage.Handed && m.NextVersionId is null)
+                {
+                    <button type="button" @onclick="NewVersionAsync" disabled="@_busy">@L("Новая версия")</button>
+                }
+
                 <button type="button" class="secondary" @onclick="CopyAsync" disabled="@_busy">@L("Создать похожую")</button>
             }
             @if (m.Stage == DevStage.Cancelled && _canEdit)
@@ -140,6 +155,8 @@ else
                 <button type="button" @onclick="RestoreAsync" disabled="@_busy">@L("Вернуть в работу")</button>
             }
             <DevLabelLink Kind="model" Id="m.Id" />
+            <a class="button secondary" href="dev/models/@(m.Id)/passport.pdf?inline=1" target="_blank" rel="noopener" data-enhance-nav="false"
+               title="@L("Технический паспорт изделия (PDF)")">@L("Техпаспорт")</a>
         </div>
         @if (_cancelling)
         {
@@ -171,7 +188,7 @@ else
             @BriefTab
             break;
         case Tab.Details:
-            <DevDetailsTab ModelId="Id" CanEdit="@(m.CanEdit || (CurrentAccess.Has(Permissions.DevPattern) && !DevStages.IsFinal(m.Stage)))" />
+            <DevDetailsTab ModelId="Id" CanEdit="@(m.CanEdit || (CurrentAccess.Has(Permissions.DevPattern) && !DevStages.IsFinal(m.Stage)))" OnModelChanged="LoadAsync" />
             break;
         case Tab.Sizes:
             <DevSizesTab ModelId="Id" />
@@ -242,6 +259,10 @@ else
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
+    /// <summary>Вкладка из ссылки (`?tab=samples`) — например, из списка «Образцы у заказчиков».</summary>
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? TabQuery { get; set; }
+
     private DevModelDto? _model;
     private DevCompletenessDto? _completeness;
     private DevModelOptionsDto? _options;
@@ -280,7 +301,7 @@ else
         {
             // Переход на другую модель тем же компонентом («Создать похожую»): начинаем с вкладки «Задание», без открытых форм.
             _loadedId = Id;
-            _tab = Tab.Brief;
+            _tab = Enum.TryParse<Tab>(TabQuery, true, out var fromLink) && Enum.IsDefined(fromLink) ? fromLink : Tab.Brief;
             _options = null;
             _editingBrief = false;
             _cancelling = false;
@@ -405,6 +426,7 @@ else
         }
 
         <DevPaletteBlock ModelId="Id" CanEdit="m.CanEdit" />
+        <DevModelPatternBlock ModelId="Id" RowVersion="m.RowVersion" OnChanged="LoadAsync" />
     };
 
     private RenderFragment FilesTab => __builder =>
@@ -489,6 +511,16 @@ else
         _brief = BriefForm.From(_model!.Brief);
     }
 
+    private async Task NewVersionAsync()
+    {
+        long? id = null;
+        await RunAsync(async () => id = await Tech.NewVersionAsync(Id), L("Создана новая версия модели."));
+        if (id is { } created && !_isError)
+        {
+            Navigation.NavigateTo($"dev/models/{created}");
+        }
+    }
+
     private async Task CopyAsync()
     {
         long? id = null;
@@ -503,12 +535,19 @@ else
 
     private Task PinAsync(long fileId) => RunAsync(() => Tech.PinSketchAsync(Id, fileId, _model!.RowVersion), L("Эскиз закреплён."));
 
-    private Task MoveAsync(DevStage to) => RunAsync(() => Models.MoveAsync(Id, to, null, _model!.RowVersion), L("Стадия изменена."));
+    private Task MoveAsync(DevStage to) => RunAsync(async () =>
+    {
+        await Models.MoveAsync(Id, to, _moveComment, _model!.RowVersion);
+        _moveComment = null;
+    }, L("Стадия изменена."));
+
+    private string? _moveComment;
 
     private Task MoveToSelectedAsync() => byte.TryParse(_target, out var s)
         ? RunAsync(async () =>
         {
-            await Models.MoveAsync(Id, (DevStage)s, null, _model!.RowVersion);
+            await Models.MoveAsync(Id, (DevStage)s, _moveComment, _model!.RowVersion);
+            _moveComment = null;
             _target = string.Empty;
         }, L("Стадия изменена."))
         : Task.CompletedTask;

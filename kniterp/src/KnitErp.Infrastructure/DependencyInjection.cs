@@ -52,6 +52,8 @@ public static class DependencyInjection
         services.AddSingleton<Documents.SalesPdfRenderer>();
         services.AddSingleton<KnitErp.Application.Sales.ISalesPdfRenderer>(sp => sp.GetRequiredService<Documents.SalesPdfRenderer>());
         services.AddSingleton<KnitErp.Application.Crm.ICrmOfferPdfRenderer>(sp => sp.GetRequiredService<Documents.SalesPdfRenderer>()); // D696: PDF КП
+        services.AddSingleton<KnitErp.Application.Development.IDevPassportRenderer, Documents.DevPassportPdfRenderer>(); // D725
+        services.AddSingleton<KnitErp.Application.Development.IImageShrinker, Documents.SkiaImageShrinker>(); // D729
         return services;
     }
 

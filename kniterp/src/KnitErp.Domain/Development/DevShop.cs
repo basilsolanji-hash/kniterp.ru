@@ -12,6 +12,16 @@ public enum DevSampleStatus : byte
     Rejected = 5,
 }
 
+/// <summary>Где физически находится образец (D723, ТЗ §8 «Образец у заказчика»). Числа хранятся в базе.</summary>
+public enum DevSampleCustody : byte
+{
+    AtFactory = 0,
+    AtCustomer = 1,
+    Returned = 2,
+    Kept = 3,
+    Sold = 4,
+}
+
 /// <summary>
 /// Образец модели (D714): «образец № 1, 2, 3» в размере сетки. Цех записывает по каждой детали фактические время вязания, вес
 /// и доли цветов, конструктор — замеры по табелю мер. Решение по образцу (принят, на доработку, отклонён) — с правом изменения модели.
@@ -63,20 +73,168 @@ public sealed class DevSample
         CreatedByUserId = userId,
     };
 
-    public void Decide(DevSampleStatus status, string? comment)
+    /// <summary>Причина доработки или отказа из справочника (D768); для принятого образца — пусто.</summary>
+    public long? ReasonId { get; private set; }
+
+    /// <summary>Решение по образцу: на доработку или отказ — с причиной из справочника (D768) или с текстом «что не так».</summary>
+    public void Decide(DevSampleStatus status, string? comment, long? reasonId = null)
     {
         if (!Enum.IsDefined(status))
         {
             throw new BusinessRuleException("dev.sample.status", "Выберите результат образца.");
         }
 
-        if (status is DevSampleStatus.Rework or DevSampleStatus.Rejected && string.IsNullOrWhiteSpace(comment))
+        var negative = status is DevSampleStatus.Rework or DevSampleStatus.Rejected;
+        if (negative && reasonId is null && string.IsNullOrWhiteSpace(comment))
         {
-            throw new BusinessRuleException("dev.sample.reason", "Напишите, что не так: причина доработки или отказа.");
+            throw new BusinessRuleException("dev.sample.reason", "Выберите причину доработки или отказа либо напишите, что не так.");
         }
 
         Status = status;
+        ReasonId = negative ? reasonId : null;
         Comment = DomainText.Optional(comment, CommentMaxLength, "Комментарий");
+    }
+
+    public const int RecipientMaxLength = 200;
+    public const int CustodyNoteMaxLength = 300;
+
+    /// <summary>Где образец (D723): на фабрике, у заказчика, возвращён, оставлен у заказчика, продан.</summary>
+    public DevSampleCustody Custody { get; private set; }
+
+    /// <summary>Контрагент, которому передан образец (заказчик модели на момент передачи).</summary>
+    public long? CustodyCounterpartyId { get; private set; }
+
+    /// <summary>Кому передан: организация и контактное лицо.</summary>
+    public string? CustodyRecipient { get; private set; }
+
+    public DateOnly? HandedOn { get; private set; }
+    public DateOnly? ReturnBy { get; private set; }
+
+    /// <summary>Дата возврата, либо дата, когда образец оставлен у заказчика или продан.</summary>
+    public DateOnly? CustodyClosedOn { get; private set; }
+
+    public string? CustodyNote { get; private set; }
+
+    public static string CustodyName(DevSampleCustody custody) => custody switch
+    {
+        DevSampleCustody.AtCustomer => "У заказчика",
+        DevSampleCustody.Returned => "Возвращён",
+        DevSampleCustody.Kept => "Оставлен у заказчика",
+        DevSampleCustody.Sold => "Продан заказчику",
+        _ => "На фабрике",
+    };
+
+    /// <summary>Не вернули к сроку: образец у заказчика, «вернуть до» прошло.</summary>
+    public static bool IsReturnOverdue(DevSampleCustody custody, DateOnly? returnBy, DateOnly today) =>
+        custody == DevSampleCustody.AtCustomer && returnBy is { } d && d < today;
+
+    /// <summary>
+    /// Передать образец заказчику (D723): связанный образец, который сейчас на фабрике (в том числе возвращённый). Кому — обязательно;
+    /// «вернуть до» — не раньше даты передачи; пусто — образец отдан без срока возврата.
+    /// </summary>
+    public void HandToCustomer(long? counterpartyId, string? recipient, DateOnly on, DateOnly? returnBy, string? note)
+    {
+        if (Status == DevSampleStatus.Knitting)
+        {
+            throw new BusinessRuleException("dev.sample.custody.knitting", "Образец ещё вяжется — передать заказчику можно связанный образец.");
+        }
+
+        if (Custody is not (DevSampleCustody.AtFactory or DevSampleCustody.Returned))
+        {
+            throw new BusinessRuleException("dev.sample.custody.out", "Образец уже у заказчика или не вернётся на фабрику.");
+        }
+
+        if (returnBy is { } r && r < on)
+        {
+            throw new BusinessRuleException("dev.sample.custody.date", "Дата возврата не может быть раньше даты передачи.");
+        }
+
+        CustodyRecipient = DomainText.Require(recipient, RecipientMaxLength, "Кому передан образец");
+        CustodyNote = DomainText.Optional(note, CustodyNoteMaxLength, "Комментарий");
+        CustodyCounterpartyId = counterpartyId;
+        HandedOn = on;
+        ReturnBy = returnBy;
+        CustodyClosedOn = null;
+        Custody = DevSampleCustody.AtCustomer;
+    }
+
+    /// <summary>Закрыть передачу: образец вернули, оставили у заказчика или продали ему. Дата — не раньше передачи.</summary>
+    public void CloseCustody(DevSampleCustody result, DateOnly on, string? note)
+    {
+        if (result is not (DevSampleCustody.Returned or DevSampleCustody.Kept or DevSampleCustody.Sold))
+        {
+            throw new BusinessRuleException("dev.sample.custody.result", "Выберите: возвращён, оставлен у заказчика или продан.");
+        }
+
+        if (Custody != DevSampleCustody.AtCustomer)
+        {
+            throw new BusinessRuleException("dev.sample.custody.not_out", "Образец не у заказчика.");
+        }
+
+        if (HandedOn is { } h && on < h)
+        {
+            throw new BusinessRuleException("dev.sample.custody.date", "Дата возврата не может быть раньше даты передачи.");
+        }
+
+        if (note is not null)
+        {
+            CustodyNote = DomainText.Optional(note, CustodyNoteMaxLength, "Комментарий");
+        }
+
+        CustodyClosedOn = on;
+        Custody = result;
+    }
+
+    // ---------- D728: образец по ТЗ §8 — колорит, версия рисунка, пряжа и партия, кто вязал и собирал, доработка ----------
+    public const int BatchMaxLength = 60;
+    public const int ReworkMaxLength = 500;
+
+    public long? ColorwayId { get; private set; }
+    public int? PatternVersion { get; private set; }
+
+    /// <summary>Партия пряжи (номер партии крашения).</summary>
+    public string? YarnBatch { get; private set; }
+
+    public long? KnittedByUserId { get; private set; }
+    public long? AssembledByUserId { get; private set; }
+
+    /// <summary>Время сборки, минут (время вязки — по факту деталей).</summary>
+    public int? AssemblyMinutes { get; private set; }
+
+    /// <summary>Доработка: что меняем, кто, срок.</summary>
+    public string? ReworkWhat { get; private set; }
+
+    public long? ReworkAssigneeUserId { get; private set; }
+    public DateOnly? ReworkDueDate { get; private set; }
+
+    /// <summary>Колорит и версия рисунка — с модели на момент создания образца (D728).</summary>
+    public void LinkPattern(long? colorwayId, int? patternVersion) => (ColorwayId, PatternVersion) = (colorwayId, patternVersion);
+
+    /// <summary>Паспорт образца: партия, кто вязал и собирал (активные пользователи — проверяет сервис), время сборки.</summary>
+    public void SetMaking(string? yarnBatch, long? knittedBy, long? assembledBy, int? assemblyMinutes)
+    {
+        if (assemblyMinutes is < 0 or > 10_000)
+        {
+            throw new BusinessRuleException("dev.sample.assembly", "Время сборки — от 0 до 10 000 минут.");
+        }
+
+        YarnBatch = DomainText.Optional(yarnBatch, BatchMaxLength, "Партия пряжи");
+        KnittedByUserId = knittedBy;
+        AssembledByUserId = assembledBy;
+        AssemblyMinutes = assemblyMinutes;
+    }
+
+    /// <summary>План доработки (ТЗ §8): что меняем, кто, срок — для образца «на доработку».</summary>
+    public void PlanRework(string? what, long? assignee, DateOnly? due)
+    {
+        if (Status != DevSampleStatus.Rework)
+        {
+            throw new BusinessRuleException("dev.sample.rework.status", "План доработки — только у образца «На доработку».");
+        }
+
+        ReworkWhat = DomainText.Require(what, ReworkMaxLength, "Что меняем");
+        ReworkAssigneeUserId = assignee;
+        ReworkDueDate = due;
     }
 
     /// <summary>Цех записал факт по всем деталям — образец связан (если решения ещё не было).</summary>
