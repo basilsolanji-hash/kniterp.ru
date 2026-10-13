@@ -5690,5 +5690,8 @@
   "вернуть до {0}": "{0} gacha qaytarish",
   "передан": "topshirilgan",
   "Технический паспорт изделия (PDF)": "Buyumning texnik pasporti (PDF)",
-  "Техпаспорт": "Texpasport"
+  "Техпаспорт": "Texpasport",
+  "В рисунке больше 16 цветов — это не сетка рисунка, похоже на фото. Загрузите сетку, где одна клетка — одна петля.": "Rasmda 16 tadan ortiq rang bor — bu rasm to'ri emas, fotosuratga o'xshaydi. Bitta katak — bitta halqa bo'lgan to'rni yuklang.",
+  "Не удалось прочитать сетку рисунка. Сохраните сетку как PNG 8 бит без чересстрочной развёртки, BMP 24 или 32 бит либо CSV.": "Rasm to'rini o'qib bo'lmadi. To'rni satrlararo yoyishsiz PNG 8 bit, BMP 24 yoki 32 bit yoxud CSV sifatida saqlang.",
+  "Сетка рисунка пустая или больше 2000×2000 клеток.": "Rasm to'ri bo'sh yoki 2000×2000 katakdan katta."
 }

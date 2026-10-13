@@ -238,6 +238,66 @@ public sealed class DevModel
         PackBox = DomainText.Optional(packBox, 60, "Размер короба");
     }
 
+    // ---------- D726, D728: рисунок модели и пряжа и вязка (ТЗ §7–8) ----------
+
+    /// <summary>Рисунок модели (библиотека рисунков) и его конкретная версия — не «последняя».</summary>
+    public long? PatternId { get; private set; }
+
+    public int? PatternVersion { get; private set; }
+
+    /// <summary>Колорит рисунка, в котором разрабатывается модель.</summary>
+    public long? ColorwayId { get; private set; }
+
+    /// <summary>Номер краски пряжи.</summary>
+    public string? DyeNumber { get; private set; }
+
+    /// <summary>Плотность: петель на 10 см.</summary>
+    public decimal? DensityLoops { get; private set; }
+
+    /// <summary>Плотность: рядов на 10 см.</summary>
+    public decimal? DensityRows { get; private set; }
+
+    /// <summary>Усадка после ВТО, %.</summary>
+    public decimal? ShrinkagePercent { get; private set; }
+
+    /// <summary>Привязать версию рисунка и колорит (проверяет сервис: свой рисунок, версия существует, колорит этого рисунка) или снять.</summary>
+    public void LinkPattern(long? patternId, int? version, long? colorwayId)
+    {
+        EnsureEditable();
+        if (patternId is null)
+        {
+            (PatternId, PatternVersion, ColorwayId) = (null, null, null);
+            return;
+        }
+
+        if (version is not > 0)
+        {
+            throw new BusinessRuleException("dev.model.pattern.version", "Выберите версию рисунка.");
+        }
+
+        (PatternId, PatternVersion, ColorwayId) = (patternId, version, colorwayId);
+    }
+
+    /// <summary>Пряжа и вязка (ТЗ §8): номер краски, плотность на 10 см, усадка после ВТО.</summary>
+    public void SetKnitting(string? dyeNumber, decimal? densityLoops, decimal? densityRows, decimal? shrinkage)
+    {
+        EnsureEditable();
+        if (densityLoops is <= 0 or > 500 || densityRows is <= 0 or > 500)
+        {
+            throw new BusinessRuleException("dev.model.density", "Плотность — больше 0 и не больше 500 петель (рядов) на 10 см.");
+        }
+
+        if (shrinkage is < -50 or > 50)
+        {
+            throw new BusinessRuleException("dev.model.shrinkage", "Усадка после ВТО — от −50 до 50 %.");
+        }
+
+        DyeNumber = DomainText.Optional(dyeNumber, 40, "Номер краски");
+        DensityLoops = densityLoops;
+        DensityRows = densityRows;
+        ShrinkagePercent = shrinkage;
+    }
+
     /// <summary>Закрепить эскиз (файл проверяет сервис: свой, вида «Эскиз», картинка) или снять закрепление.</summary>
     public void PinSketch(long? fileId)
     {

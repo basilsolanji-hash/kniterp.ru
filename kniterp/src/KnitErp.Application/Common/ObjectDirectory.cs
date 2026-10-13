@@ -127,6 +127,12 @@ public static class ObjectDirectory
                         .Select(m => new { m.Id, m.Number, m.Name, m.Stage }).ToListAsync(ct))
                     .Select(m => new TaggedObjectDto(entity, m.Id, $"{m.Number} — {m.Name}", KnitErp.Domain.Development.DevStages.Name(m.Stage),
                         $"dev/models/{m.Id}")).ToList();
+            case TaggedEntity.DevPattern when has(Permissions.DevView):
+                // D726: номер, название и статус рисунка.
+                return (await db.DevPatterns.AsNoTracking().Where(p => p.OrganizationId == org && ids.Contains(p.Id))
+                        .Select(p => new { p.Id, p.Number, p.Name, p.Status }).ToListAsync(ct))
+                    .Select(p => new TaggedObjectDto(entity, p.Id, $"{p.Number} — {p.Name}", KnitErp.Domain.Development.DevPattern.StatusName(p.Status),
+                        $"dev/patterns/{p.Id}")).ToList();
             case TaggedEntity.CrmLead or TaggedEntity.CrmDeal or TaggedEntity.CrmContact:
                 // D601 (CRM): видимость лида, сделки и контакта решает CRM — ответственный, наблюдатель или право crm.all.
                 return await Crm.CrmVisibility.DescribeAsync(db, ctx, entity, ids, ct);

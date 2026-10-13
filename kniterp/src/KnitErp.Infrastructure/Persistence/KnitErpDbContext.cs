@@ -143,6 +143,13 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates => Set<KnitErp.Domain.Development.DevCategoryTemplate>();
     public DbSet<KnitErp.Domain.Development.DevMachine> DevMachines => Set<KnitErp.Domain.Development.DevMachine>();
     public DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes => Set<KnitErp.Domain.Development.DevMachineNote>();
+    public DbSet<KnitErp.Domain.Development.DevPattern> DevPatterns => Set<KnitErp.Domain.Development.DevPattern>();
+    public DbSet<KnitErp.Domain.Development.DevPatternVersion> DevPatternVersions => Set<KnitErp.Domain.Development.DevPatternVersion>();
+    public DbSet<KnitErp.Domain.Development.DevPatternFile> DevPatternFiles => Set<KnitErp.Domain.Development.DevPatternFile>();
+    public DbSet<KnitErp.Domain.Development.DevPatternColor> DevPatternColors => Set<KnitErp.Domain.Development.DevPatternColor>();
+    public DbSet<KnitErp.Domain.Development.DevPatternColorway> DevPatternColorways => Set<KnitErp.Domain.Development.DevPatternColorway>();
+    public DbSet<KnitErp.Domain.Development.DevPatternColorwayYarn> DevPatternColorwayYarns => Set<KnitErp.Domain.Development.DevPatternColorwayYarn>();
+    public DbSet<KnitErp.Domain.Development.DevCategoryMeasure> DevCategoryMeasures => Set<KnitErp.Domain.Development.DevCategoryMeasure>();
     public DbSet<KnitErp.Domain.Development.DevModelAccessory> DevModelAccessories => Set<KnitErp.Domain.Development.DevModelAccessory>();
     public DbSet<KnitErp.Domain.Development.DevCostRun> DevCostRuns => Set<KnitErp.Domain.Development.DevCostRun>();
     public DbSet<KnitErp.Domain.Development.DevCostLine> DevCostLines => Set<KnitErp.Domain.Development.DevCostLine>();

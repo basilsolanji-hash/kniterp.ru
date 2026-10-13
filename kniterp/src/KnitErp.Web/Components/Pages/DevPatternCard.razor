@@ -1,0 +1,537 @@
+@page "/dev/patterns/{Id:long}"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@using System.Globalization
+@inject DevPatternService Patterns
+@inject NavigationManager Nav
+
+@*
+    Карточка рисунка (D726–D727, ТЗ §7): свойства и статус, цвета с долями (вручную или по файлу-сетке), колориты — раскладка цвет → пряжа,
+    файлы текущей версии (сетка рисунка, программа машины со временем вязки), новая версия с причиной, «готов к программированию»,
+    копирование, где использован. Утверждённый рисунок меняется только новой версией. Все вызовы — по одному (кнопки блокируются).
+*@
+<PageTitle>@(_p?.Number ?? L("Рисунок")) — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <p class="muted">@L("Рисунок не найден.")</p>
+}
+else if (_p is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    var p = _p;
+    var editable = p.CanEdit && p.Status is DevPatternStatus.Draft or DevPatternStatus.Review;
+    <p><a href="dev/patterns">← @L("Библиотека рисунков")</a></p>
+    <div class="page-head">
+        <h1>@p.Number · @p.Name <span class="tag @(p.Status == DevPatternStatus.Approved ? "ok" : p.Status == DevPatternStatus.Review ? "warn" : null)">@L(p.StatusName)</span></h1>
+        <span class="muted">@L("версия {0}", p.CurrentVersion)@(p.CopiedFrom is null ? "" : " · " + L("копия {0}", p.CopiedFrom))</span>
+    </div>
+    <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.DevPattern" EntityId="Id" />
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    @if (p.ReadyForProgrammingAtUtc is not null && !p.HasProgram)
+    {
+        <div class="flash" role="status">@L("Рисунок готов к программированию — ждёт программу машины от программиста {0}.", p.Programmer ?? "—")</div>
+    }
+
+    <div class="actions">
+        @if (p.CanEdit && p.Status == DevPatternStatus.Draft)
+        {
+            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Review)">@L("На проверку")</button>
+        }
+        @if (p.CanApprove && p.Status is DevPatternStatus.Draft or DevPatternStatus.Review)
+        {
+            <button type="button" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Approved)">@L("Утвердить рисунок")</button>
+        }
+        @if (p.CanEdit && p.Status is DevPatternStatus.Review or DevPatternStatus.Approved)
+        {
+            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть в черновик")</button>
+        }
+        @if (p.CanEdit && p.Status != DevPatternStatus.Archived)
+        {
+            <button type="button" class="secondary" disabled="@_busy" @onclick="() => _versionForm = !_versionForm">@L("Новая версия")</button>
+            <button type="button" class="secondary" disabled="@_busy" @onclick="ReadyAsync">@L("Рисунок готов к программированию")</button>
+            <button type="button" class="secondary" disabled="@_busy" @onclick="CopyAsync">@L("Скопировать рисунок")</button>
+            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Archived)">@L("В архив")</button>
+        }
+        @if (p.CanEdit && p.Status == DevPatternStatus.Archived)
+        {
+            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть из архива")</button>
+        }
+    </div>
+    @if (_versionForm)
+    {
+        <form class="inline-form" @onsubmit="NewVersionAsync">
+            <label>@L("Что изменено") <input @bind="_change" maxlength="@DevPatternVersion.TextMaxLength" required /></label>
+            <label>@L("Причина") <input @bind="_changeReason" maxlength="@DevPatternVersion.TextMaxLength" /></label>
+            <button type="submit" disabled="@_busy">@L("Создать версию")</button>
+        </form>
+    }
+
+    <div class="dev-panels">
+        <div class="panel">
+            <h2>@L("Свойства рисунка")</h2>
+            @if (editable && _form is not null && _options is not null)
+            {
+                <form class="grid" @onsubmit="SaveAsync">
+                    <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                        <label>@L("Название") <input @bind="_form.Name" maxlength="@DevPattern.NameMaxLength" required /></label>
+                        <label>
+                            @L("Вид рисунка")
+                            <select @bind="_form.Kind">
+                                @foreach (var k in DevPattern.Kinds)
+                                {
+                                    <option value="@k">@L(DevPattern.KindName(k))</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("Раппорт: петель") <input type="number" min="1" max="@DevPattern.MaxRapport" inputmode="numeric" @bind="_form.Rw" /></label>
+                        <label>@L("Раппорт: рядов") <input type="number" min="1" max="@DevPattern.MaxRapport" inputmode="numeric" @bind="_form.Rh" /></label>
+                        <label>@L("Длина протяжки, мм") <input type="number" min="0" step="0.1" inputmode="decimal" @bind="_form.Float" /></label>
+                        <label>
+                            @L("Класс машины")
+                            <select @bind="_form.Class">
+                                <option value="">—</option>
+                                @foreach (var c in _options.MachineClasses)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label>@L("Ширина изделия, петель") <input type="number" min="1" inputmode="numeric" @bind="_form.Width" /></label>
+                        <label>@L("Правило выравнивания") <input @bind="_form.Align" maxlength="@DevPattern.AlignmentMaxLength" placeholder="@L("если раппорт не кратен ширине")" /></label>
+                        <label>
+                            @L("Дессинатор")
+                            <select @bind="_form.Dessinator">
+                                <option value="">—</option>
+                                @foreach (var u in _options.Users)
+                                {
+                                    <option value="@u.Id">@u.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label>
+                            @L("Программист")
+                            <select @bind="_form.Programmer">
+                                <option value="">—</option>
+                                @foreach (var u in _options.Users)
+                                {
+                                    <option value="@u.Id">@u.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="wide">@L("Описание") <textarea @bind="_form.Note" maxlength="@DevPattern.NoteMaxLength" rows="2"></textarea></label>
+                        <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить свойства")</button></div>
+                    </fieldset>
+                </form>
+            }
+            else
+            {
+                <dl class="dev-facts">
+                    <div><dt>@L("Вид рисунка")</dt><dd>@L(p.KindName)</dd></div>
+                    <div><dt>@L("Раппорт")</dt><dd>@(p.RapportWidth is null ? "—" : L("{0} петель × {1} рядов", p.RapportWidth, p.RapportHeight?.ToString() ?? "—"))</dd></div>
+                    <div><dt>@L("Длина протяжки, мм")</dt><dd>@(p.MaxFloatMm?.ToString("0.#", CultureInfo.InvariantCulture) ?? "—")</dd></div>
+                    <div><dt>@L("Класс машины")</dt><dd>@(p.MachineClass ?? "—")</dd></div>
+                    <div><dt>@L("Ширина изделия, петель")</dt><dd>@(p.ProductWidthLoops?.ToString() ?? "—")</dd></div>
+                    <div><dt>@L("Правило выравнивания")</dt><dd>@(p.AlignmentRule ?? "—")</dd></div>
+                    <div><dt>@L("Дессинатор")</dt><dd>@(p.Dessinator ?? "—")</dd></div>
+                    <div><dt>@L("Программист")</dt><dd>@(p.Programmer ?? "—")</dd></div>
+                </dl>
+                @if (p.Note is not null) { <p class="small">@p.Note</p> }
+            }
+        </div>
+
+        <div class="panel">
+            <h2>@L("Цвета и доли в раппорте")</h2>
+            @if (p.Colors.Count == 0)
+            {
+                <p class="muted">@L("Цветов пока нет: добавьте вручную или посчитайте по файлу-сетке.")</p>
+            }
+            else
+            {
+                <div class="scroll">
+                    <table class="dev-matrix">
+                        <thead><tr><th>№</th><th>@L("Цвет")</th><th class="num">@L("Доля, %")</th><th class="num">@L("Нитеводитель")</th><th>@L("Цвет сетки")</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var c in p.Colors)
+                            {
+                                var color = c;
+                                <tr>
+                                    <td>@c.No</td>
+                                    @if (editable)
+                                    {
+                                        <td><input value="@c.Name" maxlength="@DevPatternColor.NameMaxLength" aria-label="@L("Цвет {0}: название", c.No)" @onchange="e => Edit(color).Name = e.Value as string" /></td>
+                                        <td class="num"><input type="number" min="0" max="100" step="0.01" inputmode="decimal" style="max-width: 90px" value="@c.SharePercent?.ToString(CultureInfo.InvariantCulture)"
+                                                               aria-label="@L("Цвет {0}: доля", c.No)" @onchange="e => Edit(color).Share = Dec(e.Value)" /></td>
+                                        <td class="num"><input type="number" min="1" max="@DevMachine.MaxFeeders" inputmode="numeric" style="max-width: 70px" value="@c.Feeder"
+                                                               aria-label="@L("Цвет {0}: нитеводитель", c.No)" @onchange="e => Edit(color).Feeder = int.TryParse(e.Value as string, out var f) ? f : null" /></td>
+                                    }
+                                    else
+                                    {
+                                        <td>@c.Name</td>
+                                        <td class="num">@(c.SharePercent?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—")</td>
+                                        <td class="num">@(c.Feeder?.ToString() ?? "—")</td>
+                                    }
+                                    <td>@if (c.GridKey is { } g) { @if (g.StartsWith('#')) { <span class="dev-swatch" style="background:@g"></span> } @g }</td>
+                                    <td>
+                                        @if (editable)
+                                        {
+                                            <button type="button" class="secondary" disabled="@(_busy || !_edits.ContainsKey(c.Id))" @onclick="() => SaveColorAsync(color)">@L("Сохранить")</button>
+                                            <button type="button" class="secondary" disabled="@_busy" @onclick="() => RemoveColorAsync(color)" aria-label="@L("Убрать цвет {0}", c.No)">×</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="small @(Math.Abs(p.ShareTotal - 100) > 0.5m && p.ShareTotal > 0 ? "late-text" : "muted")">@L("Сумма долей: {0} %", p.ShareTotal.ToString("0.##", CultureInfo.InvariantCulture))</p>
+            }
+            @if (editable)
+            {
+                <form class="inline-form" @onsubmit="AddColorAsync">
+                    <label>@L("Новый цвет") <input @bind="_colorName" maxlength="@DevPatternColor.NameMaxLength" placeholder="@L("Фон")" required /></label>
+                    <label>@L("Доля, %") <input type="number" min="0" max="100" step="0.01" inputmode="decimal" style="max-width: 90px" @bind="_colorShare" /></label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить цвет")</button>
+                    <button type="button" class="secondary" disabled="@_busy" @onclick="ComputeAsync">@L("Посчитать доли по файлу")</button>
+                </form>
+            }
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>@L("Колориты: цвет → пряжа")</h2>
+        @if (p.Colors.Count == 0)
+        {
+            <p class="muted">@L("Сначала добавьте цвета рисунка.")</p>
+        }
+        else
+        {
+            <div class="scroll">
+                <table class="dev-matrix">
+                    <thead>
+                        <tr>
+                            <th>@L("Цвет")</th>
+                            @foreach (var cw in p.Colorways)
+                            {
+                                <th>@cw.Name @if (cw.UsedInModels > 0) { <span class="muted small">(@L("в моделях: {0}", cw.UsedInModels))</span> }</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in p.Colors)
+                        {
+                            var color = c;
+                            <tr>
+                                <td>@c.No. @c.Name</td>
+                                @foreach (var cw in p.Colorways)
+                                {
+                                    var colorway = cw;
+                                    var y = cw.Yarns.FirstOrDefault(x => x.ColorId == c.Id);
+                                    <td>
+                                        @if (editable && _options is not null)
+                                        {
+                                            <select aria-label="@L("{0}, {1}: пряжа", cw.Name, c.Name)" disabled="@_busy"
+                                                    @onchange="e => SetYarnAsync(colorway, color, long.TryParse(e.Value as string, out var i) ? i : null, y?.Swatch)">
+                                                <option value="" selected="@(y?.ItemId is null)">—</option>
+                                                @foreach (var o in _options.Yarns)
+                                                {
+                                                    <option value="@o.Id" selected="@(y?.ItemId == o.Id)">@o.Name</option>
+                                                }
+                                            </select>
+                                            <input type="color" value="@(y?.Swatch ?? "#cccccc")" aria-label="@L("{0}, {1}: цвет на экране", cw.Name, c.Name)" disabled="@_busy"
+                                                   @onchange="e => SetYarnAsync(colorway, color, y?.ItemId, e.Value as string)" />
+                                        }
+                                        else
+                                        {
+                                            @if (y?.Swatch is { } s) { <span class="dev-swatch" style="background:@s"></span> }
+                                            @(y?.ItemName ?? "—")
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        @if (editable)
+        {
+            <form class="inline-form" @onsubmit="AddColorwayAsync">
+                <label>@L("Новый колорит") <input @bind="_colorwayName" maxlength="@DevPatternColorway.NameMaxLength" placeholder="@L("Молочный / красный")" required /></label>
+                <button type="submit" class="secondary" disabled="@_busy">@L("Добавить колорит")</button>
+            </form>
+        }
+    </div>
+
+    <div class="panel">
+        <h2>@L("Файлы версии {0}", p.CurrentVersion)</h2>
+        <div class="actions">
+            @if (editable)
+            {
+                <label class="file-pick" title="@L("До 50 МБ")">@L("Загрузить рисунок ({0})", DevPatternFile.Accept(DevPatternFileKind.Pattern))
+                    <InputFile OnChange="e => UploadAsync(e, DevPatternFileKind.Pattern)" accept="@DevPatternFile.Accept(DevPatternFileKind.Pattern)" disabled="@_busy" /></label>
+            }
+            @if (p.CanProgram && p.Status != DevPatternStatus.Archived)
+            {
+                <label>@L("Время вязки изделия, мин") <input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_knitMinutes" /></label>
+                <label class="file-pick" title="@L("До 50 МБ")">@L("Загрузить программу (.sin, .dat)")
+                    <InputFile OnChange="e => UploadAsync(e, DevPatternFileKind.Program)" accept="@DevPatternFile.Accept(DevPatternFileKind.Program)" disabled="@_busy" /></label>
+            }
+        </div>
+        @foreach (var v in p.Versions)
+        {
+            <h3>@L("Версия {0}", v.Version) <span class="muted small">· @v.Change@(v.Reason is null ? "" : " — " + v.Reason) · @v.CreatedBy, @Local(v.CreatedAtUtc)</span></h3>
+            @if (v.Files.Count == 0)
+            {
+                <p class="muted small">@L("Файлов нет.")</p>
+            }
+            else
+            {
+                <ul class="dev-files">
+                    @foreach (var f in v.Files)
+                    {
+                        <li>
+                            @if (f.IsImage) { <a href="dev/pattern-files/@f.Id" download data-enhance-nav="false"><img class="dev-thumb" src="dev/pattern-files/@(f.Id)?inline=1" alt="@f.FileName" loading="lazy" /></a> }
+                            <a href="dev/pattern-files/@f.Id" download data-enhance-nav="false">@f.FileName</a>
+                            <span class="muted small">@(f.Kind == DevPatternFileKind.Program ? L("программа") : L("рисунок"))@(f.KnitSeconds is { } s ? " · " + L("вязка {0}", DevFormat.Duration(s)) : "") · @f.UploadedBy</span>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </div>
+
+    <div class="panel">
+        <h2>@L("Использован в моделях")</h2>
+        @if (p.UsedIn.Count == 0)
+        {
+            <p class="muted">@L("Рисунок пока не выбран ни в одной модели.")</p>
+        }
+        else
+        {
+            <ul class="dev-files">
+                @foreach (var u in p.UsedIn)
+                {
+                    <li><a href="dev/models/@u.ModelId">@u.Number</a> @u.Name <span class="muted small">· @L("версия {0}", u.Version?.ToString() ?? "—")@(u.Colorway is null ? "" : " · " + u.Colorway) · @L(u.StageName)</span></li>
+                }
+            </ul>
+        }
+    </div>
+    <div class="panel">
+        <h2>@L("Обсуждение")</h2>
+        <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.DevPattern" TargetId="Id" />
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private sealed class Form
+    {
+        public string? Name { get; set; }
+        public DevPatternKind Kind { get; set; }
+        public int? Rw { get; set; }
+        public int? Rh { get; set; }
+        public decimal? Float { get; set; }
+        public string Class { get; set; } = string.Empty;
+        public int? Width { get; set; }
+        public string? Align { get; set; }
+        public string? Note { get; set; }
+        public string Dessinator { get; set; } = string.Empty;
+        public string Programmer { get; set; } = string.Empty;
+    }
+
+    private sealed class ColorEdit
+    {
+        public string? Name { get; set; }
+        public decimal? Share { get; set; }
+        public int? Feeder { get; set; }
+    }
+
+    private DevPatternDto? _p;
+    private DevPatternOptionsDto? _options;
+    private Form? _form;
+    private readonly Dictionary<long, ColorEdit> _edits = [];
+    private bool _notFound;
+    private bool _busy;
+    private bool _versionForm;
+    private string? _change;
+    private string? _changeReason;
+    private string? _colorName;
+    private decimal? _colorShare;
+    private string? _colorwayName;
+    private decimal? _knitMinutes;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded == Id)
+        {
+            return;
+        }
+
+        _loaded = Id;
+        try
+        {
+            _options ??= await Patterns.OptionsAsync();
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync(bool keepEdits = false)
+    {
+        _p = await Patterns.GetAsync(Id);
+        if (!keepEdits)
+        {
+            _edits.Clear(); // после ошибки введённое в таблицу цветов остаётся на экране
+        }
+
+        _form = new Form
+        {
+            Name = _p.Name, Kind = _p.Kind, Rw = _p.RapportWidth, Rh = _p.RapportHeight, Float = _p.MaxFloatMm, Class = _p.MachineClassId?.ToString() ?? "",
+            Width = _p.ProductWidthLoops, Align = _p.AlignmentRule, Note = _p.Note, Dessinator = _p.DessinatorUserId?.ToString() ?? "",
+            Programmer = _p.ProgrammerUserId?.ToString() ?? "",
+        };
+    }
+
+    private ColorEdit Edit(DevPatternColorDto c)
+    {
+        if (!_edits.TryGetValue(c.Id, out var e))
+        {
+            e = new ColorEdit { Name = c.Name, Share = c.SharePercent, Feeder = c.Feeder };
+            _edits[c.Id] = e;
+        }
+
+        return e;
+    }
+
+    private static decimal? Dec(object? v) =>
+        decimal.TryParse((v as string)?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? d : null;
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture);
+
+    private static long? Id_(string s) => long.TryParse(s, out var v) ? v : null;
+
+    private Task SaveAsync() => RunAsync(() => Patterns.UpdateAsync(Id, new DevPatternValues(_form!.Name, _form.Kind, _form.Rw, _form.Rh, _form.Float, Id_(_form.Class),
+        _form.Width, _form.Align, _form.Note, Id_(_form.Dessinator), Id_(_form.Programmer)), _p!.RowVersion), L("Свойства сохранены."));
+
+    private Task MoveAsync(DevPatternStatus target) => RunAsync(() => Patterns.MoveAsync(Id, target, _p!.RowVersion), L("Статус рисунка: {0}.", L(DevPattern.StatusName(target))));
+
+    private Task NewVersionAsync() => RunAsync(async () =>
+    {
+        var v = await Patterns.NewVersionAsync(Id, _change, _changeReason, _p!.RowVersion);
+        _versionForm = false;
+        _change = _changeReason = null;
+        _message = L("Создана версия {0}.", v);
+    }, null);
+
+    private Task ReadyAsync() => RunAsync(() => Patterns.ReadyForProgrammingAsync(Id, _p!.RowVersion), L("Задача программисту отправлена."));
+
+    private async Task CopyAsync()
+    {
+        long id = 0;
+        await RunAsync(async () => id = await Patterns.CopyAsync(Id), null);
+        if (id != 0 && !_isError)
+        {
+            Nav.NavigateTo($"dev/patterns/{id}");
+        }
+    }
+
+    private Task AddColorAsync() => RunAsync(async () =>
+    {
+        await Patterns.AddColorAsync(Id, _colorName, _colorShare, null);
+        _colorName = null;
+        _colorShare = null;
+    }, L("Цвет добавлен."));
+
+    private Task SaveColorAsync(DevPatternColorDto c) => RunAsync(() =>
+    {
+        var e = Edit(c);
+        return Patterns.UpdateColorAsync(c.Id, e.Name, e.Share, e.Feeder, c.RowVersion);
+    }, L("Цвет сохранён."));
+
+    private Task RemoveColorAsync(DevPatternColorDto c) => RunAsync(() => Patterns.RemoveColorAsync(c.Id), L("Цвет убран."));
+
+    private Task ComputeAsync() => RunAsync(async () =>
+    {
+        var n = await Patterns.ComputeSharesAsync(Id);
+        _message = L("Доли посчитаны по файлу: цветов — {0}.", n);
+    }, null);
+
+    private Task AddColorwayAsync() => RunAsync(async () =>
+    {
+        await Patterns.AddColorwayAsync(Id, _colorwayName);
+        _colorwayName = null;
+    }, L("Колорит добавлен."));
+
+    private Task SetYarnAsync(DevPatternColorwayDto cw, DevPatternColorDto c, long? itemId, string? swatch) =>
+        RunAsync(() => Patterns.SetYarnAsync(cw.Id, c.Id, itemId, swatch), L("Раскладка сохранена."));
+
+    private Task UploadAsync(InputFileChangeEventArgs args, DevPatternFileKind kind) => RunAsync(async () =>
+    {
+        await using var stream = args.File.OpenReadStream(DevFile.MaxBytes);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        int? seconds = kind == DevPatternFileKind.Program && _knitMinutes is > 0 ? (int)Math.Round(_knitMinutes.Value * 60) : null;
+        await Patterns.AddFileAsync(Id, kind, args.File.Name, ms.ToArray(), seconds);
+    }, kind == DevPatternFileKind.Program ? L("Программа загружена.") : L("Файл загружен."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message ??= success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync(keepEdits: _isError);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+}
