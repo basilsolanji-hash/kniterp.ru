@@ -437,7 +437,40 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var offer = await db.CrmOffers.AsNoTracking().Include(o => o.Lines).SingleOrDefaultAsync(o => o.Id == offerId && o.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("КП");
         var deal = await CrmAccess.Deals(db, ctx).AsNoTracking().SingleOrDefaultAsync(d => d.Id == offer.DealId, ct) ?? throw new NotFoundException("КП");
-        return await CreateOrderCoreAsync(ctx, deal, warehouseId, offer.Lines.Select(l => (l.ItemId, l.Quantity, l.Price)).ToList(), offer.Number, ct);
+
+        // D129 (аудит 12.10.2026, п. 7): повторное «Заказ по КП» (двойное нажатие, вторая вкладка) возвращает уже созданный
+        // и не отменённый заказ, а не второй такой же; проверка — под блокировкой КП. Просроченное КП в заказ не превращается.
+        await using var tx = await db.BeginTransactionAsync(ct);
+        await db.LockAsync($"kniterp.crm.offer.{offer.Id}", ct);
+        var existing = await (from l in db.CrmDealOrders.AsNoTracking()
+                              where l.OrganizationId == ctx.OrganizationId && l.OfferId == offer.Id
+                              join o in db.SalesOrders.AsNoTracking() on l.SalesOrderId equals o.Id
+                              where o.Status != SalesOrderStatus.Cancelled
+                              orderby o.Id descending
+                              select (long?)o.Id).FirstOrDefaultAsync(ct);
+        if (existing is { } orderId)
+        {
+            return orderId;
+        }
+
+        var today = await LocalTodayAsync(ctx, ct);
+        if (offer.ValidUntil < today)
+        {
+            var validUntil = offer.ValidUntil.ToString("dd.MM.yyyy");
+            throw new BusinessRuleException("crm.offer.expired",
+                $"КП {offer.Number} действовало до {validUntil} — срок истёк. Составьте новое КП с актуальными ценами.");
+        }
+
+        var created = await CreateOrderCoreAsync(ctx, deal, warehouseId, offer.Lines.Select(l => (l.ItemId, l.Quantity, l.Price)).ToList(), offer.Number, ct,
+            offer.Id);
+        await tx.CommitAsync(ct);
+        return created;
+    }
+
+    private async Task<DateOnly> LocalTodayAsync(AccessContext ctx, CancellationToken ct)
+    {
+        var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
+        return CrmEvents.Today(clock.UtcNow, tz);
     }
 
     /// <summary>Подтвердить заказ покупателя по сделке, не уходя из карточки (права — модуля продаж). Сделка станет «Выиграна» (D607).</summary>
@@ -455,7 +488,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
     }
 
     private async Task<long> CreateOrderCoreAsync(AccessContext ctx, CrmDeal deal, long warehouseId, IReadOnlyList<(long ItemId, decimal Quantity, decimal Price)> lines,
-        string? offerNumber, CancellationToken ct)
+        string? offerNumber, CancellationToken ct, long? offerId = null)
     {
         var id = deal.Id;
         if (deal.Outcome == CrmDealOutcome.Lost)
@@ -464,8 +497,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         var options = await sales.GetOptionsAsync(ct: ct);
-        var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, tz));
+        var today = await LocalTodayAsync(ctx, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         var orderId = await sales.CreateOrderAsync(new SalesOrderHeader(today, deal.CounterpartyId, warehouseId, deal.ExpectedCloseDate is { } d && d >= today ? d : null,
             null, true, offerNumber is null ? $"Из сделки {deal.Number}" : $"Из сделки {deal.Number} по {offerNumber}"), ct);
@@ -478,7 +510,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
             await sales.SetOrderLineAsync(orderId, line.ItemId, line.Quantity, line.Price, vat, (await sales.GetOrderAsync(orderId, ct)).RowVersion, ct);
         }
 
-        db.CrmDealOrders.Add(CrmDealOrder.Create(ctx.OrganizationId, id, orderId, ctx.UserId, clock.UtcNow));
+        db.CrmDealOrders.Add(CrmDealOrder.Create(ctx.OrganizationId, id, orderId, ctx.UserId, clock.UtcNow, offerId));
         Audit(ctx, AuditActions.CrmDealOrderCreated, id, null, order.Number, offerNumber ?? deal.Number);
         await db.SaveChangesAsync(ct);
         // Б2 (D665): создан заказ — сделка «Согласование» (только вперёд).

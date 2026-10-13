@@ -3096,6 +3096,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<long>("DealId")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("OfferId")
+                        .HasColumnType("bigint");
+
                     b.Property<long>("OrganizationId")
                         .HasColumnType("bigint");
 
@@ -3112,6 +3115,10 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("OrganizationId", "DealId")
                         .HasDatabaseName("ix_crm_deal_orders_deal");
+
+                    b.HasIndex("OrganizationId", "OfferId")
+                        .HasDatabaseName("ix_crm_deal_orders_offer")
+                        .HasFilter("[OfferId] IS NOT NULL");
 
                     b.HasIndex("OrganizationId", "SalesOrderId");
 
@@ -12463,6 +12470,13 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_crm_deal_orders_deal");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmOffer", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "OfferId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_deal_orders_offer");
 
                     b.HasOne("KnitErp.Domain.Sales.SalesOrder", null)
                         .WithMany()

@@ -795,6 +795,11 @@ public sealed partial class SalesService(
     {
         var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
         var order = await LoadOrderAsync(ctx, orderId, ct);
+        // D129 (аудит 12.10.2026, п. 1): повторное нажатие открывает уже созданный черновик, а не создаёт второй на тот же остаток.
+        if (await OpenDraftAsync(ctx, orderId, ct) is { } draft)
+        {
+            return draft;
+        }
         var moved = await MovedAsync(ctx, [orderId], ct);
         // D300 (сессия 4): строки-услуги со склада не отгружаются — они закрываются актом или УПД.
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
@@ -924,14 +929,23 @@ public sealed partial class SalesService(
     public async Task CancelPaymentAsync(long id, string? reason, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await DemandEditAsync(ct);
+        await using var tx = await db.BeginTransactionAsync(ct);
         var payment = await db.CustomerPayments.SingleOrDefaultAsync(p => p.Id == id && p.OrganizationId == ctx.OrganizationId, ct)
                       ?? throw new NotFoundException("Оплата");
         payment.EnsureVersion(payment.RowVersion, rowVersion);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, payment.PaymentDate, ct);
+        // D129 (аудит 12.10.2026, п. 4): отмена оплаты, пришедшей в кассу, уменьшает кассу — она не уходит в минус (D84),
+        // как при отмене денежного поступления. Касса блокируется до конца транзакции.
+        if (payment.Status == CustomerPaymentStatus.Posted && payment.MoneyAccountId is { } account)
+        {
+            await KnitErp.Application.Finance.MoneyService.EnsureCashAsync(db, ctx.OrganizationId, account, payment.Amount, ct);
+        }
+
         payment.Cancel(ctx.UserId, reason, clock.UtcNow);
         Audit(ctx, AuditActions.CustomerPaymentCancelled, nameof(CustomerPayment), id, $"{payment.Amount:0.00}", "отменена",
             $"{payment.Number}: {payment.CancelReason}");
         await db.SaveOrConflictAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     /// <summary>Разноски оплаты и заказы покупателя, на которые можно разнести остаток (D85).</summary>
@@ -1163,6 +1177,21 @@ public sealed partial class SalesService(
             .Where(r => r.OrganizationId == ctx.OrganizationId && r.Kind == kind && !r.IsArchived)
             .Select(r => new { r.Id, r.Name }).ToListAsync(ct);
         return (reasons.FirstOrDefault(r => r.Name == preferred) ?? reasons.FirstOrDefault())?.Id;
+    }
+
+    /// <summary>Черновик документа «отгрузку» по заказу, если он уже есть (D129). Открыть его можно только с правом создавать складские документы.</summary>
+    private async Task<long?> OpenDraftAsync(AccessContext ctx, long orderId, CancellationToken ct)
+    {
+        var draft = await db.StockDocuments.AsNoTracking()
+            .Where(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId == orderId && d.Kind == StockOperationKind.Shipment
+                        && d.Status == StockDocumentStatus.Draft)
+            .OrderByDescending(d => d.Id).Select(d => (long?)d.Id).FirstOrDefaultAsync(ct);
+        if (draft is not null)
+        {
+            await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
+        }
+
+        return draft;
     }
 
     private async Task<DateOnly> TodayAsync(AccessContext ctx, CancellationToken ct)

@@ -642,6 +642,7 @@ public sealed class MoySkladImportService(
         /// <summary>Отпечатки связанных позиций — только для предпросмотра (при загрузке позиции меняются по ходу, читаются заново).</summary>
         private Dictionary<long, string>? _hashes;
         private List<VatRate> _rates = [];
+        private DateOnly _today;
 
         public async Task<MoySkladPreviewDto> PreviewAsync(CancellationToken ct)
         {
@@ -746,6 +747,7 @@ public sealed class MoySkladImportService(
                 .Where(g => g.Count() == 1).ToDictionary(g => g.Key, g => g.Single().Id, StringComparer.OrdinalIgnoreCase);
             _units = await db.Units.AsNoTracking().Where(u => u.OrganizationId == org).ToListAsync(ct);
             _rates = await db.VatRates.AsNoTracking().Include(r => r.Periods).Where(r => r.OrganizationId == org && !r.IsArchived).ToListAsync(ct);
+            _today = await KnitErp.Application.Sales.SalesDiscounts.TodayAsync(db, org, clock, ct); // D129: дата организации, а не UTC
             await LoadAllAsync(MoySkladEntities.Uom, _uoms, ct);
             await LoadAllAsync(MoySkladEntities.Country, _countries, ct);
         }
@@ -1598,7 +1600,7 @@ public sealed class MoySkladImportService(
         private long? Vat(MsRow row, ItemType type)
         {
             var rates = _rates;
-            var today = DateOnly.FromDateTime(clock.UtcNow);
+            var today = _today;
             VatRate? rate = row.VatEnabled == false
                 ? rates.FirstOrDefault(r => r.Kind == VatRateKind.Exempt)
                 : (row.EffectiveVat ?? row.Vat) is { } percent ? rates.FirstOrDefault(r => r.PercentOn(today) == percent) : null;

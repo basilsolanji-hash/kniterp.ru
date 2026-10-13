@@ -69,7 +69,8 @@ public sealed class SupplierPriceListService(IKnitErpDbContext db, IAccessGuard 
         var items = await (from i in db.Items.AsNoTracking()
                            where i.OrganizationId == org && !i.IsArchived
                            select new { i.Id, i.Code, i.Name, i.PurchasePrice, i.VatRateId, i.Type }).ToDictionaryAsync(i => i.Id, ct);
-        var today = DateOnly.FromDateTime(clock.UtcNow);
+        // D129 (аудит 12.10.2026, п. 8): ставка НДС «на сегодня» — по дате организации, а не UTC (в Ташкенте до 05:00 UTC уже завтра).
+        var today = await KnitErp.Application.Sales.SalesDiscounts.TodayAsync(db, org, clock, ct);
         var rates = (await db.VatRates.AsNoTracking().Include(r => r.Periods).Where(r => r.OrganizationId == org).ToListAsync(ct)).ToDictionary(r => r.Id, r => r.PercentOn(today));
 
         var result = new List<PriceListRowDto>();

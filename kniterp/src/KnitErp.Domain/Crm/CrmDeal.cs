@@ -346,9 +346,17 @@ public sealed class CrmDealOrder
     public long OrganizationId { get; private set; }
     public long DealId { get; private set; }
     public long SalesOrderId { get; private set; }
+
+    /// <summary>КП, по которому создан заказ («Заказ по КП», D625); повторное нажатие возвращает этот заказ (D129).</summary>
+    public long? OfferId { get; private set; }
+
     public long CreatedByUserId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 
-    public static CrmDealOrder Create(long organizationId, long dealId, long salesOrderId, long userId, DateTime nowUtc) =>
-        new() { OrganizationId = organizationId, DealId = dealId, SalesOrderId = salesOrderId, CreatedByUserId = userId, CreatedAtUtc = nowUtc };
+    public static CrmDealOrder Create(long organizationId, long dealId, long salesOrderId, long userId, DateTime nowUtc, long? offerId = null) =>
+        new()
+        {
+            OrganizationId = organizationId, DealId = dealId, SalesOrderId = salesOrderId, OfferId = offerId, CreatedByUserId = userId,
+            CreatedAtUtc = nowUtc,
+        };
 }

@@ -5618,5 +5618,9 @@
   "Нельзя выдать право за пределами своей области: «{0}».": "Oʻz sohangizdan tashqarida huquq berib boʻlmaydi: «{0}».",
   "Нельзя выдать право на всю организацию: «{0}» у вас только в своей области.": "Butun tashkilotga huquq berib boʻlmaydi: «{0}» sizda faqat oʻz sohangizda.",
   "Нельзя подписаться на событие «{0}»: нет права «{1}».": "«{0}» hodisasiga obuna boʻlib boʻlmaydi: «{1}» huquqi yoʻq.",
-  "Свою роль меняет другой администратор или Владелец.": "Oʻz rolingizni boshqa administrator yoki Ega oʻzgartiradi."
+  "Свою роль меняет другой администратор или Владелец.": "Oʻz rolingizni boshqa administrator yoki Ega oʻzgartiradi.",
+  "КП {0} действовало до {1} — срок истёк. Составьте новое КП с актуальными ценами.": "{0} TT {1} gacha amal qilgan — muddati o‘tgan. Dolzarb narxlar bilan yangi TT tuzing.",
+  "Нельзя сторнировать: по заказу проведены возвраты {0} — {1}, а без этого документа останется {2}. Сначала сторнируйте возвраты.": "Storno qilib bo‘lmaydi: buyurtma bo‘yicha {0} qaytarishlari o‘tkazilgan — {1}, bu hujjatsiz esa {2} qoladi. Avval qaytarishlarni storno qiling.",
+  "Отгрузка больше заказанного: {0} — отгружается {1}, по заказу осталось отгрузить {2}. Проверьте другие отгрузки по этому заказу.": "Jo‘natish buyurtmadan ko‘p: {0} — {1} jo‘natilmoqda, buyurtma bo‘yicha {2} jo‘natish qoldi. Ushbu buyurtma bo‘yicha boshqa jo‘natishlarni tekshiring.",
+  "Поступление больше заказанного: {0} — поступает {1}, по заказу осталось получить {2}. Лишнее оформите поступлением без заказа.": "Kirim buyurtmadan ko‘p: {0} — {1} kirmoqda, buyurtma bo‘yicha {2} olish qoldi. Ortiqchasini buyurtmasiz kirim bilan rasmiylashtiring."
 }
