@@ -25,10 +25,22 @@ public sealed class StockDocument
         [StockOperationKind.Receipt, StockOperationKind.Transfer, StockOperationKind.WriteOff, StockOperationKind.ReturnToSupplier,
          StockOperationKind.Shipment, StockOperationKind.CustomerReturn];
 
-    /// <summary>Документы с контрагентом: поставщиком (поступление, возврат поставщику) или покупателем (отгрузка, возврат).</summary>
-    public static bool WithSupplier(StockOperationKind kind) => kind is StockOperationKind.Receipt or StockOperationKind.ReturnToSupplier;
+    /// <summary>
+    /// D354 (сессия 4, Р1): все виды документа, включая акты услуг. Акты оформляются по заказу (кнопкой в карточке заказа),
+    /// поэтому кнопок «Новый …» в реестре у них нет — для этого <see cref="Kinds"/> без актов.
+    /// </summary>
+    public static readonly IReadOnlyList<StockOperationKind> AllKinds =
+        [.. Kinds, StockOperationKind.ServiceAct, StockOperationKind.SupplierServiceAct];
 
-    public static bool WithCustomer(StockOperationKind kind) => kind is StockOperationKind.Shipment or StockOperationKind.CustomerReturn;
+    /// <summary>
+    /// Документы с контрагентом: поставщиком (поступление, возврат поставщику, акт поставщика) или покупателем (отгрузка, возврат,
+    /// акт услуг).
+    /// </summary>
+    public static bool WithSupplier(StockOperationKind kind) =>
+        kind is StockOperationKind.Receipt or StockOperationKind.ReturnToSupplier or StockOperationKind.SupplierServiceAct;
+
+    public static bool WithCustomer(StockOperationKind kind) =>
+        kind is StockOperationKind.Shipment or StockOperationKind.CustomerReturn or StockOperationKind.ServiceAct;
 
     /// <summary>Расходные виды: товар уходит со склада документа.</summary>
     public static bool IsOutgoing(StockOperationKind kind) =>
@@ -88,13 +100,27 @@ public sealed class StockDocument
         StockOperationKind.ReturnToSupplier => "ВП",
         StockOperationKind.Shipment => "ОТ",
         StockOperationKind.CustomerReturn => "ВК",
+        StockOperationKind.ServiceAct => "АУ",
+        StockOperationKind.SupplierServiceAct => "АП",
         _ => throw new BusinessRuleException("stock.document.kind", "Выберите вид документа."),
     };
+
+    /// <summary>
+    /// D354 (сессия 4, Р1): счётчик номеров. Акт услуг берёт номер из общего счётчика с отгрузками (с префиксом «АУ»): УПД по акту —
+    /// счёт-фактура, а его порядковый номер — цифры номера документа (<c>PrintService.VatInvoiceNumber</c>), и номера отгрузок и актов
+    /// не должны совпадать.
+    /// </summary>
+    public static string CounterPrefix(StockOperationKind kind) =>
+        NumberPrefix(kind == StockOperationKind.ServiceAct ? StockOperationKind.Shipment : kind);
+
+    /// <summary>Номер документа из номера счётчика (<see cref="CounterPrefix"/>): «ОТ-000016» → «АУ-000016» для акта услуг.</summary>
+    public static string NumberFromCounter(StockOperationKind kind, string counterNumber) =>
+        NumberPrefix(kind) + counterNumber[CounterPrefix(kind).Length..];
 
     public static StockDocument Create(
         long organizationId, string number, StockOperationKind kind, StockDocumentHeader header, long createdBy, DateTime nowUtc)
     {
-        if (!Kinds.Contains(kind))
+        if (!AllKinds.Contains(kind))
         {
             throw new BusinessRuleException("stock.document.kind", "Выберите вид документа.");
         }
@@ -304,6 +330,9 @@ public sealed class StockDocument
                     result.Add((WarehouseId, line.ItemId, -line.Quantity));
                     result.Add((TargetWarehouseId!.Value, line.ItemId, line.Quantity));
                     break;
+                case StockOperationKind.ServiceAct:
+                case StockOperationKind.SupplierServiceAct:
+                    break; // D354 (сессия 4, Р1): услуги не хранятся — акт движений не пишет
             }
         }
 
@@ -356,7 +385,7 @@ public sealed class StockDocument
             throw new BusinessRuleException("stock.document.sales_order_not_allowed", "Заказ покупателя указывается только в отгрузке и возврате от покупателя.");
         }
 
-        if (Kind == StockOperationKind.ReturnToSupplier && h.CounterpartyId is null)
+        if (Kind is (StockOperationKind.ReturnToSupplier or StockOperationKind.SupplierServiceAct) && h.CounterpartyId is null)
         {
             throw new BusinessRuleException("stock.document.supplier_required", "Укажите поставщика, которому возвращается товар.");
         }
@@ -364,6 +393,17 @@ public sealed class StockDocument
         if (!withSupplier && h.PurchaseOrderId is not null)
         {
             throw new BusinessRuleException("stock.document.order_not_allowed", "Заказ поставщику указывается только в поступлении и возврате.");
+        }
+
+        // D354 (сессия 4, Р1): цена и НДС услуги — из строки заказа, поэтому акт без заказа не оформляется.
+        if (Kind == StockOperationKind.ServiceAct && h.SalesOrderId is null)
+        {
+            throw new BusinessRuleException("stock.service_act.order_required", "Акт оказания услуг оформляется по заказу покупателя.");
+        }
+
+        if (Kind == StockOperationKind.SupplierServiceAct && h.PurchaseOrderId is null)
+        {
+            throw new BusinessRuleException("stock.service_act.purchase_order_required", "Акт услуг поставщика оформляется по заказу поставщику.");
         }
 
         WarehouseId = h.WarehouseId;
@@ -379,7 +419,7 @@ public sealed class StockDocument
     /// <summary>Строки комплектов (D352) — только в отгрузке и возврате по заказу покупателя.</summary>
     private void EnsureBundleAllowed()
     {
-        if (!WithCustomer(Kind) || SalesOrderId is null)
+        if (Kind is not (StockOperationKind.Shipment or StockOperationKind.CustomerReturn) || SalesOrderId is null)
         {
             throw new BusinessRuleException("item.bundle_not_stocked",
                 "Комплект не хранится на складе — в складском документе укажите его компоненты.");

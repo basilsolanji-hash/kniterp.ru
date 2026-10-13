@@ -71,13 +71,16 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
     {
         var ctx = await DemandAsync(filter, ct);
         var lines = await SoldAsync(ctx, filter, ct);
-        var costs = await CostsAsync(ctx, filter.To,
-            lines.SelectMany(l => l.Components?.Select(c => c.ItemId) ?? [l.ItemId]).Distinct().ToList(), ct);
+        var costIds = lines.SelectMany(l => l.Components?.Select(c => c.ItemId) ?? [l.ItemId]).Distinct().ToList();
+        var costs = await CostsAsync(ctx, filter.To, costIds, ct);
+        // D354 (сессия 4, Р1): у услуги нет складской себестоимости — 0 (источник «услуга»), если она не куплена по акту поставщика.
+        var services = (await db.Items.AsNoTracking().Where(i => costIds.Contains(i.Id) && i.Type == KnitErp.Domain.Catalog.ItemType.Service)
+            .Select(i => i.Id).ToListAsync(ct)).ToHashSet();
         // D352 (сессия 4, Р2): себестоимость комплекта — по компонентам, фактически ушедшим в его строках (состав на момент отгрузки),
         // по той же оценке единицы, что у остальных позиций; неизвестна у одного компонента — неизвестна у комплекта.
         decimal? CostOf(SoldLine l) => l.Components is { } parts
             ? parts.All(p => costs.ContainsKey(p.ItemId)) ? parts.Sum(p => Money.Round(costs[p.ItemId].Cost * p.Quantity)) : null
-            : costs.TryGetValue(l.ItemId, out var c) ? Money.Round(c.Cost * l.Quantity) : null;
+            : costs.TryGetValue(l.ItemId, out var c) ? Money.Round(c.Cost * l.Quantity) : services.Contains(l.ItemId) ? 0m : (decimal?)null;
 
         List<ProfitRowDto> rows;
         if (grouping == ProfitGrouping.Item)
@@ -87,7 +90,7 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
             {
                 var known = g.All(l => CostOf(l) is not null);
                 var source = g.Any(l => l.Components is not null) ? CostSource.Components
-                    : costs.TryGetValue(g.Key, out var c) ? c.Source : CostSource.None;
+                    : costs.TryGetValue(g.Key, out var c) ? c.Source : services.Contains(g.Key) ? CostSource.Service : CostSource.None;
                 return new ProfitRowDto(g.Key, items[g.Key].Code, items[g.Key].Name, items[g.Key].Symbol, g.Sum(l => l.Quantity), g.Sum(l => l.Revenue),
                     known ? g.Sum(l => CostOf(l)!.Value) : 0, known, known ? source : CostSource.None);
             }).ToList();
@@ -129,7 +132,8 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
     {
         var docs = from d in db.StockDocuments.AsNoTracking()
                    where d.OrganizationId == ctx.OrganizationId && d.SalesOrderId != null && d.Status == StockDocumentStatus.Posted
-                         && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn)
+                         // D354 (сессия 4, Р1): акт оказания услуг — реализация услуг, как отгрузка.
+                         && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn || d.Kind == StockOperationKind.ServiceAct)
                          && d.DocumentDate >= filter.From && d.DocumentDate <= filter.To
                    join c in db.Counterparties.AsNoTracking() on d.CounterpartyId equals c.Id
                    select new { d, c.Name, c.Inn };
@@ -179,7 +183,9 @@ public sealed class SalesAnalyticsService(IKnitErpDbContext db, IAccessGuard gua
             .Where(c => c.OrganizationId == ctx.OrganizationId && c.Status == TechCardStatus.Active).ToDictionaryAsync(c => c.ItemId, ct);
         var received = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == ctx.OrganizationId && d.PurchaseOrderId != null && d.Status == StockDocumentStatus.Posted
-                        && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.ReturnToSupplier) && d.DocumentDate <= asOf)
+                        // D354 (сессия 4, Р1): услуга, купленная по акту поставщика (доставка), — её закупочная себестоимость.
+                        && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.ReturnToSupplier || d.Kind == StockOperationKind.SupplierServiceAct)
+                        && d.DocumentDate <= asOf)
             .SelectMany(d => d.Lines.Select(l => new { OrderId = d.PurchaseOrderId!.Value, d.Kind, l.ItemId, l.Quantity }))
             .ToListAsync(ct);
         var orderIds = received.Select(r => r.OrderId).Distinct().ToList();

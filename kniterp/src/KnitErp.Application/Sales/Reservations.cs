@@ -44,7 +44,7 @@ internal static class Reservations
                             && d.Status == StockDocumentStatus.Posted)
                 .SelectMany(d => d.Lines.Select(l => new { d.Id, OrderId = d.SalesOrderId!.Value, d.Kind, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }))
                 .ToListAsync(ct))
-            .Select(m => ((m.Id, m.OrderId, m.Kind), m.ItemId, m.Quantity, m.BundleItemId, m.BundleQuantity)));
+            .Select(m => ((m.Id, m.OrderId, Kind: StockOperationKinds.OrderKind(m.Kind)), m.ItemId, m.Quantity, m.BundleItemId, m.BundleQuantity))); // D354
         var net = moved.GroupBy(m => (m.Key.OrderId, m.ItemId))
             .ToDictionary(g => g.Key, g => g.Sum(m => m.Key.Kind == StockOperationKind.Shipment ? m.Quantity : -m.Quantity));
 

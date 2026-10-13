@@ -414,6 +414,11 @@ else
         {
             <button type="button" @onclick="ShipmentAsync" disabled="@_busy">@L("Оформить отгрузку")</button>
         }
+        @* D354 (сессия 4, Р1): строки-услуги закрываются актом оказания услуг — без движений склада. *@
+        @if (_order.CanCreateDocuments && _order.Status == SalesOrderStatus.Confirmed && _order.Lines.Any(l => !l.Stocked && l.Left > 0))
+        {
+            <button type="button" class="secondary" @onclick="ServiceActAsync" disabled="@_busy">@L("Акт на услуги")</button>
+        }
         @if (_order.CanCreateDocuments && _order.Shipped != ShipmentState.None)
         {
             <button type="button" class="secondary" @onclick="ReturnAsync" disabled="@_busy">@L("Оформить возврат")</button>
@@ -444,7 +449,7 @@ else
                         <td>@d.Date.ToString("dd.MM.yyyy")</td>
                         <td><span class="tag @StockDocumentsPage.StatusClass(d.Status)">@L(d.StatusName)</span></td>
                         <td>
-                            @if (_order.CanSeePrices && d.Kind == StockOperationKind.Shipment && d.Status == StockDocumentStatus.Posted)
+                            @if (_order.CanSeePrices && d.Kind is StockOperationKind.Shipment or StockOperationKind.ServiceAct && d.Status == StockDocumentStatus.Posted)
                             {
                                 <a href="print/upd/@d.Id" target="_blank" rel="noopener">@L("УПД")</a>
                             }
@@ -828,6 +833,8 @@ else
     private Task CancelAsync() => RunAsync(() => Sales.CancelOrderAsync(Id, _order!.RowVersion), L("Заказ отменён."));
 
     private Task ShipmentAsync() => GoAsync(() => Sales.CreateShipmentAsync(Id));
+
+    private Task ServiceActAsync() => GoAsync(() => Sales.CreateServiceActAsync(Id));
 
     private Task ReturnAsync() => GoAsync(() => Sales.CreateReturnAsync(Id));
 
