@@ -55,6 +55,46 @@ public sealed class CatMinPriceOrderTests(SqlTestHost host) : IClassFixture<SqlT
         Assert.DoesNotContain("ШП-1", audit.Before);
     }
 
+    /// <summary>
+    /// D142: подсветка строки (D350) и проверка подтверждения (D1104) — одним правилом, в величине минимальной цены (вид цены по умолчанию —
+    /// с НДС). Заказ без НДС: 819,67 без НДС = 1 000,00 с НДС 22 % — не ниже; 819 = 999,18 — ниже; заказ с НДС: 999,99 — ниже, 1 000 — нет.
+    /// </summary>
+    [SqlFact]
+    public async Task Min_price_is_compared_in_its_own_vat_basis_for_highlight_and_confirmation()
+    {
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+        var vat = (await s.VatRates.ActiveAsync())[0].Id;
+        var a = await s.Catalog.CreateItemAsync(new ItemCommand("А-1", "Свитер", ItemType.Finished, piece, null, vat));
+        var b = await s.Catalog.CreateItemAsync(new ItemCommand("Б-1", "Шапка", ItemType.Finished, piece, null, vat));
+        foreach (var id in new[] { a, b })
+        {
+            var trade = await s.Trade.GetAsync(id);
+            await s.Trade.SaveAsync(id, new ItemTradeDetails(PaymentSubject.Goods, false, TrackingType.None, null, 1000m), trade.RowVersion);
+        }
+
+        var store = await s.Warehouses.CreateWarehouseAsync("Склад", null);
+        var customer = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Магазин»", null, null, false, true, null));
+        var day = new DateOnly(2026, 10, 1);
+        foreach (var (withVat, ok, low) in new[] { (false, 819.67m, 819m), (true, 1000m, 999.99m) })
+        {
+            var order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(day, customer, store, day, null, withVat, null));
+            await s.Sales.SetOrderLineAsync(order, a, 1, ok, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
+            await s.Sales.SetOrderLineAsync(order, b, 1, low, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
+            var dto = await s.Sales.GetOrderAsync(order);
+            Assert.False(dto.Lines.Single(l => l.ItemId == a).BelowMinimum);
+            Assert.True(dto.Lines.Single(l => l.ItemId == b).BelowMinimum);
+
+            // Проверка подтверждения видит то же самое: нарушение только у «Б-1», граница — в величине минимальной цены.
+            var issue = Assert.Single(dto.PriceIssues!);
+            Assert.Equal(("Б-1", 1000m), (issue.Code, issue.Limit));
+            Assert.True(issue.Actual < issue.Limit);
+            Assert.Equal("sales.price.override_reason",
+                (await Assert.ThrowsAsync<KnitErp.Domain.Common.BusinessRuleException>(() => s.Sales.ConfirmOrderAsync(order, dto.RowVersion))).Code);
+        }
+    }
+
     private async Task<CreatedOrganization> CreateOrgAsync()
     {
         int[] w = [2, 4, 10, 3, 5, 9, 4, 6, 8];

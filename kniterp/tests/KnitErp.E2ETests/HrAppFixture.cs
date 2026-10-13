@@ -26,6 +26,11 @@ public sealed class HrAppFixture : IAsyncLifetime
     public string Password { get; } = "E2e-" + Guid.NewGuid().ToString("N")[..16] + "!a";
     public IBrowser Browser { get; private set; } = default!;
 
+    /// <summary>D143: покупатель с вводным остатком, авансом, отгрузкой и возвратом — для акта сверки.</summary>
+    public const string SettlementCustomerName = "ООО «Покупатель для сверки»";
+
+    public long SettlementCustomerId { get; private set; }
+
     public async Task InitializeAsync()
     {
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(SqlTestHost.EnvVar)))
@@ -35,6 +40,7 @@ public sealed class HrAppFixture : IAsyncLifetime
 
         await _host.InitializeAsync();
         await SeedAsync();
+        SettlementCustomerId = await SeedSettlementCustomerAsync(SettlementCustomerName);
         await using (var db = _host.NewDb())
         {
             _app = await WebAppProcess.StartAsync(Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.GetConnectionString(db.Database)!);
@@ -178,6 +184,46 @@ public sealed class HrAppFixture : IAsyncLifetime
         }
 
         return email;
+    }
+
+    /// <summary>
+    /// D143: покупатель для акта сверки — вводный остаток 5 000 (30 дней назад), аванс 2 000, заказ 10 × 1 000 отгружен, возвращено 3.
+    /// Сальдо на конец — 10 000 в нашу пользу. Готовится до запуска приложения: после входа Владельца имена пользователей зашифрованы ключом
+    /// приложения, и сервисы теста их уже не читают.
+    /// </summary>
+    private async Task<long> SeedSettlementCustomerAsync(string name)
+    {
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "Europe/Moscow"));
+        await using var s = _host.As(_org!.OwnerUserId, _org.OrganizationId);
+        var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+        var store = await s.Warehouses.CreateWarehouseAsync("Склад сверки " + Guid.NewGuid().ToString("N")[..4], null);
+        var item = await s.Catalog.CreateItemAsync(new KnitErp.Application.Catalog.ItemCommand("СВ-" + Guid.NewGuid().ToString("N")[..6], "Свитер для сверки",
+            KnitErp.Domain.Catalog.ItemType.Finished, piece, null));
+        long reason;
+        await using (var db = _host.NewDb())
+        {
+            reason = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.FirstAsync(db.OperationReasons
+                .Where(r => r.OrganizationId == _org.OrganizationId && r.Kind == KnitErp.Domain.Warehousing.StockOperationKind.Receipt).Select(r => r.Id));
+        }
+
+        var stock = await s.Documents.CreateAsync(KnitErp.Domain.Warehousing.StockOperationKind.Receipt,
+            new KnitErp.Domain.Warehousing.StockDocumentHeader(store, null, null, reason, today, null));
+        await s.Documents.SetLineAsync(stock, item, 10, (await s.Documents.GetAsync(stock)).RowVersion);
+        await s.Documents.PostAsync(stock, (await s.Documents.GetAsync(stock)).RowVersion);
+
+        var customer = await s.Counterparties.CreateAsync(new KnitErp.Application.Catalog.CounterpartyCommand(name, null, null, false, true, null));
+        var entity = (await s.LegalEntities.ListAsync()).Single(e => e.IsDefault).Id;
+        await s.Sales.AddOpeningBalanceAsync(customer, entity, today.AddDays(-30), 5_000m, null);
+        await s.Sales.CreatePaymentAsync(today, customer, null, 2_000m, null);
+        var order = await s.Sales.CreateOrderAsync(new KnitErp.Domain.Sales.SalesOrderHeader(today, customer, store, null, null, true, null));
+        await s.Sales.SetOrderLineAsync(order, item, 10, 1_000m, null, (await s.Sales.GetOrderAsync(order)).RowVersion);
+        await s.Sales.ConfirmOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion);
+        var ship = await s.Sales.CreateShipmentAsync(order);
+        await s.Documents.PostAsync(ship, (await s.Documents.GetAsync(ship)).RowVersion);
+        var ret = await s.Sales.CreateReturnAsync(order);
+        await s.Documents.SetLineAsync(ret, item, 3, (await s.Documents.GetAsync(ret)).RowVersion);
+        await s.Documents.PostAsync(ret, (await s.Documents.GetAsync(ret)).RowVersion);
+        return customer;
     }
 
     /// <summary>Вымышленный ИНН юрлица с верной контрольной цифрой.</summary>

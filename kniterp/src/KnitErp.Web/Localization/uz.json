@@ -6438,5 +6438,6 @@
   "наш долг": "bizning qarzimiz",
   "В документе есть комплекты: загрузка из Excel заменила бы их строки. Измените строки вручную.": "Hujjatda to‘plamlar bor: Excel’dan yuklash ularning qatorlarini almashtirib yuboradi. Qatorlarni qo‘lda o‘zgartiring.",
   "Отгрузки, акты и возвраты": "Jo‘natmalar, dalolatnomalar va qaytarishlar",
-  "Поступления, акты и возвраты": "Kirimlar, dalolatnomalar va qaytarishlar"
+  "Поступления, акты и возвраты": "Kirimlar, dalolatnomalar va qaytarishlar",
+  "Период закрыт по {0:dd.MM.yyyy}: разноски оплат на заказ {1} — в закрытом периоде, перевести переплату в аванс нельзя. Открыть период может Владелец.": "Davr {0:dd.MM.yyyy} gacha yopilgan: {1} buyurtmasiga to‘lovlar taqsimoti yopiq davrda, ortiqcha to‘lovni avansga o‘tkazib bo‘lmaydi. Davrni Egasi ochishi mumkin."
 }

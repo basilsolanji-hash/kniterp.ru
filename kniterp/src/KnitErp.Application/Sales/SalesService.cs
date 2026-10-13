@@ -50,12 +50,17 @@ public sealed record SalesOrderRowDto(
 public sealed record SalesOrderLineDto(
     long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Price, decimal? VatPercent,
     decimal? Amount, decimal? VatAmount, decimal Shipped, decimal Returned, decimal DiscountPercent = 0, decimal Stock = 0, decimal ReservedByOthers = 0,
-    bool Stocked = true, bool IsBundle = false, decimal ManualDiscountPercent = 0, string? DiscountSources = null, decimal? MinPrice = null)
+    bool Stocked = true, bool IsBundle = false, decimal ManualDiscountPercent = 0, string? DiscountSources = null, decimal? MinPrice = null,
+    bool PricesIncludeVat = true, bool MinPriceIncludesVat = true)
 {
     public decimal Left => Math.Max(0, Quantity - Shipped + Returned);
 
-    /// <summary>D350 (сессия 4, Р3): цена после скидки строки ниже минимальной цены позиции — предупреждение, не запрет.</summary>
-    public bool BelowMinimum => Price is { } p && TradeRules.BelowMinimum(decimal.Round(p * (1 - DiscountPercent / 100m), 2), MinPrice);
+    /// <summary>
+    /// D350 (сессия 4, Р3): цена после скидки строки ниже минимальной цены позиции — подсветка. D142: в величине минимальной цены
+    /// (как базовый вид цены, MinPriceIncludesVat), тем же правилом, что проверка подтверждения D1104.
+    /// </summary>
+    public bool BelowMinimum => Price is { } p
+                                && TradeRules.BelowMinimum(p * (1 - DiscountPercent / 100m), PricesIncludeVat, VatPercent, MinPrice, MinPriceIncludesVat);
     public decimal Available => Stock - ReservedByOthers;
 
     /// <summary>Не хватает для отгрузки оставшегося — подсветка в строке. Услуга (D300) со склада не отгружается — ей не «не хватает».</summary>
@@ -297,6 +302,11 @@ public sealed partial class SalesService(
             return (whole, whole - Math.Min(whole, BundleExpansion.Available(itemId, specs, free, precision)));
         }
 
+        // D142: минимальная цена позиции задана в величине базового вида цены (как в проверке D1104).
+        var minIncludesVat = prices && items.Values.Any(i => i.MinPrice != null)
+            ? await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId && t.IsDefault).Select(t => (bool?)t.IncludesVat)
+                .SingleOrDefaultAsync(ct) ?? true
+            : true;
         var lines = order.Lines.Select(l =>
         {
             var item = items[l.ItemId];
@@ -306,7 +316,8 @@ public sealed partial class SalesService(
                 Moved(l.ItemId, StockOperationKind.Shipment), Moved(l.ItemId, StockOperationKind.CustomerReturn),
                 l.DiscountPercent, onHand, reserved, !services.Contains(l.ItemId) || bundles.Contains(l.ItemId), bundles.Contains(l.ItemId),
                 l.ManualDiscountPercent, prices ? l.DiscountSources : null,
-                prices ? item.MinPrice : null); // D350: минимальная цена — только с правом на цены
+                prices ? item.MinPrice : null, // D350: минимальная цена — только с правом на цены
+                order.PricesIncludeVat, minIncludesVat); // D142
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);

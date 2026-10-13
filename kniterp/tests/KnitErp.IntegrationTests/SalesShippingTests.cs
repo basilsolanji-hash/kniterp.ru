@@ -351,6 +351,40 @@ public sealed class SalesShippingTests(SqlTestHost host) : IClassFixture<SqlTest
         }
     }
 
+    /// <summary>D140: зачёт переплаты в аванс и возврат денег меняют разноски — в закрытом периоде нельзя, как общий разносчик (D133).</summary>
+    [SqlFact]
+    public async Task Overpayment_release_and_refund_respect_closed_period()
+    {
+        var f = await SetUpAsync();
+        await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
+        await StockAsync(s, f, f.Sweater, 20);
+        var order = await ConfirmedAsync(s, f, f.Customer, (f.Sweater, 10));
+        await s.Sales.CreatePaymentAsync(Day, f.Customer, order, 10_000m, null);
+        await ShipAsync(s, order);
+        var ret = await s.Sales.CreateReturnAsync(order);
+        await s.Documents.SetLineAsync(ret, f.Sweater, 3, (await s.Documents.GetAsync(ret)).RowVersion);
+        await s.Documents.PostAsync(ret, (await s.Documents.GetAsync(ret)).RowVersion);
+
+        // Оплата и заказ — 09.10, период закрыт по 09.10: разноску не снять ни зачётом в аванс, ни возвратом денег.
+        await s.Period.CloseAsync(Day, null);
+        var closed = await Assert.ThrowsAsync<BusinessRuleException>(() => s.Sales.ReleaseOverpaymentAsync(order));
+        Assert.Equal("period.closed", closed.Code);
+        Assert.Contains("закрыт", closed.Message);
+        Assert.Equal("period.closed", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            s.Sales.RefundAsync(order, new RefundCommand(Day.AddDays(1), 1_000m, null, null)))).Code);
+        var panel = await s.Sales.ShippingPanelAsync(order);
+        Assert.Equal((3_000m, 0m), (panel.Overpaid!.Value, panel.CustomerAdvance!.Value));
+        await using (var db = host.NewDb())
+        {
+            Assert.Equal(1, await db.CustomerPaymentAllocations.CountAsync(a => a.OrderId == order));
+            Assert.False(await db.CustomerRefunds.AnyAsync(r => r.SalesOrderId == order));
+        }
+
+        // Период открыт с причиной — зачёт проходит.
+        await s.Period.ReopenAsync(null, "Исправление расчётов", (await s.Period.GetAsync()).RowVersion);
+        Assert.Equal(3_000m, await s.Sales.ReleaseOverpaymentAsync(order));
+    }
+
     private static string Code(string gtin, string serial) => "01" + gtin + "21" + serial;
 
     private async Task<decimal> BalanceAsync(Fixture f, long warehouse, long item)
