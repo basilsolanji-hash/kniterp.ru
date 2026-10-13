@@ -114,6 +114,62 @@ public sealed class HrPersonalDataTests(SqlTestHost host) : IClassFixture<SqlTes
     }
 
     [SqlFact]
+    public async Task Birth_date_is_masked_without_personal_data_right_and_employee_always_sees_own_data()
+    {
+        // D130: дата рождения — ПДн: в списке и карточке только с правом просмотра ПДн или своя; Excel-выгрузка ПДн не содержит.
+        var org = await host.CreateOrganizationAsync();
+        var (_, _, mine) = await host.HireAsync(org, "0001");
+        var (_, _, other) = await host.HireAsync(org, "0002", "Сидорова");
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            foreach (var id in new[] { mine, other })
+            {
+                await s.Employees.SetBirthdayAsync(id, new DateOnly(1990, 4, 2), false, (await s.Employees.GetAsync(id)).RowVersion);
+            }
+
+            var list = await s.Employees.ListAsync(new EmployeeFilter());
+            Assert.True(list.CanEditPersonalData);
+            Assert.All(list.Employees, e => Assert.Equal(new DateOnly(1990, 4, 2), e.BirthDate));
+        }
+
+        // Кладовщик, он же сотрудник «0001»: видит всех сотрудников без дат рождения, кроме своей; свои ПДн читает без уровня «С» в роли.
+        var keeper = await host.InviteActiveAsync(org, SystemRoles.Storekeeper, employeeId: mine);
+        await using (var s = host.As(keeper, org.OrganizationId))
+        {
+            var list = await s.Employees.ListAsync(new EmployeeFilter());
+            Assert.False(list.CanEditPersonalData);
+            Assert.Equal(new DateOnly(1990, 4, 2), list.Employees.Single(e => e.Id == mine).BirthDate);
+            Assert.Null(list.Employees.Single(e => e.Id == other).BirthDate);
+            Assert.Null((await s.Employees.GetAsync(other)).BirthDate);
+        }
+
+        await using (var hr = host.Hr(keeper, org.OrganizationId))
+        {
+            Assert.Equal(mine, (await hr.PersonalData.GetAsync(mine)).EmployeeId);
+            Assert.True((await hr.PersonalData.SummaryAsync(mine)).CanViewPersonalData);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => hr.PersonalData.GetAsync(other));
+        }
+
+        // Администратор ведёт сотрудников, но ПДн ему — только индивидуальной выдачей (D200): дат не видит и не меняет.
+        var admin = await host.InviteActiveAsync(org, SystemRoles.Administrator);
+        await using (var s = host.As(admin, org.OrganizationId))
+        {
+            var row = await s.Employees.GetAsync(other);
+            Assert.Null(row.BirthDate);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Employees.SetBirthdayAsync(other, null, false, row.RowVersion));
+            Assert.DoesNotContain("Дата рождения", EmployeeExchangeService.Columns);
+            var xlsx = await s.EmployeeExchange.ExportAsync();
+            var sheet = SqlTestHost.Spreadsheet.ReadFirstSheet(new MemoryStream(xlsx), 1000);
+            Assert.DoesNotContain(sheet.SelectMany(r => r), c => c.Contains("1990"));
+        }
+
+        await using var db = host.NewDb();
+        Assert.Equal(new DateOnly(1990, 4, 2), await db.Employees.Where(e => e.Id == other).Select(e => e.BirthDate).SingleAsync());
+        Assert.True(await db.AuditEntries.AnyAsync(a => a.OrganizationId == org.OrganizationId && a.ActorUserId == keeper
+                                                        && a.Action == AuditActions.PersonalDataViewed && a.EntityId == mine.ToString()));
+    }
+
+    [SqlFact]
     public async Task Consent_lifecycle_and_scans_are_insert_only()
     {
         var org = await host.CreateOrganizationAsync();

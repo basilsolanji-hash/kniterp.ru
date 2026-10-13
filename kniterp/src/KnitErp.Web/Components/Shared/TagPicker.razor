@@ -5,6 +5,7 @@
 @*
     D103: теги объекта как метки Finder — цветные точки с названием, «+ Тег» ищет существующий или создаёт новый с цветом.
     Сервис тегов работает со своим контекстом базы, поэтому виджет не мешает операциям карточки.
+    D130: «+ Тег» и «×» — только с правом изменения объекта, «Создать тег» — с правом управления справочником тегов (проверяет сервер).
 *@
 <div class="tag-picker" aria-label="@L("Теги")">
     @foreach (var t in _tags)
@@ -12,13 +13,13 @@
         <span class="tag-chip">
             <span class="tag-dot @(t.Color == TagColor.None ? "hollow" : null)" style="background: @t.Css"></span>
             <a href="tags/@t.Id">@t.Name</a>
-            @if (!ReadOnly)
+            @if (CanAssign)
             {
                 <button type="button" class="tag-x" @onclick="() => RemoveAsync(t)" disabled="@_busy" aria-label="@L("Снять тег {0}", t.Name)">×</button>
             }
         </span>
     }
-    @if (!ReadOnly)
+    @if (CanAssign)
     {
         <button type="button" class="tag-add" @onclick="ToggleAsync" disabled="@_busy" aria-expanded="@(_open ? "true" : "false")">+ @L("Тег")</button>
     }
@@ -28,14 +29,18 @@
         var matches = _all.Where(t => _tags.All(x => x.Id != t.Id) && (text.Length == 0 || t.Name.Contains(text, StringComparison.OrdinalIgnoreCase))).Take(12).ToList();
         var exact = _all.Any(t => string.Equals(t.Name, text, StringComparison.OrdinalIgnoreCase));
         <div class="tag-pop" role="dialog" aria-label="@L("Поставить тег")">
-            <input @bind="_text" @bind:event="oninput" placeholder="@L("Найти или создать тег")" maxlength="@Tag.NameMaxLength" aria-label="@L("Название тега")" />
+            <input @bind="_text" @bind:event="oninput" placeholder="@(_rights.CanManage ? L("Найти или создать тег") : L("Найти тег"))" maxlength="@Tag.NameMaxLength" aria-label="@L("Название тега")" />
             @foreach (var t in matches)
             {
                 <button type="button" class="tag-option" @onclick="() => AssignAsync(t.Id)" disabled="@_busy">
                     <span class="tag-dot @(t.Color == TagColor.None ? "hollow" : null)" style="background: @t.Css"></span> @t.Name
                 </button>
             }
-            @if (text.Length > 0 && !exact)
+            @if (text.Length > 0 && !exact && !_rights.CanManage)
+            {
+                <p class="muted small">@L("Такого тега нет. Новые теги создаёт сотрудник с правом «Теги: управление справочником».")</p>
+            }
+            else if (text.Length > 0 && !exact)
             {
                 <div class="tag-colors" role="radiogroup" aria-label="@L("Цвет")">
                     @foreach (var c in TagColors.All)
@@ -49,7 +54,7 @@
             }
             else if (matches.Count == 0)
             {
-                <p class="muted small">@L("Введите название нового тега.")</p>
+                <p class="muted small">@(_rights.CanManage ? L("Введите название нового тега.") : L("Подходящих тегов нет."))</p>
             }
         </div>
     }
@@ -77,13 +82,21 @@
     private TagColor _color = TagColor.Blue;
     private string? _error;
     private (TaggedEntity, long) _loaded;
+    private TagRightsDto _rights = new(false, false);
+
+    private bool CanAssign => !ReadOnly && _rights.CanAssign;
 
     protected override async Task OnParametersSetAsync()
     {
         if (_loaded != (Entity, EntityId))
         {
             _loaded = (Entity, EntityId);
-            await RunAsync(async () => _tags = await Tags.ForEntityAsync(Entity, EntityId));
+            _rights = new(false, false);
+            await RunAsync(async () =>
+            {
+                _tags = await Tags.ForEntityAsync(Entity, EntityId);
+                _rights = await Tags.RightsAsync(Entity, EntityId);
+            });
         }
     }
 

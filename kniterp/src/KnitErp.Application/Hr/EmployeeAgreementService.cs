@@ -115,7 +115,7 @@ public sealed class EmployeeAgreementService(
         var ctx = await guard.CurrentAsync(ct);
         var employee = await db.Employees.AsNoTracking().SingleOrDefaultAsync(e => e.Id == employeeId && e.OrganizationId == ctx.OrganizationId, ct)
                        ?? throw new NotFoundException("Сотрудник");
-        if (!ctx.Permissions.Has(Permissions.PersonalDataView) && !(employee.UserId == ctx.UserId))
+        if (!Structure.EmployeeService.CanReadPersonalData(ctx, employee.UserId))
         {
             await guard.DenyAsync(ctx, Permissions.PersonalDataView, ct);
         }

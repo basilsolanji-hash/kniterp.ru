@@ -53,7 +53,7 @@ else
                     <label>@L("Фамилия") <InputText @bind-Value="_form.LastName" maxlength="100" required /></label>
                     <label>@L("Имя") <InputText @bind-Value="_form.FirstName" maxlength="100" required /></label>
                     <label>@L("Отчество") <InputText @bind-Value="_form.MiddleName" maxlength="100" /></label>
-                    @if (_mode == Mode.Edit)
+                    @if (_mode == Mode.Edit && _list?.CanEditPersonalData == true) @* D130: дата рождения — ПДн *@
                     {
                         <label>@L("Дата рождения") <InputDate @bind-Value="_form.BirthDate" /></label>
                         <label class="inline"><InputCheckbox @bind-Value="_form.ShareBirthday" /> @L("Сотрудник согласен, чтобы коллеги видели день рождения (без года)")</label>

@@ -17,6 +17,9 @@
     <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
 }
 
+@* D130: справочник тегов меняют только с правом «Теги: управление справочником»; остальные видят теги и отмеченное. *@
+@if (CanManage)
+{
 <form class="panel" @onsubmit="SaveAsync">
     <h2>@(_editId is null ? L("Новый тег") : L("Изменить тег"))</h2>
     <div class="grid">
@@ -42,6 +45,7 @@
         }
     </div>
 </form>
+}
 
 <label class="check"><input type="checkbox" @bind="_archived" @bind:after="LoadAsync" /> @L("Показать архив")</label>
 @if (_tags is null)
@@ -65,13 +69,16 @@ else
                         <td class="num">@t.Count</td>
                         <td>@(t.IsFavorite ? "✓" : "")</td>
                         <td>
-                            <div class="row-actions">
-                                @if (!t.IsArchived)
-                                {
-                                    <button type="button" class="secondary" @onclick="() => Edit(t)" disabled="@_busy">@L("Изменить")</button>
-                                }
-                                <button type="button" class="secondary" @onclick="() => ArchiveAsync(t)" disabled="@_busy">@(t.IsArchived ? L("Вернуть") : L("В архив"))</button>
-                            </div>
+                            @if (CanManage)
+                            {
+                                <div class="row-actions">
+                                    @if (!t.IsArchived)
+                                    {
+                                        <button type="button" class="secondary" @onclick="() => Edit(t)" disabled="@_busy">@L("Изменить")</button>
+                                    }
+                                    <button type="button" class="secondary" @onclick="() => ArchiveAsync(t)" disabled="@_busy">@(t.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                                </div>
+                            }
                         </td>
                     </tr>
                 }
@@ -81,6 +88,11 @@ else
 }
 
 @code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private bool CanManage => CurrentAccess.Has(Permissions.TagManage);
+
     private IReadOnlyList<TagDto>? _tags;
     private long? _editId;
     private byte[] _rowVersion = [];

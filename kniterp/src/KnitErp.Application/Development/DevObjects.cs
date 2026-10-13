@@ -15,8 +15,8 @@ public static class DevObjects
 {
     public static void Register()
     {
-        ObjectDirectory.Register(TaggedEntity.DevDetail, DescribeDetailsAsync);
-        ObjectDirectory.Register(TaggedEntity.DevMachine, DescribeMachinesAsync);
+        ObjectDirectory.Register(TaggedEntity.DevDetail, DescribeDetailsAsync, Permissions.DevEdit, Permissions.DevPattern);
+        ObjectDirectory.Register(TaggedEntity.DevMachine, DescribeMachinesAsync, Permissions.DevSettings);
     }
 
     private static bool CanSee(AccessContext ctx) =>
