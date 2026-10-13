@@ -446,6 +446,7 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
             t.HasCheckConstraint("ck_items_min_price", "[MinPrice] IS NULL OR [MinPrice] >= 0");
             // D300: услуга — со ставкой НДС, без веса, объёма, неснижаемого остатка и модификаций.
             t.HasTrigger("tr_items_service_without_stock");
+            t.HasTrigger("tr_items_unit_locked"); // D339
             t.HasCheckConstraint("ck_items_service",
                 "[Type] <> 10 OR ([VatRateId] IS NOT NULL AND [WeightKg] IS NULL AND [VolumeM3] IS NULL AND [MinStock] IS NULL AND [ParentItemId] IS NULL)");
             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");
@@ -1217,7 +1218,7 @@ internal sealed class SalesStageRuleConfiguration : IEntityTypeConfiguration<Sal
 {
     public void Configure(EntityTypeBuilder<SalesStageRule> b)
     {
-        b.ToTable("sales_stage_rules", t => t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 8"));
+        b.ToTable("sales_stage_rules", t => t.HasCheckConstraint("ck_sales_stage_rules_trigger", "[Trigger] BETWEEN 1 AND 9"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Trigger).HasConversion<byte>();

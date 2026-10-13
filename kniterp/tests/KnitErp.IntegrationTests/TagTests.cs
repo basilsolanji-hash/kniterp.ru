@@ -4,6 +4,7 @@ using KnitErp.Application.Common;
 using KnitErp.Application.Organizations;
 using KnitErp.Application.Purchasing;
 using KnitErp.Application.Sales;
+using KnitErp.Application.Tagging;
 using KnitErp.Application.Warehousing;
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Catalog;
@@ -93,6 +94,97 @@ public sealed class TagTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             Assert.Contains(await s.Tags.ForEntityAsync(TaggedEntity.Item, item), x => x.Id == urgent);
             Assert.True(await s.Db.AuditEntries.AnyAsync(a => a.Action == KnitErp.Domain.Audit.AuditActions.TagAssigned && a.EntityId == urgent.ToString()));
         }
+    }
+
+    [SqlFact]
+    public async Task Tag_directory_needs_manage_right_and_tagging_needs_object_edit_right()
+    {
+        // D130: справочник тегов — право tag.manage; ставить и снимать тег — право изменения объекта в его области.
+        var (org, yarn, shop, item) = await SetUpAsync();
+        long tag, docYarn, docShop;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            var supplier = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Нить»", null, null, true, false, null));
+            var reason = await s.Db.OperationReasons.Where(r => r.OrganizationId == org.OrganizationId && r.Kind == StockOperationKind.Receipt)
+                .Select(r => r.Id).FirstAsync();
+            docYarn = await s.Documents.CreateAsync(StockOperationKind.Receipt, new StockDocumentHeader(yarn, null, supplier, reason, new DateOnly(2026, 10, 11), null));
+            docShop = await s.Documents.CreateAsync(StockOperationKind.Receipt, new StockDocumentHeader(shop, null, supplier, reason, new DateOnly(2026, 10, 11), null));
+            tag = await s.Tags.CreateAsync("Срочно", TagColor.Red);
+            Assert.Equal(new TagRightsDto(true, true), await s.Tags.RightsAsync(TaggedEntity.Item, item));
+        }
+
+        // Кладовщик склада пряжи: тегов не создаёт и не меняет; ставит существующий тег на документ своего склада,
+        // но не на позицию (справочник он только видит) и не на документ чужого склада.
+        var keeper = await InviteActiveAsync(org, SystemRoles.Storekeeper, yarn);
+        await using (var s = host.As(keeper, org.OrganizationId))
+        {
+            var t = (await s.Tags.ListAsync()).Single();
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.CreateAsync("Своё", TagColor.Blue));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.UpdateAsync(tag, "Горит", TagColor.Orange, true, t.RowVersion));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.ArchiveAsync(tag, true, t.RowVersion));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.AssignAsync(TaggedEntity.StockDocument, docYarn, null, "Своё"));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.AssignAsync(TaggedEntity.Item, item, tag));
+            await Assert.ThrowsAsync<NotFoundException>(() => s.Tags.AssignAsync(TaggedEntity.StockDocument, docShop, tag));
+
+            await s.Tags.AssignAsync(TaggedEntity.StockDocument, docYarn, tag);
+            await s.Tags.AssignAsync(TaggedEntity.StockDocument, docYarn, null, "срочно"); // существующий по названию — можно
+            Assert.Single(await s.Tags.ForEntityAsync(TaggedEntity.StockDocument, docYarn));
+            Assert.Equal(new TagRightsDto(true, false), await s.Tags.RightsAsync(TaggedEntity.StockDocument, docYarn));
+            Assert.Equal(new TagRightsDto(false, false), await s.Tags.RightsAsync(TaggedEntity.Item, item));
+            Assert.Equal(new TagRightsDto(false, false), await s.Tags.RightsAsync(TaggedEntity.StockDocument, docShop));
+            await s.Tags.RemoveAsync(TaggedEntity.StockDocument, docYarn, tag);
+        }
+
+        // Аудитор видит всё, но ничего не отмечает.
+        var auditor = await InviteActiveAsync(org, SystemRoles.Auditor, null);
+        await using (var s = host.As(auditor, org.OrganizationId))
+        {
+            Assert.Single(await s.Tags.ListAsync());
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.AssignAsync(TaggedEntity.Item, item, tag));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.AssignAsync(TaggedEntity.StockDocument, docYarn, tag));
+        }
+
+        // Старший кладовщик ведёт справочник тегов.
+        var senior = await InviteActiveAsync(org, SystemRoles.SeniorStorekeeper, yarn);
+        await using (var s = host.As(senior, org.OrganizationId))
+        {
+            Assert.True(await s.Tags.CreateAsync("Проверить", TagColor.Yellow) > 0);
+        }
+
+        await using var db = host.NewDb();
+        Assert.True(await db.AuditEntries.AnyAsync(a => a.OrganizationId == org.OrganizationId && a.ActorUserId == keeper
+                                                        && a.Action == KnitErp.Domain.Audit.AuditActions.AccessDenied && a.After == Permissions.TagManage));
+        Assert.True(await db.AuditEntries.AnyAsync(a => a.OrganizationId == org.OrganizationId && a.ActorUserId == auditor
+                                                        && a.Action == KnitErp.Domain.Audit.AuditActions.AccessDenied && a.After == Permissions.CatalogEdit));
+    }
+
+    [SqlFact]
+    public async Task Migration_grants_tag_manage_to_system_roles_of_existing_organizations()
+    {
+        // D130: организации, созданные до права, получают его миграцией — Владелец, Администратор, Кадровик и другие по матрице.
+        var (org, _, _, _) = await SetUpAsync();
+        await using var db = host.NewDb();
+        var roles = await db.Roles.Where(r => r.OrganizationId == org.OrganizationId && r.IsSystem).Select(r => new { r.Id, r.Code }).ToListAsync();
+        var ids = roles.Select(r => r.Id).ToList();
+        Assert.Equal(roles.Count(r => RoleMatrixP0.LevelOf(r.Code, Permissions.TagManage) != PermissionLevel.None),
+            await db.Set<RolePermission>().CountAsync(p => ids.Contains(p.RoleId) && p.PermissionCode == Permissions.TagManage));
+
+        await db.Set<RolePermission>().Where(p => ids.Contains(p.RoleId) && p.PermissionCode == Permissions.TagManage).ExecuteDeleteAsync();
+        await db.Database.ExecuteSqlRawAsync(KnitErp.Infrastructure.Persistence.Migrations.TagManagePermission.GrantSql);
+        await db.Database.ExecuteSqlRawAsync(KnitErp.Infrastructure.Persistence.Migrations.TagManagePermission.GrantSql); // повтор — без дублей
+
+        var granted = await (from p in db.Set<RolePermission>()
+                             join r in db.Roles on p.RoleId equals r.Id
+                             where ids.Contains(p.RoleId) && p.PermissionCode == Permissions.TagManage
+                             select new { r.Code, p.Level }).ToListAsync();
+        Assert.All(granted, g => Assert.Equal(PermissionLevel.Full, g.Level));
+        var codes = granted.Select(g => g.Code).ToHashSet();
+        Assert.Contains(SystemRoles.Owner, codes);
+        Assert.Contains(SystemRoles.Administrator, codes);
+        Assert.Contains(SystemRoles.HrOfficer, codes);
+        Assert.DoesNotContain(SystemRoles.Storekeeper, codes);
+        Assert.DoesNotContain(SystemRoles.Employee, codes);
+        Assert.Equal(roles.Where(r => RoleMatrixP0.LevelOf(r.Code, Permissions.TagManage) != PermissionLevel.None).Select(r => r.Code).ToHashSet(), codes);
     }
 
     [SqlFact]

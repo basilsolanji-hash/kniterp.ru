@@ -1,0 +1,165 @@
+@page "/sales-pick-lists"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesService Sales
+@inject NavigationManager Navigation
+
+@* D1150: задания на сборку для склада — список и создание по подтверждённым заказам одного склада. *@
+<PageTitle>@L("Задания на сборку") — knitERP</PageTitle>
+<SalesShippingStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_rows is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Задания на сборку")</h1>
+        <div class="sx-tools">
+            <label>
+                @L("Состояние")
+                <select @bind="_status" @bind:after="ReloadAsync">
+                    <option value="">@L("Все")</option>
+                    <option value="@PickListStatus.Open">@L("Собирается")</option>
+                    <option value="@PickListStatus.Picked">@L("Собрано")</option>
+                    <option value="@PickListStatus.Cancelled">@L("Отменено")</option>
+                </select>
+            </label>
+        </div>
+    </div>
+    <p class="sx-lead">@L("Склад собирает товар по заданию: позиции заказов с местом хранения, отметка «собрано» по строке или целиком. Собранный заказ сам переходит на этап по правилу «Заказ собран на складе».")</p>
+
+    @if (_message is not null)
+    {
+        <div class="flash error" role="alert">@_message</div>
+    }
+
+    @if (_orders is { Count: > 0 })
+    {
+        <section class="panel" aria-label="@L("Новое задание")">
+            <h2 style="margin: 0 0 6px">@L("Новое задание на сборку")</h2>
+            <form class="sx-form" @onsubmit="CreateAsync">
+                <label>
+                    @L("Склад")
+                    <select @bind="_warehouse">
+                        @foreach (var w in _orders.Select(o => (o.WarehouseId, o.Warehouse)).Distinct())
+                        {
+                            <option value="@w.WarehouseId">@w.Warehouse</option>
+                        }
+                    </select>
+                </label>
+                <label class="w2">@L("Комментарий") <input @bind="_comment" maxlength="@SalesPickList.CommentMaxLength" /></label>
+                <div class="w4 scroll">
+                    <table class="compact sx-table">
+                        <thead><tr><th></th><th>@L("Заказ")</th><th>@L("Покупатель")</th><th>@L("Отгрузка")</th><th>@L("Сборка")</th></tr></thead>
+                        <tbody>
+                            @foreach (var o in _orders.Where(o => o.WarehouseId.ToString() == _warehouse))
+                            {
+                                <tr>
+                                    <td><input type="checkbox" checked="@_selected.Contains(o.OrderId)" @onchange="e => Toggle(o.OrderId, e)" aria-label="@L("Выбрать {0}", o.Number)" /></td>
+                                    <td><a href="sales-orders/@o.OrderId">@o.Number</a> <span class="sx-sub">@o.OrderDate.ToString("dd.MM.yyyy")</span></td>
+                                    <td>@o.Customer</td>
+                                    <td>@(o.ShipDate?.ToString("dd.MM.yyyy") ?? "—")</td>
+                                    <td>@(o.PickList is { } p ? (o.Picked ? L("собран: {0}", p) : L("в задании {0}", p)) : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="sx-actions"><button type="submit" disabled="@(_busy || _selected.Count == 0)">@L("Создать задание ({0})", _selected.Count)</button></div>
+            </form>
+        </section>
+    }
+
+    <div class="scroll">
+        <table class="sx-table">
+            <thead><tr><th>@L("Номер")</th><th>@L("Дата")</th><th>@L("Склад")</th><th>@L("Заказы")</th><th class="num">@L("Собрано")</th><th>@L("Состояние")</th></tr></thead>
+            <tbody>
+                @if (_rows.Count == 0)
+                {
+                    <tr><td colspan="6" class="muted">@L("Заданий пока нет.")</td></tr>
+                }
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td><a href="sales-pick-lists/@r.Id">@r.Number</a></td>
+                        <td>@r.Date.ToString("dd.MM.yyyy")</td>
+                        <td>@r.Warehouse</td>
+                        <td>@r.Orders</td>
+                        <td class="num">@Quantities.Format(r.Picked) / @Quantities.Format(r.Quantity)</td>
+                        <td><span class="tag">@L(r.StatusName)</span>@(r.PartiallyPicked ? " " + L("частично") : "")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<PickListRowDto>? _rows;
+    private IReadOnlyList<OrderToShipDto>? _orders;
+    private readonly HashSet<long> _selected = [];
+    private PickListStatus? _status;
+    private string? _warehouse;
+    private string? _comment;
+    private string? _denied;
+    private string? _message;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await ReloadAsync();
+            _orders = await Sales.OrdersToShipAsync();
+            _warehouse = _orders.FirstOrDefault()?.WarehouseId.ToString();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task ReloadAsync() => _rows = await Sales.ListPickListsAsync(new PickListFilter(_status));
+
+    private void Toggle(long id, ChangeEventArgs e)
+    {
+        if (e.Value is true)
+        {
+            _selected.Add(id);
+        }
+        else
+        {
+            _selected.Remove(id);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            var ids = _orders!.Where(o => o.WarehouseId.ToString() == _warehouse && _selected.Contains(o.OrderId)).Select(o => o.OrderId).ToList();
+            Navigation.NavigateTo($"sales-pick-lists/{await Sales.CreatePickListAsync(ids, _comment)}");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

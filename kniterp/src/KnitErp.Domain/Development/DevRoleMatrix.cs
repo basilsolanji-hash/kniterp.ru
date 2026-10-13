@@ -18,6 +18,8 @@ public static class DevRoleMatrix
         [Permissions.DevCostView] = Full,
         [Permissions.DevSettings] = Full,
         [Permissions.CatalogView] = Full,
+        // D130: главный технолог ведёт теги моделей отдела.
+        [Permissions.TagManage] = Full,
     };
 
     private static readonly Dictionary<string, PermissionLevel> Technologist = new(StringComparer.Ordinal)

@@ -1,0 +1,163 @@
+@page "/sales-print/ukd/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Sales
+@inject SalesService Sales
+
+@*
+    D1155: универсальный корректировочный документ (УКД, статус 1) к возврату от покупателя по заказу. Графы корректировочного
+    счёта-фактуры — по приложению 2 к ПП РФ № 1137 (строки А — до изменения, Б — после, В — увеличение, Г — уменьшение); реквизиты —
+    юрлицо заказа. Печатается по-русски, как УПД (D68).
+*@
+<PageTitle>@(_doc is null ? "УКД" : $"УКД {_doc.Number}") — knitERP</PageTitle>
+<style>
+    @@media print { @@page { size: A4 landscape; margin: 7mm; } }
+    .sheet.ukd { max-width: 1400px; }
+    .sheet.ukd table.goods th, .sheet.ukd table.goods td { font-size: 9px; padding: 2px 3px; }
+    .sheet.ukd .ukd-fields div { font-size: 10.5px; }
+</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="stock-documents/@Id">@L("← К возврату")</a>
+</div>
+@if (_doc is { Warnings.Count: > 0 })
+{
+    <div class="print-bar" style="display: block">
+        <b class="warn">@L("Проверьте перед печатью:")</b>
+        <ul style="margin: 4px 0 0 18px; padding: 0">
+            @foreach (var w in _doc.Warnings)
+            {
+                <li class="warn">@w</li>
+            }
+        </ul>
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="sheet"><p>@_error</p></div>
+}
+else if (_doc is null)
+{
+    <div class="sheet"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    var r = _doc.Requisites;
+    <div class="sheet ukd">
+        @if (_doc.Reversed)
+        {
+            <div class="stamp">ВОЗВРАТ СТОРНИРОВАН — КОРРЕКТИРОВКА АННУЛИРОВАНА</div>
+        }
+        <div class="ukd-fields">
+            <div><b>Универсальный корректировочный документ</b>, статус: <b style="border: 1px solid #000; padding: 0 6px">1</b>
+                (1 — корректировочный счёт-фактура и документ об изменении стоимости)</div>
+            <div><b>Корректировочный счёт-фактура №</b> @_doc.Number от @PrintInvoicePage.Date(_doc.Date) <span class="code">(1)</span></div>
+            <div><b>Исправление корректировочного счёта-фактуры №</b> -- от -- <span class="code">(1а)</span></div>
+            <div><b>к счёту-фактуре (счетам-фактурам)</b> @(_doc.Shipments.Length == 0 ? "--" : _doc.Shipments), с учётом исправления № -- от -- <span class="code">(1б)</span></div>
+            <div><b>Продавец:</b> @_doc.Seller.Name <span class="code">(2)</span></div>
+            <div><b>Адрес:</b> @_doc.Seller.Address <span class="code">(2а)</span></div>
+            <div><b>ИНН/КПП продавца:</b> @_doc.Seller.Inn@(_doc.Seller.Kpp is null ? "" : "/" + _doc.Seller.Kpp) <span class="code">(2б)</span></div>
+            <div><b>Покупатель:</b> @_doc.Buyer.Name <span class="code">(3)</span></div>
+            <div><b>Адрес:</b> @_doc.Buyer.Address <span class="code">(3а)</span></div>
+            <div><b>ИНН/КПП покупателя:</b> @_doc.Buyer.Inn@(_doc.Buyer.Kpp is null ? "" : "/" + _doc.Buyer.Kpp) <span class="code">(3б)</span></div>
+            <div><b>Валюта: наименование, код</b> @_doc.Currency <span class="code">(4)</span></div>
+            <div><b>Идентификатор государственного контракта, договора (соглашения) (при наличии)</b> -- <span class="code">(5)</span></div>
+        </div>
+
+        <table class="goods" style="margin-top: 6px">
+            <thead>
+                <tr>
+                    <th rowspan="2">№ п/п</th><th rowspan="2">Наименование товара</th><th rowspan="2"></th>
+                    <th colspan="2">Единица измерения</th><th rowspan="2">Количество (объём)</th><th rowspan="2">Цена (тариф) за единицу измерения</th>
+                    <th rowspan="2">Стоимость товаров без налога — всего</th><th rowspan="2">В том числе сумма акциза</th><th rowspan="2">Налоговая ставка</th>
+                    <th rowspan="2">Сумма налога</th><th rowspan="2">Стоимость товаров с налогом — всего</th>
+                </tr>
+                <tr><th>код</th><th>условное обозначение</th></tr>
+                <tr class="small"><th></th><th>1</th><th></th><th>2</th><th>2а</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var l in _doc.Lines)
+                {
+                    <tr>
+                        <td class="c" rowspan="4">@l.No</td><td rowspan="4">@l.Code @l.Name</td><td>А (до изменения)</td>
+                        <td class="c" rowspan="4">@l.UnitCode</td><td class="c" rowspan="4">@l.UnitSymbol</td>
+                        <td class="n">@Quantities.Format(l.QuantityBefore)</td><td class="n">@Amounts.Format(l.PriceBefore)</td><td class="n">@Amounts.Format(l.AmountBefore)</td>
+                        <td class="c" rowspan="4">без акциза</td><td class="c" rowspan="4">@Amounts.Vat(l.VatPercent)</td>
+                        <td class="n">@Vat(l.VatPercent, l.VatBefore, r.VatExempt)</td><td class="n">@Amounts.Format(l.TotalBefore)</td>
+                    </tr>
+                    <tr>
+                        <td>Б (после изменения)</td>
+                        <td class="n">@Quantities.Format(l.QuantityAfter)</td><td class="n">@Amounts.Format(l.PriceAfter)</td><td class="n">@Amounts.Format(l.AmountAfter)</td>
+                        <td class="n">@Vat(l.VatPercent, l.VatAfter, r.VatExempt)</td><td class="n">@Amounts.Format(l.TotalAfter)</td>
+                    </tr>
+                    <tr><td>В (увеличение)</td><td class="c">--</td><td class="c">--</td><td class="c">--</td><td class="c">--</td><td class="c">--</td></tr>
+                    <tr>
+                        <td>Г (уменьшение)</td><td class="n">@Quantities.Format(l.QuantityBefore - l.QuantityAfter)</td><td class="c">--</td>
+                        <td class="n">@Amounts.Format(l.AmountDecrease)</td><td class="n">@Vat(l.VatPercent, l.VatDecrease, r.VatExempt)</td><td class="n">@Amounts.Format(l.TotalDecrease)</td>
+                    </tr>
+                }
+                <tr>
+                    <td colspan="7"><b>Всего увеличение (сумма строк В)</b></td>
+                    <td class="c">--</td><td class="c" colspan="2">X</td><td class="c">--</td><td class="c">--</td>
+                </tr>
+                <tr>
+                    <td colspan="7"><b>Всего уменьшение (сумма строк Г)</b></td>
+                    <td class="n"><b>@Amounts.Format(_doc.AmountDecrease)</b></td><td class="c" colspan="2">X</td>
+                    <td class="n"><b>@Amounts.Format(_doc.VatDecrease)</b></td><td class="n"><b>@Amounts.Format(_doc.TotalDecrease)</b></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="sign">
+            @if (r.SoleProprietor)
+            {
+                <div>Индивидуальный предприниматель или иное уполномоченное лицо <span class="line"></span> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
+                <div>@(r.Ogrn is null ? "" : "ОГРНИП " + r.Ogrn) <span class="line"></span><div class="small">(реквизиты свидетельства о государственной регистрации индивидуального предпринимателя)</div></div>
+            }
+            else
+            {
+                <div>Руководитель организации или иное уполномоченное лицо <span class="line"></span> @r.DirectorName<div class="small">(подпись) (ф.и.о.)</div></div>
+                <div>Главный бухгалтер или иное уполномоченное лицо <span class="line"></span> @(r.AccountantName ?? r.DirectorName)<div class="small">(подпись) (ф.и.о.)</div></div>
+            }
+        </div>
+
+        <table class="plain" style="margin-top: 14px">
+            <tr><td colspan="2">Основание для корректировки (изменения стоимости): <b>@_doc.Basis</b>, возврат товара покупателем по документу № @_doc.ReturnNumber от @_doc.Date.ToString("dd.MM.yyyy") <span class="small">[8]</span></td></tr>
+            <tr>
+                <td style="width: 50%">Документ составил <span class="small">[10]</span><br />
+                    @(r.SoleProprietor ? "Индивидуальный предприниматель" : r.DirectorPosition ?? "") <span class="line"></span> @r.DirectorName<div class="small">(должность) (подпись) (ф.и.о.)</div></td>
+                <td>Документ получил <span class="small">[15]</span><br />
+                    <span class="line"></span> <span class="line"></span> <span class="line"></span><div class="small">(должность) (подпись) (ф.и.о.)</div></td>
+            </tr>
+            <tr><td>Дата составления: <b>@PrintInvoicePage.Date(_doc.Date)</b> <span class="small">[11]</span></td>
+                <td>Дата получения: «___» __________ 20__ г. <span class="small">[16]</span></td></tr>
+            <tr><td>Наименование экономического субъекта — составителя документа: @_doc.Seller.Name, ИНН/КПП @_doc.Seller.Inn@(_doc.Seller.Kpp is null ? "" : "/" + _doc.Seller.Kpp) <span class="small">[14]</span></td>
+                <td>Наименование экономического субъекта — составителя документа: @_doc.Buyer.Name@(_doc.Buyer.Inn is null ? "" : ", ИНН/КПП " + _doc.Buyer.Inn + (_doc.Buyer.Kpp is null ? "" : "/" + _doc.Buyer.Kpp)) <span class="small">[19]</span></td></tr>
+            <tr><td>М. П.</td><td>М. П.</td></tr>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private CorrectionPrintDto? _doc;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await Sales.CorrectionAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+
+    private static string Vat(decimal? percent, decimal amount, bool exempt) =>
+        percent is null ? (exempt ? "Без налога (НДС)" : "без НДС") : Amounts.Format(amount);
+}

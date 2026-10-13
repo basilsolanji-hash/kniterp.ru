@@ -142,6 +142,78 @@ public static class ObjectDirectory
         }
     }
 
+    /// <summary>
+    /// D130: права, которые позволяют менять объект (ставить и снимать на нём теги). Объект должен быть ещё и виден
+    /// (<see cref="DescribeAsync"/>). Пустой список — менять нельзя никому, кроме того, у кого есть право управления тегами
+    /// (объекты модулей, подключённые без прав изменения).
+    /// </summary>
+    public static IReadOnlyList<string> EditPermissions(TaggedEntity entity) => entity switch
+    {
+        TaggedEntity.Item or TaggedEntity.Counterparty => [Permissions.CatalogEdit],
+        TaggedEntity.SalesOrder or TaggedEntity.CustomerInvoice => [Permissions.SalesEdit],
+        TaggedEntity.PurchaseOrder => [Permissions.PurchaseEdit],
+        TaggedEntity.StockDocument or TaggedEntity.InventoryCount or TaggedEntity.StockBatch => StockEdits,
+        TaggedEntity.OpeningBalance => OpeningEdits,
+        TaggedEntity.ExpenseReport => [Permissions.SalesEdit, Permissions.PurchaseEdit],
+        TaggedEntity.ProductionOrder => [Permissions.ProductionOrderEdit],
+        TaggedEntity.Employee => [Permissions.EmployeeEdit],
+        TaggedEntity.DevModel => [Permissions.DevEdit],
+        TaggedEntity.CrmLead or TaggedEntity.CrmDeal or TaggedEntity.CrmContact => [Permissions.CrmEdit],
+        _ => ModuleEdits.TryGetValue(entity, out var codes) ? codes : [],
+    };
+
+    /// <summary>
+    /// D130: пользователь вправе менять объект — есть право изменения его вида и, для складских объектов и сотрудников, объект в области
+    /// этого права (склады, подразделения). Видимость объекта проверяется отдельно.
+    /// </summary>
+    public static async Task<bool> CanChangeAsync(IKnitErpDbContext db, AccessContext ctx, TaggedEntity entity, long id, CancellationToken ct)
+    {
+        var codes = EditPermissions(entity);
+        if (!codes.Any(ctx.Permissions.Has))
+        {
+            return false;
+        }
+
+        var org = ctx.OrganizationId;
+        switch (entity)
+        {
+            case TaggedEntity.StockDocument:
+            {
+                var visible = WarehouseScope.Visible(ctx, StockEdits);
+                return visible is null || await db.StockDocuments.AsNoTracking().AnyAsync(d => d.OrganizationId == org && d.Id == id
+                    && (visible.Contains(d.WarehouseId) || (d.TargetWarehouseId != null && visible.Contains(d.TargetWarehouseId.Value))), ct);
+            }
+
+            case TaggedEntity.InventoryCount:
+            {
+                var visible = WarehouseScope.Visible(ctx, StockEdits);
+                return visible is null || await db.InventoryCounts.AsNoTracking().AnyAsync(d => d.OrganizationId == org && d.Id == id && visible.Contains(d.WarehouseId), ct);
+            }
+
+            case TaggedEntity.OpeningBalance:
+            {
+                var visible = WarehouseScope.Visible(ctx, OpeningEdits);
+                return visible is null || await db.OpeningBalances.AsNoTracking().AnyAsync(d => d.OrganizationId == org && d.Id == id && visible.Contains(d.WarehouseId), ct);
+            }
+
+            case TaggedEntity.CustomerInvoice:
+            case TaggedEntity.ExpenseReport:
+                return ctx.Permissions.Has(Permissions.PriceView);
+            case TaggedEntity.Employee:
+            {
+                var visible = await Structure.StructureScope.VisibleDepartmentsAsync(db, ctx, Permissions.EmployeeEdit, ct);
+                return visible is null || await db.Employees.AsNoTracking().AnyAsync(e => e.OrganizationId == org && e.Id == id && visible.Contains(e.DepartmentId), ct);
+            }
+
+            default:
+                return true;
+        }
+    }
+
+    private static readonly string[] StockEdits = [Permissions.WarehouseDocumentCreate, Permissions.WarehouseDocumentPost];
+    private static readonly string[] OpeningEdits = [Permissions.OpeningBalanceCreate, Permissions.OpeningBalanceApprove];
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<TaggedEntity, string[]> ModuleEdits = new();
+
     /// <summary>Описание объектов модуля: только объекты своей организации, которые пользователь вправе видеть; права проверяет модуль.</summary>
     public delegate Task<IReadOnlyList<TaggedObjectDto>> Describer(IKnitErpDbContext db, AccessContext ctx, IReadOnlyList<long> ids, CancellationToken ct);
 
@@ -157,7 +229,8 @@ public static class ObjectDirectory
     /// D117: модуль (CRM, «Разработка» и следующие) подключает свои объекты к тегам и обсуждениям без правки этого класса —
     /// вызовом в регистрации своих сервисов. Значение — из диапазона модуля; встроенные объекты переопределить нельзя.
     /// </summary>
-    public static void Register(TaggedEntity entity, Describer describer)
+    /// <param name="editPermissions">D130: права изменения объекта — с любым из них можно ставить и снимать на нём теги.</param>
+    public static void Register(TaggedEntity entity, Describer describer, params string[] editPermissions)
     {
         ArgumentNullException.ThrowIfNull(describer);
         if ((int)entity is < ModuleRangeStart or > ModuleRangeEnd)
@@ -169,5 +242,7 @@ public static class ObjectDirectory
         {
             throw new InvalidOperationException($"Объект {entity} уже подключён другим модулем.");
         }
+
+        ModuleEdits[entity] = editPermissions;
     }
 }

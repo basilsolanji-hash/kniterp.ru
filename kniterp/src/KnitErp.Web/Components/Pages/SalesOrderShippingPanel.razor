@@ -1,0 +1,216 @@
+@*
+    D1150–D1154: сборка, отгрузка с доставкой и деньги после возврата в карточке заказа. Данные грузит карточка
+    (SalesService.ShippingPanelAsync в своём LoadAsync) и передаёт параметром; здесь сервис вызывается только по кнопке, затем OnChanged
+    или переход в созданный документ.
+*@
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesService Sales
+@inject NavigationManager Navigation
+
+@if (Data is { } d && (d.PickLists.Count > 0 || d.Groups.Count > 0 || d.CanPick || d.CanShip || d.Overpaid > 0 || d.Refunds.Count > 0
+                       || (d.CanMoney && d.CustomerAdvance > 0)))
+{
+    <SalesShippingStyles />
+    <section class="ssh" aria-label="@L("Сборка, доставка и возвраты")">
+        <div class="ssh-row">
+            <b>@L("Сборка и доставка")</b>
+            @foreach (var p in d.PickLists)
+            {
+                <a href="sales-pick-lists/@p.Id">@p.Number</a>
+                <span class="tag">@L(p.StatusName)@(p.PartiallyPicked ? " · " + L("частично") : "")</span>
+            }
+            @foreach (var g in d.Groups)
+            {
+                <a href="sales-shipments/@g.Id">@g.Number</a>
+                <span class="tag">@L(g.StatusName)</span>
+                @if (g.Delivery is not null || g.TrackingNumber is not null)
+                {
+                    <span class="muted small">@g.Delivery @(g.TrackingNumber is { } t ? L("трек {0}", t) : "")</span>
+                }
+            }
+            @if (d.CanPick)
+            {
+                <button type="button" class="secondary" @onclick="PickAsync" disabled="@_busy">@L("Задание на сборку")</button>
+            }
+            @if (d.CanShip)
+            {
+                <button type="button" class="secondary" @onclick="ShipAsync" disabled="@_busy">@L("Отгрузка с доставкой")</button>
+            }
+        </div>
+
+        @if (d.Overpaid > 0 || d.Refunds.Count > 0 || (d.CanMoney && d.CustomerAdvance > 0))
+        {
+            <div class="sx-kv">
+                @if (d.Overpaid > 0)
+                {
+                    <div><span>@L("Переплата по заказу после возврата")</span><span class="bad">@Amounts.Format(d.Overpaid)</span></div>
+                }
+                <div><span>@L("Аванс покупателя (не разнесено)")</span><span>@Amounts.Format(d.CustomerAdvance)</span></div>
+            </div>
+            @if (d.CanMoney && d.Overpaid > 0)
+            {
+                <p class="muted small">@L("Переплату можно зачесть в аванс: она снимется с оплат этого заказа и станет авансом покупателя — его зачтут в другой заказ кнопкой «Зачесть аванс». Или вернуть деньгами.")</p>
+                <div class="actions">
+                    <button type="button" class="secondary" @onclick="ReleaseAsync" disabled="@_busy">@L("Зачесть переплату в аванс")</button>
+                </div>
+            }
+            @if (d.CanMoney && (d.Overpaid > 0 || d.CustomerAdvance > 0))
+            {
+                <form class="sx-form" @onsubmit="RefundAsync">
+                    <span class="sx-legend">@L("Вернуть деньги покупателю")</span>
+                    <label>@L("Дата") <input type="date" @bind="_date" required /></label>
+                    <label>@L("Сумма") <input @bind="_amount" inputmode="decimal" required placeholder="@Amounts.Format((d.Overpaid ?? 0) + (d.CustomerAdvance ?? 0))" /></label>
+                    <label>
+                        @L("Откуда")
+                        <select @bind="_account">
+                            <option value="">@L("счёт оплаты или основной")</option>
+                            @foreach (var a in d.Accounts)
+                            {
+                                <option value="@a.Id">@a.Label</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Комментарий") <input @bind="_comment" maxlength="1000" /></label>
+                    <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Вернуть деньги")</button></div>
+                </form>
+            }
+            @if (d.Refunds.Count > 0)
+            {
+                <table class="compact sx-table">
+                    <tbody>
+                        @foreach (var r in d.Refunds)
+                        {
+                            <tr>
+                                <td>@L("Возврат денег") @r.Number</td>
+                                <td>@r.Date.ToString("dd.MM.yyyy")</td>
+                                <td class="num">@Amounts.Format(r.Amount)</td>
+                                <td>
+                                    @if (r.Status == CustomerRefundStatus.Cancelled)
+                                    {
+                                        <span class="tag">@L("Отменён")</span> <span class="muted small">@r.CancelReason</span>
+                                    }
+                                    else if (d.CanMoney)
+                                    {
+                                        <form class="inline-form" @onsubmit="() => CancelAsync(r)">
+                                            <input @bind="_cancelReason" placeholder="@L("Причина отмены")" maxlength="500" aria-label="@L("Причина отмены")" />
+                                            <button type="submit" class="secondary" disabled="@_busy">@L("Отменить")</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+        @if (_error is not null)
+        {
+            <div class="flash error" role="alert">@_error</div>
+        }
+        @if (_message is not null)
+        {
+            <div class="flash" role="status">@_message</div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long OrderId { get; set; }
+
+    [Parameter]
+    public SalesOrderShippingDto? Data { get; set; }
+
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private bool _busy;
+    private string? _error;
+    private string? _message;
+    private DateTime _date = DateTime.Today;
+    private string? _amount;
+    private string? _account;
+    private string? _comment;
+    private string? _cancelReason;
+
+    protected override void OnInitialized() => _date = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+
+    private Task PickAsync() => GoAsync(async () => $"sales-pick-lists/{await Sales.CreatePickListAsync([OrderId], null)}");
+
+    private Task ShipAsync() => GoAsync(async () =>
+        $"sales-shipments/{await Sales.CreateShipmentGroupAsync([OrderId], new SalesShipmentLogistics(null, null, null, null, null))}");
+
+    private Task ReleaseAsync() => RunAsync(async () =>
+        _message = L("В аванс покупателя переведено {0}.", Amounts.Format(await Sales.ReleaseOverpaymentAsync(OrderId))));
+
+    private Task RefundAsync() => RunAsync(async () =>
+    {
+        if (!Quantities.TryParse(_amount, out var amount))
+        {
+            throw new BusinessRuleException("sales.refund.amount", L("Укажите сумму числом, например 1 220,50."));
+        }
+
+        await Sales.RefundAsync(OrderId, new RefundCommand(DateOnly.FromDateTime(_date), amount, long.TryParse(_account, out var a) ? a : null, _comment));
+        _amount = _comment = null;
+        _message = L("Деньги возвращены покупателю.");
+    });
+
+    private Task CancelAsync(CustomerRefundDto r) => RunAsync(async () =>
+    {
+        await Sales.CancelRefundAsync(r.MoneyOperationId, _cancelReason, r.RowVersion);
+        _cancelReason = null;
+        _message = L("Возврат денег отменён.");
+    });
+
+    private async Task GoAsync(Func<Task<string>> create)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            Navigation.NavigateTo(await create());
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _message = null;
+        try
+        {
+            await action();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

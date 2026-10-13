@@ -268,8 +268,15 @@ public sealed class CrmTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         }
 
         // Теги и обсуждения работают на сделке (TaggedEntity 31); чужой — «не найдено».
+        // D130: новый тег заводит тот, у кого есть право на справочник тегов; менеджер ставит существующий.
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            await s.Tags.CreateAsync("Опт", TagColor.Blue);
+        }
+
         await using (var s = host.As(boris, org.OrganizationId))
         {
+            await Assert.ThrowsAsync<AccessDeniedException>(() => s.Tags.AssignAsync(TaggedEntity.CrmDeal, deal, null, "Розница", TagColor.Red));
             await s.Tags.AssignAsync(TaggedEntity.CrmDeal, deal, null, "Опт", TagColor.Blue);
             Assert.Equal("Опт", (await s.Tags.ForEntityAsync(TaggedEntity.CrmDeal, deal)).Single().Name);
             await s.Discussions.AddAsync(TaggedEntity.CrmDeal, deal, "Клиент просит образцы", null);

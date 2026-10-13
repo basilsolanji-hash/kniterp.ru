@@ -243,6 +243,23 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Sales.SalesMailAttachment> SalesMailAttachments { get; }
     DbSet<KnitErp.Domain.Sales.SalesDocumentLink> SalesDocumentLinks { get; }
     DbSet<KnitErp.Domain.Sales.SalesCreditApproval> SalesCreditApprovals { get; }
+    // D1150–D1159, D1108 (продажи): сборка, отгрузка по нескольким заказам, доставка, возвраты, коды маркировки.
+    DbSet<KnitErp.Domain.Sales.SalesPickList> SalesPickLists { get; }
+    DbSet<KnitErp.Domain.Sales.SalesPickListLine> SalesPickListLines { get; }
+    DbSet<KnitErp.Domain.Sales.SalesDeliveryMethod> SalesDeliveryMethods { get; }
+    DbSet<KnitErp.Domain.Sales.SalesShipmentGroup> SalesShipmentGroups { get; }
+    DbSet<KnitErp.Domain.Sales.SalesShipmentGroupDocument> SalesShipmentGroupDocuments { get; }
+    DbSet<KnitErp.Domain.Sales.SalesReturnReason> SalesReturnReasons { get; }
+    DbSet<KnitErp.Domain.Sales.SalesReturnDetails> SalesReturnDetails { get; }
+    DbSet<KnitErp.Domain.Sales.SalesReturnLine> SalesReturnLines { get; }
+    DbSet<KnitErp.Domain.Sales.CustomerRefund> CustomerRefunds { get; }
+    DbSet<KnitErp.Domain.Sales.SalesMarkingCode> SalesMarkingCodes { get; }
+    // D1107, D1162, D1168 (продажи, аналитика): план продаж, свойства каналов, отчёты маркетплейсов.
+    DbSet<KnitErp.Domain.Sales.SalesPlan> SalesPlans { get; }
+    DbSet<KnitErp.Domain.Sales.SalesChannelSettings> SalesChannelSettings { get; }
+    DbSet<KnitErp.Domain.Sales.MarketplaceReport> MarketplaceReports { get; }
+    DbSet<KnitErp.Domain.Sales.MarketplaceReportLine> MarketplaceReportLines { get; }
+    DbSet<KnitErp.Domain.Sales.MarketplaceColumnMap> MarketplaceColumnMaps { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
@@ -260,6 +277,13 @@ public interface IKnitErpDbContext : IAsyncDisposable
     /// </summary>
     Task ReloadAsync(object entity, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// D339: где позиции организации уже участвуют в учёте количеств (движения, партии, строки документов, заказов, инвентаризаций,
+    /// техкарт, состав комплектов). itemId — одна позиция, unitId — все позиции с этой единицей. null — нигде. Возвращает код места
+    /// из <see cref="ItemUsage"/> — по нему сервис пишет понятную причину отказа.
+    /// </summary>
+    Task<string?> ItemUsageAsync(long organizationId, long? itemId, long? unitId, CancellationToken cancellationToken = default);
+
     /// <summary>Точка сохранения внутри текущей транзакции: часть работы (например, строку загрузки) можно откатить, не теряя остального.</summary>
     Task SavepointAsync(string name, CancellationToken cancellationToken = default);
 
@@ -274,6 +298,31 @@ public interface IKnitErpDbContext : IAsyncDisposable
 
     /// <summary>Исключительная именованная блокировка до конца текущей транзакции (sp_getapplock).</summary>
     Task LockAsync(string resource, CancellationToken cancellationToken = default);
+}
+
+/// <summary>D339: места, где количества позиции записаны в её единице (таблица → понятное название для сообщения).</summary>
+public static class ItemUsage
+{
+    public static readonly IReadOnlyDictionary<string, string> Tables = new Dictionary<string, string>
+    {
+        ["stock_movements"] = "складские движения",
+        ["stock_batches"] = "партии",
+        ["stock_batch_movements"] = "движения партий",
+        ["stock_document_lines"] = "строки складских документов",
+        ["stock_document_batch_lines"] = "партии в складских документах",
+        ["opening_balance_lines"] = "начальные остатки",
+        ["opening_balance_batch_lines"] = "партии начальных остатков",
+        ["inventory_lines"] = "инвентаризации",
+        ["inventory_batch_counts"] = "пересчёт партий",
+        ["sales_order_lines"] = "заказы покупателей",
+        ["purchase_order_lines"] = "заказы поставщикам",
+        ["customer_invoice_lines"] = "счета покупателям",
+        ["tech_card_lines"] = "техкарты (материалы)",
+        ["tech_cards"] = "техкарты (выпуск)",
+        ["bundle_components:ComponentItemId"] = "состав комплектов",
+    };
+
+    public static string Describe(string? code) => code is null ? "" : Tables.GetValueOrDefault(code, code);
 }
 
 /// <summary>
@@ -293,4 +342,10 @@ public interface ISpreadsheetFormat
     IReadOnlyList<IReadOnlyList<string>>? ReadNamedSheet(Stream stream, string sheetName, int maxRows);
 
     byte[] Write(IReadOnlyList<SheetData> sheets);
+
+    /// <summary>
+    /// D1168 (сессия «Продажи»): первый лист широкой выгрузки чужой системы — отчёт Wildberries содержит около 80 столбцов,
+    /// больше обычного предела шаблонов. Те же проверки архива; пределы столбцов и ячеек — шире.
+    /// </summary>
+    IReadOnlyList<IReadOnlyList<string>> ReadWideSheet(Stream stream, int maxRows) => ReadFirstSheet(stream, maxRows);
 }

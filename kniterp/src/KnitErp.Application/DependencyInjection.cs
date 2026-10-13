@@ -85,6 +85,7 @@ public static class DependencyInjection
         services.AddScoped<Sales.SalesStageService>();
         services.AddScoped<Sales.SalesAgreementService>();
         services.AddScoped<Sales.SalesDiscountService>();
+        services.AddScoped<Sales.SalesPriceListService>(); // D1142: прайс-лист
         services.AddScoped<Sales.SalesSettingsService>();
         // D1120–D1125 (продажи): оформление документов, письма клиенту, связанные документы.
         services.AddScoped<Sales.SalesDocumentSettingsService>();
@@ -118,6 +119,7 @@ public static class DependencyInjection
         services.AddScoped<Exchange.MoySklad.MoySkladImportService>(); // D310 (сессия 4)
         services.AddScoped<Catalog.CatalogSettingsService>(); // D312 (сессия 4)
         services.AddScoped<Catalog.CatalogFeedService>(); // D314 (сессия 4)
+        services.AddScoped<Catalog.CatalogViewService>(); // D338: вид списка номенклатуры пользователя
         services.AddScoped<Catalog.ItemCodesService>(); // D315 (сессия 4)
         services.AddScoped<Catalog.LabelService>(); // D316 (сессия 4)
         services.AddScoped<Catalog.GroupDefaultsService>(); // D317 (сессия 4)
@@ -137,6 +139,8 @@ public static class DependencyInjection
         services.AddScoped<Integrations.WebhookDispatcher>();
         services.AddScoped<Common.RequisitesLookupService>();
         services.AddScoped<Sales.SalesAnalyticsService>();
+        services.AddScoped<Sales.SalesReportService>(); // D1160–D1167: аналитика продаж, план-факт, воронка
+        services.AddScoped<Sales.MarketplaceReportService>(); // D1107, D1168–D1170: каналы и отчёты маркетплейсов
         services.AddScoped<Taxes.VatInvoiceService>();
         services.AddScoped<Printing.PrintService>();
         services.AddScoped<RecoveryCodeService>();

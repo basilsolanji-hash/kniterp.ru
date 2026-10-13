@@ -114,6 +114,19 @@ public sealed class RevaluationService(IKnitErpDbContext db, IAccessGuard guard,
     /// <summary>Применение: новые цены, история с номером переоценки и запись журнала — одной транзакцией. Возвращает число изменённых цен.</summary>
     public async Task<int> ApplyAsync(RevaluationRequest request, CancellationToken ct = default)
     {
+        try
+        {
+            return await ApplyAsyncCoreAsync(request, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // аудит каталога (D347): транзакция откатилась — несохранённое не должно уйти следующим сохранением вкладки
+            throw;
+        }
+    }
+
+    private async Task<int> ApplyAsyncCoreAsync(RevaluationRequest request, CancellationToken ct)
+    {
         var ctx = await DemandAsync(ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         await db.LockAsync($"kniterp.revaluation.{ctx.OrganizationId}", ct);

@@ -1,0 +1,112 @@
+@* Лист счёта на оплату (D68, D1120, D1121) — для страницы печати счёта и комплекта документов (D1141). Российская форма, по-русски. *@
+@using KnitErp.Application.Printing
+@using KnitErp.Application.Sales
+
+@{ var r = Doc.Requisites; }
+<div class="sheet portrait" style="@(Break ? "break-before: page" : null)">
+    @if (Deco.Logo is { } logo)
+    {
+        <img class="sx-logo" src="@logo.DataUri" alt="" />
+    }
+    @if (Doc.Cancelled)
+    {
+        <div class="stamp">СЧЁТ ОТМЕНЁН</div>
+    }
+    <table>
+        <tr>
+            <td colspan="2" rowspan="2" style="width: 60%">@(r.BankName ?? "—")<div class="small">Банк получателя</div></td>
+            <td style="width: 10%">БИК</td>
+            <td style="border-bottom: 0">@r.BankBic</td>
+        </tr>
+        <tr>
+            <td>Сч. №</td>
+            <td style="border-top: 0">@r.BankCorrAccount</td>
+        </tr>
+        <tr>
+            <td>ИНН @Doc.Seller.Inn</td>
+            <td>КПП @Doc.Seller.Kpp</td>
+            <td rowspan="2">Сч. №</td>
+            <td rowspan="2">@r.BankAccount</td>
+        </tr>
+        <tr>
+            <td colspan="2">@Doc.Seller.Name<div class="small">Получатель</div></td>
+        </tr>
+    </table>
+
+    <h1>Счёт на оплату № @Doc.Number от @PrintInvoicePage.Date(Doc.Date)</h1>
+
+    <table class="plain">
+        <tr><td style="width: 140px">Поставщик<br />(Исполнитель):</td><td><b>@PrintInvoicePage.Party(Doc.Seller)</b></td></tr>
+        <tr><td>Покупатель<br />(Заказчик):</td><td><b>@PrintInvoicePage.Party(Doc.Buyer)</b></td></tr>
+        <tr><td>Основание:</td><td><b>@Doc.Basis</b></td></tr>
+    </table>
+
+    <table style="margin-top: 8px">
+        <thead>
+            <tr><th>№</th><th>Товары (работы, услуги)</th><th>Кол-во</th><th>Ед.</th><th>Цена</th><th>НДС</th><th>Сумма</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var l in Doc.Lines)
+            {
+                <tr>
+                    <td class="c">@l.No</td>
+                    <td>@l.Name</td>
+                    <td class="n">@Quantities.Format(l.Quantity)</td>
+                    <td>@l.UnitSymbol</td>
+                    <td class="n">@Amounts.Format(l.Price)</td>
+                    <td class="c">@Amounts.Vat(l.VatPercent)</td>
+                    <td class="n">@Amounts.Format(Doc.PricesIncludeVat ? l.Amount : l.AmountWithoutVat)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <table class="totals-print">
+        <tr><td>Итого:</td><td class="n">@Amounts.Format(Doc.PricesIncludeVat ? Doc.Total : Doc.Total - Doc.VatTotal)</td></tr>
+        <tr><td>@(Doc.PricesIncludeVat ? "В том числе НДС:" : "НДС:")</td><td class="n">@(Doc.VatTotal == 0 ? (r.VatExempt ? "Без налога (НДС)" : "Без НДС") : Amounts.Format(Doc.VatTotal))</td></tr>
+        <tr><td>Всего к оплате:</td><td class="n">@Amounts.Format(Doc.Total)</td></tr>
+    </table>
+
+    @if (QrSvg is not null)
+    {
+        @* D1121: QR для оплаты по ГОСТ Р 56042-2014 — из реквизитов юрлица, счёта и суммы. *@
+        <div class="sx-qr">@((MarkupString)QrSvg)Оплата по QR-коду в приложении банка</div>
+    }
+    <p>Всего наименований @Doc.Lines.Count, на сумму @Amounts.Format(Doc.Total) @Doc.CurrencyCode</p>
+    <p class="words">@Doc.TotalInWords</p>
+    @if (Doc.DueDate is { } due)
+    {
+        <p>Оплатить не позднее @due.ToString("dd.MM.yyyy").</p>
+    }
+
+    <div class="sign sx-sign">
+        @if (r.SoleProprietor)
+        {
+            <div>Индивидуальный предприниматель <SalesPrintSign Image="Deco.DirectorSignature" /> @r.DirectorName</div>
+        }
+        else
+        {
+            <div>Руководитель <SalesPrintSign Image="Deco.DirectorSignature" /> @r.DirectorName</div>
+            <div>Бухгалтер <SalesPrintSign Image="@(Deco.AccountantSignature ?? Deco.DirectorSignature)" /> @(r.AccountantName ?? r.DirectorName)</div>
+        }
+        @if (Deco.Stamp is { } stamp)
+        {
+            <img class="sx-stamp" src="@stamp.DataUri" alt="" />
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public InvoicePrintDto Doc { get; set; } = null!;
+
+    [Parameter]
+    public SalesPrintDecorations Deco { get; set; } = SalesPrintDecorations.None;
+
+    /// <summary>QR для оплаты (SVG) или null.</summary>
+    [Parameter]
+    public string? QrSvg { get; set; }
+
+    [Parameter]
+    public bool Break { get; set; }
+}

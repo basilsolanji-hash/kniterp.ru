@@ -1,0 +1,18 @@
+@*
+    Стили отчётов маркетплейсов (D1168): таблицы строк и итогов, решения по несопоставленным товарам. Плотно, на телефоне 390 px —
+    второстепенные столбцы скрыты, строка решения — в колонку.
+*@
+<style>
+    .mp-table td.num, .mp-table th.num { text-align: right; white-space: nowrap; }
+    .mp-table td .mp-note, .mp-note { display: block; font-size: 11px; color: var(--muted); }
+    .mp-sub { font-size: 14px; margin: 10px 0 4px; }
+    .mp-unmatched { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 10px; }
+    .mp-unmatched .mp-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr) minmax(0, 2fr); gap: 6px 10px; align-items: center;
+        border-bottom: 1px dashed var(--line); padding: 4px 0; }
+    .mp-unmatched .mp-row input, .mp-unmatched .mp-row select { width: 100%; min-width: 0; box-sizing: border-box; }
+    .mp-unmatched .mp-search { display: flex; gap: 6px; min-width: 0; }
+    @@media (max-width: 899px) {
+        .mp-table .opt { display: none; }
+        .mp-unmatched .mp-row { grid-template-columns: minmax(0, 1fr); }
+    }
+</style>

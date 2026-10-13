@@ -278,7 +278,22 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
 
         db.ItemBarcodes.Add(barcode);
         Audit(ctx, AuditActions.CatalogChanged, nameof(Item), itemId, null, $"{ItemBarcode.TypeName(barcode.Type)} {barcode.Code}", "Штрихкод добавлен");
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            db.DiscardChanges();
+            // Ревью D339: тот же штрихкод добавили одновременно в другой вкладке — понятная причина, а не сбой; вкладка остаётся рабочей.
+            if (await db.ItemBarcodes.AsNoTracking().AnyAsync(b => b.OrganizationId == ctx.OrganizationId && b.Code == barcode.Code, ct))
+            {
+                throw new BusinessRuleException("catalog.barcode.duplicate", $"Штрихкод {barcode.Code} только что добавлен к другой позиции.");
+            }
+
+            throw;
+        }
+
         return barcode.Id;
     }
 
@@ -302,17 +317,29 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             .Select(b => (long?)b.ItemId).FirstOrDefaultAsync(ct);
     }
 
-    /// <summary>Цены позиции по видам цен: значение — задать, null — убрать. Нужны права на номенклатуру и на цены.</summary>
+    /// <summary>
+    /// Цены позиции по видам цен: значение — задать, null — убрать. Нужны права на номенклатуру и на цены.
+    /// D344 (ответ заказчика): при одновременной правке сохраняется последнее изменение, без конфликта. В историю цен пишется
+    /// настоящая прежняя цена из базы; одновременная вставка цены того же вида (уникальный индекс) — повтор поверх неё.
+    /// </summary>
     public async Task SetPricesAsync(long itemId, IReadOnlyDictionary<long, decimal?> prices, CancellationToken ct = default)
     {
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            await SetPricesCoreAsync(itemId, prices, ct);
-        }
-        catch
-        {
-            db.DiscardChanges(); // D304: цены меняются по одной — при отказе на середине ничего не остаётся в DbContext вкладки
-            throw;
+            try
+            {
+                await SetPricesCoreAsync(itemId, prices, ct);
+                return;
+            }
+            catch (DbUpdateException) when (attempt == 1)
+            {
+                db.DiscardChanges();
+            }
+            catch
+            {
+                db.DiscardChanges(); // D304: цены меняются по одной — при отказе на середине ничего не остаётся в DbContext вкладки
+                throw;
+            }
         }
     }
 
@@ -322,8 +349,29 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
         await guard.DemandAsync(Permissions.PriceView, ct);
         var item = await db.Items.AsNoTracking().SingleOrDefaultAsync(i => i.Id == itemId && i.OrganizationId == ctx.OrganizationId, ct)
                    ?? throw new NotFoundException("Номенклатура");
+        if (item.IsArchived)
+        {
+            // Ревью D339: цены архивной позиции не меняются (как и прочие её сведения) — сначала верните её из архива.
+            throw new BusinessRuleException("catalog.archived", "Позиция в архиве.");
+        }
+
         var types = await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId).ToDictionaryAsync(t => t.Id, ct);
         var current = await db.ItemPrices.Where(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == itemId).ToDictionaryAsync(p => p.PriceTypeId, ct);
+        // D341: у вкладки один DbContext — отслеживаемая цена могла устареть (её поменял другой пользователь): прежняя цена — из базы.
+        var fresh = await db.ItemPrices.AsNoTracking().Where(p => p.OrganizationId == ctx.OrganizationId && p.ItemId == itemId)
+            .ToDictionaryAsync(p => p.PriceTypeId, p => p.Price, ct);
+        foreach (var (typeId, tracked) in current.ToList())
+        {
+            if (!fresh.TryGetValue(typeId, out var actual) || actual != tracked.Price)
+            {
+                await db.ReloadAsync(tracked, ct); // удалённая в базе строка отсоединяется
+                if (!fresh.ContainsKey(typeId))
+                {
+                    current.Remove(typeId);
+                }
+            }
+        }
+
         foreach (var (typeId, price) in prices)
         {
             var type = types.GetValueOrDefault(typeId) ?? throw new NotFoundException("Вид цены");
@@ -521,6 +569,12 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
             throw new BusinessRuleException("catalog.user.used", $"Справочник «{catalog.Name}» подключён к доп. полю — сначала уберите поле в архив.");
         }
 
+        // Ревью D328: и к характеристике модификаций (тип «Справочник») — иначе новые значения ей не из чего выбрать.
+        if (archived && await db.Characteristics.AnyAsync(c => c.OrganizationId == ctx.OrganizationId && c.CatalogId == id && !c.IsArchived, ct))
+        {
+            throw new BusinessRuleException("catalog.user.used_by_characteristic", $"Справочник «{catalog.Name}» подключён к характеристике модификаций — сначала смените её тип или уберите в архив.");
+        }
+
         if (!archived)
         {
             await EnsureCatalogFreeAsync(ctx, catalog.Name, id, ct);
@@ -586,10 +640,60 @@ public sealed class NomenclatureService(IKnitErpDbContext db, IAccessGuard guard
     {
         var (ctx, entry) = await LoadEntryAsync(id, rowVersion, ct);
         var before = entry.Display;
-        entry.Set(name, code);
-        await EnsureEntryFreeAsync(entry.CatalogId, entry.Name, id, ct);
-        Audit(ctx, AuditActions.CatalogChanged, nameof(UserCatalogEntry), id, before, entry.Display, "Запись своего справочника");
-        await db.SaveOrConflictAsync(ct);
+        var oldName = entry.Name;
+        try
+        {
+            entry.Set(name, code);
+            await EnsureEntryFreeAsync(entry.CatalogId, entry.Name, id, ct);
+            Audit(ctx, AuditActions.CatalogChanged, nameof(UserCatalogEntry), id, before, entry.Display, "Запись своего справочника");
+            await using var tx = await db.BeginTransactionAsync(ct);
+            await db.SaveOrConflictAsync(ct);
+            if (!string.Equals(oldName, entry.Name, StringComparison.Ordinal))
+            {
+                await RenameCharacteristicValuesAsync(ctx.OrganizationId, entry.CatalogId, oldName, entry.Name, ct);
+            }
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            db.DiscardChanges();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Ревью D328: у модификаций хранится название записи справочника — переименование переносится в их значения и ключи,
+    /// иначе любая правка такой модификации отклонялась бы («нет в справочнике»).
+    /// </summary>
+    private async Task RenameCharacteristicValuesAsync(long org, long catalogId, string oldName, string newName, CancellationToken ct)
+    {
+        var characteristicIds = await db.Characteristics.Where(c => c.OrganizationId == org && c.CatalogId == catalogId).Select(c => c.Id).ToListAsync(ct);
+        if (characteristicIds.Count == 0)
+        {
+            return;
+        }
+
+        var affected = (await db.ItemCharacteristicValues.Where(v => v.OrganizationId == org && characteristicIds.Contains(v.CharacteristicId)).ToListAsync(ct))
+            .Where(v => string.Equals(v.Value, oldName, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (affected.Count == 0)
+        {
+            return;
+        }
+
+        var itemIds = affected.Select(v => v.ItemId).Distinct().ToList();
+        foreach (var v in affected)
+        {
+            v.Rename(newName);
+        }
+
+        var all = (await db.ItemCharacteristicValues.Where(v => itemIds.Contains(v.ItemId)).ToListAsync(ct)).ToLookup(v => v.ItemId);
+        foreach (var item in await db.Items.Where(i => i.OrganizationId == org && itemIds.Contains(i.Id)).ToListAsync(ct))
+        {
+            item.SetVariantKey(Variants.Key(all[item.Id].ToDictionary(v => v.CharacteristicId, v => v.Value)));
+        }
+
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task SetEntryArchivedAsync(long id, bool archived, byte[] rowVersion, CancellationToken ct = default)

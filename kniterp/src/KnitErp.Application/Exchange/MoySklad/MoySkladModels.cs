@@ -65,9 +65,15 @@ public sealed record MsRow
 
     /// <summary>D333: остаток в отчёте report/stock/all (по всем складам).</summary>
     public decimal? Stock { get; init; }
+
+    /// <summary>D336: остатки по складам в отчёте report/stock/bystore.</summary>
+    public IReadOnlyList<MsStoreStock>? StockByStore { get; init; }
 }
 
 public sealed record MsPriceType(string Id, string? Name, string? ExternalCode);
+
+/// <summary>D336: остаток позиции на одном складе МойСклад (meta.href склада, название, количество).</summary>
+public sealed record MsStoreStock(MsMeta? Meta, string? Name, decimal? Stock);
 
 /// <summary>Доп. поле в строке объекта: значение — строка, число, логическое или объект ({ "name": … } у справочника и контрагента).</summary>
 public sealed record MsAttribute(string? Id, string? Name, string? Type, JsonElement Value);
@@ -127,9 +133,15 @@ public interface IMoySkladClient
 
     Task<IReadOnlyList<MsPriceType>> PriceTypesAsync(string token, CancellationToken ct = default);
 
+    /// <summary>D337: что клиент отправляет в заголовках (для проверки связи) — без токена.</summary>
+    string HeadersInfo => string.Empty;
+
     /// <summary>D327: массовое изменение цен (POST entity/… массивом, до 1000 объектов). Возвращает изменённые объекты (id, updated).</summary>
     /// <summary>D333: страница отчёта об остатках по всем складам (все позиции, и с нулевым остатком).</summary>
     Task<MsPage<MsRow>> StockAsync(string token, int offset, int limit, CancellationToken ct = default);
+
+    /// <summary>D336: страница отчёта «Остатки по складам».</summary>
+    Task<MsPage<MsRow>> StockByStoreAsync(string token, int offset, int limit, CancellationToken ct = default);
 
     Task<IReadOnlyList<MsRow>> UpdatePricesAsync(string token, string entity, IReadOnlyList<MsPriceUpdate> updates, CancellationToken ct = default);
 }
@@ -150,6 +162,9 @@ public static class MoySkladEntities
     /// <summary>D333: отчёт «Остатки» по всем складам — только чтение, для сверки.</summary>
     public const string StockAll = "report/stock/all";
 
+    /// <summary>D336: отчёт «Остатки по складам» — только чтение, для сверки по складам.</summary>
+    public const string StockByStore = "report/stock/bystore";
+
     /// <summary>Сущности, в которые knitERP может записывать (только цены, D327).</summary>
     public static readonly IReadOnlySet<string> Writable = new HashSet<string>(StringComparer.Ordinal) { Product, Service, Bundle, Variant };
 
@@ -159,5 +174,5 @@ public static class MoySkladEntities
     public static bool IsSafeId(string? id) => id is { Length: > 0 and <= 64 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
 
     public static readonly IReadOnlySet<string> Allowed =
-        new HashSet<string>(StringComparer.Ordinal) { Organization, Uom, Country, Folder, Product, Service, Bundle, Variant, PriceTypes, StockAll };
+        new HashSet<string>(StringComparer.Ordinal) { Organization, Uom, Country, Folder, Product, Service, Bundle, Variant, PriceTypes, StockAll, StockByStore };
 }

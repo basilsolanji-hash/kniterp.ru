@@ -100,6 +100,7 @@ public sealed class SettlementStatementService(IKnitErpDbContext db, IAccessGuar
             .Select(p => new SettlementRowDto(p.PaymentDate,
                 p.CashOrderNumber is { } ko ? $"Оплата наличными, {ko}" : $"Оплата{(p.DocumentNumber is { } n ? $" по п/п № {n}" : "")}, {p.Number}",
                 0, p.Amount, 2)));
+        rows.AddRange(await KnitErp.Application.Sales.SalesRefunds.SettlementRowsAsync(db, org, cp.Id, entity.Id, to, ct)); // D1154 (сессия «Продажи»)
 
         var purchaseEntities = await db.PurchaseOrders.AsNoTracking().Where(o => o.OrganizationId == org && o.SupplierId == cp.Id)
             .Select(o => new { o.Id, o.LegalEntityId }).ToDictionaryAsync(o => o.Id, o => o.LegalEntityId, ct);

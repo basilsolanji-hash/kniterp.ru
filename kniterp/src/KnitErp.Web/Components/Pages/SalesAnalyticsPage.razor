@@ -1,0 +1,475 @@
+@page "/reports/sales"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Common
+@inject SalesReportService Reports
+
+@* D1160–D1167: аналитика продаж — разрезы с выручкой и маржой, ABC, план-факт, воронка; одна книга Excel со всеми отчётами. *@
+<PageTitle>@L("Аналитика продаж") — knitERP</PageTitle>
+<SalesStyles />
+<style>
+    .sa-table td.num, .sa-table th.num { text-align: right; white-space: nowrap; }
+    .sa-table tfoot td { font-weight: 600; border-top: 2px solid var(--line); }
+    .sa-table td .sa-note { display: block; font-size: 11px; color: var(--muted); }
+    .sa-class { display: inline-block; min-width: 20px; text-align: center; border-radius: 999px; font-weight: 600; font-size: 12px; padding: 0 6px; }
+    .sa-class.A { background: var(--accent-soft-2); }
+    .sa-class.B { background: var(--warn-bg); color: var(--warn-text); }
+    .sa-class.C { background: var(--line); }
+    .sa-funnel { display: flex; flex-direction: column; gap: 6px; max-width: 760px; margin: 8px 0; }
+    .sa-funnel .sa-step { display: grid; grid-template-columns: minmax(120px, 190px) minmax(0, 1fr); gap: 4px 10px; align-items: center; }
+    .sa-funnel .sa-bar { background: var(--accent-soft-2); border-radius: 6px; padding: 4px 8px; min-width: 2.5em; box-sizing: border-box; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+    .sa-progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; min-width: 60px; }
+    .sa-progress > span { display: block; height: 100%; background: var(--accent); }
+    @@media (max-width: 899px) { .sa-table .opt { display: none; } }
+    @@media (max-width: 560px) { .sa-funnel .sa-step { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_options is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="sx-head">
+        <h1>@L("Аналитика продаж")</h1>
+        <div class="sx-tools">
+            @if (_options.CanEditPlan)
+            {
+                <a class="button secondary" href="sales-plan">@L("План продаж")</a>
+            }
+            <a class="button secondary" href="@ExportHref" download data-enhance-nav="false" title="@L("Все отчёты страницы с текущими отборами")">Excel</a>
+        </div>
+    </div>
+    <p class="sx-lead">@L("Выручка — отгрузки минус возвраты по ценам заказов, без НДС, по дате отгрузки. Себестоимость — как в «Прибыльности»: закупки или техкарта; где цены нет, маржа не считается. Менеджер — ответственный заказа.")</p>
+    @if (_options.OwnOnly)
+    {
+        <p class="muted">@L("Показаны только заказы, где вы ответственный, — так настроено для вашей роли.")</p>
+    }
+
+    @if (!_options.AmountsVisible)
+    {
+        <p class="muted">@L("Суммы, себестоимость и маржа скрыты: нет права «Цены и суммы». ABC строится по количеству.")</p>
+    }
+
+    <form class="sx-form" @onsubmit="ReloadAsync">
+        <label>@L("С") <input type="date" @bind="_from" /></label>
+        <label>@L("По") <input type="date" @bind="_to" /></label>
+        <label>
+            @L("Менеджер")
+            <select @bind="_manager">
+                <option value="">@L("Все")</option>
+                @foreach (var m in _options.Managers)
+                {
+                    <option value="@m.Id">@m.Name</option>
+                }
+                <option value="0">@L("Без ответственного")</option>
+            </select>
+        </label>
+        <label>
+            @L("Канал")
+            <select @bind="_channel">
+                <option value="">@L("Все")</option>
+                @foreach (var c in _options.Channels)
+                {
+                    <option value="@c.Id">@c.Name</option>
+                }
+                <option value="0">@L("Без канала")</option>
+            </select>
+        </label>
+        <label>
+            @L("Группа позиций")
+            <select @bind="_group">
+                <option value="">@L("Все")</option>
+                @foreach (var g in _options.Groups)
+                {
+                    <option value="@g.Id">@g.Name</option>
+                }
+                <option value="0">@L("Без группы")</option>
+            </select>
+        </label>
+        @if (_tab == Tab.Dimensions)
+        {
+            <label>
+                @L("Разрез")
+                <select @bind="_by">
+                    <option value="@SalesDimension.Customer">@L("Покупатели")</option>
+                    <option value="@SalesDimension.Manager">@L("Менеджеры")</option>
+                    <option value="@SalesDimension.Group">@L("Группы позиций")</option>
+                    <option value="@SalesDimension.Channel">@L("Каналы")</option>
+                    <option value="@SalesDimension.Item">@L("Позиции")</option>
+                    <option value="@SalesDimension.Period">@L("Периоды")</option>
+                </select>
+            </label>
+            @if (_by == SalesDimension.Period)
+            {
+                <label>
+                    @L("Шаг")
+                    <select @bind="_step">
+                        <option value="@SalesPeriodStep.Day">@L("День")</option>
+                        <option value="@SalesPeriodStep.Week">@L("Неделя")</option>
+                        <option value="@SalesPeriodStep.Month">@L("Месяц")</option>
+                    </select>
+                </label>
+            }
+        }
+        else if (_tab == Tab.Abc)
+        {
+            <label>
+                @L("Анализ")
+                <select @bind="_abcSubject">
+                    <option value="@AbcSubject.Customer">@L("Покупатели")</option>
+                    <option value="@AbcSubject.Item">@L("Позиции")</option>
+                </select>
+            </label>
+            <label>@L("Граница A, %") <input type="number" min="1" max="99" step="1" @bind="_abcA" /></label>
+            <label>@L("Граница B, %") <input type="number" min="0" max="98" step="1" @bind="_abcB" /></label>
+        }
+        else if (_tab == Tab.Plan)
+        {
+            <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
+        }
+
+        <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button></div>
+    </form>
+
+    <div class="tabs" role="tablist">
+        @foreach (var t in Enum.GetValues<Tab>())
+        {
+            <button type="button" role="tab" class="@(_tab == t ? "tab active" : "tab secondary")" aria-selected="@(_tab == t ? "true" : "false")"
+                    @onclick="() => SwitchAsync(t)" disabled="@_busy">@TabName(t)</button>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="flash error" role="alert"><span>@_error</span><button type="button" class="link" aria-label="@L("Закрыть сообщение")" @onclick="() => _error = null">×</button></div>
+    }
+
+    @if (_tab == Tab.Dimensions && _report is { } r)
+    {
+        var amounts = r.AmountsVisible;
+        <div class="sx-kv">
+            @if (amounts)
+            {
+                <div><span>@L("Выручка без НДС")</span><span>@Amounts.Format(r.Total.Revenue)</span></div>
+                <div><span>@L("Маржа")</span><span>@(r.Total.Margin is { } m ? Amounts.Format(m) : L("неполная себестоимость"))</span></div>
+                <div><span>@L("Средний чек")</span><span>@Amounts.Format(r.Total.AverageCheck)</span></div>
+            }
+            <div><span>@L("Заказов с отгрузкой")</span><span>@r.Total.Orders</span></div>
+            <div><span>@L("Покупателей")</span><span>@r.Total.Customers</span></div>
+            <div><span>@L("Повторные покупки")</span><span>@L("{0} покупателей ({1}%)", r.RepeatCustomers, r.RepeatSharePercent?.ToString("0.#") ?? "0")</span></div>
+        </div>
+        <div class="scroll">
+            <table class="sa-table">
+                <thead>
+                    <tr>
+                        <th>@DimensionName(r.Filter.By)</th>
+                        <th class="num">@L("Количество")</th>
+                        @if (amounts)
+                        {
+                            <th class="num">@L("Выручка без НДС")</th>
+                            <th class="num opt">@L("Себестоимость")</th>
+                            <th class="num">@L("Маржа")</th>
+                            <th class="num">@L("Маржа, %")</th>
+                        }
+                        <th class="num opt">@L("Заказов")</th>
+                        @if (amounts)
+                        {
+                            <th class="num opt">@L("Средний чек")</th>
+                        }
+                        <th class="num opt">@L("Покупателей")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (r.Rows.Count == 0)
+                    {
+                        <tr><td colspan="9" class="muted">@L("За период продаж нет.")</td></tr>
+                    }
+                    @foreach (var row in r.Rows)
+                    {
+                        <tr>
+                            <td>@(row.Name ?? NoneName(r.Filter.By))@if (row.Note is not null) {<span class="sa-note">@row.Note</span>}</td>
+                            <td class="num">@Quantities.Format(row.Quantity)</td>
+                            @if (amounts)
+                            {
+                                <td class="num">@Amounts.Format(row.Revenue)</td>
+                                <td class="num opt">@(row.CostComplete ? Amounts.Format(row.Cost) : L("частично: {0}", Amounts.Format(row.Cost)))</td>
+                                <td class="num"><b class="@(row.Margin < 0 ? "warn-text" : "")">@Amounts.Format(row.Margin)</b></td>
+                                <td class="num">@(row.MarginPercent is { } p ? p.ToString("0.0") + "%" : "—")</td>
+                            }
+                            <td class="num opt">@row.Orders</td>
+                            @if (amounts)
+                            {
+                                <td class="num opt">@Amounts.Format(row.AverageCheck)</td>
+                            }
+                            <td class="num opt">@row.Customers</td>
+                        </tr>
+                    }
+                </tbody>
+                @if (r.Rows.Count > 0)
+                {
+                    <tfoot>
+                        <tr>
+                            <td>@L("Итого")</td>
+                            <td class="num">@Quantities.Format(r.Total.Quantity)</td>
+                            @if (amounts)
+                            {
+                                <td class="num">@Amounts.Format(r.Total.Revenue)</td>
+                                <td class="num opt">@Amounts.Format(r.Total.Cost)</td>
+                                <td class="num">@Amounts.Format(r.Total.Margin)</td>
+                                <td class="num">@(r.Total.MarginPercent is { } tp ? tp.ToString("0.0") + "%" : "—")</td>
+                            }
+                            <td class="num opt">@r.Total.Orders</td>
+                            @if (amounts)
+                            {
+                                <td class="num opt">@Amounts.Format(r.Total.AverageCheck)</td>
+                            }
+                            <td class="num opt">@r.Total.Customers</td>
+                        </tr>
+                    </tfoot>
+                }
+            </table>
+        </div>
+    }
+    else if (_tab == Tab.Abc && _abc is { } abc)
+    {
+        <div class="sx-kv">
+            @foreach (var cls in new[] { 'A', 'B', 'C' })
+            {
+                <div><span>@L("Класс {0}", cls)</span><span>@L("{0} шт., {1}%", abc.Count(cls), abc.Share(cls).ToString("0.#"))</span></div>
+            }
+            <div><span>@L("Основа")</span><span>@(abc.Basis == AbcBasis.Revenue ? L("выручка без НДС") : L("количество"))</span></div>
+        </div>
+        <div class="scroll">
+            <table class="sa-table">
+                <thead>
+                    <tr>
+                        <th>@L("Класс")</th>
+                        <th>@(abc.Subject == AbcSubject.Customer ? L("Покупатель") : L("Позиция"))</th>
+                        <th class="num">@(abc.Basis == AbcBasis.Revenue ? L("Выручка без НДС") : L("Количество"))</th>
+                        <th class="num">@L("Доля, %")</th>
+                        <th class="num opt">@L("Накопленная доля, %")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (abc.Rows.Count == 0)
+                    {
+                        <tr><td colspan="5" class="muted">@L("За период продаж нет.")</td></tr>
+                    }
+                    @foreach (var row in abc.Rows)
+                    {
+                        <tr>
+                            <td><span class="sa-class @row.Class">@row.Class</span></td>
+                            <td>@row.Name@if (row.Code is not null) {<span class="sa-note">@row.Code</span>}</td>
+                            <td class="num">@(abc.Basis == AbcBasis.Revenue ? Amounts.Format(row.Value) : Quantities.Format(row.Value))</td>
+                            <td class="num">@row.SharePercent.ToString("0.##")</td>
+                            <td class="num opt">@row.CumulativePercent.ToString("0.##")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_tab == Tab.Plan && _plan is { } plan)
+    {
+        @if (plan.AmountsVisible)
+        {
+            <div class="sx-kv">
+                <div><span>@L("План")</span><span>@Amounts.Format(plan.Plan)</span></div>
+                <div><span>@L("Факт")</span><span>@Amounts.Format(plan.Fact)</span></div>
+                <div><span>@L("Выполнение")</span><span>@(plan.Percent is { } pp ? pp.ToString("0.#") + "%" : "—")</span></div>
+                <div><span>@L("Прошло месяца")</span><span>@(plan.ElapsedPercent.ToString("0.#"))%</span></div>
+            </div>
+        }
+        <div class="scroll">
+            <table class="sa-table">
+                <thead>
+                    <tr><th>@L("Менеджер")</th><th class="num">@L("План")</th><th class="num">@L("Факт")</th><th class="num">@L("Выполнение")</th><th class="opt"></th><th class="num opt">@L("Отклонение")</th></tr>
+                </thead>
+                <tbody>
+                    @if (plan.Rows.Count == 0)
+                    {
+                        <tr><td colspan="6" class="muted">@L("Плана и продаж за месяц нет.")</td></tr>
+                    }
+                    @foreach (var row in plan.Rows)
+                    {
+                        <tr>
+                            <td>@(row.Manager ?? L("Без ответственного"))</td>
+                            <td class="num">@Amounts.Format(row.Plan)</td>
+                            <td class="num">@Amounts.Format(row.Fact)</td>
+                            <td class="num">@(row.Percent is { } p ? p.ToString("0.#") + "%" : "—")</td>
+                            <td class="opt"><div class="sa-progress"><span style="width: @(Math.Min(100, row.Percent ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></span></div></td>
+                            <td class="num opt"><span class="@(row.Deviation < 0 ? "warn-text" : "")">@Amounts.Format(row.Deviation)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_tab == Tab.Funnel && _funnel is { } funnel)
+    {
+        var first = Math.Max(1, funnel.Stages[0].Orders);
+        <p class="muted">@L("Заказы с датой в периоде; суммы — с НДС, как в заказе. Конверсия — доля от предыдущего этапа.")</p>
+        <div class="sa-funnel">
+            @foreach (var st in funnel.Stages)
+            {
+                <div class="sa-step">
+                    <span>@FunnelName(st.Stage)@if (st.ConversionPercent is { } cp) {<span class="sa-note">@L("{0}% от предыдущего", cp.ToString("0.#"))</span>}</span>
+                    <span class="sa-bar" style="width: @(Math.Max(8, st.Orders * 100 / first).ToString(System.Globalization.CultureInfo.InvariantCulture))%">
+                        @L("{0} зак.", st.Orders)@(st.Amount is { } a ? " · " + Amounts.Format(a) : "")
+                    </span>
+                </div>
+            }
+        </div>
+        <p class="muted">@L("Отменено заказов: {0}", funnel.Cancelled)</p>
+    }
+}
+
+@code {
+    private enum Tab
+    {
+        Dimensions,
+        Abc,
+        Plan,
+        Funnel,
+    }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private SalesReportOptionsDto? _options;
+    private SalesReportDto? _report;
+    private AbcDto? _abc;
+    private PlanFactDto? _plan;
+    private SalesFunnelDto? _funnel;
+    private Tab _tab = Tab.Dimensions;
+    private bool _busy;
+    private string? _denied;
+    private string? _error;
+    private DateTime _from;
+    private DateTime _to;
+    private DateTime _month;
+    private string _manager = string.Empty;
+    private string _channel = string.Empty;
+    private string _group = string.Empty;
+    private SalesDimension _by = SalesDimension.Customer;
+    private SalesPeriodStep _step = SalesPeriodStep.Month;
+    private AbcSubject _abcSubject = AbcSubject.Customer;
+    private decimal _abcA = 80;
+    private decimal _abcB = 15;
+
+    private string TabName(Tab t) => t switch
+    {
+        Tab.Abc => L("ABC-анализ"),
+        Tab.Plan => L("План-факт"),
+        Tab.Funnel => L("Воронка"),
+        _ => L("Выручка и маржа"),
+    };
+
+    private string DimensionName(SalesDimension d) => d switch
+    {
+        SalesDimension.Manager => L("Менеджер"),
+        SalesDimension.Group => L("Группа"),
+        SalesDimension.Channel => L("Канал"),
+        SalesDimension.Period => L("Период"),
+        SalesDimension.Item => L("Позиция"),
+        _ => L("Покупатель"),
+    };
+
+    private string NoneName(SalesDimension d) => d switch
+    {
+        SalesDimension.Manager => L("Без ответственного"),
+        SalesDimension.Group => L("Без группы"),
+        SalesDimension.Channel => L("Без канала"),
+        _ => "—",
+    };
+
+    private string FunnelName(FunnelStage s) => s switch
+    {
+        FunnelStage.Confirmed => L("Подтверждено"),
+        FunnelStage.Shipped => L("Отгружено"),
+        FunnelStage.Paid => L("Оплачено полностью"),
+        _ => L("Оформлено заказов"),
+    };
+
+    private static long? Id(string value) => long.TryParse(value, out var v) ? v : null;
+
+    private SalesReportFilter Filter => new(DateOnly.FromDateTime(_from), DateOnly.FromDateTime(_to), _by, _step, Id(_manager), Id(_channel), null, Id(_group));
+
+    private string ExportHref => KnitErp.Web.Exports.ExportLink.Build("reports/sales.xlsx",
+        ("from", KnitErp.Web.Exports.ExportLink.Date(_from)), ("to", KnitErp.Web.Exports.ExportLink.Date(_to)), ("by", ((byte)_by).ToString()),
+        ("step", ((byte)_step).ToString()), ("manager", _manager), ("channel", _channel), ("group", _group));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+        _from = new DateTime(today.Year, today.Month, 1);
+        _to = _from.AddMonths(1).AddDays(-1);
+        _month = _from;
+        try
+        {
+            _options = await Reports.OptionsAsync();
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        switch (_tab)
+        {
+            case Tab.Abc:
+                _abc = await Reports.AbcAsync(Filter, _abcSubject, AbcBasis.Revenue, _abcA, _abcB);
+                break;
+            case Tab.Plan:
+                _plan = await Reports.PlanFactAsync(DateOnly.FromDateTime(_month));
+                break;
+            case Tab.Funnel:
+                _funnel = await Reports.FunnelAsync(Filter);
+                break;
+            default:
+                _report = await Reports.ReportAsync(Filter);
+                break;
+        }
+    }
+
+    private async Task SwitchAsync(Tab tab)
+    {
+        _tab = tab;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

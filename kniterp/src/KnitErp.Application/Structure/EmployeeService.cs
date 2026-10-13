@@ -31,7 +31,8 @@ public sealed record EmployeeRowDto(
     public string StatusName => Employee.StatusName(Status);
 }
 
-public sealed record EmployeeListDto(IReadOnlyList<EmployeeRowDto> Employees, bool CanEdit, bool OwnOnly, bool IsScoped);
+/// <param name="CanEditPersonalData">D130: дата рождения в форме — только с правами просмотра и изменения ПДн.</param>
+public sealed record EmployeeListDto(IReadOnlyList<EmployeeRowDto> Employees, bool CanEdit, bool OwnOnly, bool IsScoped, bool CanEditPersonalData = false);
 
 public sealed record EmployeeFilter(long? DepartmentId = null, bool IncludeDismissed = false, string? Search = null);
 
@@ -83,8 +84,9 @@ public sealed class EmployeeService(
             query = query.Where(e => e.LastName.Contains(s) || e.FirstName.Contains(s) || e.PersonnelNumber.Contains(s));
         }
 
-        var rows = await Project(query.OrderBy(e => e.LastName).ThenBy(e => e.FirstName)).ToListAsync(ct);
-        return new EmployeeListDto(rows, ctx.Permissions.Has(Permissions.EmployeeEdit), ownOnly, visible is not null);
+        var rows = (await Project(query.OrderBy(e => e.LastName).ThenBy(e => e.FirstName)).ToListAsync(ct)).Select(r => Mask(ctx, r)).ToList();
+        return new EmployeeListDto(rows, ctx.Permissions.Has(Permissions.EmployeeEdit), ownOnly, visible is not null,
+            ctx.Permissions.Has(Permissions.PersonalDataView) && ctx.Permissions.Has(Permissions.PersonalDataEdit));
     }
 
     /// <summary>Карточка сотрудника: в области просмотра пользователя или своя; иначе «не найдено».</summary>
@@ -109,8 +111,19 @@ public sealed class EmployeeService(
             await guard.DenyAsync(ctx, Permissions.EmployeeView, ct);
         }
 
-        return await Project(query).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Сотрудник");
+        return Mask(ctx, await Project(query).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Сотрудник"));
     }
+
+    /// <summary>
+    /// D130: дата рождения — персональные данные: в DTO только с правом просмотра ПДн или своя (если чтение ПДн не запрещено явно).
+    /// Остальным — пусто; согласие показывать день рождения коллегам (D83) — не ПДн и остаётся.
+    /// </summary>
+    internal static bool CanReadPersonalData(AccessContext ctx, long? employeeUserId) =>
+        ctx.Permissions.Has(Permissions.PersonalDataView)
+        || (employeeUserId == ctx.UserId && !ctx.Permissions.IsDenied(Permissions.PersonalDataView));
+
+    private static EmployeeRowDto Mask(AccessContext ctx, EmployeeRowDto row) =>
+        CanReadPersonalData(ctx, row.UserId) ? row : row with { BirthDate = null };
 
     /// <summary>Действующие подразделения и должности для формы сотрудника.</summary>
     public async Task<EmployeeOptionsDto> GetOptionsAsync(CancellationToken ct = default)
@@ -187,6 +200,12 @@ public sealed class EmployeeService(
     public async Task<byte[]> SetBirthdayAsync(long id, DateOnly? birthDate, bool share, byte[] rowVersion, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.EmployeeEdit, ct);
+        if (!ctx.Permissions.Has(Permissions.PersonalDataEdit))
+        {
+            // D130: дата рождения — персональные данные; меняет тот, кому выдано изменение ПДн.
+            await guard.DenyAsync(ctx, Permissions.PersonalDataEdit, ct);
+        }
+
         var employee = await LoadForEditAsync(ctx, id, rowVersion, ct);
         var tz = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.TimeZoneId).SingleAsync(ct);
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeBySystemTimeZoneId(clock.UtcNow, tz));

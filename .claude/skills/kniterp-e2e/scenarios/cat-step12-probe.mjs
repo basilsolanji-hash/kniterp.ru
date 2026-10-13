@@ -10,7 +10,7 @@ await page.getByRole('button', { name: 'Проверить связь по ра�
 await page.locator('th:has-text("Раздел")').waitFor({ timeout: 180000 });
 const rows = await page.locator('table:has(th:has-text("Раздел")) tbody tr').allInnerTexts();
 console.log(rows.join('\n'));
-if (rows.length !== 10) throw new Error('разделов: ' + rows.length);
+if (rows.length !== 11) throw new Error('разделов: ' + rows.length);
 if (rows.some(r => r.includes('test-token'))) throw new Error('токен в тексте ошибки');
 console.log('✓ таблица разделов показана, токена в тексте нет');
 await page.screenshot({ path: `${process.env.E2E_DIR}/shots/probe.png` });

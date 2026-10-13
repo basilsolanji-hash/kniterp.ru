@@ -29,3 +29,17 @@ public sealed class CatResourceLimitsTests
         Assert.Equal(4, Variants.Matrix(new Dictionary<long, IReadOnlyList<string>> { [1] = ["a", "b"], [2] = ["46", "48"] }).Count);
     }
 }
+
+/// <summary>Ревью: длина ссылки проверяется после кодирования (кириллица в %XX длиннее в разы).</summary>
+public sealed class CatLinkFieldTests
+{
+    [Fact]
+    public void Encoded_link_length_is_checked()
+    {
+        var field = CustomFieldDefinition.Create(1, CustomFieldTarget.Item, "Сайт", CustomFieldType.Link, 10);
+        var longCyrillic = "https://x.ru/" + new string('ж', 300);
+        Assert.True(longCyrillic.Length < CustomFieldDefinition.ValueMaxLength);
+        Assert.Equal("custom_field.link_long", Assert.Throws<BusinessRuleException>(() => field.Normalize(longCyrillic)).Code);
+        Assert.Equal("https://x.ru/%D0%B6", field.Normalize("https://x.ru/ж"));
+    }
+}

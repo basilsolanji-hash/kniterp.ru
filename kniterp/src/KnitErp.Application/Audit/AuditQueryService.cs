@@ -52,11 +52,43 @@ public sealed class AuditQueryService(IKnitErpDbContext db, IAccessGuard guard)
             .ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
         var orgName = await db.Organizations.AsNoTracking().Where(o => o.Id == ctx.OrganizationId).Select(o => o.ShortName).SingleAsync(ct);
 
-        return entries.Select(e => new AuditRowDto(
-            e.OccurredAtUtc,
-            e.ActorUserId,
-            e.ActorUserId is { } id && names.TryGetValue(id, out var n) ? n : null,
-            e.Action, e.EntityType, e.EntityId, DescribeObject(e, names, orgName), e.Before, e.After, e.Reason)).ToList();
+        // D345 (ответ заказчика «цены скрывай»): без права «Цены и суммы» значения цен в журнале не показываются.
+        var priceTypes = ctx.Permissions.Has(Permissions.PriceView)
+            ? null
+            : await db.PriceTypes.AsNoTracking().Where(t => t.OrganizationId == ctx.OrganizationId).Select(t => t.Name).ToListAsync(ct);
+
+        return entries.Select(e =>
+        {
+            var hide = priceTypes is not null && IsPrice(e, priceTypes);
+            return new AuditRowDto(
+                e.OccurredAtUtc,
+                e.ActorUserId,
+                e.ActorUserId is { } id && names.TryGetValue(id, out var n) ? n : null,
+                e.Action, e.EntityType, e.EntityId, DescribeObject(e, names, orgName),
+                hide && e.Before is not null ? Hidden : e.Before, hide && e.After is not null ? Hidden : e.After, e.Reason);
+        }).ToList();
+    }
+
+    public const string Hidden = "скрыто";
+
+    /// <summary>
+    /// Запись с ценой: ручная цена («код: вид цены»), закупочная цена, импорт, прайс-лист, массовое изменение цен, автоцена и
+    /// переоценка. Названия видов цен сами по себе не секрет — записи «Вид цены» не скрываются.
+    /// </summary>
+    internal static bool IsPrice(AuditEntry e, IReadOnlyCollection<string> priceTypeNames)
+    {
+        if (e.EntityType is "PriceRevaluation" or "PriceRule" or "SupplierPriceList")
+        {
+            return true;
+        }
+
+        if (e.EntityType != "Item" || e.Reason is not { } reason)
+        {
+            return false;
+        }
+
+        return reason.Contains("цен", StringComparison.OrdinalIgnoreCase)
+               || priceTypeNames.Any(t => reason.EndsWith(": " + t, StringComparison.Ordinal));
     }
 
     public static readonly IReadOnlyList<string> SignInActions =

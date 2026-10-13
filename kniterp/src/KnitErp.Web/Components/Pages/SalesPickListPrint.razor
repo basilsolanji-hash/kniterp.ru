@@ -1,0 +1,66 @@
+@page "/sales-print/pick-list/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Sales
+@inject SalesService Sales
+
+@* D1150: лист сборки для склада — строки по местам хранения, без цен; графа «собрано» для отметки от руки. *@
+<PageTitle>@(_doc is null ? "Лист сборки" : $"Лист сборки {_doc.Number}") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 12mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="sales-pick-lists/@Id">@L("← К заданию")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_doc is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    <div class="sheet portrait">
+        <h1>Лист сборки № @_doc.Number от @_doc.Date.ToString("dd.MM.yyyy")</h1>
+        <p>Склад: <b>@_doc.Warehouse</b>@(_doc.Comment is null ? "" : $". {_doc.Comment}")</p>
+        <table class="goods">
+            <thead><tr><th>№</th><th>Место</th><th>Код</th><th>Наименование</th><th>Заказ, покупатель</th><th>Кол-во</th><th>Ед.</th><th>Собрано</th></tr></thead>
+            <tbody>
+                @{ var no = 0; }
+                @foreach (var l in _doc.Lines)
+                {
+                    <tr>
+                        <td class="c">@(++no)</td><td>@(l.Location ?? "")</td><td>@l.Code</td><td>@l.Name</td><td>@l.OrderNumber, @l.Customer</td>
+                        <td class="n">@Quantities.Format(l.Quantity)</td><td class="c">@l.UnitSymbol</td><td class="n">@(l.Picked > 0 ? Quantities.Format(l.Picked) : "")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p style="margin-top: 16px">Всего строк: @_doc.Lines.Count, единиц: @Quantities.Format(_doc.Lines.Sum(l => l.Quantity))</p>
+        <table class="plain" style="margin-top: 24px">
+            <tr><td style="width: 50%">Собрал: <span class="line"></span></td><td>Проверил: <span class="line"></span></td></tr>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private PickListDto? _doc;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await Sales.GetPickListAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

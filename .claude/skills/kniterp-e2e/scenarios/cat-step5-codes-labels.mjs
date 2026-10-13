@@ -53,6 +53,8 @@ ok('печать: 3 копии по сохранённому шаблону');
 await page.goto(`${BASE}/catalog/labels`); await ready(page);
 await page.locator('label:has-text("Новый из образца") select').selectOption('a4-70x37');
 await page.getByRole('button', { name: 'Начать с образца' }).click();
+// Форма заполняется из образца после ответа сервера — иначе введённое название затиралось названием образца.
+await page.waitForFunction(() => [...document.querySelectorAll('label')].some(l => l.textContent.includes('Название') && l.querySelector('input')?.value.startsWith('Лист A4')));
 await page.locator('label:has-text("Название") input').first().fill('Лист ' + sfx);
 await page.getByRole('button', { name: 'Сохранить шаблон' }).click();
 // Сообщение «Шаблон сохранён.» могло остаться от прошлого сохранения — ждём сам шаблон в списке.

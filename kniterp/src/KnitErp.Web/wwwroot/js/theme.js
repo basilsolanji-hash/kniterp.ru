@@ -1,9 +1,9 @@
-// knitERP: тема до отрисовки страницы (подключается в <head>, чтобы не было вспышки тёмной темы).
-// Выбор — в профиле: тёмная, светлая, как в системе; хранится в этом браузере.
+// knitERP: тема до отрисовки страницы (подключается в <head>, чтобы страница не мигала).
+// Выбор — в профиле: светлая (по умолчанию), тёмная, как в системе; хранится в этом браузере.
 (function () {
-    var theme = 'dark';
-    try { theme = localStorage.getItem('kniterp.theme') || 'dark'; } catch (e) { }
-    if (['dark', 'light', 'auto'].indexOf(theme) < 0) theme = 'dark';
+    var theme = 'light';
+    try { theme = localStorage.getItem('kniterp.theme') || 'light'; } catch (e) { }
+    if (['dark', 'light', 'auto'].indexOf(theme) < 0) theme = 'light';
     document.documentElement.setAttribute('data-theme', theme);
     // D114: размер интерфейса — компактно (по умолчанию), обычно, крупно.
     var density = 'compact';
