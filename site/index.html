@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Фабрика «KS» — трикотажные комплектующие</title>
+  <meta name="description" content="Подвязы, воротники-поло, манжеты, шнуры, бейки — со склада или под заказ.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header__inner">
+      <a class="logo" href="/" aria-label="Фабрика KS — на главную">
+        <img src="assets/ks-logo-white.png" alt="KS" width="34" height="24">
+        <span>ФАБРИКА</span>
+      </a>
+      <nav class="nav" id="nav" aria-label="Главное меню">
+        <a href="/shop">Каталог</a>
+        <a href="#order">Индивидуальный заказ</a>
+        <a href="#about">О фабрике</a>
+        <a href="#delivery">Доставка и оплата</a>
+        <a href="#contacts">Контакты</a>
+      </nav>
+      <div class="header__actions">
+        <button class="icon-btn" id="searchToggle" aria-label="Поиск">
+          <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>
+        </button>
+        <a class="icon-btn" href="/my-account" aria-label="Личный кабинет">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+        </a>
+        <button class="icon-btn burger" id="burger" aria-label="Меню" aria-expanded="false" aria-controls="nav">
+          <svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+      </div>
+    </div>
+    <form class="search" id="search" action="/" role="search" hidden>
+      <input type="search" name="s" placeholder="Поиск по каталогу" aria-label="Поиск по каталогу">
+      <input type="hidden" name="post_type" value="product">
+      <button type="submit" class="btn btn--primary">Найти</button>
+    </form>
+  </header>
+
+  <a class="cart-fab" href="/cart" aria-label="Корзина">
+    <svg viewBox="0 0 24 24"><path d="M3 4h2l2.2 10.2a1 1 0 0 0 1 .8h8.9a1 1 0 0 0 1-.8L20 8H6.2"/><circle cx="9" cy="19" r="1.4"/><circle cx="17" cy="19" r="1.4"/></svg>
+    <span class="cart-fab__count" id="cartCount">180</span>
+  </a>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <h1 class="hero__title">Знаем цену каждой детали</h1>
+        <p class="hero__lead">Подвязы, воротники-поло, манжеты, шнуры, бейки — со склада или под заказ. Два способа работать с нами — выбирайте удобный</p>
+        <div class="hero__buttons">
+          <a class="btn btn--primary" href="/shop">Открыть каталог <svg class="arrow" viewBox="0 0 24 24"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+          <a class="btn btn--outline" href="#order">Индивидуальный заказ <svg class="arrow" viewBox="0 0 24 24"><path d="M7 17 17 7M8 7h9v9"/></svg></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="banner">
+      <div class="banner__media">
+        <!-- Замените на оригинальное видео/фото с сайта: <video src="assets/hero.mp4" autoplay muted loop playsinline></video> -->
+        <img src="assets/hero.jpg" alt="Вязальная машина фабрики KS">
+      </div>
+      <div class="banner__caption">
+        <h2>Трикотажная фабрика «KS»: когда незаметная деталь становится незаменимой</h2>
+      </div>
+    </section>
+
+    <section class="about" id="about">
+      <div class="container">
+        <h2 class="section-title">О фабрике</h2>
+        <div class="card">
+          <p>Когда вы думаете о трикотажных комплектующих, вы вряд ли представляете двигатель роста вашего бизнеса. Скорее «технические детали», «необходимый минимум», «то, что просто должно быть».</p>
+          <p><strong>А теперь представьте обратное:</strong> эти самые «мелочи» могут стать вашим главным конкурентным преимуществом.</p>
+          <h3>Кто мы?</h3>
+          <p><strong>«KS»</strong> — лидер в нише вязаных комплектующих: подвязы, воротники — поло, манжеты, бейки, шнуры и.т.д.</p>
+          <p>Мы специализируемся на производстве и оптовых поставках трикотажных комплектующих и готовы предложить качественные решения для вашего бизнеса.</p>
+          <p><strong>Основатель фабрики</strong> — Соланджи Басил, дессинатор, профессионал с 25-летним опытом в текстильной отрасли, человек, который знает, что хорошие комплектующие — это «от незаметного к незаменимому».</p>
+          <ul class="stats">
+            <li><b>&gt;25 лет</b><span>опыт основателя в текстильной отрасли</span></li>
+            <li><b>&gt;200</b><span>цветов в постоянной палитре</span></li>
+            <li><b>от 2 дней</b><span>срок выполнения заказа</span></li>
+            <li><b>100%</b><span>собственное производство, без субподряда</span></li>
+            <li><b>10 000 деталей</b><span>производим ежемесячно</span></li>
+            <li><b>Бесплатная доставка</b><span>по всей России при заказе от 50 000 рублей</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer" id="contacts">
+    <div class="container footer__inner">
+      <a class="logo" href="/"><img src="assets/ks-logo-white.png" alt="KS" width="34" height="24"><span>ФАБРИКА</span></a>
+      <div class="footer__contacts">
+        <a href="tel:+79850007992">+7 985 000-79-92</a>
+        <a href="mailto:Sale@fabrika-ks.ru">Sale@fabrika-ks.ru</a>
+        <span>Московская обл., г. Электросталь, ул. Ялагина, 3</span>
+      </div>
+      <small>© ООО «Солвер», ИНН 9705239429</small>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
