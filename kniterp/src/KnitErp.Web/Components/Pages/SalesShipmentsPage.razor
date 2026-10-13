@@ -120,8 +120,8 @@ else
                 <ul class="sx-history">
                     @foreach (var m in _methods)
                     {
-                        <li>
-                            @m.Name <span class="muted small">@L(m.KindName)@(m.IsArchived ? " · " + L("в архиве") : "")</span>
+                        <li class="ship-ref">
+                            <span class="ship-ref-name">@m.Name@if (L(m.KindName) != m.Name || m.IsArchived) { <span class="muted small"> · @(L(m.KindName) == m.Name ? L("в архиве") : L(m.KindName) + (m.IsArchived ? " · " + L("в архиве") : ""))</span> }</span>
                             <button type="button" class="link" @onclick="() => ArchiveMethodAsync(m)" disabled="@_busy">@(m.IsArchived ? L("Вернуть") : L("В архив"))</button>
                         </li>
                     }
@@ -141,8 +141,8 @@ else
                 <ul class="sx-history">
                     @foreach (var x in _reasons)
                     {
-                        <li>
-                            @x.Name @if (x.IsArchived) { <span class="muted small">@L("в архиве")</span> }
+                        <li class="ship-ref">
+                            <span class="ship-ref-name">@x.Name@if (x.IsArchived) { <span class="muted small"> · @L("в архиве")</span> }</span>
                             <button type="button" class="link" @onclick="() => ArchiveReasonAsync(x)" disabled="@_busy">@(x.IsArchived ? L("Вернуть") : L("В архив"))</button>
                         </li>
                     }
