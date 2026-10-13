@@ -1,6 +1,7 @@
 @page "/supplier-invoices"
 @using KnitErp.Application.Purchasing
 @inject PurchaseService Purchases
+@inject IJSRuntime JS
 
 <PageTitle>@L("Счета поставщиков") — knitERP</PageTitle>
 
@@ -59,10 +60,19 @@ else
     private string? _search;
     private bool _unpaid;
 
+    /// <summary>D817: фильтр списка — в адресе (пишется после применения), «Назад» открывает тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "unpaid")]
+    public string? UnpaidQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
+            _search = SearchQuery;
+            _unpaid = UnpaidQuery == "1";
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -84,6 +94,10 @@ else
         try
         {
             await LoadAsync();
+            await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+            {
+                ["q"] = _search, ["unpaid"] = _unpaid ? "1" : null, ["new"] = null,
+            });
         }
         finally
         {

@@ -5,6 +5,7 @@
 @inject InventoryService Inventory
 @inject StockDocumentService Documents
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@L("Инвентаризация") — knitERP</PageTitle>
 
@@ -113,6 +114,16 @@ else
     [SupplyParameterFromQuery(Name = "new")]
     public string? NewQuery { get; set; }
 
+    /// <summary>D817: фильтр списка — в адресе (пишется после применения), «Назад» открывает тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "warehouse")]
+    public string? WarehouseQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    public string? ToQuery { get; set; }
+
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
@@ -136,10 +147,20 @@ else
     private string ExportHref => KnitErp.Web.Exports.ExportLink.Build("inventory.xlsx",
         ("from", KnitErp.Web.Exports.ExportLink.Date(_from)), ("to", KnitErp.Web.Exports.ExportLink.Date(_to)), ("warehouse", _filterWarehouse));
 
-    private Task ReloadAsync() => RunAsync(async () => _rows = await Inventory.ListAsync(Filter));
+    private Task ReloadAsync() => RunAsync(async () =>
+    {
+        _rows = await Inventory.ListAsync(Filter);
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["warehouse"] = _filterWarehouse, ["from"] = _from?.ToString("yyyy-MM-dd"), ["to"] = _to?.ToString("yyyy-MM-dd"), ["new"] = null,
+        });
+    });
 
     protected override async Task OnInitializedAsync()
     {
+        _filterWarehouse = WarehouseQuery ?? string.Empty;
+        _from = DateTime.TryParse(FromQuery, System.Globalization.CultureInfo.InvariantCulture, out var from) ? from : null;
+        _to = DateTime.TryParse(ToQuery, System.Globalization.CultureInfo.InvariantCulture, out var to) ? to : null;
         try
         {
             _visibleWarehouses = await Documents.ListVisibleWarehousesAsync();

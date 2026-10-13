@@ -4,6 +4,7 @@
 @inject CrmLeadService Leads
 @inject KnitErp.Application.Tagging.TagService TagLookup
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@L("Лиды") — knitERP</PageTitle>
 <CrmStyles />
@@ -177,10 +178,27 @@ else
     private string? _paste;
     private bool _pasteOpen;
 
+    /// <summary>D817: фильтр списка — в адресе (пишется после применения), «Назад» открывает тот же отбор. Статус «Все» — status=all, «Открытые» (по умолчанию) — без параметра.</summary>
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? StatusQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "source")]
+    public string? SourceQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "mine")]
+    public string? MineQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
+            _status = StatusQuery switch { null or "" => "open", "all" => string.Empty, var s => s };
+            _filterSource = SourceQuery ?? string.Empty;
+            _search = SearchQuery;
+            _mine = MineQuery == "1";
             _options = await Leads.OptionsAsync();
             await LoadAsync();
         }
@@ -201,7 +219,15 @@ else
     private Task ReloadAsync()
     {
         _pageNo = 0;
-        return RunAsync(LoadAsync);
+        return RunAsync(async () =>
+        {
+            await LoadAsync();
+            await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+            {
+                ["status"] = _status switch { "open" => null, "" => "all", var s => s }, ["source"] = _filterSource, ["q"] = _search,
+                ["mine"] = _mine ? "1" : null, ["new"] = null,
+            });
+        });
     }
 
     private Task PageAsync(int page)

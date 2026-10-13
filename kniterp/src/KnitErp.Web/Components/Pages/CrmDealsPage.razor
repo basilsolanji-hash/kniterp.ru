@@ -4,6 +4,7 @@
 @inject CrmDealService Deals
 @inject KnitErp.Application.Tagging.TagService TagLookup
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@L("Сделки") — knitERP</PageTitle>
 <CrmStyles />
@@ -247,6 +248,28 @@ else
     [SupplyParameterFromQuery(Name = "view")]
     public string? ViewQuery { get; set; }
 
+    /// <summary>D817: фильтр списка — в адресе (пишется после применения), «Назад» открывает тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "pipeline")]
+    public string? PipelineQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "responsible")]
+    public string? ResponsibleQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "source")]
+    public string? SourceQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    public string? ToQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "mine")]
+    public string? MineQuery { get; set; }
+
     private CrmOptionsDto? _options;
     private CrmBoardDto? _board;
     private CrmPage<CrmDealRowDto>? _page;
@@ -285,6 +308,17 @@ else
             _options = await Deals.OptionsAsync();
             _pipeline = _options.Pipelines.FirstOrDefault()?.Id.ToString() ?? "";
             _newPipeline = _pipeline;
+            if (_options.Pipelines.Any(p => p.Id.ToString() == PipelineQuery))
+            {
+                _pipeline = PipelineQuery!;
+            }
+
+            _responsible = ResponsibleQuery ?? string.Empty;
+            _source = SourceQuery ?? string.Empty;
+            _from = DateTime.TryParse(FromQuery, System.Globalization.CultureInfo.InvariantCulture, out var from) ? from : null;
+            _to = DateTime.TryParse(ToQuery, System.Globalization.CultureInfo.InvariantCulture, out var to) ? to : null;
+            _search = SearchQuery;
+            _mine = MineQuery == "1";
             _customers = await Deals.CounterpartiesAsync(null);
             await LoadAsync();
         }
@@ -315,7 +349,16 @@ else
     private Task ReloadAsync()
     {
         _pageNo = 0;
-        return RunAsync(LoadAsync);
+        return RunAsync(async () =>
+        {
+            await LoadAsync();
+            await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+            {
+                ["view"] = _view == "table" ? "table" : null, ["pipeline"] = _pipeline, ["responsible"] = _responsible, ["source"] = _source,
+                ["from"] = _from?.ToString("yyyy-MM-dd"), ["to"] = _to?.ToString("yyyy-MM-dd"), ["q"] = _search,
+                ["mine"] = _mine ? "1" : null, ["new"] = null,
+            });
+        });
     }
 
     private Task SwitchAsync(string view)

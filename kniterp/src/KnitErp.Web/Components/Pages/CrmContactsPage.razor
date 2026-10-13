@@ -4,6 +4,7 @@
 @inject CrmContactService Contacts
 @inject CrmDealService Deals
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@L("Контакты") — knitERP</PageTitle>
 <CrmStyles />
@@ -126,10 +127,19 @@ else
     private string? _companySearch;
     private string _company = string.Empty;
 
+    /// <summary>D817: поиск и «с архивом» — в адресе (пишутся после применения фильтра).</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "archived")]
+    public string? ArchivedQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
+            _search = SearchQuery;
+            _archived = ArchivedQuery == "1";
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -143,7 +153,14 @@ else
     private Task ReloadAsync()
     {
         _pageNo = 0;
-        return RunAsync(LoadAsync);
+        return RunAsync(async () =>
+        {
+            await LoadAsync();
+            await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+            {
+                ["q"] = _search, ["archived"] = _archived ? "1" : null, ["new"] = null,
+            });
+        });
     }
 
     private Task PageAsync(int page)

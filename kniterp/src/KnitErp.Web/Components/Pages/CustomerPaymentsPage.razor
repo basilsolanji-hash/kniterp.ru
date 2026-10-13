@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Sales
 @inject SalesService Sales
 @inject KnitErp.Application.Finance.MoneyService Money
+@inject IJSRuntime JS
 
 <PageTitle>@L("Оплаты покупателей") — knitERP</PageTitle>
 
@@ -144,6 +145,17 @@ else
     private DateTime? _from;
     private DateTime? _to;
     private string _search = string.Empty;
+
+    /// <summary>D817: фильтр списка — в адресе (пишется после применения), «Назад» открывает тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    public string? ToQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
     private string _customer = string.Empty;
     private DateTime _date = DateTime.Today;
     private string _amount = string.Empty;
@@ -163,6 +175,9 @@ else
     {
         try
         {
+            _from = DateTime.TryParse(FromQuery, System.Globalization.CultureInfo.InvariantCulture, out var from) ? from : null;
+            _to = DateTime.TryParse(ToQuery, System.Globalization.CultureInfo.InvariantCulture, out var to) ? to : null;
+            _search = SearchQuery ?? string.Empty;
             await LoadAsync();
             if (CanEdit)
             {
@@ -182,7 +197,14 @@ else
     private async Task LoadAsync() =>
         _rows = await Sales.ListPaymentsAsync(_from is { } f ? DateOnly.FromDateTime(f) : null, _to is { } t ? DateOnly.FromDateTime(t) : null, _search);
 
-    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
+    private async Task ReloadAsync()
+    {
+        await RunAsync(() => Task.CompletedTask, null);
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["from"] = _from?.ToString("yyyy-MM-dd"), ["to"] = _to?.ToString("yyyy-MM-dd"), ["q"] = _search, ["new"] = null,
+        });
+    }
 
     private Task CreateAsync() => RunAsync(async () =>
     {

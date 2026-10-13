@@ -1,6 +1,7 @@
 @page "/purchase-orders"
 @using KnitErp.Application.Purchasing
 @using KnitErp.Domain.Purchasing
+@inject IJSRuntime JS
 @inject KnitErp.Application.Tagging.TagService TagLookup
 @inject PurchaseService Purchases
 @inject NavigationManager Navigation
@@ -174,6 +175,19 @@ else
     [SupplyParameterFromQuery(Name = "overdue")]
     public int? OverdueQuery { get; set; }
 
+    /// <summary>D817: фильтр списка — в адресе (пишется после применения), «Назад» открывает тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? StatusQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    public string? ToQuery { get; set; }
+
     private string _status = string.Empty;
     private bool _overdue;
     private string _entity = string.Empty;
@@ -194,6 +208,10 @@ else
         try
         {
             _overdue = OverdueQuery == 1;
+            _status = StatusQuery ?? string.Empty;
+            _search = SearchQuery ?? string.Empty;
+            _from = DateTime.TryParse(FromQuery, System.Globalization.CultureInfo.InvariantCulture, out var from) ? from : null;
+            _to = DateTime.TryParse(ToQuery, System.Globalization.CultureInfo.InvariantCulture, out var to) ? to : null;
             await LoadAsync();
             if (NewQuery == "1")
             {
@@ -220,7 +238,15 @@ else
     private bool IsLate(PurchaseOrderRowDto o) =>
         o.Status == PurchaseOrderStatus.Confirmed && o.ExpectedDate < Today && o.Received != ReceiptState.Full;
 
-    private Task ReloadAsync() => RunAsync(LoadAsync);
+    private Task ReloadAsync() => RunAsync(async () =>
+    {
+        await LoadAsync();
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["status"] = _status, ["q"] = _search, ["overdue"] = _overdue ? "1" : null,
+            ["from"] = _from?.ToString("yyyy-MM-dd"), ["to"] = _to?.ToString("yyyy-MM-dd"), ["new"] = null,
+        });
+    });
 
     private Task OpenCreateAsync() => RunAsync(async () =>
     {

@@ -4,6 +4,7 @@
 @using KnitErp.Web.Components.Shared
 @inject TechCardService Cards
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@L("Техкарты") — knitERP</PageTitle>
 
@@ -114,10 +115,19 @@ else
     private string _outputText = "1";
     private string? _comment;
 
+    /// <summary>D817: поиск и «показать архив» — в адресе (пишутся после применения фильтра).</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "archived")]
+    public string? ArchivedQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         try
         {
+            _search = SearchQuery ?? string.Empty;
+            _archived = ArchivedQuery == "1";
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -128,7 +138,14 @@ else
 
     private async Task LoadAsync() => _rows = await Cards.ListAsync(_search, _archived);
 
-    private Task ReloadAsync() => RunAsync(LoadAsync);
+    private Task ReloadAsync() => RunAsync(async () =>
+    {
+        await LoadAsync();
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["q"] = _search, ["archived"] = _archived ? "1" : null, ["new"] = null,
+        });
+    });
 
     private Task OpenCreateAsync() => RunAsync(async () =>
     {

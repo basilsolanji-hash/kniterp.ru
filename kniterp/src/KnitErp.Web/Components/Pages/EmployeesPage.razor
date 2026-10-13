@@ -7,6 +7,7 @@
 @inject EmployeeExchangeService Exchange
 @inject KnitErp.Application.Hr.HrSettingsService HrSettings
 @inject KnitErp.Application.Structure.StructureService Structure
+@inject IJSRuntime JS
 
 <PageTitle>@L("Сотрудники") — knitERP</PageTitle>
 <StepUpDialog @ref="_stepUp" />
@@ -229,6 +230,14 @@ else
     private bool _flashIsError;
     private string _search = string.Empty;
     private bool _includeDismissed;
+
+    /// <summary>D817: поиск и «показать уволенных» — в адресе (пишутся после применения фильтра).</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "dismissed")]
+    public string? DismissedQuery { get; set; }
+
     private bool _leaveOnlyByOrder;
     private KnitErp.Application.Hr.CompletenessListDto? _completeness;
 
@@ -243,7 +252,9 @@ else
     {
         try
         {
-            _list = await Employees.ListAsync(new EmployeeFilter());
+            _search = SearchQuery ?? string.Empty;
+            _includeDismissed = DismissedQuery == "1";
+            _list = await Employees.ListAsync(new EmployeeFilter(null, _includeDismissed, _search));
             if (_list.CanEdit)
             {
                 _leaveOnlyByOrder = (await HrSettings.GetAsync()).Rules.LeaveOnlyByOrder; // D216: отпуск только приказом
@@ -259,7 +270,14 @@ else
         }
     }
 
-    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask);
+    private async Task ReloadAsync()
+    {
+        await RunAsync(() => Task.CompletedTask);
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["q"] = _search, ["dismissed"] = _includeDismissed ? "1" : null, ["new"] = null,
+        });
+    }
 
     private Task OpenHireAsync() => RunAsync(async () =>
     {

@@ -13,6 +13,7 @@
 @inject PackService Packs
 @inject NavigationManager Navigation
 @inject CatalogViewService Views
+@inject IJSRuntime JS
 
 <PageTitle>@L("Номенклатура") — knitERP</PageTitle>
 
@@ -516,9 +517,22 @@ else
     [SupplyParameterFromQuery(Name = "search")]
     public string? SearchQuery { get; set; }
 
+    /// <summary>D817: остальной фильтр — тоже в адресе (пишется после применения), «Назад» открывает тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "kind")]
+    public string? KindQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? TypeQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "archived")]
+    public string? ArchivedQuery { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         _search = SearchQuery ?? _search;
+        _kindFilter = KindQuery ?? string.Empty;
+        _typeFilter = TypeQuery ?? string.Empty;
+        _includeArchived = ArchivedQuery == "1";
         try
         {
             await LoadAsync();
@@ -780,11 +794,16 @@ else
         await ReloadAsync();
     }
 
-    private Task ReloadAsync()
+    private async Task ReloadAsync()
     {
         _page = 0;
         ClearSelection(); // новый отбор — выбор сбрасывается, чтобы изменение не ушло на невидимые позиции
-        return RunAsync(() => Task.CompletedTask, null);
+        await RunAsync(() => Task.CompletedTask, null);
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["search"] = _search, ["kind"] = _kindFilter, ["type"] = _typeFilter,
+            ["archived"] = _includeArchived ? "1" : null, ["new"] = null,
+        });
     }
 
     private Task GoToPageAsync(int page)

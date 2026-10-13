@@ -2,6 +2,7 @@
 @using KnitErp.Application.Sales
 @using KnitErp.Domain.Sales
 @inject CustomerInvoiceService Invoices
+@inject IJSRuntime JS
 
 <PageTitle>@L("Счета покупателям") — knitERP</PageTitle>
 
@@ -75,6 +76,19 @@ else
     private DateTime? _to;
     private bool _cancelled;
 
+    /// <summary>D817: фильтр списка — в адресе (пишется после применения), «Назад» открывает тот же отбор.</summary>
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? SearchQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    public string? ToQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "cancelled")]
+    public string? CancelledQuery { get; set; }
+
     /// <summary>Оплаченность счёта — уже на языке пользователя.</summary>
     public static string StateName(InvoicePaymentState state) => state switch
     {
@@ -94,6 +108,10 @@ else
     {
         try
         {
+            _search = SearchQuery;
+            _from = DateTime.TryParse(FromQuery, System.Globalization.CultureInfo.InvariantCulture, out var from) ? from : null;
+            _to = DateTime.TryParse(ToQuery, System.Globalization.CultureInfo.InvariantCulture, out var to) ? to : null;
+            _cancelled = CancelledQuery == "1";
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -116,6 +134,11 @@ else
         try
         {
             await LoadAsync();
+            await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+            {
+                ["q"] = _search, ["from"] = _from?.ToString("yyyy-MM-dd"), ["to"] = _to?.ToString("yyyy-MM-dd"),
+                ["cancelled"] = _cancelled ? "1" : null, ["new"] = null,
+            });
         }
         finally
         {

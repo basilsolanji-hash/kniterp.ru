@@ -7,6 +7,7 @@
 @inject MoneyOperationService Operations
 @inject CashFlowItemService Items
 @inject AccountableService Accountables
+@inject IJSRuntime JS
 
 <PageTitle>@L("Касса и счета") — knitERP</PageTitle>
 
@@ -246,6 +247,16 @@ else
     [SupplyParameterFromQuery(Name = "new")]
     public string? NewQuery { get; set; }
 
+    /// <summary>D817: фильтр операций — в адресе (пишется после применения), «Назад» открывает тот же отбор; без дат в адресе — текущий месяц.</summary>
+    [SupplyParameterFromQuery(Name = "from")]
+    public string? FromQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "to")]
+    public string? ToQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "account")]
+    public string? AccountQuery { get; set; }
+
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
@@ -297,6 +308,17 @@ else
         var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
         _from = new DateTime(today.Year, today.Month, 1);
         _to = today;
+        if (DateTime.TryParse(FromQuery, System.Globalization.CultureInfo.InvariantCulture, out var from))
+        {
+            _from = from;
+        }
+
+        if (DateTime.TryParse(ToQuery, System.Globalization.CultureInfo.InvariantCulture, out var to))
+        {
+            _to = to;
+        }
+
+        _filterAccount = AccountQuery ?? string.Empty;
         try
         {
             await LoadAsync();
@@ -363,7 +385,14 @@ else
         _form = new OperationForm { Date = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date, Account = _accounts.FirstOrDefault()?.Id.ToString() ?? string.Empty };
     }
 
-    private Task ReloadAsync() => RunAsync(() => Task.CompletedTask, null);
+    private async Task ReloadAsync()
+    {
+        await RunAsync(() => Task.CompletedTask, null);
+        await JS.InvokeVoidAsync("kniterp.setQuery", new Dictionary<string, string?>
+        {
+            ["from"] = _from?.ToString("yyyy-MM-dd"), ["to"] = _to?.ToString("yyyy-MM-dd"), ["account"] = _filterAccount, ["new"] = null,
+        });
+    }
 
     private Task CreateAsync() => RunAsync(async () =>
     {
