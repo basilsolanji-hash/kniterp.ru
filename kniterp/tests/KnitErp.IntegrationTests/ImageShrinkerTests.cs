@@ -99,4 +99,44 @@ public sealed class ImageShrinkerTests
         var t7 = shrinker.Shrink(Jpeg(300, 100, 7), "image/jpeg", 2000)!;
         Assert.True(IsRed(Pixel(t7, 50, 270)));
     }
+
+    /// <summary>Ревью 13.10: PNG в несколько сотен байт с заголовком 30000×30000 не разворачивается в память — понятный отказ.</summary>
+    [Fact]
+    public void Decompression_bomb_is_rejected_before_decoding()
+    {
+        static uint Crc(byte[] data)
+        {
+            var crc = 0xFFFFFFFFu;
+            foreach (var b in data)
+            {
+                crc ^= b;
+                for (var k = 0; k < 8; k++)
+                {
+                    crc = (crc & 1) != 0 ? 0xEDB88320u ^ (crc >> 1) : crc >> 1;
+                }
+            }
+
+            return crc ^ 0xFFFFFFFFu;
+        }
+
+        static byte[] Chunk(string type, byte[] data)
+        {
+            var typed = System.Text.Encoding.ASCII.GetBytes(type).Concat(data).ToArray();
+            var len = new byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(len, data.Length);
+            var crc = new byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(crc, Crc(typed));
+            return [.. len, .. typed, .. crc];
+        }
+
+        var ihdr = new byte[13];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(ihdr, 30_000);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(ihdr.AsSpan(4), 30_000);
+        ihdr[8] = 8;
+        ihdr[9] = 2;
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, .. Chunk("IHDR", ihdr), .. Chunk("IDAT", [0x78, 0x9C, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01]),
+            .. Chunk("IEND", [])];
+        var ex = Assert.Throws<KnitErp.Domain.Common.BusinessRuleException>(() => new SkiaImageShrinker().Shrink(png, "image/png", 2000));
+        Assert.Equal("dev.file.image.size", ex.Code);
+    }
 }

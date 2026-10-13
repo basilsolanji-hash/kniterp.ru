@@ -742,7 +742,6 @@
   "Отход, %": "Chiqindi, %",
   "Отчество": "Otasining ismi",
   "Отчёты": "Hisobotlar",
-  "Отчёты комиссионера": "Komissioner hisobotlari",
   "Отчёты склада: просмотр": "Ombor hisobotlari: koʻrish",
   "Оформить возврат": "Qaytarishni rasmiylashtirish",
   "Оформить отгрузку": "Joʻnatishni rasmiylashtirish",
@@ -776,7 +775,6 @@
   "Период открыт": "Davr ochildi",
   "Период открыт.": "Davr ochildi.",
   "Период уже закрыт по {0:dd.MM.yyyy}. Чтобы сдвинуть границу назад, откройте период.": "Davr {0:dd.MM.yyyy} gacha allaqachon yopilgan. Chegarani orqaga surish uchun davrni oching.",
-  "Персональные данные сотрудников": "Xodimlarning shaxsiy maʼlumotlari",
   "Площадка": "Maydon",
   "Площадка «{0}» в архиве.": "«{0}» maydoni arxivda.",
   "Площадка «{0}» уже есть.": "«{0}» maydoni allaqachon bor.",
@@ -6277,5 +6275,6 @@
   "На складе остаток {0}: списать или переместить его можно будет только после возврата из архива.": "Omborda {0} qoldiq bor: uni faqat arxivdan qaytargandan keyin hisobdan chiqarish yoki ko‘chirish mumkin.",
   "Позиция «{0}» уже в учёте:": "«{0}» pozitsiyasi allaqachon hisobda:",
   "скрыто": "yashirilgan",
-  "Единиц пока нет.": "Birliklar hozircha yo‘q."
+  "Единиц пока нет.": "Birliklar hozircha yo‘q.",
+  "Версия {0} утверждена — чтобы изменить рисунок, создайте новую версию.": "{0}-versiya tasdiqlangan — naqshni o‘zgartirish uchun yangi versiya yarating."
 }

@@ -349,4 +349,41 @@ public sealed class DevAutomationRulesTests
         Assert.Equal("dev.pattern.approve.rapport", Code(() => DevPatternRules.EnsureApprovable(DevPattern.Create(1, "Р-4", PatternValues(rw: null), DateTime.UtcNow, 1),
             colors, [("Основной", all)], 8)));
     }
+
+    [Fact]
+    public void Approved_pattern_version_stays_locked_until_new_version()
+    {
+        var p = DevPattern.Create(1, "Р-1", PatternValues(), DateTime.UtcNow, 1);
+        p.MoveTo(DevPatternStatus.Approved);
+        p.MoveTo(DevPatternStatus.Draft); // «вернуть в черновик» не открывает правку утверждённой версии
+        Assert.False(p.IsEditable);
+        Assert.Equal("dev.pattern.locked", Assert.Throws<BusinessRuleException>(() => p.Set(PatternValues())).Code);
+        p.MoveTo(DevPatternStatus.Archived);
+        p.MoveTo(DevPatternStatus.Draft);
+        Assert.False(p.IsEditable);
+        p.NextVersion();
+        Assert.True(p.IsEditable);
+        p.Set(PatternValues());
+    }
+
+    [Fact]
+    public void Grid_key_is_validated_and_can_be_cleared()
+    {
+        var c = DevPatternColor.Create(1, 1, 1, "Фон", null, null, "#FFFFFF");
+        Assert.Equal("field.too_long", Assert.Throws<BusinessRuleException>(() => c.SetShare(50, "Background1")).Code);
+        c.SetShare(0, null, clearKey: true);
+        Assert.Null(c.GridKey);
+        c.SetShare(40, "#000000");
+        Assert.Equal(("#000000", 40m), (c.GridKey, c.SharePercent!.Value));
+    }
+
+    [Fact]
+    public void Text_grid_is_bounded_by_size_and_row_length()
+    {
+        Assert.False(DevPatternGrid.LooksLikeTextGrid(new byte[DevPatternGrid.MaxTextBytes + 1].Select(_ => (byte)'1').ToArray()));
+        var longRow = System.Text.Encoding.ASCII.GetBytes(string.Join(",", Enumerable.Repeat("a", DevPatternGrid.MaxSide + 1)));
+        Assert.False(DevPatternGrid.LooksLikeTextGrid(longRow));
+        Assert.Equal("dev.pattern.grid.size", Assert.Throws<BusinessRuleException>(() => DevPatternGrid.Count(longRow, "text/csv")).Code);
+        Assert.True(DevPatternGrid.LooksLikeTextGrid(System.Text.Encoding.ASCII.GetBytes(string.Join(",", Enumerable.Repeat("a", DevPatternGrid.MaxSide)))));
+    }
 }

@@ -5355,6 +5355,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int?>("ApprovedVersion")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ChangedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
                     b.Property<long?>("CopiedFromPatternId")
                         .HasColumnType("bigint");
 
@@ -5700,6 +5706,62 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("dev_pattern_versions", "kniterp", t =>
                         {
                             t.HasTrigger("tr_dev_pattern_versions_immutable");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevPatternVersionColor", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ColorName")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("ColorNo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Colorway")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<long?>("ColorwayId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int?>("Feeder")
+                        .HasColumnType("int");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PatternId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("SharePercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Yarn")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId", "PatternId", "Version")
+                        .HasDatabaseName("ix_dev_pattern_version_colors_version");
+
+                    b.ToTable("dev_pattern_version_colors", "kniterp", t =>
+                        {
+                            t.HasTrigger("tr_dev_pattern_version_colors_immutable");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -14999,6 +15061,23 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_dev_pattern_versions_pattern");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Development.DevPatternVersionColor", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("KnitErp.Domain.Development.DevPatternVersion", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "PatternId", "Version")
+                        .HasPrincipalKey("OrganizationId", "PatternId", "Version")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_dev_pattern_version_colors_version");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Development.DevSample", b =>

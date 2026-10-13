@@ -43,8 +43,11 @@ public sealed record DevPatternDto(
     int? MachineFeeders, int? ProductWidthLoops, string? AlignmentRule, string? Note, DevPatternStatus Status, int CurrentVersion, long? DessinatorUserId,
     string? Dessinator, long? ProgrammerUserId, string? Programmer, DateTime? ReadyForProgrammingAtUtc, bool HasProgram, string? CopiedFrom,
     IReadOnlyList<DevPatternColorDto> Colors, IReadOnlyList<DevPatternColorwayDto> Colorways, IReadOnlyList<DevPatternVersionDto> Versions,
-    IReadOnlyList<DevPatternUseDto> UsedIn, bool CanEdit, bool CanApprove, bool CanProgram, byte[] RowVersion)
+    IReadOnlyList<DevPatternUseDto> UsedIn, bool CanEdit, bool CanApprove, bool CanProgram, byte[] RowVersion, int? ApprovedVersion = null)
 {
+    /// <summary>Свойства, цвета, колориты и сетку можно менять: черновик или проверка и текущая версия ещё не утверждалась.</summary>
+    public bool IsEditable => Status is DevPatternStatus.Draft or DevPatternStatus.Review && ApprovedVersion != CurrentVersion;
+
     public string KindName => DevPattern.KindName(Kind);
     public string StatusName => DevPattern.StatusName(Status);
     public decimal ShareTotal => Colors.Sum(c => c.SharePercent ?? 0);
@@ -189,7 +192,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
                 cwUse.GetValueOrDefault(c.Id), c.RowVersion)).ToList(),
             versions.Select(v => new DevPatternVersionDto(v.Version, v.Change, v.Reason, v.CreatedAtUtc, v.User, files.Where(f => f.Version == v.Version).ToList())).ToList(),
             uses, perms.Has(Permissions.DevPattern), perms.Has(Permissions.DevApprove), perms.Has(Permissions.DevPattern) || perms.Has(Permissions.DevEdit),
-            p.RowVersion);
+            p.RowVersion, p.ApprovedVersion);
     }
 
     /// <summary>Новый рисунок: номер «Р-00001», версия 1 «Создан», колорит «Основной».</summary>
@@ -502,6 +505,12 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
         {
             var p = await LoadAsync(ctx, patternId, ct);
             p.EnsureVersion(p.RowVersion, rowVersion);
+            if (!p.RowVersion.AsSpan().SequenceEqual(rowVersion))
+            {
+                // Ревью 13.10: рисунок (цвета, колориты, файлы) меняли после того, как его открыли, — утверждать то, чего не видел, нельзя.
+                throw new ConcurrencyConflictException();
+            }
+
             if (target == DevPatternStatus.Approved)
             {
                 await EnsureApprovableAsync(ctx, p, ct);

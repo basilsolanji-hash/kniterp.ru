@@ -101,7 +101,8 @@ public sealed class DevPattern
     public bool IsEditable => Status is DevPatternStatus.Draft or DevPatternStatus.Review && ApprovedVersion != CurrentVersion;
 
     /// <summary>Отметить правку цветов, колоритов или файлов — меняет версию строки рисунка.</summary>
-    public void Touch(DateTime nowUtc) => ChangedAtUtc = nowUtc;
+    public void Touch(DateTime nowUtc) =>
+        ChangedAtUtc = ChangedAtUtc is { } last && nowUtc <= last ? last.AddMilliseconds(1) : nowUtc; // всегда новое значение — строка обновится
 
     public static string KindName(DevPatternKind kind) => kind switch
     {
