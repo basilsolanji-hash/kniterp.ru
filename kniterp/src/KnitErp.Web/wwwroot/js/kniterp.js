@@ -32,10 +32,23 @@
                 });
                 if (has && !tr.hasAttribute('data-has-opt')) {
                     tr.setAttribute('data-has-opt', '');
-                    tr.setAttribute('tabindex', '0');
-                    tr.setAttribute('aria-expanded', 'false');
+                    // D810: без aria-expanded — у строки обычной таблицы он недопустим (axe); скрытые ячейки читает скринридер.
+                    if (window.matchMedia('(max-width: 599px)').matches) tr.setAttribute('tabindex', '0');
                 }
             });
+        });
+    }
+    // D810: таблица шире своей области прокручивается — область доступна с клавиатуры (стрелки) и подписана для скринридера.
+    function scrollable() {
+        document.querySelectorAll('.scroll').forEach(function (box) {
+            var wide = box.scrollWidth > box.clientWidth + 1;
+            if (wide && !box.hasAttribute('tabindex')) {
+                box.setAttribute('tabindex', '0');
+                box.setAttribute('role', 'region');
+                if (!box.hasAttribute('aria-label')) box.setAttribute('aria-label', document.documentElement.getAttribute('data-scroll-label') || 'Таблица');
+            } else if (!wide && box.getAttribute('tabindex') === '0' && box.getAttribute('role') === 'region') {
+                box.removeAttribute('tabindex'); box.removeAttribute('role');
+            }
         });
     }
     // Аудит 12.10.2026: фильтры списков на телефоне свёрнуты при первом показе (FoldOnPhone), на компьютере открыты.
@@ -50,7 +63,6 @@
         if (!window.matchMedia('(max-width: 599px)').matches) return;
         var open = tr.hasAttribute('data-open');
         if (open) tr.removeAttribute('data-open'); else tr.setAttribute('data-open', '');
-        tr.setAttribute('aria-expanded', open ? 'false' : 'true');
     }
     document.addEventListener('click', function (e) {
         var tr = e.target.closest && e.target.closest('tr[data-has-opt]');
@@ -64,9 +76,10 @@
     new MutationObserver(function () {
         if (pending) return;
         pending = true;
-        requestAnimationFrame(function () { pending = false; label(); priority(); fold(); });
+        requestAnimationFrame(function () { pending = false; label(); priority(); fold(); scrollable(); });
     }).observe(document.documentElement, { childList: true, subtree: true });
-    document.addEventListener('DOMContentLoaded', function () { label(); priority(); fold(); });
+    document.addEventListener('DOMContentLoaded', function () { label(); priority(); fold(); scrollable(); });
+    window.addEventListener('resize', function () { scrollable(); });
 })();
 
 // Панель быстрого доступа: горячие клавиши, фокус в панели инструмента и обратно, буфер обмена.

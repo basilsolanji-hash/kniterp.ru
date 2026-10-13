@@ -6481,5 +6481,6 @@
   "Только просмотр: изменять может пользователь с правом на изменение этого раздела. Если нужно что-то поменять — обратитесь к администратору.": "Faqat ko‘rish: bu bo‘limni o‘zgartirish huquqiga ega foydalanuvchi o‘zgartira oladi. Biror narsani o‘zgartirish kerak bo‘lsa — administratorga murojaat qiling.",
   "Укажите дату и время отправки": "Yuborish sanasi va vaqtini ko‘rsating",
   "Этап в архиве": "Bosqich arxivda",
-  "Этот отчёт уже загружен": "Bu hisobot allaqachon yuklangan"
+  "Этот отчёт уже загружен": "Bu hisobot allaqachon yuklangan",
+  "Таблица — прокрутка стрелками": "Jadval — strelkalar bilan aylantirish"
 }

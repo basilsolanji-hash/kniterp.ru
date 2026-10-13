@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="@CurrentCode">
+<html lang="@CurrentCode" data-scroll-label="@L("Таблица — прокрутка стрелками")">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -88,6 +88,7 @@
             --faint: #8C949E;
             --faint-2: #8C949E;
             --accent: #1A7F74;
+            --link: #146A61; /* D810: ссылки на сером фоне — контраст не ниже 4,5:1 (акцент даёт ≈ 4,1) */
             --on-accent: #FFFFFF;
             --ok-bg: #DCF2EE;
             --ok-text: #0F6A60;
@@ -142,6 +143,7 @@
             --faint: #8C949E;
             --faint-2: #8C949E;
             --accent: #1A7F74;
+            --link: #146A61; /* D810: ссылки на сером фоне — контраст не ниже 4,5:1 (акцент даёт ≈ 4,1) */
             --on-accent: #FFFFFF;
             --ok-bg: #DCF2EE;
             --ok-text: #0F6A60;
@@ -177,7 +179,7 @@
         }
         :root { color-scheme: dark; }
         body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; font-size: 15px; }
-        a { color: var(--accent); }
+        a { color: var(--link, var(--accent)); }
         .shell { display: flex; flex-wrap: wrap; min-height: 100vh; }
         .side { flex: 1 1 200px; padding: 16px; border-right: 1px solid var(--line); }
         .side a { display: block; padding: 10px 12px; text-decoration: none; color: var(--text-2); border-radius: 6px; }
@@ -193,7 +195,7 @@
         .card label { display: flex; flex-direction: column; gap: 6px; color: var(--text-2); }
         input { font: inherit; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--field); color: var(--text); }
         button { font: inherit; padding: 10px 14px; border-radius: 6px; border: 0; background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer; }
-        button.link { background: none; color: var(--accent); padding: 0; font-weight: 400; }
+        button.link { background: none; color: var(--link, var(--accent)); padding: 0; font-weight: 400; }
         .key { font-family: ui-monospace, monospace; letter-spacing: 1px; word-break: break-all; }
         .qr { background: #fff; padding: 12px; border-radius: 8px; width: 200px; height: 200px; }
         h2 { font-size: 18px; margin: 0 0 8px; }
@@ -231,7 +233,7 @@
         }
         select { font: inherit; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--field); color: var(--text); }
         button.secondary { background: var(--line); color: var(--text); font-weight: 400; }
-        button.danger { background: var(--bad); color: #fff; }
+        button.danger { background: var(--bad); color: var(--on-accent); } /* D810: в тёмной теме фон светлее — текст тёмный */
         .confirm { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 6px; border-radius: 6px; background: var(--bad-bg-2); }
         .confirm-q { font-size: 13px; color: var(--bad-text); }
         button:disabled { opacity: .5; cursor: default; }
@@ -754,7 +756,8 @@
             .scroll table:not(.matrix) td:not([data-label]) { justify-content: flex-start; text-align: left; }
             .scroll table:not(.matrix) td:empty { display: none; }
             /* Приоритетные столбцы: второстепенные (th.opt) скрыты, строка раскрывается по нажатию «Подробнее». */
-            .scroll table:not(.matrix) td[data-opt] { display: none; }
+            /* D810: свёрнутая ячейка скрыта с экрана, но не от скринридера (строка обычной таблицы не может быть «раскрывающейся»). */
+            .scroll table:not(.matrix) tr:not([data-open]) td[data-opt] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; padding: 0; border: 0; }
             .scroll table:not(.matrix) tr[data-open] td[data-opt] { display: flex; }
             .scroll table:not(.matrix) tr[data-has-opt] { cursor: pointer; }
             .scroll table:not(.matrix) tr[data-has-opt]::after { content: "@CssText("Подробнее") ▾"; display: block; padding-top: 6px; color: var(--accent); font-size: 14px; }
@@ -836,8 +839,8 @@
         .quick-pinned .quick-btn.labeled { width: auto; padding: 0 8px; gap: 5px; }
         .quick-text { font-size: 13px; white-space: nowrap; }
         /* D806: «Создать» — главная кнопка панели; подписи значков — на широком экране, уже — значок с подсказкой и aria-label. */
-        .quick-btn.quick-create { background: var(--accent); color: #fff; border-color: transparent; }
-        .quick-btn.quick-create:hover, .quick-btn.quick-create[aria-expanded=true] { background: var(--accent); color: #fff; filter: brightness(1.08); }
+        .quick-btn.quick-create { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+        .quick-btn.quick-create:hover, .quick-btn.quick-create[aria-expanded=true] { background: var(--accent); color: var(--on-accent); filter: brightness(1.08); }
         .quick-create .plus { font-size: 18px; line-height: 1; font-weight: 600; }
         .topbar .quick-search { margin-right: 0; }
         .topbar .quick-pinned > .menu-anchor:has(.quick-create) { margin-right: auto; }
@@ -879,7 +882,7 @@
         .side .nav-favorites a { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 13px; }
         .side .nav-favorites a .icon-svg { color: var(--warn-text); flex: none; }
         .shell.narrow .nav-favorites a { justify-content: center; }
-        .side .nav-items a.nav-all { color: var(--accent-text, var(--accent)); font-size: 12.5px; }
+        .side .nav-items a.nav-all { color: var(--link, var(--accent)); font-size: 12.5px; }
         .crumbs { font-size: 13px; color: var(--muted); margin-bottom: 4px; } .crumbs a { color: var(--muted); }
         .section-hub { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; align-items: start; }
         .section-card h2 { font-size: 15px; margin: 0 0 8px; }

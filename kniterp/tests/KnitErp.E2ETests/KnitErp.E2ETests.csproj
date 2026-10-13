@@ -13,6 +13,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <!-- axe-core (MPL-2.0) — локальная копия для теста доступности, без внешних CDN (ТЗ интерфейса, этап 4). -->
+    <None Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Данные готовятся теми же сервисами и той же тестовой базой, что и в интеграционных тестах. -->
     <ProjectReference Include="..\KnitErp.IntegrationTests\KnitErp.IntegrationTests.csproj" />
     <!-- Приложение собирается вместе с тестами; тест запускает его отдельным процессом. -->

@@ -4,8 +4,9 @@
 @* Стили — в разметке, а не в HeadContent: HeadContent страницы заменил бы HeadContent макета. *@
 <style>
         body { background: #fff !important; color: #000 !important; }
-        .print-bar { display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #F1F1F3; border-bottom: 1px solid #D0D0D6; font: 13px Arial, sans-serif; }
-        .print-bar button { background: #2BA89A; color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
+        .print-bar { display: flex; gap: 8px; align-items: center; padding: 10px 16px; background: #F1F1F3; color: #1F1F23; border-bottom: 1px solid #D0D0D6; font: 13px Arial, sans-serif; }
+        .print-bar label { color: inherit; } /* D810: в тёмной теме подписи были светлыми на светлой панели */
+        .print-bar button { background: #1A7F74; color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
         .print-bar a { color: #1B6F66; }
         .print-bar .warn { color: #8A5A00; }
         .sheet { background: #fff; color: #000; max-width: 1080px; margin: 0 auto; padding: 18px 20px; font: 11px Arial, sans-serif; line-height: 1.35; }

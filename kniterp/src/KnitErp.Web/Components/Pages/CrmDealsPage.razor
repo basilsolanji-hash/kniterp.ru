@@ -134,7 +134,7 @@ else
 
     @if (_view == "board" && _board is not null)
     {
-        <div class="crm-board" aria-label="@L("Канбан сделок")">
+        <div class="crm-board" role="region" tabindex="0" aria-label="@L("Канбан сделок")"> @* D810: прокручиваемая доска доступна с клавиатуры *@
             @for (var i = 0; i < _board.Columns.Count; i++)
             {
                 var col = _board.Columns[i];

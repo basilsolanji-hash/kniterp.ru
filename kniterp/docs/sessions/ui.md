@@ -34,4 +34,8 @@
 - **Опись экранов (`docs/ui/screens.md`).** Новый `@page` — новая строка описи, иначе падает `ScreenInventoryTests`.
 
 ## Вопросы к модулям
-_(пока нет)_
+- **«Разработка» (`DevModelsPage`, доска `.dev-board`).** Доска прокручивается, но не получает фокус с клавиатуры (axe
+  `scrollable-region-focusable`, serious). Предложение: `<div class="dev-board" role="region" tabindex="0" aria-label="@L("Доска моделей")">`
+  — как сделано у доски сделок CRM (D810). Пока не исправлено, нарушение помечено в `AllScreensE2ETests.PassedToModules`.
+- **«Разработка» (`/print/dev/label`).** На 390 px лист этикетки шире экрана на 53 px — для печатной формы допустимо, но панель
+  кнопок печати можно переносить по строкам.
