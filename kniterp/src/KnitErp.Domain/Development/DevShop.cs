@@ -185,6 +185,58 @@ public sealed class DevSample
         Custody = result;
     }
 
+    // ---------- D728: образец по ТЗ §8 — колорит, версия рисунка, пряжа и партия, кто вязал и собирал, доработка ----------
+    public const int BatchMaxLength = 60;
+    public const int ReworkMaxLength = 500;
+
+    public long? ColorwayId { get; private set; }
+    public int? PatternVersion { get; private set; }
+
+    /// <summary>Партия пряжи (номер партии крашения).</summary>
+    public string? YarnBatch { get; private set; }
+
+    public long? KnittedByUserId { get; private set; }
+    public long? AssembledByUserId { get; private set; }
+
+    /// <summary>Время сборки, минут (время вязки — по факту деталей).</summary>
+    public int? AssemblyMinutes { get; private set; }
+
+    /// <summary>Доработка: что меняем, кто, срок.</summary>
+    public string? ReworkWhat { get; private set; }
+
+    public long? ReworkAssigneeUserId { get; private set; }
+    public DateOnly? ReworkDueDate { get; private set; }
+
+    /// <summary>Колорит и версия рисунка — с модели на момент создания образца (D728).</summary>
+    public void LinkPattern(long? colorwayId, int? patternVersion) => (ColorwayId, PatternVersion) = (colorwayId, patternVersion);
+
+    /// <summary>Паспорт образца: партия, кто вязал и собирал (активные пользователи — проверяет сервис), время сборки.</summary>
+    public void SetMaking(string? yarnBatch, long? knittedBy, long? assembledBy, int? assemblyMinutes)
+    {
+        if (assemblyMinutes is < 0 or > 10_000)
+        {
+            throw new BusinessRuleException("dev.sample.assembly", "Время сборки — от 0 до 10 000 минут.");
+        }
+
+        YarnBatch = DomainText.Optional(yarnBatch, BatchMaxLength, "Партия пряжи");
+        KnittedByUserId = knittedBy;
+        AssembledByUserId = assembledBy;
+        AssemblyMinutes = assemblyMinutes;
+    }
+
+    /// <summary>План доработки (ТЗ §8): что меняем, кто, срок — для образца «на доработку».</summary>
+    public void PlanRework(string? what, long? assignee, DateOnly? due)
+    {
+        if (Status != DevSampleStatus.Rework)
+        {
+            throw new BusinessRuleException("dev.sample.rework.status", "План доработки — только у образца «На доработку».");
+        }
+
+        ReworkWhat = DomainText.Require(what, ReworkMaxLength, "Что меняем");
+        ReworkAssigneeUserId = assignee;
+        ReworkDueDate = due;
+    }
+
     /// <summary>Цех записал факт по всем деталям — образец связан (если решения ещё не было).</summary>
     public void MarkKnitted()
     {

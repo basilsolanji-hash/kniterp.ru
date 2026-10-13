@@ -9,7 +9,8 @@
     .pl-table td.num, .pl-table th.num { text-align: right; white-space: nowrap; }
     .pl-table tr.pl-group > td { background: var(--accent-soft-2); font-weight: 600; }
     .pl-table td.pl-photo a { white-space: nowrap; }
-    .sx-form label.pl-check { flex-direction: row; display: flex; gap: 6px; align-items: center; align-self: end; padding-bottom: 6px; }
+    .sx-form label.pl-check { flex-direction: row; display: flex; gap: 6px; align-items: center; align-self: end; padding-bottom: 6px; min-width: 0; }
+    .sx-form label.pl-check input { width: auto; flex: none; margin: 0; }
     @@media (max-width: 899px) { .pl-table .opt { display: none; } }
 </style>
 

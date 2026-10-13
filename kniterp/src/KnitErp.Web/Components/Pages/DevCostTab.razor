@@ -54,6 +54,20 @@ else
             {
                 <label>@L("Наценка, %") <input type="number" min="0" max="1000" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_markup" /></label>
             }
+            @if (c.Colorways is { Count: > 1 } cws)
+            {
+                @* D729: сценарий «другой колорит» — пряжа цветов рисунка из выбранного колорита. *@
+                <label>
+                    @L("Колорит рисунка")
+                    <select @bind="_colorway">
+                        <option value="">@L("как в модели")</option>
+                        @foreach (var cw in cws.Where(x => x.Id != c.CurrentColorwayId))
+                        {
+                            <option value="@cw.Id">@cw.Name</option>
+                        }
+                    </select>
+                </label>
+            }
             <button type="submit" class="secondary" disabled="@_busy">@L("Пересчитать")</button>
         </fieldset>
     </form>
@@ -238,6 +252,7 @@ else
             _loaded = ModelId;
             _prices.Clear();
             _replace.Clear();
+            _colorway = string.Empty;
             await LoadAsync(initial: true);
         }
     }
@@ -261,8 +276,10 @@ else
         _ => source,
     };
 
+    private string _colorway = string.Empty;
+
     private DevCostScenario Scenario() => new(new Dictionary<long, decimal>(_prices), new Dictionary<long, long>(_replace),
-        _mode == "2" ? DevPriceMode.TargetPrice : DevPriceMode.Markup, _markup, _target, _note);
+        _mode == "2" ? DevPriceMode.TargetPrice : DevPriceMode.Markup, _markup, _target, _note, long.TryParse(_colorway, out var cw) ? cw : null);
 
     private async Task LoadAsync(bool initial = false)
     {

@@ -180,6 +180,7 @@ public static class AuditLabels
         [AuditActions.CustomerRefundCreated] = "Деньги возвращены покупателю",
         [AuditActions.CustomerRefundCancelled] = "Возврат денег покупателю отменён",
         [AuditActions.SalesAdvanceReleased] = "Переплата по заказу переведена в аванс",
+        [AuditActions.CustomerOpeningBalanceChanged] = "Вводный остаток расчётов с покупателем введён или аннулирован",
         [AuditActions.SalesMarkingChanged] = "Коды маркировки в документе изменены",
         [AuditActions.SalesPlanChanged] = "План продаж изменён",
         [AuditActions.SalesChannelChanged] = "Свойства канала продаж изменены",
@@ -209,6 +210,7 @@ public static class AuditLabels
         [AuditActions.DevMachineNoted] = "Комментарий к станку",
         [AuditActions.DevSampleRecorded] = "Факт образца",
         [AuditActions.DevSampleCustody] = "Образец у заказчика",
+        [AuditActions.DevPatternChanged] = "Рисунок разработки",
     };
 
     public static string Action(string code) => Actions.TryGetValue(code, out var label) ? label : code;

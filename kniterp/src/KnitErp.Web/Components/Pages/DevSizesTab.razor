@@ -63,6 +63,31 @@ else
                 </div>
             </div>
 
+            <div class="panel">
+                <h2>@L("Вес изделия по размерам")</h2>
+                <div class="scroll">
+                    <table class="dev-matrix">
+                        <thead><tr><th>@L("Размер")</th>@foreach (var z in s.Sizes) { <th class="num">@z.Name</th> }</tr></thead>
+                        <tbody>
+                            <tr>
+                                <td>@L("Вес изделия, г")</td>
+                                @foreach (var z in s.Sizes)
+                                {
+                                    var size = z.Id;
+                                    <td class="num"><input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 72px"
+                                                           value="@(_weight.GetValueOrDefault(size)?.ToString("0.##", CultureInfo.InvariantCulture))"
+                                                           @onchange="e => _weight[size] = ParseDecimal(e.Value)" aria-label="@L("Вес изделия, размер {0}", z.Name)" /></td>
+                                }
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                @if (s.CanEdit)
+                {
+                    <div class="actions"><button type="button" @onclick="SaveWeightsAsync" disabled="@_busy">@L("Сохранить вес")</button></div>
+                }
+            </div>
+
             <div class="panel wide">
                 <h2>@L("Размеры деталей, см")</h2>
                 @if (s.Details.Count == 0)
@@ -142,6 +167,9 @@ else
                 }
                 @if (s.CanEdit)
                 {
+                    <div class="actions">
+                        <button type="button" class="secondary" @onclick="ApplyTemplateAsync" disabled="@_busy">@L("Заполнить по шаблону категории")</button>
+                    </div>
                     <form class="inline-form" @onsubmit="AddMeasureAsync">
                         <label>@L("Точка измерения") <input @bind="_mName" list="dev-measure-points" maxlength="@DevMeasure.NameMaxLength" placeholder="@L("Длина изделия")" required /></label>
                         <datalist id="dev-measure-points">
@@ -174,6 +202,8 @@ else
     private readonly Dictionary<(long, long, int), decimal?> _wasDetail = [];
     private readonly Dictionary<(long, long, int), decimal?> _wasMeasure = [];
     private readonly Dictionary<long, int?> _wasPerBox = [];
+    private readonly Dictionary<long, decimal?> _weight = [];
+    private readonly Dictionary<long, decimal?> _wasWeight = [];
     private string? _packBoxWas;
     private string? _grid;
     private string? _base;
@@ -205,7 +235,8 @@ else
         Detail = 1,
         Measure = 2,
         Pack = 4,
-        All = Detail | Measure | Pack,
+        Weight = 8,
+        All = Detail | Measure | Pack | Weight,
     }
 
     /// <summary>
@@ -246,6 +277,7 @@ else
         Merge(_detail, _wasDetail, detail, reset.HasFlag(Part.Detail));
         Merge(_measure, _wasMeasure, measure, reset.HasFlag(Part.Measure));
         Merge(_perBox, _wasPerBox, _s.Sizes.ToDictionary(z => z.Id, z => z.PerBox), reset.HasFlag(Part.Pack));
+        Merge(_weight, _wasWeight, _s.Sizes.ToDictionary(z => z.Id, z => z.WeightGrams), reset.HasFlag(Part.Weight));
     }
 
     private static void Merge<TKey, TValue>(Dictionary<TKey, TValue?> current, Dictionary<TKey, TValue?> was, Dictionary<TKey, TValue?> fresh, bool reset)
@@ -276,6 +308,23 @@ else
 
     private static void SetCell(Dictionary<(long, long, int), decimal?> d, (long, long, int) key, object? value) =>
         d[key] = decimal.TryParse((value as string)?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private static decimal? ParseDecimal(object? value) =>
+        decimal.TryParse((value as string)?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private Task SaveWeightsAsync() => RunAsync(() => Shop.SetSizeWeightsAsync(ModelId,
+        _weight.Where(kv => kv.Value != _wasWeight.GetValueOrDefault(kv.Key)).Select(kv => (kv.Key, kv.Value)).ToList()), L("Вес изделия сохранён."), Part.Weight);
+
+    private async Task ApplyTemplateAsync()
+    {
+        var added = 0;
+        await RunAsync(async () => added = await Shop.ApplyMeasureTemplateAsync(ModelId), null);
+        if (!_isError)
+        {
+            _message = added > 0 ? L("Добавлено точек из шаблона категории: {0}.", added)
+                : L("Новых точек нет: шаблон категории пуст или все его точки уже в табеле мер.");
+        }
+    }
 
     private Task SaveGridAsync() => RunAsync(() => Shop.SetSizeGridAsync(ModelId, Expand(_grid), _base), L("Размерная сетка сохранена."));
 

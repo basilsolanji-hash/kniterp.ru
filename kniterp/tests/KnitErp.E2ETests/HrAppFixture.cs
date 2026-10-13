@@ -108,6 +108,16 @@ public sealed class HrAppFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>Класс машины в справочнике разработки (D726) — для утверждения рисунка. Возвращает название.</summary>
+    public async Task<string> CreateMachineClassAsync(string name, int feeders)
+    {
+        await using var s = _host.As(_org!.OwnerUserId, _org.OrganizationId);
+        var user = new TestUser { UserId = _org.OwnerUserId, OrganizationId = _org.OrganizationId, ClientAddress = _host.ClientAddress };
+        await new KnitErp.Application.Development.DevSettingsService(s.Db, new KnitErp.Application.Access.AccessGuard(s.Db, user, _host.Clock), user, _host.Clock)
+            .AddLookupAsync(KnitErp.Domain.Development.DevLookupKind.MachineClass, name, feeders);
+        return name;
+    }
+
     /// <summary>Пряжа в номенклатуре организации (сырьё, кг) — для палитры модели и норм техкарты (D751). Возвращает название.</summary>
     public async Task<string> CreateYarnAsync(string name)
     {

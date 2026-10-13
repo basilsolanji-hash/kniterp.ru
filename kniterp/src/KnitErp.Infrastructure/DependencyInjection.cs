@@ -51,6 +51,7 @@ public static class DependencyInjection
         // D1123 (продажи): PDF счёта, УПД и заказа для писем клиенту.
         services.AddSingleton<KnitErp.Application.Sales.ISalesPdfRenderer, Documents.SalesPdfRenderer>();
         services.AddSingleton<KnitErp.Application.Development.IDevPassportRenderer, Documents.DevPassportPdfRenderer>(); // D725
+        services.AddSingleton<KnitErp.Application.Development.IImageShrinker, Documents.SkiaImageShrinker>(); // D729
         return services;
     }
 

@@ -1,0 +1,203 @@
+@page "/dev/patterns"
+@using KnitErp.Application.Development
+@using KnitErp.Domain.Development
+@inject DevPatternService Patterns
+@inject NavigationManager Nav
+
+@*
+    Библиотека рисунков (D726, ТЗ §7): поиск по номеру и названию, виду, раппорту, числу цветов, классу машины и тегу; «использован в моделях».
+    Новый рисунок создаёт дессинатор (право «рисунки»).
+*@
+<PageTitle>@L("Библиотека рисунков") — knitERP</PageTitle>
+<DevStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else
+{
+    <div class="page-head">
+        <h1>@L("Библиотека рисунков")</h1>
+        @if (CurrentAccess.Has(Permissions.DevPattern) && !_creating)
+        {
+            <button type="button" @onclick="() => _creating = true" disabled="@_busy">@L("Новый рисунок")</button>
+        }
+    </div>
+    @if (_message is not null)
+    {
+        <div class="flash error" role="alert">@_message</div>
+    }
+    @if (_creating && _options is not null)
+    {
+        <div class="panel">
+            <h2>@L("Новый рисунок")</h2>
+            <form class="grid" @onsubmit="CreateAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                    <label>@L("Название") <input @bind="_name" maxlength="@DevPattern.NameMaxLength" required /></label>
+                    <label>
+                        @L("Вид рисунка")
+                        <select @bind="_kind">
+                            @foreach (var k in DevPattern.Kinds)
+                            {
+                                <option value="@k">@L(DevPattern.KindName(k))</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Раппорт: петель") <input type="number" min="1" max="@DevPattern.MaxRapport" inputmode="numeric" @bind="_rw" /></label>
+                    <label>@L("Раппорт: рядов") <input type="number" min="1" max="@DevPattern.MaxRapport" inputmode="numeric" @bind="_rh" /></label>
+                    <label>
+                        @L("Класс машины")
+                        <select @bind="_class">
+                            <option value="">—</option>
+                            @foreach (var c in _options.MachineClasses)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <div class="actions">
+                        <button type="submit" disabled="@_busy">@L("Создать рисунок")</button>
+                        <button type="button" class="secondary" @onclick="() => _creating = false">@L("Отмена")</button>
+                    </div>
+                </fieldset>
+            </form>
+        </div>
+    }
+
+    <form class="inline-form" @onsubmit="LoadAsync">
+        <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+            <label>@L("Поиск") <input @bind="_search" placeholder="@L("номер или название")" /></label>
+            <label>
+                @L("Вид")
+                <select @bind="_fKind">
+                    <option value="">@L("все")</option>
+                    @foreach (var k in DevPattern.Kinds)
+                    {
+                        <option value="@k">@L(DevPattern.KindName(k))</option>
+                    }
+                </select>
+            </label>
+            <label>@L("Цветов") <input type="number" min="1" max="@DevPattern.MaxColors" inputmode="numeric" style="max-width: 80px" @bind="_fColors" /></label>
+            <label>@L("Раппорт, петель") <input type="number" min="1" inputmode="numeric" style="max-width: 90px" @bind="_fRapport" /></label>
+            @if (_options is not null)
+            {
+                <label>
+                    @L("Класс машины")
+                    <select @bind="_fClass">
+                        <option value="">@L("все")</option>
+                        @foreach (var c in _options.MachineClasses)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </select>
+                </label>
+            }
+            <label class="check"><input type="checkbox" @bind="_archived" /> @L("с архивом")</label>
+            <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
+        </fieldset>
+    </form>
+
+    @if (_rows is null)
+    {
+        <p class="muted">@L("Загрузка…")</p>
+    }
+    else if (_rows.Count == 0)
+    {
+        <p class="muted">@L("Рисунков не найдено.")</p>
+    }
+    else
+    {
+        <div class="scroll">
+            <table class="dev-matrix">
+                <thead>
+                    <tr><th>@L("Номер")</th><th>@L("Название")</th><th>@L("Вид")</th><th class="num">@L("Раппорт")</th><th class="num">@L("Цветов")</th>
+                        <th>@L("Класс машины")</th><th>@L("Статус")</th><th class="num">@L("Версия")</th><th class="num">@L("В моделях")</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _rows)
+                    {
+                        <tr>
+                            <td><a href="dev/patterns/@r.Id">@r.Number</a></td>
+                            <td>@r.Name @if (r.ReadyForProgramming) { <span class="tag warn">@L("к программированию")</span> }</td>
+                            <td>@L(r.KindName)</td>
+                            <td class="num">@(r.RapportWidth is null ? "—" : $"{r.RapportWidth}×{r.RapportHeight?.ToString() ?? "—"}")</td>
+                            <td class="num">@r.Colors</td>
+                            <td>@(r.MachineClass ?? "—")</td>
+                            <td><span class="tag @(r.Status == DevPatternStatus.Approved ? "ok" : r.Status == DevPatternStatus.Review ? "warn" : null)">@L(r.StatusName)</span></td>
+                            <td class="num">@r.Version</td>
+                            <td class="num">@r.UsedInModels</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private IReadOnlyList<DevPatternRowDto>? _rows;
+    private DevPatternOptionsDto? _options;
+    private string? _search;
+    private string _fKind = string.Empty;
+    private int? _fColors;
+    private int? _fRapport;
+    private string _fClass = string.Empty;
+    private bool _archived;
+    private bool _creating;
+    private string? _name;
+    private DevPatternKind _kind = DevPatternKind.JacquardDouble;
+    private int? _rw;
+    private int? _rh;
+    private string _class = string.Empty;
+    private bool _busy;
+    private string? _denied;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _options = await Patterns.OptionsAsync();
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _rows = await Patterns.ListAsync(new DevPatternFilter(_search, Enum.TryParse<DevPatternKind>(_fKind, out var k) ? k : null, _fColors, _fRapport,
+            long.TryParse(_fClass, out var c) ? c : null, null, _archived));
+    }
+
+    private async Task CreateAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        try
+        {
+            var id = await Patterns.CreateAsync(new DevPatternValues(_name, _kind, _rw, _rh, null, long.TryParse(_class, out var c) ? c : null, null, null, null,
+                CurrentAccess.UserId, null));
+            Nav.NavigateTo($"dev/patterns/{id}");
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

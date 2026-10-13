@@ -26,6 +26,26 @@ public sealed class PackService(IKnitErpDbContext db, IAccessGuard guard, ICurre
         return await ListInternalAsync(db, ctx.OrganizationId, [itemId], ct);
     }
 
+    /// <summary>
+    /// D353 (сессия 4, Р4): упаковки всех позиций организации — один запрос при открытии документа, чтобы ввод «N упаковок» и скан
+    /// штрихкода упаковки в строках работали без запросов на каждую позицию. Без права на справочники — пусто (ввод в основных единицах).
+    /// </summary>
+    public async Task<IReadOnlyDictionary<long, IReadOnlyList<ItemPackDto>>> AllAsync(CancellationToken ct = default)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        if (!ctx.Permissions.Has(Permissions.CatalogView))
+        {
+            return new Dictionary<long, IReadOnlyList<ItemPackDto>>();
+        }
+
+        var packs = await (from p in db.ItemPacks.AsNoTracking()
+                           join u in db.Units.AsNoTracking() on p.UnitId equals u.Id
+                           where p.OrganizationId == ctx.OrganizationId
+                           orderby p.ItemId, p.Factor
+                           select new ItemPackDto(p.Id, p.ItemId, p.UnitId, u.Name, u.Symbol, p.Factor, p.Barcode, p.RowVersion)).ToListAsync(ct);
+        return packs.GroupBy(p => p.ItemId).ToDictionary(g => g.Key, g => (IReadOnlyList<ItemPackDto>)g.ToList());
+    }
+
     internal static async Task<List<ItemPackDto>> ListInternalAsync(IKnitErpDbContext db, long organizationId, IReadOnlyCollection<long> itemIds,
         CancellationToken ct) =>
         await (from p in db.ItemPacks.AsNoTracking()

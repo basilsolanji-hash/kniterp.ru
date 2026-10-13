@@ -13,6 +13,8 @@
     <!-- D1123 (продажи): PDF счёта, УПД и заказа для писем клиенту; QR оплаты по ГОСТ Р 56042 в PDF. -->
     <PackageReference Include="PDFsharp-MigraDoc" />
     <PackageReference Include="QRCoder" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <!-- Ключи защиты cookie хранятся в базе, зашифрованные мастер-ключом. -->
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />

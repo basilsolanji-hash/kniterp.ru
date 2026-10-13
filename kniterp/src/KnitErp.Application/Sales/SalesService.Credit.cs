@@ -98,10 +98,11 @@ public static class SalesReceivables
     }
 
     /// <summary>
-    /// Видит только своих покупателей (D1112): все роли пользователя с настройкой «Свои» (самое мягкое среди ролей, как D1103).
-    /// Допущение D1112: «Своего подразделения» для дебиторки пока равно «Все» — подразделение менеджера в продажах не хранится.
+    /// D1110: чьи заказы видит пользователь — null (все) или ответственные: сам он («Свои») либо сотрудники его подразделения с вложенными
+    /// («Своего подразделения»). Действует самое мягкое среди ролей (как D1103); роль без настройки — «Все»; без ролей — «Все».
+    /// Подразделение — у карточки сотрудника, привязанной к пользователю (уволенные не учитываются); нет карточки — только свои.
     /// </summary>
-    public static async Task<bool> OwnOnlyAsync(IKnitErpDbContext db, AccessContext ctx, DateTime nowUtc, CancellationToken ct)
+    public static async Task<HashSet<long>?> VisibleManagersAsync(IKnitErpDbContext db, AccessContext ctx, DateTime nowUtc, CancellationToken ct)
     {
         var roleIds = await db.RoleAssignments.AsNoTracking()
             .Where(a => a.OrganizationId == ctx.OrganizationId && a.UserId == ctx.UserId && a.RoleId != null && a.RevokedAtUtc == null
@@ -109,12 +110,34 @@ public static class SalesReceivables
             .Select(a => a.RoleId!.Value).Distinct().ToListAsync(ct);
         if (roleIds.Count == 0)
         {
-            return false;
+            return null;
         }
 
-        var own = await db.SalesRoleSettings.AsNoTracking()
-            .CountAsync(s => s.OrganizationId == ctx.OrganizationId && roleIds.Contains(s.RoleId) && s.Visibility == SalesOrderVisibility.Own, ct);
-        return own == roleIds.Count;
+        var settings = await db.SalesRoleSettings.AsNoTracking()
+            .Where(s => s.OrganizationId == ctx.OrganizationId && roleIds.Contains(s.RoleId)).Select(s => new { s.RoleId, s.Visibility }).ToListAsync(ct);
+        if (settings.Count < roleIds.Count || settings.Any(s => s.Visibility == SalesOrderVisibility.All))
+        {
+            return null;
+        }
+
+        HashSet<long> users = [ctx.UserId];
+        if (settings.Any(s => s.Visibility == SalesOrderVisibility.Department))
+        {
+            var own = await db.Employees.AsNoTracking()
+                .Where(e => e.OrganizationId == ctx.OrganizationId && e.UserId == ctx.UserId && e.Status != KnitErp.Domain.Structure.EmploymentStatus.Dismissed)
+                .Select(e => e.DepartmentId).ToListAsync(ct);
+            if (own.Count > 0)
+            {
+                var tree = await KnitErp.Application.Structure.StructureScope.LoadTreeAsync(db, ctx.OrganizationId, ct);
+                var departments = tree.WithDescendants(own).ToList();
+                users.UnionWith(await db.Employees.AsNoTracking()
+                    .Where(e => e.OrganizationId == ctx.OrganizationId && e.UserId != null && departments.Contains(e.DepartmentId)
+                                && e.Status != KnitErp.Domain.Structure.EmploymentStatus.Dismissed)
+                    .Select(e => e.UserId!.Value).ToListAsync(ct));
+            }
+        }
+
+        return users;
     }
 
     /// <summary>Отчёт без проверки прав — права проверяет вызывающий (сервис, главный экран).</summary>
@@ -125,10 +148,12 @@ public static class SalesReceivables
         var ledgers = await SalesCredit.LedgersAsync(db, ctx.OrganizationId, null, asOf, ct);
         var debtors = ledgers.Values.Where(l => l.Debt > 0).ToList();
         var managers = await ManagersAsync(db, ctx.OrganizationId, debtors.Select(d => d.CustomerId).ToList(), ct);
-        var ownOnly = await OwnOnlyAsync(db, ctx, nowUtc, ct);
-        if (ownOnly)
+        var visible = await VisibleManagersAsync(db, ctx, nowUtc, ct);
+        var ownOnly = visible is not null;
+        if (visible is not null)
         {
-            debtors = debtors.Where(d => managers[d.CustomerId] == ctx.UserId).ToList();
+            // D1110: свои покупатели или покупатели менеджеров своего подразделения.
+            debtors = debtors.Where(d => managers[d.CustomerId] is { } m && visible.Contains(m)).ToList();
         }
 
         var managerIds = debtors.Select(d => managers[d.CustomerId]).Where(m => m is not null).Select(m => m!.Value).Distinct().ToList();
@@ -348,8 +373,8 @@ public sealed partial class SalesService
         var org = ctx.OrganizationId;
         var customer = await db.Counterparties.AsNoTracking().SingleOrDefaultAsync(c => c.Id == customerId && c.OrganizationId == org, ct)
                        ?? throw new NotFoundException("Контрагент");
-        if (await SalesReceivables.OwnOnlyAsync(db, ctx, clock.UtcNow, ct)
-            && (await SalesReceivables.ManagersAsync(db, org, [customerId], ct))[customerId] != ctx.UserId)
+        if (await SalesReceivables.VisibleManagersAsync(db, ctx, clock.UtcNow, ct) is { } visible
+            && !((await SalesReceivables.ManagersAsync(db, org, [customerId], ct))[customerId] is { } manager && visible.Contains(manager)))
         {
             throw new NotFoundException("Контрагент");
         }

@@ -82,27 +82,57 @@ public sealed partial class PrintService(IKnitErpDbContext db, IAccessGuard guar
         var doc = await db.StockDocuments.AsNoTracking().Include(d => d.Lines)
                       .SingleOrDefaultAsync(d => d.Id == stockDocumentId && d.OrganizationId == ctx.OrganizationId, ct)
                   ?? throw new NotFoundException("Документ");
-        if (doc.Kind != StockOperationKind.Shipment || doc.SalesOrderId is null
+        // D354 (сессия 4, Р1): УПД — и по акту оказания услуг.
+        if (doc.Kind is not (StockOperationKind.Shipment or StockOperationKind.ServiceAct) || doc.SalesOrderId is null
             || doc.Status is not (StockDocumentStatus.Posted or StockDocumentStatus.Reversed))
         {
-            throw new BusinessRuleException("print.upd.document", "УПД печатается по проведённой отгрузке по заказу покупателя.");
+            throw new BusinessRuleException("print.upd.document", "УПД печатается по проведённой отгрузке или акту оказания услуг по заказу покупателя.");
         }
 
         var org = await db.Organizations.AsNoTracking().SingleAsync(o => o.Id == ctx.OrganizationId, ct);
         var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).SingleAsync(o => o.Id == doc.SalesOrderId, ct);
         var (entity, account) = await SellerAsync(ctx.OrganizationId, order.LegalEntityId, order.BankAccountId, ct);
         var warehouse = await db.Warehouses.AsNoTracking().Where(w => w.Id == doc.WarehouseId).Select(w => w.Name).SingleAsync(ct);
-        var items = await ItemsAsync(doc.Lines.Select(l => l.ItemId), ct);
-        var lines = doc.Lines
+        var warnings = new List<string>();
+
+        // D354 (сессия 4, Р1): проведённые отгрузка и акты заказа одной датой — один УПД (UpdMerge): строки товаров и услуг вместе,
+        // номер — по отгрузке. Акт, вошедший в УПД отгрузки, печатается этим же УПД.
+        var parts = new List<(string Number, IReadOnlyList<(long ItemId, decimal Quantity)> Lines)>();
+        if (doc.Status == StockDocumentStatus.Posted)
+        {
+            var candidates = await UpdMerge.CandidatesAsync(db, ctx.OrganizationId, [order.Id], [doc.DocumentDate], ct);
+            var hosts = UpdMerge.Hosts(candidates);
+            var hostId = hosts.TryGetValue(doc.Id, out var h) ? h : doc.Id;
+            var host = candidates.Single(c => c.Id == hostId);
+            if (hostId != doc.Id)
+            {
+                warnings.Add($"Акт {doc.Number} входит в УПД отгрузки {host.Number} той же датой — печатается общий документ.");
+            }
+
+            parts.Add((host.Number, host.OrderLines));
+            parts.AddRange(candidates.Where(c => hosts.GetValueOrDefault(c.Id) == hostId && c.Id != hostId).OrderBy(c => c.Id)
+                .Select(c => (c.Number, c.OrderLines)));
+        }
+        else
+        {
+            parts.Add((doc.Number, doc.OrderLines()));
+        }
+
+        // D352 (сессия 4, Р2): комплект — одной строкой по цене заказа (код товара — код комплекта); компоненты видны в отгрузке.
+        var ordered = parts.SelectMany(p => p.Lines).GroupBy(l => l.ItemId).Select(g => (ItemId: g.Key, Quantity: g.Sum(l => l.Quantity))).ToList();
+        var items = await ItemsAsync(ordered.Select(l => l.ItemId), ct);
+        var lines = ordered
             .Select(l =>
             {
                 var orderLine = order.Lines.Single(o => o.ItemId == l.ItemId);
                 var (amount, vat) = Money.LineAmounts(l.Quantity, orderLine.NetPrice, orderLine.VatPercent, order.PricesIncludeVat);
                 return (Item: items[l.ItemId], l.Quantity, orderLine.VatPercent, Amount: amount, Vat: vat);
             })
-            .OrderBy(l => l.Item.Code)
+            .OrderBy(l => l.Item.IsService).ThenBy(l => l.Item.Code)
+            // D354: у услуги «код вида товара» (графа 1б) и страна происхождения — прочерк.
             .Select((l, i) => new PrintLineDto(i + 1, l.Item.Code, l.Item.Name, l.Item.Symbol, l.Item.UnitCode, l.Quantity,
-                Money.Round((l.Amount - l.Vat) / l.Quantity), l.VatPercent, l.Amount - l.Vat, l.Vat, l.Amount, l.Item.TnVed,
+                Money.Round((l.Amount - l.Vat) / l.Quantity), l.VatPercent, l.Amount - l.Vat, l.Vat, l.Amount,
+                l.Item.IsService ? NoValue : l.Item.TnVed,
                 l.Item.Imported ? l.Item.CountryCode : null, l.Item.Imported ? l.Item.CountryName : null, l.Item.Imported ? l.Item.Declaration : null))
             .ToList();
         var total = lines.Sum(l => l.Amount);
@@ -121,7 +151,6 @@ public sealed partial class PrintService(IKnitErpDbContext db, IAccessGuard guar
             : string.Join("; ", prepayments.Select(p => $"№ {p.DocumentNumber ?? "—"} от {p.PaymentDate:dd.MM.yyyy}"));
 
         var seller = Seller(entity);
-        var warnings = new List<string>();
         if (org.CountryCode != Countries.Russia)
         {
             warnings.Add("Форма УПД — российская; для организации другой страны нужен документ по её законодательству.");
@@ -180,12 +209,16 @@ public sealed partial class PrintService(IKnitErpDbContext db, IAccessGuard guar
                          + "В knitERP авансовые счета-фактуры пока не оформляются — впишите их реквизиты из учётной программы.");
         }
 
-        return new UpdPrintDto(VatInvoiceNumber(doc.Number), doc.DocumentDate, doc.Number, seller, Requisites(entity, account), buyer,
+        return new UpdPrintDto(VatInvoiceNumber(parts[0].Number), doc.DocumentDate, string.Join(", ", parts.Select(p => p.Number)), seller,
+            Requisites(entity, account), buyer,
             Basis(order), warehouse, lines, lines.Sum(l => l.AmountWithoutVat), lines.Sum(l => l.VatAmount), total,
             AmountInWords.Format(total, org.CurrencyCode),
             $"{char.ToUpperInvariant(country.CurrencyName[0])}{country.CurrencyName[1..]}, {CurrencyNumeric.GetValueOrDefault(org.CurrencyCode, org.CurrencyCode)}",
             doc.Status == StockDocumentStatus.Reversed, paymentDocuments, warnings);
     }
+
+    /// <summary>Прочерк в графе УПД (D354: «код вида товара» у услуги).</summary>
+    public const string NoValue = "--";
 
     /// <summary>
     /// Порядковый номер счёта-фактуры (подп. «а» п. 1 Правил заполнения, ПП № 1137) — цифры номера отгрузки без префикса и ведущих нулей:
@@ -231,10 +264,10 @@ public sealed partial class PrintService(IKnitErpDbContext db, IAccessGuard guar
 
     private sealed record PrintItem(
         string Code, string Name, string Symbol, string UnitCode, string? TnVed = null, string? CountryCode = null, string? CountryName = null,
-        string? Declaration = null)
+        string? Declaration = null, bool IsService = false)
     {
-        /// <summary>Ввезённый товар: страна происхождения указана и это не Россия (643).</summary>
-        public bool Imported => CountryCode is not null && CountryCode != KnitErp.Domain.Catalog.ItemDetailRules.RussiaCode;
+        /// <summary>Ввезённый товар: страна происхождения указана и это не Россия (643). Услуга (D354) — не товар.</summary>
+        public bool Imported => !IsService && CountryCode is not null && CountryCode != KnitErp.Domain.Catalog.ItemDetailRules.RussiaCode;
     }
 
     private async Task<Dictionary<long, PrintItem>> ItemsAsync(IEnumerable<long> ids, CancellationToken ct)
@@ -243,7 +276,8 @@ public sealed partial class PrintService(IKnitErpDbContext db, IAccessGuard guar
         return await db.Items.AsNoTracking().Where(i => list.Contains(i.Id))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new
             {
-                i.Id, Item = new PrintItem(i.Code, i.Name, u.Symbol, u.Code, i.TnVedCode, i.OriginCountryCode, i.OriginCountryName, i.CustomsDeclaration),
+                i.Id, Item = new PrintItem(i.Code, i.Name, u.Symbol, u.Code, i.TnVedCode, i.OriginCountryCode, i.OriginCountryName, i.CustomsDeclaration,
+                    i.Type == KnitErp.Domain.Catalog.ItemType.Service),
             })
             .ToDictionaryAsync(x => x.Id, x => x.Item, ct);
     }

@@ -4,6 +4,7 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Domain.Common
 @inject SalesService Sales
+@inject KnitErp.Application.Catalog.PackService PackList
 @inject KnitErp.Application.Warehousing.StockBatchService BatchService
 @inject KnitErp.Application.Finance.MoneyService Money
 @inject SalesStageService StageList
@@ -314,6 +315,7 @@ else
                 </datalist>
             </label>
             <label>@L("Количество") <input @bind="_qtyText" inputmode="decimal" size="8" /></label>
+            <PackCount Packs="@PackLookup.Of(_packs, FindItem()?.Id)" Precision="@(FindItem()?.Precision ?? 0)" OnQuantity="q => _qtyText = q" />
             <label>@(_order.PricesIncludeVat ? L("Цена с НДС") : L("Цена без НДС")) <input @bind="_priceText" inputmode="decimal" size="10" /></label>
             <label>
                 @L("НДС")
@@ -390,7 +392,7 @@ else
                         <td>@l.UnitSymbol</td>
                         @if (_order.CanSeePrices)
                         {
-                            <td class="num">@(l.Price?.ToString("#,0.00##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")))</td>
+                            <td class="num @(l.BelowMinimum ? "cell-short" : null)" title="@(l.BelowMinimum ? L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice)) : null)">@(l.Price?.ToString("#,0.00##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")))@if (l.BelowMinimum) { <div class="muted small">@L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice))</div> }</td>
                             <td class="num">@Amounts.Vat(l.VatPercent)</td>
                             <td class="num" title="@l.DiscountSources">@(l.DiscountPercent > 0 ? $"{l.DiscountPercent:0.##}%" : "—")
                                 @if (l.DiscountSources is not null) { <span class="sx-sub sx-discount-src">@l.DiscountSources</span> }
@@ -490,6 +492,11 @@ else
         {
             <button type="button" @onclick="ShipmentAsync" disabled="@_busy">@L("Оформить отгрузку")</button>
         }
+        @* D354 (сессия 4, Р1): строки-услуги закрываются актом оказания услуг — без движений склада. *@
+        @if (_order.CanCreateDocuments && _order.Status == SalesOrderStatus.Confirmed && _order.Lines.Any(l => !l.Stocked && l.Left > 0))
+        {
+            <button type="button" class="secondary" @onclick="ServiceActAsync" disabled="@_busy">@L("Акт на услуги")</button>
+        }
         @if (_order.CanCreateDocuments && _order.Shipped != ShipmentState.None)
         {
             <button type="button" class="secondary" @onclick="ReturnAsync" disabled="@_busy">@L("Оформить возврат")</button>
@@ -546,7 +553,7 @@ else
                         <td>@d.Date.ToString("dd.MM.yyyy")</td>
                         <td><span class="tag @StockDocumentsPage.StatusClass(d.Status)">@L(d.StatusName)</span></td>
                         <td>
-                            @if (_order.CanSeePrices && d.Kind == StockOperationKind.Shipment && d.Status == StockDocumentStatus.Posted)
+                            @if (_order.CanSeePrices && d.Kind is StockOperationKind.Shipment or StockOperationKind.ServiceAct && d.Status == StockDocumentStatus.Posted)
                             {
                                 <span><a href="print/upd/@d.Id" target="_blank" rel="noopener">@L("УПД")</a> · <a href="print/torg12/@d.Id" target="_blank" rel="noopener">@L("ТОРГ-12")</a> · <a href="print/ttn/@d.Id" target="_blank" rel="noopener" title="@L("Транспортная накладная")">@L("ТН")</a> · <a href="sales-documents/upd/@(d.Id).xml" download data-enhance-nav="false" title="@L("XML УПД (формат ФНС 5.03) для загрузки в оператора ЭДО")">@L("XML для ЭДО")</a></span>
                             }
@@ -725,6 +732,7 @@ else
             if (_order!.CanEdit)
             {
                 _options = await Sales.GetOptionsAsync(_order.OrderDate);
+                _packs = await PackList.AllAsync(); // D353: упаковки для ввода и скана — один раз
                 _vatText = _options.VatRates.FirstOrDefault()?.Percent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
                 _accounts = CurrentAccess.Has(Permissions.PriceView) ? await Money.OptionsAsync() : [];
             }
@@ -870,6 +878,12 @@ else
     {
         if (FindItem() is { } item)
         {
+            // D353: скан штрихкода упаковки без количества — к строке добавляется коэффициент упаковки.
+            if (string.IsNullOrWhiteSpace(_qtyText) && PackLookup.ByBarcode(_packs, _itemText) is { } scanned)
+            {
+                _qtyText = Quantities.Format((_order!.Lines.FirstOrDefault(l => l.ItemId == item.Id)?.Quantity ?? 0) + scanned.Factor);
+            }
+
             _itemText = $"{item.Code} — {item.Name}";
             _vatText = item.VatPercent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             _priceHint = null;
@@ -898,8 +912,11 @@ else
         var code = _itemText.Split(" — ", 2)[0].Trim();
         return _options?.Items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
                ?? _options?.Items.FirstOrDefault(i => i.Article is not null && string.Equals(i.Article, code, StringComparison.OrdinalIgnoreCase))
-               ?? _options?.Items.FirstOrDefault(i => i.Barcodes is not null && i.Barcodes.Split(' ').Contains(code));
+               ?? _options?.Items.FirstOrDefault(i => i.Barcodes is not null && i.Barcodes.Split(' ').Contains(code))
+               ?? (PackLookup.ByBarcode(_packs, code) is { } pack ? _options?.Items.FirstOrDefault(i => i.Id == pack.ItemId) : null); // D353: штрихкод упаковки
     }
+
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Catalog.ItemPackDto>> _packs = PackLookup.Empty;
 
     private void EditLine(SalesOrderLineDto l)
     {
@@ -997,6 +1014,7 @@ else
 
     private Task RemoveLineAsync(SalesOrderLineDto l) => RunAsync(() => Sales.RemoveOrderLineAsync(Id, l.ItemId, _order!.RowVersion), null);
 
+    // D1104 сильнее D350: цена ниже минимальной подтверждается только с правом и причиной (ConfirmOverrideAsync).
     private Task ConfirmAsync() => RunAsync(() => Sales.ConfirmOrderAsync(Id, _order!.RowVersion), L("Заказ подтверждён."));
 
     private Task CloseAsync() => RunAsync(() => Sales.CloseOrderAsync(Id, _order!.RowVersion), L("Заказ закрыт."));
@@ -1021,6 +1039,8 @@ else
     }, L("Заказ отменён."));
 
     private Task ShipmentAsync() => GoAsync(() => Sales.CreateShipmentAsync(Id));
+
+    private Task ServiceActAsync() => GoAsync(() => Sales.CreateServiceActAsync(Id));
 
     private Task ReturnAsync() => GoAsync(() => Sales.CreateReturnAsync(Id));
 

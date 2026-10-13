@@ -47,6 +47,16 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_customer");
         b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DealId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_deal");
+        // D726, D728: рисунок модели — конкретная версия рисунка своей организации и колорит этого рисунка; пряжа и вязка.
+        b.HasOne<DevPatternVersion>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PatternId, x.PatternVersion })
+            .HasPrincipalKey(v => new { v.OrganizationId, v.PatternId, v.Version }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_pattern_version");
+        b.HasOne<DevPatternColorway>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PatternId, x.ColorwayId })
+            .HasPrincipalKey(c => new { c.OrganizationId, c.PatternId, c.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_colorway");
+        b.Property(x => x.DyeNumber).HasMaxLength(40);
+        b.Property(x => x.DensityLoops).HasPrecision(6, 2);
+        b.Property(x => x.DensityRows).HasPrecision(6, 2);
+        b.Property(x => x.ShrinkagePercent).HasPrecision(5, 2);
+        b.HasIndex(x => new { x.OrganizationId, x.PatternId }).HasDatabaseName("ix_dev_models_pattern");
         // D769: предыдущая версия — модель своей организации; у версии не больше одной следующей.
         b.Property(x => x.VersionNo).HasDefaultValue(1).HasSentinel(1);
         b.HasOne<DevModel>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PreviousVersionId })
@@ -144,6 +154,9 @@ internal sealed class DevFileConfiguration : IEntityTypeConfiguration<DevFile>
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_files_machine");
         b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_dev_files_org_id");
         b.HasIndex(x => new { x.OrganizationId, x.MachineId }).HasDatabaseName("ix_dev_files_machine");
+        // D728: фото образца — образец своей организации.
+        b.HasOne<DevSample>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.SampleId }).HasPrincipalKey(s => new { s.OrganizationId, s.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_files_sample");
     }
 }
 

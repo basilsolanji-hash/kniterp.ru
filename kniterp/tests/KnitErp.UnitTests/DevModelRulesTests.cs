@@ -306,4 +306,47 @@ public sealed class DevAutomationRulesTests
         s.CloseCustody(DevSampleCustody.Kept, new DateOnly(2026, 10, 2), null);
         Assert.Equal("dev.sample.custody.out", Assert.Throws<BusinessRuleException>(() => s.HandToCustomer(null, "ООО", new DateOnly(2026, 10, 3), null, null)).Code);
     }
+
+    private static DevPatternValues PatternValues(int? rw = 24, int? width = 120, string? align = null) =>
+        new("Олени", DevPatternKind.JacquardDouble, rw, 30, 7m, 1, width, align, null, null, null);
+
+    [Fact]
+    public void Pattern_statuses_versions_and_editing()
+    {
+        var p = DevPattern.Create(1, "Р-00001", PatternValues(), DateTime.UtcNow, 1);
+        Assert.Equal((DevPatternStatus.Draft, 1), (p.Status, p.CurrentVersion));
+        Assert.Equal("dev.pattern.status", Assert.Throws<BusinessRuleException>(() => p.MoveTo(DevPatternStatus.Draft)).Code);
+        p.MoveTo(DevPatternStatus.Review);
+        p.MoveTo(DevPatternStatus.Approved);
+        Assert.Equal("dev.pattern.locked", Assert.Throws<BusinessRuleException>(() => p.Set(PatternValues())).Code);
+        p.MarkReadyForProgramming(DateTime.UtcNow);
+        Assert.Equal(2, p.NextVersion());
+        Assert.Equal((DevPatternStatus.Draft, (DateTime?)null), (p.Status, p.ReadyForProgrammingAtUtc));
+        p.MoveTo(DevPatternStatus.Archived);
+        Assert.Equal("dev.pattern.locked", Assert.Throws<BusinessRuleException>(() => p.NextVersion()).Code);
+        p.MoveTo(DevPatternStatus.Draft);
+        Assert.Equal("dev.pattern.rapport", Assert.Throws<BusinessRuleException>(() => p.Set(PatternValues(rw: 0))).Code);
+        Assert.Equal("Р-00012", DevPattern.FormatNumber("dev.pattern-000012"));
+    }
+
+    [Fact]
+    public void Pattern_approval_checks_colors_yarn_feeders_and_rapport()
+    {
+        var p = DevPattern.Create(1, "Р-00001", PatternValues(), DateTime.UtcNow, 1);
+        long[] colors = [1, 2, 3];
+        IReadOnlyCollection<long> all = new HashSet<long>(colors);
+        string Code(Action a) => Assert.Throws<BusinessRuleException>(a).Code;
+        Assert.Equal("dev.pattern.approve.colors", Code(() => DevPatternRules.EnsureApprovable(p, [], [("Основной", all)], 8)));
+        Assert.Equal("dev.pattern.approve.colorway", Code(() => DevPatternRules.EnsureApprovable(p, colors, [], 8)));
+        Assert.Equal("dev.pattern.approve.yarn", Code(() => DevPatternRules.EnsureApprovable(p, colors, [("Основной", all), ("Красный", new HashSet<long> { 1, 2 })], 8)));
+        Assert.Equal("dev.pattern.approve.machine", Code(() => DevPatternRules.EnsureApprovable(p, colors, [("Основной", all)], null)));
+        Assert.Equal("dev.pattern.approve.feeders", Code(() => DevPatternRules.EnsureApprovable(p, colors, [("Основной", all)], 2)));
+        DevPatternRules.EnsureApprovable(p, colors, [("Основной", all)], 8); // 120 кратно 24
+        var odd = DevPattern.Create(1, "Р-2", PatternValues(width: 125), DateTime.UtcNow, 1);
+        Assert.Equal("dev.pattern.approve.align", Code(() => DevPatternRules.EnsureApprovable(odd, colors, [("Основной", all)], 8)));
+        DevPatternRules.EnsureApprovable(DevPattern.Create(1, "Р-3", PatternValues(width: 125, align: "по центру переда"), DateTime.UtcNow, 1), colors,
+            [("Основной", all)], 8);
+        Assert.Equal("dev.pattern.approve.rapport", Code(() => DevPatternRules.EnsureApprovable(DevPattern.Create(1, "Р-4", PatternValues(rw: null), DateTime.UtcNow, 1),
+            colors, [("Основной", all)], 8)));
+    }
 }

@@ -269,6 +269,7 @@ public static class AuditActions
     public const string CustomerRefundCreated = "sales.refund.created";
     public const string CustomerRefundCancelled = "sales.refund.cancelled";
     public const string SalesAdvanceReleased = "sales.advance.released";
+    public const string CustomerOpeningBalanceChanged = "sales.opening_balance.changed"; // D1146
     public const string SalesMarkingChanged = "sales.marking.changed";
     // D1107, D1162, D1168–D1170 (продажи, аналитика): план продаж, каналы, отчёты маркетплейсов.
     public const string SalesPlanChanged = "sales.plan.changed";
@@ -301,6 +302,7 @@ public static class AuditActions
     public const string DevMachineNoted = "dev.machine.noted";
     public const string DevSampleRecorded = "dev.sample.recorded";
     public const string DevSampleCustody = "dev.sample.custody";
+    public const string DevPatternChanged = "dev.pattern.changed";
     // CRM (D600–D699). Телефоны и почты — только маской (D612).
     public const string CrmLeadCreated = "crm.lead.created";
     public const string CrmLeadChanged = "crm.lead.changed";

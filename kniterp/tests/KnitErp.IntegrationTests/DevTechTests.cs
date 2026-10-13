@@ -728,6 +728,273 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         }
     }
 
+    /// <summary>ТЗ §8: сравнение образцов рядом — замеры с отклонением, факт деталей против плана, общий вес, свои фото образца.</summary>
+    [SqlFact]
+    public async Task Samples_are_compared_side_by_side()
+    {
+        var org = await CreateOrganizationAsync();
+        var other = await CreateOrganizationAsync();
+        var png = KnitErp.Infrastructure.Documents.PaymentQrImage.Png("фото", 4);
+        var start = host.Clock.UtcNow;
+        long model, first, second, photo1, photo2, length;
+        try
+        {
+            await using var k = As(org.OwnerUserId, org.OrganizationId);
+            model = await k.Models.CreateAsync(Header("Шапка для сравнения"));
+            var front = await k.Tech.AddDetailAsync(model, "Полотно", 1);
+            var cuff = await k.Tech.AddDetailAsync(model, "Манжета", 2);
+            await k.Tech.SetKnittingAsync(front, null, null, 300, 80m, null, (await k.Tech.DetailAsync(front)).RowVersion);
+            await k.Tech.SetKnittingAsync(cuff, null, null, 60, 10m, null, (await k.Tech.DetailAsync(cuff)).RowVersion);
+            await k.Shop.SetSizeGridAsync(model, ["S", "M"], "M");
+            var sizes = (await k.Shop.SizesAsync(model)).Sizes;
+            length = await k.Shop.AddMeasureAsync(model, "Длина изделия", 0.5m, null);
+            var width = await k.Shop.AddMeasureAsync(model, "Ширина", 1m, null);
+            await k.Shop.SetMeasureValuesAsync(model, [new(length, sizes[1].Id, 0, null, 20m), new(width, sizes[1].Id, 0, null, 18m)]);
+
+            // Образцы № 1 и № 2; фото № 1 загружено после создания № 2 — относится к своему образцу, а не ко времени; фото модели — ни к какому.
+            first = await k.Shop.CreateSampleAsync(model, sizes[1].Id);
+            host.Clock.UtcNow = start.AddDays(1);
+            second = await k.Shop.CreateSampleAsync(model, sizes[1].Id);
+            host.Clock.UtcNow = start.AddDays(1).AddHours(1);
+            photo1 = await k.Shop.AddSamplePhotoAsync(first, "obrazec1.png", png);
+            photo2 = await k.Shop.AddSamplePhotoAsync(second, "obrazec2.png", png);
+            await k.Models.AddFileAsync(model, DevFileKind.Photo, "model.png", png, null);
+
+            await k.Shop.RecordFactAsync(first, front, 330, 90m, []);
+            await k.Shop.RecordFactAsync(first, cuff, 70, 12m, []);
+            await k.Shop.RecordFactAsync(second, front, 290, 81m, []);
+            await k.Shop.SetSampleMeasuresAsync(first, [new(length, 0, 0, null, 21m), new(width, 0, 0, null, 18.5m)]);
+            await k.Shop.SetSampleMeasuresAsync(second, [new(length, 0, 0, null, 20.3m)]);
+            var rv = (await k.Shop.SamplesAsync(model)).Samples.Single(s => s.Id == first).RowVersion;
+            await k.Shop.DecideSampleAsync(first, DevSampleStatus.Rework, "длинная", rv);
+
+            var cmp = await k.Shop.CompareSamplesAsync(model, [second, first]);
+            Assert.Equal(new[] { 1, 2 }, cmp.Samples.Select(s => s.No)); // колонки — по возрастанию номера
+            Assert.Equal(new[] { "Длина изделия", "Ширина" }, cmp.MeasureNames);
+            Assert.Equal(new[] { "Полотно", "Манжета" }, cmp.DetailNames);
+            var (s1, s2) = (cmp.Samples[0], cmp.Samples[1]);
+            Assert.Equal((DevSampleStatus.Rework, "длинная", "M"), (s1.Status, s1.Comment!, s1.Size!));
+            Assert.Equal((20m, 21m, 1m, true), (s1.Measures[0].Plan!.Value, s1.Measures[0].Fact!.Value, s1.Measures[0].Deviation!.Value, s1.Measures[0].OutOfTolerance));
+            Assert.Equal((0.5m, false), (s1.Measures[1].Deviation!.Value, s1.Measures[1].OutOfTolerance));
+            Assert.Equal((0.3m, false), (s2.Measures[0].Deviation!.Value, s2.Measures[0].OutOfTolerance));
+            Assert.Null(s2.Measures[1].Fact);
+            Assert.Equal((300, 330, 80m, 90m), (s1.Details[0].PlanKnitSeconds!.Value, s1.Details[0].FactKnitSeconds!.Value, s1.Details[0].PlanWeightGrams!.Value,
+                s1.Details[0].FactWeightGrams!.Value));
+            Assert.Equal(2, s1.Details[1].Quantity);
+            Assert.Equal(114m, s1.TotalWeightGrams); // 90 + 12 × 2 манжеты
+            Assert.Equal(81m, s2.TotalWeightGrams);
+            Assert.Null(s2.Details[1].FactWeightGrams);
+            Assert.Equal(new[] { photo1 }, s1.PhotoFileIds);
+            Assert.Equal(new[] { photo2 }, s2.PhotoFileIds);
+
+            Assert.Equal("dev.sample.compare", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Shop.CompareSamplesAsync(model, [first]))).Code);
+            Assert.Equal("dev.sample.compare", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Shop.CompareSamplesAsync(model, [first, first]))).Code);
+            var otherModel = await k.Models.CreateAsync(Header("Другая модель"));
+            var foreignSample = await k.Shop.CreateSampleAsync(otherModel, null);
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.CompareSamplesAsync(model, [first, foreignSample]));
+        }
+        finally
+        {
+            host.Clock.UtcNow = start;
+        }
+
+        await using (var k = As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.CompareSamplesAsync(model, [first, second]));
+        }
+    }
+
+    /// <summary>
+    /// ТЗ §8 (D728): образец берёт колорит и версию рисунка модели; паспорт — партия, кто вязал и собирал (активные пользователи), время сборки;
+    /// время вязки и вес изделия по факту; план доработки только у «На доработку»; фото образца; чужая организация — «не найдено».
+    /// </summary>
+    [SqlFact]
+    public async Task Sample_passport_rework_plan_and_photo()
+    {
+        var org = await CreateOrganizationAsync();
+        var other = await CreateOrganizationAsync();
+        var sampler = await InviteActiveAsync(org, SystemRoles.DevSampler);
+        var foreigner = await InviteActiveAsync(other, SystemRoles.DevSampler);
+        var png = KnitErp.Infrastructure.Documents.PaymentQrImage.Png("фото", 4);
+        long model, colorway, sample, photo;
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            var user = new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress };
+            var patterns = new DevPatternService(k.All.Db, new AccessGuard(k.All.Db, user, host.Clock), user, host.Clock);
+            var pattern = await patterns.CreateAsync(new DevPatternValues("Ромбы", DevPatternKind.JacquardDouble, 24, 30, null, null, null, null, null, null, null));
+            colorway = await patterns.AddColorwayAsync(pattern, "Зима");
+            model = await k.Models.CreateAsync(Header("Свитер с ромбами"));
+            var front = await k.Tech.AddDetailAsync(model, "Перед", 1);
+            var sleeve = await k.Tech.AddDetailAsync(model, "Рукав", 2);
+            await patterns.LinkToModelAsync(model, pattern, 1, colorway, (await k.Models.GetAsync(model)).RowVersion);
+
+            sample = await k.Shop.CreateSampleAsync(model, null);
+            await k.Shop.RecordFactAsync(sample, front, 600, 200m, []);
+            await k.Shop.RecordFactAsync(sample, sleeve, 300, 80m, []);
+            var dto = (await k.Shop.SamplesAsync(model)).Samples.Single();
+            Assert.Equal(("Зима", 1), (dto.Making!.Colorway!, dto.Making.PatternVersion!.Value));
+            Assert.Equal(20m, dto.Making.KnitMinutes); // (600 + 300 × 2) / 60
+            Assert.Equal(360m, dto.Making.WeightGrams); // 200 + 80 × 2
+            Assert.Null(dto.Rework);
+            Assert.Empty(dto.PhotoFileIds!);
+
+            // Паспорт: чужой пользователь — отказ, активный образцовщицы — записан.
+            Assert.Equal("dev.model.assignee", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.SetSampleMakingAsync(sample, "П-17", foreigner, null, 15, dto.RowVersion))).Code);
+            Assert.Equal("dev.sample.assembly", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.SetSampleMakingAsync(sample, "П-17", sampler, null, -1, dto.RowVersion))).Code);
+            await k.Shop.SetSampleMakingAsync(sample, " П-17 ", sampler, org.OwnerUserId, 15, dto.RowVersion);
+            await Assert.ThrowsAsync<ConcurrencyConflictException>(() => k.Shop.SetSampleMakingAsync(sample, "П-18", null, null, null, dto.RowVersion));
+            var data = await k.Shop.SamplesAsync(model);
+            dto = data.Samples.Single();
+            Assert.Equal(("П-17", sampler, org.OwnerUserId, 15), (dto.Making!.YarnBatch!, dto.Making.KnittedByUserId!.Value, dto.Making.AssembledByUserId!.Value,
+                dto.Making.AssemblyMinutes!.Value));
+            Assert.NotNull(dto.Making.KnittedBy);
+            Assert.Contains(data.Users!, u => u.Id == sampler);
+            Assert.DoesNotContain(data.Users!, u => u.Id == foreigner);
+            Assert.Contains(await k.All.Db.AuditEntries.AsNoTracking().Where(e => e.OrganizationId == org.OrganizationId && e.Action == AuditActions.DevSampleRecorded)
+                .Select(e => e.After).ToListAsync(), v => v != null && v.Contains("партия: П-17"));
+
+            // План доработки — только у образца «На доработку».
+            Assert.Equal("dev.sample.rework.status", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.PlanReworkAsync(sample, "Удлинить рукав", sampler, new DateOnly(2026, 11, 1), dto.RowVersion))).Code);
+            await k.Shop.DecideSampleAsync(sample, DevSampleStatus.Rework, "короткий рукав", dto.RowVersion);
+            dto = (await k.Shop.SamplesAsync(model)).Samples.Single();
+            Assert.Equal("dev.model.assignee", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.PlanReworkAsync(sample, "Удлинить рукав", foreigner, null, dto.RowVersion))).Code);
+            Assert.Equal("field.required", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.PlanReworkAsync(sample, " ", sampler, null, dto.RowVersion))).Code);
+            await k.Shop.PlanReworkAsync(sample, "Удлинить рукав на 2 см", sampler, new DateOnly(2026, 11, 1), dto.RowVersion);
+            dto = (await k.Shop.SamplesAsync(model)).Samples.Single();
+            Assert.Equal(("Удлинить рукав на 2 см", sampler, new DateOnly(2026, 11, 1)), (dto.Rework!.What!, dto.Rework.AssigneeUserId!.Value, dto.Rework.DueDate!.Value));
+
+            // Новый образец после смены колорита модели берёт новый колорит; у старого — прежний.
+            var autumn = await patterns.AddColorwayAsync(pattern, "Осень");
+            await patterns.LinkToModelAsync(model, pattern, 1, autumn, (await k.Models.GetAsync(model)).RowVersion);
+            var second = await k.Shop.CreateSampleAsync(model, null);
+            data = await k.Shop.SamplesAsync(model);
+            Assert.Equal("Осень", data.Samples.Single(x => x.Id == second).Making!.Colorway);
+            Assert.Equal("Зима", data.Samples.Single(x => x.Id == sample).Making!.Colorway);
+        }
+
+        // Образцовщица: паспорт и фото — да, план доработки — нет.
+        await using (var k = As(sampler, org.OrganizationId))
+        {
+            var dto = (await k.Shop.SamplesAsync(model)).Samples.Single(x => x.Id == sample);
+            await k.Shop.SetSampleMakingAsync(sample, "П-18", sampler, org.OwnerUserId, 20, dto.RowVersion);
+            dto = (await k.Shop.SamplesAsync(model)).Samples.Single(x => x.Id == sample);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Shop.PlanReworkAsync(sample, "Другое", null, null, dto.RowVersion));
+            photo = await k.Shop.AddSamplePhotoAsync(sample, "obrazec.png", png);
+            var data = await k.Shop.SamplesAsync(model);
+            Assert.Equal(new[] { photo }, data.Samples.Single(x => x.Id == sample).PhotoFileIds);
+            Assert.Empty(data.Samples.Single(x => x.Id != sample).PhotoFileIds!);
+            var file = await k.All.Db.DevFiles.AsNoTracking().SingleAsync(f => f.Id == photo);
+            Assert.Equal((sample, DevFileKind.Photo, model), (file.SampleId!.Value, file.Kind, file.ModelId));
+            var cmp = await k.Shop.CompareSamplesAsync(model, data.Samples.Select(x => x.Id).ToList());
+            Assert.Equal(new[] { photo }, cmp.Samples.Single(x => x.Id == sample).PhotoFileIds);
+            Assert.Empty(cmp.Samples.Single(x => x.Id != sample).PhotoFileIds);
+            Assert.Equal("dev.file.type", (await Assert.ThrowsAsync<BusinessRuleException>(() => k.Shop.AddSamplePhotoAsync(sample, "obrazec.sin", Program))).Code);
+        }
+
+        await using (var k = As(other.OwnerUserId, other.OrganizationId))
+        {
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.SetSampleMakingAsync(sample, "Чужая", null, null, null, []));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.PlanReworkAsync(sample, "Чужая", null, null, []));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.AddSamplePhotoAsync(sample, "chuzhoe.png", png));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.SamplesAsync(model));
+        }
+    }
+
+    [SqlFact]
+    public async Task Measure_templates_size_weights_and_knitting()
+    {
+        var org = await CreateOrganizationAsync();
+        var sampler = await InviteActiveAsync(org, SystemRoles.DevSampler);
+        long modelId, chest;
+        await using (var k = As(org.OwnerUserId, org.OrganizationId))
+        {
+            // ТЗ §9: шаблон табеля мер категории — Владелец добавляет и убирает точки, дубль не принимается.
+            await k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Длина изделия", 1m, 2m);
+            chest = await k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Ширина", 0.5m, 1m);
+            var extra = await k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Лишняя точка", 1m, null);
+            await k.Settings.AddCategoryMeasureAsync(DevCategory.Sweater, "Длина рукава", 1m, null);
+            Assert.Equal("dev.measure.duplicate", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Длина изделия", 1m, null))).Code);
+            await k.Settings.RemoveCategoryMeasureAsync(extra);
+            var template = await k.Settings.CategoryMeasuresAsync(DevCategory.Accessory);
+            Assert.Equal(new[] { "Длина изделия", "Ширина" }, template.Select(t => t.Name));
+            Assert.Equal((1m, 2m), (template[0].Tolerance, template[0].Step!.Value));
+            Assert.True(await k.All.Db.AuditEntries.AnyAsync(a => a.OrganizationId == org.OrganizationId && a.Action == AuditActions.DevSettingsChanged
+                                                                   && a.Reason!.StartsWith("Шаблон табеля мер")));
+
+            // Применение: добавляются только недостающие точки (по названию), повторно — ничего.
+            modelId = await k.Models.CreateAsync(Header("Повязка"));
+            await k.Shop.AddMeasureAsync(modelId, "Длина изделия", 0.3m, null);
+            Assert.Equal(1, await k.Shop.ApplyMeasureTemplateAsync(modelId));
+            Assert.Equal(0, await k.Shop.ApplyMeasureTemplateAsync(modelId));
+            var measures = (await k.Shop.SizesAsync(modelId)).Measures;
+            Assert.Equal(new[] { "Длина изделия", "Ширина" }, measures.Select(m => m.Name));
+            Assert.Equal((0.3m, 0.5m), (measures[0].Tolerance, measures[1].Tolerance)); // своя точка модели не перезаписывается
+
+            // ТЗ §8: вес изделия по размерам — сохраняется, пустое снимает, попадает в паспорт.
+            await k.Shop.SetSizeGridAsync(modelId, ["1", "2", "3"], "2");
+            var sizes = (await k.Shop.SizesAsync(modelId)).Sizes;
+            await k.Shop.SetSizeWeightsAsync(modelId, [(sizes[0].Id, 120m), (sizes[1].Id, 135.5m), (sizes[2].Id, 150m)]);
+            await k.Shop.SetSizeWeightsAsync(modelId, [(sizes[2].Id, null)]);
+            Assert.Equal(new decimal?[] { 120m, 135.5m, null }, (await k.Shop.SizesAsync(modelId)).Sizes.Select(z => z.WeightGrams));
+            Assert.Equal("dev.size.weight", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Shop.SetSizeWeightsAsync(modelId, [(sizes[0].Id, -1m)]))).Code);
+
+            // Пряжа и вязка: значения, проверки, конфликт версии строки.
+            var m = await k.Models.GetAsync(modelId);
+            await k.Models.SetKnittingAsync(modelId, "  К-1024 ", 28m, 40.5m, 6m, m.RowVersion);
+            var saved = await k.Models.GetAsync(modelId);
+            Assert.Equal(("К-1024", 28m, 40.5m, 6m), (saved.DyeNumber!, saved.DensityLoops!.Value, saved.DensityRows!.Value, saved.ShrinkagePercent!.Value));
+            await Assert.ThrowsAsync<ConcurrencyConflictException>(() => k.Models.SetKnittingAsync(modelId, null, null, null, null, m.RowVersion));
+            Assert.Equal("dev.model.density", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Models.SetKnittingAsync(modelId, null, 0m, null, null, saved.RowVersion))).Code);
+            Assert.Equal("dev.model.shrinkage", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                k.Models.SetKnittingAsync(modelId, null, null, null, 51m, saved.RowVersion))).Code);
+            Assert.True(await k.All.Db.AuditEntries.AnyAsync(a => a.OrganizationId == org.OrganizationId && a.EntityId == modelId.ToString()
+                                                                   && a.Reason!.EndsWith("петель на 10 см") && a.After == "28"));
+
+            var passport = await k.Passport.BuildAsync(modelId);
+            Assert.Equal(("К-1024", 28m, 40.5m, 6m), (passport.DyeNumber!, passport.DensityLoops!.Value, passport.DensityRows!.Value, passport.ShrinkagePercent!.Value));
+            Assert.Equal(new decimal?[] { 120m, 135.5m, null }, passport.Sizes.Select(z => z.WeightGrams));
+            var (_, pdf) = await k.Passport.PdfAsync(modelId, new KnitErp.Infrastructure.Documents.DevPassportPdfRenderer());
+            Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(pdf, 0, 4));
+
+            // Чужой размер в вес не передать.
+            var other = await k.Models.CreateAsync(Header("Другая"));
+            await k.Shop.SetSizeGridAsync(other, ["1"], "1");
+            var otherSize = (await k.Shop.SizesAsync(other)).Sizes.Single().Id;
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.SetSizeWeightsAsync(modelId, [(otherSize, 100m)]));
+        }
+
+        // Образцовщица: шаблон видит, но не меняет; табель по шаблону, вес и пряжу не меняет.
+        await using (var k = As(sampler, org.OrganizationId))
+        {
+            Assert.Equal(2, (await k.Settings.CategoryMeasuresAsync(DevCategory.Accessory)).Count);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Обхват", 1m, null));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Settings.RemoveCategoryMeasureAsync(chest));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Shop.ApplyMeasureTemplateAsync(modelId));
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Shop.SetSizeWeightsAsync(modelId, []));
+            var m = await k.Models.GetAsync(modelId);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Models.SetKnittingAsync(modelId, null, null, null, null, m.RowVersion));
+        }
+
+        // Чужая организация: модели и точки шаблона «не найдены», своего шаблона не видно.
+        var stranger = await CreateOrganizationAsync();
+        await using (var k = As(stranger.OwnerUserId, stranger.OrganizationId))
+        {
+            Assert.Empty(await k.Settings.CategoryMeasuresAsync(DevCategory.Accessory));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Settings.RemoveCategoryMeasureAsync(chest));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.ApplyMeasureTemplateAsync(modelId));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.SetSizeWeightsAsync(modelId, []));
+            await Assert.ThrowsAsync<NotFoundException>(() => k.Models.SetKnittingAsync(modelId, null, 20m, null, null, [0, 0, 0, 0, 0, 0, 0, 1]));
+        }
+    }
+
     private async Task<CreatedOrganization> CreateOrganizationAsync()
     {
         var inn = NextValidInn();

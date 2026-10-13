@@ -81,7 +81,11 @@ public sealed record DevSaveResult(int Saved, IReadOnlyList<string> Conflicts);
 public sealed record DevShopSettingsDto(int FactTolerancePercent, IReadOnlyList<DevSectionDto> Sections, int LabelWidthMm, int LabelHeightMm, bool LabelsOnA4,
     bool CanEdit);
 
-public sealed record DevSizeDto(long Id, string Name, bool IsBase, int? PerBox);
+/// <summary>Размер сетки модели; <paramref name="WeightGrams"/> — вес изделия этого размера, г (ТЗ §8).</summary>
+public sealed record DevSizeDto(long Id, string Name, bool IsBase, int? PerBox, decimal? WeightGrams = null);
+
+/// <summary>Точка шаблона табеля мер категории (ТЗ §9): допуск ± см и шаг градации (+ см на размер).</summary>
+public sealed record DevCategoryMeasureDto(long Id, DevCategory Category, string Name, decimal Tolerance, decimal? Step, int SortOrder);
 
 public sealed record DevMeasureDto(long Id, string Name, decimal Tolerance, decimal? Step, IReadOnlyDictionary<long, decimal> Values);
 
@@ -99,11 +103,21 @@ public sealed record DevSampleDto(
     IReadOnlyList<(string Detail, DevFactDto? Fact, int? PlanKnitSeconds, decimal? PlanWeightGrams)> Details,
     IReadOnlyList<DevSampleMeasureDto> Measures, byte[] RowVersion, string? Reason = null, DevSampleCustody Custody = DevSampleCustody.AtFactory,
     string? CustodyRecipient = null, DateOnly? HandedOn = null, DateOnly? ReturnBy = null, DateOnly? CustodyClosedOn = null, string? CustodyNote = null,
-    bool ReturnOverdue = false)
+    bool ReturnOverdue = false, DevSampleMakingDto? Making = null, DevSampleReworkDto? Rework = null, IReadOnlyList<long>? PhotoFileIds = null)
 {
     public string StatusName => DevSample.StatusName(Status);
     public string CustodyName => DevSample.CustodyName(Custody);
 }
+
+/// <summary>
+/// Паспорт образца (ТЗ §8, D728): колорит и версия рисунка (с модели при создании), партия пряжи, кто вязал и собирал, время сборки;
+/// время вязки (минуты, сумма факта деталей × количество в изделии) и фактический вес изделия считаются по факту цеха.
+/// </summary>
+public sealed record DevSampleMakingDto(string? Colorway, int? PatternVersion, string? YarnBatch, long? KnittedByUserId, string? KnittedBy,
+    long? AssembledByUserId, string? AssembledBy, int? AssemblyMinutes, decimal? KnitMinutes, decimal? WeightGrams);
+
+/// <summary>План доработки образца «На доработку» (ТЗ §8): что меняем, кто, срок.</summary>
+public sealed record DevSampleReworkDto(string? What, long? AssigneeUserId, string? Assignee, DateOnly? DueDate);
 
 /// <summary>Образец у заказчика (D723) — строка списка «Образцы у заказчиков».</summary>
 public sealed record DevSampleOutDto(long SampleId, int No, long ModelId, string Number, string ModelName, string Recipient, DateOnly HandedOn, DateOnly? ReturnBy,
@@ -111,7 +125,23 @@ public sealed record DevSampleOutDto(long SampleId, int No, long ModelId, string
 
 public sealed record DevSamplesDto(IReadOnlyList<DevSampleDto> Samples, IReadOnlyList<DevSizeDto> Sizes, bool CanEdit, bool CanRecord,
     int FactTolerancePercent = DevSettings.DefaultTolerance, IReadOnlyList<DevOptionDto>? Reasons = null, string? CustomerName = null, DateOnly? Today = null,
-    bool CanHand = false, bool CanCloseCustody = false);
+    bool CanHand = false, bool CanCloseCustody = false, IReadOnlyList<DevOptionDto>? Users = null);
+
+/// <summary>Деталь в сравнении образцов: факт вязания и веса против плана детали.</summary>
+public sealed record DevSampleCompareDetailDto(long DetailId, string Detail, int Quantity, int? PlanKnitSeconds, int? FactKnitSeconds,
+    decimal? PlanWeightGrams, decimal? FactWeightGrams);
+
+/// <summary>Образец в сравнении (ТЗ §8): статус, размер, решение, детали, общий вес, замеры и фото образца.</summary>
+public sealed record DevSampleCompareItemDto(long Id, int No, string? Size, DevSampleStatus Status, string? Reason, string? Comment, DateTime CreatedAtUtc,
+    IReadOnlyList<DevSampleCompareDetailDto> Details, decimal? TotalWeightGrams, IReadOnlyList<DevSampleMeasureDto> Measures,
+    IReadOnlyList<long> PhotoFileIds)
+{
+    public string StatusName => DevSample.StatusName(Status);
+}
+
+/// <summary>Сравнение образцов модели рядом: колонки — образцы (по возрастанию №), строки — точки замера и детали в одном порядке у всех.</summary>
+public sealed record DevSampleCompareDto(long ModelId, IReadOnlyList<DevSampleCompareItemDto> Samples, IReadOnlyList<string> MeasureNames,
+    IReadOnlyList<string> DetailNames);
 
 public sealed record DevOperationTypeDto(long Id, string Name, string Unit, decimal? Price, decimal? NormMinutes, byte? ProductionStage, bool IsArchived,
     byte[] RowVersion);

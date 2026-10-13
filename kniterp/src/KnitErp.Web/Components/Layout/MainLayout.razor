@@ -246,6 +246,7 @@
         [
             new("dev/models", "Модели", a => a.Has(Permissions.DevView)),
             new("dev/my", "Мои задачи разработки", a => a.Has(Permissions.DevView)),
+            new("dev/patterns", "Библиотека рисунков", a => a.Has(Permissions.DevView)),
             new("dev/tech", "Техкарты вязания", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
             new("dev/machines", "Станки и программы", a => a.Has(Permissions.DevView) || a.Has(Permissions.ProductionStageMark)),
             new("dev/analytics", "Аналитика разработки", a => a.Has(Permissions.DevView)),
