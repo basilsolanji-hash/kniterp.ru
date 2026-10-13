@@ -421,7 +421,10 @@
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
-        _access = await Access.GetCurrentAccessAsync();
+        // Страница (@Body) показывается, как только задан _access. Поэтому доступ присваивается последним, после всех запросов меню:
+        // иначе любая перерисовка (OnAfterRenderAsync, переход) запускала страницу параллельно с меню на общем DbContext вкладки —
+        // «A second operation was started on this context», вкладка падала (аудит 13.10, терминал цеха под нагрузкой).
+        var access = await Access.GetCurrentAccessAsync();
         await LoadAgreementsAsync();
         try
         {
@@ -441,6 +444,8 @@
             // Панель не должна мешать работе: без настроек показываем панель по умолчанию.
             _panel = new PanelSettings(ToolCatalog.DefaultPinned, ToolCatalog.DefaultVisible);
         }
+
+        _access = access;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

@@ -27,6 +27,7 @@ public sealed class AppFixture : IAsyncLifetime
 
     private readonly SqlTestHost _host = new();
     private readonly List<string> _log = [];
+    private string? _logFile;
     private long _userId;
     private long _organizationId;
     private long _ownerId;
@@ -274,6 +275,8 @@ public sealed class AppFixture : IAsyncLifetime
 
         // Cookie приложения — только Secure, поэтому HTTPS с временным самоподписанным сертификатом localhost (файл во временной папке).
         BaseUrl = $"https://localhost:{port}/";
+        // Полный вывод приложения — в файл рядом со снимками падений: по нему видна причина «страница перестала отвечать».
+        _logFile = Path.Combine(ScenarioBrowser.ArtifactsDirectory, $"kniterp-e2e-app-{port}.log");
         var (certificate, certificatePassword) = CreateCertificate();
         await using var db = _host.NewDb();
         var root = FindRoot();
@@ -359,6 +362,10 @@ public sealed class AppFixture : IAsyncLifetime
         lock (_log)
         {
             _log.Add(line);
+            if (_logFile is not null)
+            {
+                File.AppendAllText(_logFile, line + "\n");
+            }
         }
     }
 
