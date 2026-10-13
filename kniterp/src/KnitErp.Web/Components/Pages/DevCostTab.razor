@@ -135,7 +135,7 @@ else
         <form class="inline-form" @onsubmit="SaveAsync">
             <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
                 <label>@L("Комментарий к версии") <input @bind="_note" maxlength="@DevCostRun.NoteMaxLength" placeholder="@L("например: хлопок 24/1 вместо 20/1")" /></label>
-                <button type="submit" disabled="@_busy">@L("Сохранить версию расчёта")</button>
+                <button type="submit" class="secondary" disabled="@_busy">@L("Сохранить версию расчёта")</button>
             </fieldset>
         </form>
     }

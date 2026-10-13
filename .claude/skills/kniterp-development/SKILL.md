@@ -67,6 +67,12 @@ description: Модуль «Разработка» knitERP (D700–D799) — м�
   файлы рисунка — только вставка; утверждённый рисунок — только новой версией. Сетка — `DevPatternGrid` (PNG/BMP/CSV). Фото —
   `IImageShrinker` (SkiaSharp) до 2000 px.
 
+- Интерфейс (D731, ui-review §0 п. 4): на экране одна основная кнопка (кнопка без класса — основная), остальные `class="secondary"`;
+  редкие действия — `<details class="dev-more">` с `.dev-more-menu` («Ещё ▾»), пустые поля — строкой «Не указано: …», фильтры списков —
+  в общем `FoldOnPhone`. MainLayout, меню, общие стили и `Shared/*` — только сессия интерфейса. Снимки пересмотра —
+  `DevScreenshotTests.Capture_review_screens` (`KNITERP_REVIEW_SHOTS`), замеры в `metrics.jsonl`. В e2e стадию выбирать
+  `DevUi.MoveToStageAsync`, меню «Ещё» — `DevUi.OpenMoreAsync` (повторяют нажатие: ввод в первые секунды может потеряться).
+
 ## Частые ошибки
 - Карточка, открытая тем же компонентом с другим `Id` («Создать похожую»), сохраняет поля прошлой модели — сбрасывать состояние
   в `OnParametersSetAsync` при смене `Id`.

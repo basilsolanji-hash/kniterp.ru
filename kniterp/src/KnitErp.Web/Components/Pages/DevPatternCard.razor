@@ -48,12 +48,15 @@ else
         <div class="flash" role="status">@L("Рисунок готов к программированию — ждёт программу машины от программиста {0}.", p.Programmer ?? "—")</div>
     }
 
-    <div class="actions">
-        @if (p.CanEdit && p.Status == DevPatternStatus.Draft && p.IsEditable)
+    @* Пересмотр 13.10 (ui-review §0 п. 4): главная кнопка — следующий шаг рисунка; копия и архив — в «Ещё». *@
+    var canApprove = p.CanApprove && p.IsEditable;
+    var toReview = p.CanEdit && p.Status == DevPatternStatus.Draft && p.IsEditable;
+    <div class="actions dev-actions">
+        @if (toReview)
         {
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Review)">@L("На проверку")</button>
+            <button type="button" class="@(canApprove ? "secondary" : null)" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Review)">@L("На проверку")</button>
         }
-        @if (p.CanApprove && p.IsEditable)
+        @if (canApprove)
         {
             <button type="button" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Approved)">@L("Утвердить рисунок")</button>
         }
@@ -63,14 +66,19 @@ else
         }
         @if (p.CanEdit && p.Status != DevPatternStatus.Archived)
         {
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => _versionForm = !_versionForm">@L("Новая версия")</button>
+            <button type="button" class="@(p.IsEditable ? "secondary" : null)" disabled="@_busy" @onclick="() => _versionForm = !_versionForm">@L("Новая версия")</button>
             <button type="button" class="secondary" disabled="@_busy" @onclick="ReadyAsync">@L("Рисунок готов к программированию")</button>
-            <button type="button" class="secondary" disabled="@_busy" @onclick="CopyAsync">@L("Скопировать рисунок")</button>
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Archived)">@L("В архив")</button>
+            <details class="dev-more" @key="_moreKey">
+                <summary class="button secondary" aria-label="@L("Ещё действия")">@L("Ещё")</summary>
+                <div class="dev-more-menu" @onclick="() => _moreKey++">
+                    <button type="button" class="secondary" disabled="@_busy" @onclick="CopyAsync">@L("Скопировать рисунок")</button>
+                    <button type="button" class="secondary danger-text" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Archived)">@L("В архив")</button>
+                </div>
+            </details>
         }
         @if (p.CanEdit && p.Status == DevPatternStatus.Archived)
         {
-            <button type="button" class="secondary" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть из архива")</button>
+            <button type="button" disabled="@_busy" @onclick="() => MoveAsync(DevPatternStatus.Draft)">@L("Вернуть из архива")</button>
         }
     </div>
     @if (_versionForm)
@@ -135,7 +143,7 @@ else
                             </select>
                         </label>
                         <label class="wide">@L("Описание") <textarea @bind="_form.Note" maxlength="@DevPattern.NoteMaxLength" rows="2"></textarea></label>
-                        <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить свойства")</button></div>
+                        <div class="actions"><button type="submit" class="secondary" disabled="@_busy">@L("Сохранить свойства")</button></div>
                     </fieldset>
                 </form>
             }
@@ -155,7 +163,7 @@ else
             }
         </div>
 
-        <div class="panel">
+        <div class="panel wide">
             <h2>@L("Цвета и доли в раппорте")</h2>
             @if (p.Colors.Count == 0)
             {
@@ -340,6 +348,8 @@ else
 }
 
 @code {
+    private int _moreKey;
+
     [Parameter]
     public long Id { get; set; }
 

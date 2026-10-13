@@ -24,6 +24,9 @@ public static class DevFormat
         return m == 0 ? L("{0} с", r) : r == 0 ? L("{0} мин", m) : L("{0} мин {1} с", m, r);
     }
 
+    /// <summary>Число для поля ввода без хвостовых нулей хранения decimal(18,6): 100.000000 → 100 (пересмотр интерфейса 13.10).</summary>
+    public static decimal? Trim(decimal? value) => value is { } v ? v / 1.000000000000000000000000000000000m : null;
+
     public static string Grams(decimal? grams) => grams is { } g ? L("{0} г", g.ToString("0.##", Ru)) : "—";
 
     public static string Cm(decimal? cm) => cm is { } c ? c.ToString("0.#", Ru) : "—";

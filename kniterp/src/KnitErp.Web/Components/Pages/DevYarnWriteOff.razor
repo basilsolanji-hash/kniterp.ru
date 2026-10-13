@@ -68,7 +68,7 @@
                         </select>
                     </label>
                 }
-                <button type="submit" disabled="@(_busy || _warehouse.Length == 0)">@L("Создать черновик списания")</button>
+                <button type="submit" class="secondary" disabled="@(_busy || _warehouse.Length == 0)">@L("Создать черновик списания")</button>
             </form>
         }
         else

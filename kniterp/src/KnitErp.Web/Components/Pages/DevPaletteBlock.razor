@@ -54,7 +54,7 @@
                     </label>
                     <label>@L("Цвет на экране") <input type="color" @bind="_swatch" /></label>
                     <label>@L("Комментарий") <input @bind="_note" maxlength="@DevModelColor.NoteMaxLength" /></label>
-                    <button type="submit" disabled="@_busy">@(_editId is null ? L("Добавить цвет") : L("Сохранить цвет"))</button>
+                    <button type="submit" class="secondary" disabled="@_busy">@(_editId is null ? L("Добавить цвет") : L("Сохранить цвет"))</button>
                     @if (_editId is not null)
                     {
                         <button type="button" class="secondary" @onclick="Reset">@L("Отмена")</button>

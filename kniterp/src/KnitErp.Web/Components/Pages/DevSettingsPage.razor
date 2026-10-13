@@ -23,116 +23,255 @@ else
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
     }
 
-    <h2>@L("Автоматизация")</h2>
-    <p class="muted">@L("Меньше ручного ввода: новая модель получает исполнителей по умолчанию, дату запуска по нормативам и задание из шаблона категории; загрузка программы машины или рисунка сама переводит модель дальше.")</p>
-    <div class="panel">
-        <form @onsubmit="SaveAutomationAsync">
-            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !_auto.CanEdit)">
-                <div class="grid">
-                    @foreach (var d in _auto.Defaults)
-                    {
-                        var role = d.Role;
-                        <label>
-                            @L("{0} по умолчанию", L(d.RoleName))
-                            <select value="@(_defaults.GetValueOrDefault(role)?.ToString() ?? "")" @onchange="e => _defaults[role] = long.TryParse(e.Value as string, out var u) ? u : null">
-                                <option value="">—</option>
-                                @foreach (var u in _auto.Users)
-                                {
-                                    <option value="@u.Id">@u.Name</option>
-                                }
-                            </select>
-                        </label>
-                    }
-                    <label class="inline"><span><input type="checkbox" @bind="_autoLaunch" /> @L("Плановый запуск по нормативам стадий, если не указан")</span></label>
-                    <label class="inline"><span><input type="checkbox" @bind="_autoAdvance" /> @L("Автопереход стадии при загрузке программы машины или рисунка")</span></label>
-                </div>
-                @if (_auto.CanEdit)
-                {
-                    <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить автоматизацию")</button></div>
-                }
-            </fieldset>
-        </form>
+    @* Пересмотр 13.10 (ui-review §0 п. 4): вместо страницы в 2600 px — разделы вкладками, в каждом одна главная кнопка. *@
+    <div class="tabs dev-tabs" role="tablist" aria-label="@L("Разделы настроек")">
+        @foreach (var sec in Sections)
+        {
+            var section = sec;
+            <button type="button" role="tab" class="@(_section == section ? "tab active" : "tab secondary")" aria-selected="@(_section == section ? "true" : "false")"
+                    @onclick="() => _section = section">@SectionName(section)</button>
+        }
     </div>
 
-    <h2>@L("Шаблоны задания по категориям")</h2>
-    <p class="muted">@L("Подставляются в задание новой модели этой категории; заполненные вручную поля не меняются.")</p>
-    <div class="scroll">
-        <table>
-            <thead><tr><th>@L("Категория")</th><th class="opt">@L("Размерный ряд")</th><th class="opt">@L("Состав")</th><th class="opt">@L("Уход")</th>@if (_auto.CanEdit) { <th></th> }</tr></thead>
-            <tbody>
-                @foreach (var t in _auto.Templates)
-                {
-                    var row = t;
-                    <tr>
-                        <td>@L(row.CategoryName)</td>
-                        <td>@(row.SizeRange ?? "—")</td>
-                        <td>@(row.Composition ?? "—")</td>
-                        <td>@(row.Care ?? "—")</td>
-                        @if (_auto.CanEdit)
-                        {
-                            <td><button type="button" class="secondary" @onclick="() => _template = new TemplateForm(row)" disabled="@_busy">@L("Изменить")</button></td>
-                        }
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
-    @if (_template is not null)
+    @if (_section == Section.Stages)
     {
+        <h2>@L("Стадии")</h2>
+        <p class="muted">@L("Норматив — сколько дней модель может быть на стадии; дольше — «просрочено». Необязательные стадии можно отключить: их пропускает кнопка «Дальше».")</p>
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Стадия")</th><th class="num">@L("Норматив, дней")</th><th>@L("Включена")</th>@if (_canEdit) { <th></th> }</tr></thead>
+                <tbody>
+                    @foreach (var s in _stages)
+                    {
+                        var row = s;
+                        <tr>
+                            <td>@L(row.StageName)</td>
+                            <td class="num">
+                                @if (_canEdit)
+                                {
+                                    <input type="number" min="0" max="@DevStageSetting.MaxPlanDays" step="1" inputmode="numeric" style="max-width: 90px"
+                                           value="@_days[row.Stage]" @onchange="e => _days[row.Stage] = int.TryParse(e.Value as string, out var d) ? d : 0"
+                                           aria-label="@L("Норматив, дней")" />
+                                }
+                                else
+                                {
+                                    @row.PlanDays
+                                }
+                            </td>
+                            <td>
+                                @if (row.CanDisable && _canEdit)
+                                {
+                                    <input type="checkbox" checked="@_enabled[row.Stage]" @onchange="e => _enabled[row.Stage] = e.Value is true" aria-label="@L("Включена")" />
+                                }
+                                else
+                                {
+                                    @(row.IsEnabled ? L("да") : L("нет"))
+                                }
+                            </td>
+                            @if (_canEdit)
+                            {
+                                <td><button type="button" class="secondary" @onclick="() => SaveStageAsync(row)" disabled="@_busy">@L("Сохранить")</button></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (_section == Section.Automation)
+    {
+        <h2>@L("Автоматизация")</h2>
+        <p class="muted">@L("Меньше ручного ввода: новая модель получает исполнителей по умолчанию, дату запуска по нормативам и задание из шаблона категории; загрузка программы машины или рисунка сама переводит модель дальше.")</p>
         <div class="panel">
-            <h3>@L("Шаблон: {0}", L(DevModel.CategoryName(_template.Category)))</h3>
-            <form @onsubmit="SaveTemplateAsync">
-                <div class="grid">
-                    <label>@L("Размерный ряд") <input @bind="_template.SizeRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
-                    <label>@L("Цветовая гамма") <input @bind="_template.ColorRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
-                    <label class="wide">@L("Состав") <input @bind="_template.Composition" maxlength="@DevModel.ShortTextMaxLength" /></label>
-                    <label class="wide">@L("Маркировка") <input @bind="_template.Labeling" maxlength="@DevModel.ShortTextMaxLength" /></label>
-                    <label class="wide">@L("Уход") <input @bind="_template.Care" maxlength="@DevModel.ShortTextMaxLength" /></label>
-                </div>
-                <div class="actions">
-                    <button type="submit" disabled="@_busy">@L("Сохранить шаблон")</button>
-                    <button type="button" class="secondary" @onclick="() => _template = null">@L("Отмена")</button>
-                </div>
+            <form @onsubmit="SaveAutomationAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive || !_auto.CanEdit)">
+                    <div class="grid">
+                        @foreach (var d in _auto.Defaults)
+                        {
+                            var role = d.Role;
+                            <label>
+                                @L("{0} по умолчанию", L(d.RoleName))
+                                <select value="@(_defaults.GetValueOrDefault(role)?.ToString() ?? "")" @onchange="e => _defaults[role] = long.TryParse(e.Value as string, out var u) ? u : null">
+                                    <option value="">—</option>
+                                    @foreach (var u in _auto.Users)
+                                    {
+                                        <option value="@u.Id">@u.Name</option>
+                                    }
+                                </select>
+                            </label>
+                        }
+                        <label class="inline"><span><input type="checkbox" @bind="_autoLaunch" /> @L("Плановый запуск по нормативам стадий, если не указан")</span></label>
+                        <label class="inline"><span><input type="checkbox" @bind="_autoAdvance" /> @L("Автопереход стадии при загрузке программы машины или рисунка")</span></label>
+                    </div>
+                    @if (_auto.CanEdit)
+                    {
+                        <div class="actions"><button type="submit" disabled="@_busy">@L("Сохранить автоматизацию")</button></div>
+                    }
+                </fieldset>
             </form>
         </div>
     }
 
-    <DevMeasureTemplatesBlock />
-
-    <DevShopSettingsBlock />
-
-    @if (CurrentAccess.Has(Permissions.DevCostView))
+    @if (_section == Section.Templates)
     {
-        <DevCostSettingsBlock />
-    }
-
-    <h2>@L("Технологические операции")</h2>
-    <p class="muted">@L("Справочник технолога: операция, единица, норма времени, расценка и этап производства (вязание, сборка, ВТО, контроль качества, упаковка).")</p>
-    @if (_ops is not null)
-    {
+        <h2>@L("Шаблоны задания по категориям")</h2>
+        <p class="muted">@L("Подставляются в задание новой модели этой категории; заполненные вручную поля не меняются.")</p>
         <div class="scroll">
             <table>
-                <thead><tr><th>@L("Операция")</th><th>@L("Ед.")</th><th class="num">@L("Норма, мин")</th>@if (CurrentAccess.Has(Permissions.DevCostView)) { <th class="num">@L("Расценка")</th> }<th>@L("Этап производства")</th><th>@L("Состояние")</th>@if (_canEdit) { <th></th> }</tr></thead>
+                <thead><tr><th>@L("Категория")</th><th class="opt">@L("Размерный ряд")</th><th class="opt">@L("Состав")</th><th class="opt">@L("Уход")</th>@if (_auto.CanEdit) { <th></th> }</tr></thead>
                 <tbody>
-                    @if (_ops.Count == 0)
+                    @foreach (var t in _auto.Templates)
                     {
-                        <tr><td colspan="7" class="muted">@L("Записей пока нет.")</td></tr>
-                    }
-                    @foreach (var o in _ops)
-                    {
-                        var op = o;
+                        var row = t;
                         <tr>
-                            <td>@o.Name</td>
-                            <td>@o.Unit</td>
-                            <td class="num">@DevFormat.Number(o.NormMinutes)</td>
-                            @if (CurrentAccess.Has(Permissions.DevCostView)) { <td class="num">@Amounts.Format(o.Price)</td> }
-                            <td>@(o.ProductionStage is { } st ? L(StageName(st)) : "—")</td>
-                            <td>@(o.IsArchived ? L("в архиве") : L("действует"))</td>
+                            <td>@L(row.CategoryName)</td>
+                            <td>@(row.SizeRange ?? "—")</td>
+                            <td>@(row.Composition ?? "—")</td>
+                            <td>@(row.Care ?? "—")</td>
+                            @if (_auto.CanEdit)
+                            {
+                                <td><button type="button" class="secondary" @onclick="() => _template = new TemplateForm(row)" disabled="@_busy">@L("Изменить")</button></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_template is not null)
+        {
+            <div class="panel">
+                <h3>@L("Шаблон: {0}", L(DevModel.CategoryName(_template.Category)))</h3>
+                <form @onsubmit="SaveTemplateAsync">
+                    <div class="grid">
+                        <label>@L("Размерный ряд") <input @bind="_template.SizeRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                        <label>@L("Цветовая гамма") <input @bind="_template.ColorRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                        <label class="wide">@L("Состав") <input @bind="_template.Composition" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                        <label class="wide">@L("Маркировка") <input @bind="_template.Labeling" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                        <label class="wide">@L("Уход") <input @bind="_template.Care" maxlength="@DevModel.ShortTextMaxLength" /></label>
+                    </div>
+                    <div class="actions">
+                        <button type="submit" disabled="@_busy">@L("Сохранить шаблон")</button>
+                        <button type="button" class="secondary" @onclick="() => _template = null">@L("Отмена")</button>
+                    </div>
+                </form>
+            </div>
+        }
+
+        <DevMeasureTemplatesBlock />
+    }
+
+    @if (_section == Section.Operations)
+    {
+        <h2>@L("Технологические операции")</h2>
+        <p class="muted">@L("Справочник технолога: операция, единица, норма времени, расценка и этап производства (вязание, сборка, ВТО, контроль качества, упаковка).")</p>
+        @if (_ops is not null)
+        {
+            <div class="scroll">
+                <table>
+                    <thead><tr><th>@L("Операция")</th><th>@L("Ед.")</th><th class="num">@L("Норма, мин")</th>@if (CurrentAccess.Has(Permissions.DevCostView)) { <th class="num">@L("Расценка")</th> }<th>@L("Этап производства")</th><th>@L("Состояние")</th>@if (_canEdit) { <th></th> }</tr></thead>
+                    <tbody>
+                        @if (_ops.Count == 0)
+                        {
+                            <tr><td colspan="7" class="muted">@L("Записей пока нет.")</td></tr>
+                        }
+                        @foreach (var o in _ops)
+                        {
+                            var op = o;
+                            <tr>
+                                <td>@o.Name</td>
+                                <td>@o.Unit</td>
+                                <td class="num">@DevFormat.Number(o.NormMinutes)</td>
+                                @if (CurrentAccess.Has(Permissions.DevCostView)) { <td class="num">@Amounts.Format(o.Price)</td> }
+                                <td>@(o.ProductionStage is { } st ? L(StageName(st)) : "—")</td>
+                                <td>@(o.IsArchived ? L("в архиве") : L("действует"))</td>
+                                @if (_canEdit)
+                                {
+                                    <td class="row-actions">
+                                        <button type="button" class="secondary" @onclick="() => EditOp(op)" disabled="@_busy">@L("Изменить")</button>
+                                        <button type="button" class="secondary" @onclick="() => ArchiveOpAsync(op)" disabled="@_busy">@(o.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (_canEdit)
+            {
+                <form class="inline-form" @onsubmit="SaveOpAsync">
+                    <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                        <label>@L("Операция") <input @bind="_opName" maxlength="@DevOperationType.NameMaxLength" placeholder="@L("Убрать боковые нитки")" required /></label>
+                        <label>@L("Ед.") <input @bind="_opUnit" maxlength="@DevOperationType.UnitMaxLength" style="max-width: 70px" /></label>
+                        <label>@L("Норма, мин") <input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_opNorm" /></label>
+                        @if (CurrentAccess.Has(Permissions.DevCostView))
+                        {
+                            <label>@L("Расценка") <input type="number" min="0" step="0.01" inputmode="decimal" style="max-width: 100px" @bind="_opPrice" /></label>
+                        }
+                        <label>
+                            @L("Этап производства")
+                            <select @bind="_opStage">
+                                <option value="">—</option>
+                                @for (byte st = 1; st <= 5; st++)
+                                {
+                                    <option value="@st">@L(StageName(st))</option>
+                                }
+                            </select>
+                        </label>
+                        <button type="submit" disabled="@_busy">@(_opEdit is null ? L("Добавить операцию") : L("Сохранить операцию"))</button>
+                        @if (_opEdit is not null)
+                        {
+                            <button type="button" class="secondary" @onclick="ResetOp">@L("Отмена")</button>
+                        }
+                    </fieldset>
+                </form>
+            }
+        }
+    }
+
+    @if (_section == Section.Lookups)
+    {
+        <h2>@L("Справочники")</h2>
+        <div class="tabs dev-tabs" role="tablist">
+            @foreach (var k in Enum.GetValues<DevLookupKind>())
+            {
+                var kind = k;
+                <button type="button" role="tab" class="@(_kind == kind ? "tab active" : "tab secondary")" aria-selected="@(_kind == kind ? "true" : "false")"
+                        @onclick="() => OpenKindAsync(kind)" disabled="@_busy">@L(DevLookup.KindName(kind))</button>
+            }
+        </div>
+        @if (_canEdit)
+        {
+            <form class="inline-form" @onsubmit="AddAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                    <label>@L("Название") <input @bind="_newName" maxlength="@DevLookup.NameMaxLength" required /></label>
+                    @if (_kind == DevLookupKind.MachineClass)
+                    {
+                        <label>@L("Нитеводителей") <input type="number" min="0" max="@DevLookup.MaxNumber" step="1" inputmode="numeric" @bind="_newNumber" /></label>
+                    }
+                    <button type="submit" disabled="@_busy">@L("Добавить")</button>
+                </fieldset>
+            </form>
+        }
+        <div class="scroll">
+            <table>
+                <thead><tr><th>@L("Название")</th>@if (_kind == DevLookupKind.MachineClass) { <th class="num">@L("Нитеводителей")</th> }<th>@L("Состояние")</th>@if (_canEdit) { <th></th> }</tr></thead>
+                <tbody>
+                    @if (_lookups.Count == 0)
+                    {
+                        <tr><td colspan="4" class="muted">@L("Записей пока нет.")</td></tr>
+                    }
+                    @foreach (var l in _lookups)
+                    {
+                        var row = l;
+                        <tr>
+                            <td>@row.Name</td>
+                            @if (_kind == DevLookupKind.MachineClass) { <td class="num">@(row.Number?.ToString() ?? "—")</td> }
+                            <td>@(row.IsArchived ? L("в архиве") : L("действует"))</td>
                             @if (_canEdit)
                             {
-                                <td class="row-actions">
-                                    <button type="button" class="secondary" @onclick="() => EditOp(op)" disabled="@_busy">@L("Изменить")</button>
-                                    <button type="button" class="secondary" @onclick="() => ArchiveOpAsync(op)" disabled="@_busy">@(o.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
+                                <td>
+                                    <button type="button" class="secondary" @onclick="() => ArchiveAsync(row)" disabled="@_busy">@(row.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
                                 </td>
                             }
                         </tr>
@@ -140,133 +279,63 @@ else
                 </tbody>
             </table>
         </div>
-        @if (_canEdit)
-        {
-            <form class="inline-form" @onsubmit="SaveOpAsync">
-                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
-                    <label>@L("Операция") <input @bind="_opName" maxlength="@DevOperationType.NameMaxLength" placeholder="@L("Убрать боковые нитки")" required /></label>
-                    <label>@L("Ед.") <input @bind="_opUnit" maxlength="@DevOperationType.UnitMaxLength" style="max-width: 70px" /></label>
-                    <label>@L("Норма, мин") <input type="number" min="0" step="0.1" inputmode="decimal" style="max-width: 90px" @bind="_opNorm" /></label>
-                    @if (CurrentAccess.Has(Permissions.DevCostView))
-                    {
-                        <label>@L("Расценка") <input type="number" min="0" step="0.01" inputmode="decimal" style="max-width: 100px" @bind="_opPrice" /></label>
-                    }
-                    <label>
-                        @L("Этап производства")
-                        <select @bind="_opStage">
-                            <option value="">—</option>
-                            @for (byte st = 1; st <= 5; st++)
-                            {
-                                <option value="@st">@L(StageName(st))</option>
-                            }
-                        </select>
-                    </label>
-                    <button type="submit" disabled="@_busy">@(_opEdit is null ? L("Добавить операцию") : L("Сохранить операцию"))</button>
-                    @if (_opEdit is not null)
-                    {
-                        <button type="button" class="secondary" @onclick="ResetOp">@L("Отмена")</button>
-                    }
-                </fieldset>
-            </form>
-        }
     }
 
-    <h2>@L("Стадии")</h2>
-    <p class="muted">@L("Норматив — сколько дней модель может быть на стадии; дольше — «просрочено». Необязательные стадии можно отключить: их пропускает кнопка «Дальше».")</p>
-    <div class="scroll">
-        <table>
-            <thead><tr><th>@L("Стадия")</th><th class="num">@L("Норматив, дней")</th><th>@L("Включена")</th>@if (_canEdit) { <th></th> }</tr></thead>
-            <tbody>
-                @foreach (var s in _stages)
-                {
-                    var row = s;
-                    <tr>
-                        <td>@L(row.StageName)</td>
-                        <td class="num">
-                            @if (_canEdit)
-                            {
-                                <input type="number" min="0" max="@DevStageSetting.MaxPlanDays" step="1" inputmode="numeric" style="max-width: 90px"
-                                       value="@_days[row.Stage]" @onchange="e => _days[row.Stage] = int.TryParse(e.Value as string, out var d) ? d : 0"
-                                       aria-label="@L("Норматив, дней")" />
-                            }
-                            else
-                            {
-                                @row.PlanDays
-                            }
-                        </td>
-                        <td>
-                            @if (row.CanDisable && _canEdit)
-                            {
-                                <input type="checkbox" checked="@_enabled[row.Stage]" @onchange="e => _enabled[row.Stage] = e.Value is true" aria-label="@L("Включена")" />
-                            }
-                            else
-                            {
-                                @(row.IsEnabled ? L("да") : L("нет"))
-                            }
-                        </td>
-                        @if (_canEdit)
-                        {
-                            <td><button type="button" class="secondary" @onclick="() => SaveStageAsync(row)" disabled="@_busy">@L("Сохранить")</button></td>
-                        }
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
-
-    <h2>@L("Справочники")</h2>
-    <div class="tabs dev-tabs" role="tablist">
-        @foreach (var k in Enum.GetValues<DevLookupKind>())
-        {
-            var kind = k;
-            <button type="button" role="tab" class="@(_kind == kind ? "tab active" : "tab secondary")" aria-selected="@(_kind == kind ? "true" : "false")"
-                    @onclick="() => OpenKindAsync(kind)" disabled="@_busy">@L(DevLookup.KindName(kind))</button>
-        }
-    </div>
-    @if (_canEdit)
+    @if (_section == Section.Shop)
     {
-        <form class="inline-form" @onsubmit="AddAsync">
-            <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
-                <label>@L("Название") <input @bind="_newName" maxlength="@DevLookup.NameMaxLength" required /></label>
-                @if (_kind == DevLookupKind.MachineClass)
-                {
-                    <label>@L("Нитеводителей") <input type="number" min="0" max="@DevLookup.MaxNumber" step="1" inputmode="numeric" @bind="_newNumber" /></label>
-                }
-                <button type="submit" disabled="@_busy">@L("Добавить")</button>
-            </fieldset>
-        </form>
+        <DevShopSettingsBlock />
     }
-    <div class="scroll">
-        <table>
-            <thead><tr><th>@L("Название")</th>@if (_kind == DevLookupKind.MachineClass) { <th class="num">@L("Нитеводителей")</th> }<th>@L("Состояние")</th>@if (_canEdit) { <th></th> }</tr></thead>
-            <tbody>
-                @if (_lookups.Count == 0)
-                {
-                    <tr><td colspan="4" class="muted">@L("Записей пока нет.")</td></tr>
-                }
-                @foreach (var l in _lookups)
-                {
-                    var row = l;
-                    <tr>
-                        <td>@row.Name</td>
-                        @if (_kind == DevLookupKind.MachineClass) { <td class="num">@(row.Number?.ToString() ?? "—")</td> }
-                        <td>@(row.IsArchived ? L("в архиве") : L("действует"))</td>
-                        @if (_canEdit)
-                        {
-                            <td>
-                                <button type="button" class="secondary" @onclick="() => ArchiveAsync(row)" disabled="@_busy">@(row.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
-                            </td>
-                        }
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+
+    @if (_section == Section.Cost)
+    {
+        @if (CurrentAccess.Has(Permissions.DevCostView))
+        {
+            <DevCostSettingsBlock />
+        }
+    }
 }
 
 @code {
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    /// <summary>Раздел при открытии: stages, automation, templates, operations, lookups, shop, cost.</summary>
+    [SupplyParameterFromQuery(Name = "section")]
+    public string? SectionQuery { get; set; }
+
+    private enum Section
+    {
+        Stages,
+        Automation,
+        Templates,
+        Operations,
+        Lookups,
+        Shop,
+        Cost,
+    }
+
+    private Section _section;
+
+    private IEnumerable<Section> Sections => Enum.GetValues<Section>().Where(s => s != Section.Cost || CurrentAccess.Has(Permissions.DevCostView));
+
+    private static string SectionName(Section s) => s switch
+    {
+        Section.Stages => L("Стадии"),
+        Section.Automation => L("Автоматизация"),
+        Section.Templates => L("Шаблоны"),
+        Section.Operations => L("Операции"),
+        Section.Lookups => L("Справочники"),
+        Section.Shop => L("Цех и печать"),
+        _ => L("Себестоимость"),
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (Enum.TryParse<Section>(SectionQuery, true, out var s))
+        {
+            _section = s;
+        }
+    }
 
     private IReadOnlyList<DevStageSettingDto>? _stages;
     private IReadOnlyList<DevLookupDto>? _lookups;
