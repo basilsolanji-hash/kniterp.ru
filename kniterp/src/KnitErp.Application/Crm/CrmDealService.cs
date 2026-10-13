@@ -186,7 +186,7 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var (orders, hidden) = await LinkedOrdersAsync(ctx, id, ct);
         var values = new CrmDealValues(d.Title, d.CounterpartyId, d.ContactId, amounts ? d.Amount : 0, d.CurrencyCode, d.ExpectedCloseDate,
             d.ResponsibleUserId, d.ProjectId, d.ChannelId, d.SourceId);
-        // D685: цикл заказов клиента — с правом «Продажи: просмотр» (даты заказов — данные продаж).
+        // D684: цикл заказов клиента — с правом «Продажи: просмотр» (даты заказов — данные продаж).
         var cycle = ctx.Permissions.Has(Permissions.SalesView) ? await CrmEvents.ClientCycleAsync(db, ctx.OrganizationId, d.CounterpartyId, ct) : null;
         return new CrmDealDto(d.Id, d.Number, values, d.PipelineId, pipeline, d.StageId,
             CrmSettingsService.Ordered(stages.Where(s => !s.IsArchived || s.Id == d.StageId))

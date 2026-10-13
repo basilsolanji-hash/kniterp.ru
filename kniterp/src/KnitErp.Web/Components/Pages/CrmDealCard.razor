@@ -133,14 +133,14 @@ else
                 {
                     var total = active.Sum(o => o.Total ?? 0);
                     var paid = active.Sum(o => o.Paid ?? 0);
-                    <p class="crm-paid" role="status">
+                    <p class="crm-paid">
                         @L("Оплачено по сделке: {0} из {1}", Amounts.Format(paid), Amounts.Format(total))
                         <span class="crm-bar" style="display: inline-block; width: 120px; vertical-align: middle"><i style="width: @(total > 0 ? Math.Min(100, (int)(paid * 100 / total)) : 0)%"></i></span>
                     </p>
                 }
                 <div class="scroll">
                     <table class="compact">
-                        <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th><th></th></tr></thead>
+                        <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th></tr></thead>
                         <tbody>
                             @foreach (var o in _deal.Orders)
                             {
@@ -151,7 +151,10 @@ else
                                     <td class="num">@Amounts.Format(o.Total)</td>
                                     <td class="num">@Amounts.Format(o.Paid) @if (o.Payment is { } pay) { <span class="tag @(pay == CrmPaymentState.Paid ? "ok" : pay == CrmPaymentState.Partial ? "warn" : null)">@PaymentName(pay)</span> }</td>
                                     <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
-                                    <td><div class="row-actions">
+                                </tr>
+                                @* D684: действия по заказу — отдельной строкой во всю ширину, чтобы не уезжали за край таблицы. *@
+                                <tr class="crm-order-actions">
+                                    <td colspan="6"><div class="row-actions">
                                         @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
                                         {
                                             <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>

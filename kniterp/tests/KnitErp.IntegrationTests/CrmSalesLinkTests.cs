@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.IntegrationTests;
 
-/// <summary>Связка сделки с продажами (D684, D685): счёт, документы клиенту, оплата в сделке, повторный заказ по циклу клиента.</summary>
+/// <summary>Связка сделки с продажами (D684, D684): счёт, документы клиенту, оплата в сделке, повторный заказ по циклу клиента.</summary>
 public sealed class CrmSalesLinkTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
     [SqlFact]

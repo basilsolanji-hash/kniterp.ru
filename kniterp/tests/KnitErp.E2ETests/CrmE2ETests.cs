@@ -329,6 +329,62 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await Shot(page, "crm-10-mailing-template");
     });
 
+    /// <summary>Приёмка (13.10.2026): лид → сделка → КП → заказ → счёт → оплата; оплата видна в сделке.</summary>
+    [SqlFact]
+    public Task Lead_deal_offer_order_invoice_payment() => RunAsync("crm-pay", false, "light", async page =>
+    {
+        await OpenAsync(page, "crm/leads");
+        await page.GetByLabel("Что нужно клиенту").FillAsync($"150 шарфов {Stamp}");
+        await page.GetByLabel("Контактное лицо").FillAsync("Ольга Оплатова");
+        await page.GetByLabel("Телефон").FillAsync("+7 900 000-00-09");
+        await page.GetByLabel("Компания").FillAsync($"ООО «Оплата {Stamp}»");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить лид" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/leads/\d+$"));
+        await WaitBlazorAsync(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Квалифицировать" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать сделку" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/deals/\d+$"));
+        await WaitBlazorAsync(page);
+        var dealUrl = page.Url;
+
+        await page.GetByLabel("Поиск позиции").FillAsync("СВ-E2E");
+        await page.GetByLabel("Поиск позиции").PressAsync("Tab");
+        await Assertions.Expect(page.GetByLabel("Позиция каталога")).ToHaveValueAsync(new Regex(@"\d+"));
+        await page.GetByLabel("Количество").FillAsync("150");
+        await page.GetByLabel("Цена").FillAsync("1000");
+        await page.GetByRole(AriaRole.Form, new() { Name = "Добавить позицию" }).GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Позиция добавлена" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сформировать КП" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"КП-\d+") })).ToContainTextAsync("150 000,00");
+
+        // Заказ по КП → подтверждение из сделки → счёт.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Заказ по КП" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Создать заказ по КП-") }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Заказ покупателя создан" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Подтвердить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Выставить счёт" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Выставить счёт" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex(@"^Счёт СЧ-\d+$") })).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".crm-paid")).ToContainTextAsync("Оплачено по сделке: 0,00 из 150 000,00");
+        await Shot(page, "crm-11-deal-invoice");
+
+        // Оплата — в карточке заказа (модуль продаж).
+        await page.GetByRole(AriaRole.Link, new() { Name = "Открыть", Exact = true }).First.ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/sales-orders/\d+$"));
+        await WaitBlazorAsync(page);
+        var pay = page.Locator("form", new() { Has = page.GetByRole(AriaRole.Button, new() { Name = "Записать оплату" }) });
+        await pay.GetByLabel("Сумма").FillAsync("150000");
+        await pay.GetByRole(AriaRole.Button, new() { Name = "Записать оплату" }).ClickAsync();
+        await Assertions.Expect(page.GetByText("Оплата записана")).ToBeVisibleAsync();
+
+        // Сделка: выиграна, оплачена.
+        await OpenAsync(page, dealUrl.Replace(app.BaseUrl, ""));
+        await Assertions.Expect(page.Locator(".page-head .tag")).ToHaveTextAsync("Выиграна");
+        await Assertions.Expect(page.Locator(".crm-paid")).ToContainTextAsync("150 000,00 из 150 000,00");
+        await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"ЗК-\d+") })).ToContainTextAsync("оплачен");
+        await Shot(page, "crm-12-deal-paid");
+    });
+
     private static Task Shot(IPage page, string name)
     {
         var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath();

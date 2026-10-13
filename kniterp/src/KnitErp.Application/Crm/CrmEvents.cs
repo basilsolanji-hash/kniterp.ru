@@ -55,7 +55,7 @@ public static class CrmEvents
         {
             var tz = await TimeZoneAsync(db, ctx.OrganizationId, ct);
             var today = Today(nowUtc, tz);
-            // D685: по циклу клиента — средний интервал между его заказами; напоминание за неделю до ожидаемого заказа. Истории нет — N дней из настроек.
+            // D684: по циклу клиента — средний интервал между его заказами; напоминание за неделю до ожидаемого заказа. Истории нет — N дней из настроек.
             var cycle = await ClientCycleAsync(db, ctx.OrganizationId, deal.CounterpartyId, ct);
             var (due, why) = cycle is { } c
                 ? (Math.Max(1, c.LastOrder.AddDays(c.Days - RepeatLeadDays).DayNumber - today.DayNumber),
@@ -67,11 +67,11 @@ public static class CrmEvents
         }
     }
 
-    /// <summary>За сколько дней до ожидаемого повторного заказа напомнить менеджеру (D685).</summary>
+    /// <summary>За сколько дней до ожидаемого повторного заказа напомнить менеджеру (D684).</summary>
     public const int RepeatLeadDays = 7;
 
     /// <summary>
-    /// Цикл заказов клиента (D685): средний интервал в днях между датами его подтверждённых и закрытых заказов (не меньше двух заказов,
+    /// Цикл заказов клиента (D684): средний интервал в днях между датами его подтверждённых и закрытых заказов (не меньше двух заказов,
     /// интервал 7…365 дней), дата последнего заказа. Нет истории — null.
     /// </summary>
     public static async Task<(int Days, int Orders, DateOnly LastOrder)?> ClientCycleAsync(IKnitErpDbContext db, long organizationId, long counterpartyId,
