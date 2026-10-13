@@ -814,8 +814,12 @@ public sealed class StockDocumentService(
                 .SelectMany(o => o.Lines).Where(l => itemIds.Contains(l.ItemId))
                 .GroupBy(l => l.ItemId).Select(g => new { g.Key, Sum = g.Sum(l => l.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
         var moved = await OrderMovedAsync(ctx, sales, orderId, itemIds, doc.Id, ct);
+        // D133 (D132 п. 3): допуск поступления сверх заказа из настроек закупок — «заказано × (1 + допуск/100)»; у отгрузки допуска нет.
+        var tolerance = sales ? 0m : await KnitErp.Application.Purchasing.PurchaseSettingsService.OverReceiptPercentAsync(db, ctx.OrganizationId, ct);
         var over = quantities
-            .Select(q => (ItemId: q.Key, Quantity: q.Value, Left: Math.Max(0m, ordered.GetValueOrDefault(q.Key) - (moved[q.Key].Forward - moved[q.Key].Returned))))
+            .Select(q => (ItemId: q.Key, Quantity: q.Value,
+                Left: Math.Max(0m, KnitErp.Domain.Purchasing.PurchaseSettings.AllowedQuantity(ordered.GetValueOrDefault(q.Key), tolerance)
+                                   - (moved[q.Key].Forward - moved[q.Key].Returned))))
             .Where(x => x.Quantity > x.Left).ToList();
         if (over.Count == 0)
         {
@@ -826,11 +830,20 @@ public sealed class StockDocumentService(
         var code = await db.Items.AsNoTracking().Where(i => i.Id == first.ItemId).Select(i => i.Code).SingleAsync(ct);
         var quantity = Quantities.Format(first.Quantity);
         var left = Quantities.Format(first.Left);
-        throw sales
-            ? new BusinessRuleException("sales.shipment.exceeds",
-                $"Отгрузка больше заказанного: {code} — отгружается {quantity}, по заказу осталось отгрузить {left}. Проверьте другие отгрузки по этому заказу.")
-            : new BusinessRuleException("purchase.receipt.exceeds",
-                $"Поступление больше заказанного: {code} — поступает {quantity}, по заказу осталось получить {left}. Лишнее оформите поступлением без заказа.");
+        if (sales)
+        {
+            throw new BusinessRuleException("sales.shipment.exceeds",
+                $"Отгрузка больше заказанного: {code} — отгружается {quantity}, по заказу осталось отгрузить {left}. Проверьте другие отгрузки по этому заказу.");
+        }
+
+        if (tolerance > 0)
+        {
+            throw new BusinessRuleException("purchase.receipt.exceeds",
+                $"Поступление больше заказанного с допуском {tolerance:0.##}%: {code} — поступает {quantity}, по заказу с допуском осталось получить {left}. Лишнее оформите поступлением без заказа.");
+        }
+
+        throw new BusinessRuleException("purchase.receipt.exceeds",
+            $"Поступление больше заказанного: {code} — поступает {quantity}, по заказу осталось получить {left}. Лишнее оформите поступлением без заказа.");
     }
 
     /// <summary>D129: сторно отгрузки (поступления) по заказу — только если проведённые возвраты не превысят оставшееся без этого документа.</summary>

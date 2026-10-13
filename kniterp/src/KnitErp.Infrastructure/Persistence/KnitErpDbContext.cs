@@ -219,6 +219,8 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Sales.MarketplaceReportLine> MarketplaceReportLines => Set<KnitErp.Domain.Sales.MarketplaceReportLine>();
     public DbSet<KnitErp.Domain.Sales.MarketplaceColumnMap> MarketplaceColumnMaps => Set<KnitErp.Domain.Sales.MarketplaceColumnMap>();
     public DbSet<KnitErp.Domain.Sales.CustomerOpeningBalance> CustomerOpeningBalances => Set<KnitErp.Domain.Sales.CustomerOpeningBalance>(); // D1146
+    public DbSet<KnitErp.Domain.Purchasing.SupplierOpeningBalance> SupplierOpeningBalances => Set<KnitErp.Domain.Purchasing.SupplierOpeningBalance>(); // D133
+    public DbSet<KnitErp.Domain.Purchasing.PurchaseSettings> PurchaseSettings => Set<KnitErp.Domain.Purchasing.PurchaseSettings>(); // D133
 
     /// <summary>
     /// Транзакция сценария. Если сценарий вызван из другого (увольнение блокирует учётную запись), он присоединяется к внешней

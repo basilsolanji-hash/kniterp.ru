@@ -80,6 +80,11 @@ public sealed class PeriodService(IKnitErpDbContext db, IAccessGuard guard, ICur
 /// <summary>Проверка закрытого периода перед записью движений. Второй рубеж — триггер базы tr_stock_movements_closed_period.</summary>
 internal static class ClosedPeriod
 {
+    /// <summary>По какую дату включительно закрыт период; null — не закрывался.</summary>
+    public static async Task<DateOnly?> ClosedThroughAsync(IKnitErpDbContext db, long organizationId, CancellationToken ct) =>
+        await db.PeriodClosures.AsNoTracking().Where(p => p.OrganizationId == organizationId)
+            .Select(p => (DateOnly?)p.ClosedThrough).SingleOrDefaultAsync(ct);
+
     public static async Task EnsureOpenAsync(IKnitErpDbContext db, long organizationId, DateOnly date, CancellationToken ct)
     {
         var through = await db.PeriodClosures.AsNoTracking().Where(p => p.OrganizationId == organizationId)

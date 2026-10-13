@@ -106,7 +106,7 @@ public sealed record SupplierBalanceDto(long SupplierId, string Supplier, decima
 /// а сумма поступления считается по ценам заказа. Права: «Закупки: просмотр», «Закупки: заказы и оплаты»;
 /// цены и суммы видны только с правом «Цены и суммы».
 /// </summary>
-public sealed class PurchaseService(
+public sealed partial class PurchaseService(
     IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, StockDocumentService documents)
 {
     public const int MaxRows = 2000;
@@ -594,10 +594,6 @@ public sealed class PurchaseService(
         await db.SaveOrConflictAsync(ct);
     }
 
-    /// <summary>
-    /// Расчёты с поставщиками на дату: поступило и возвращено по проведённым документам по заказам (по ценам заказа с НДС),
-    /// оплачено — действующие оплаты. Поступления без заказа в расчёты не входят: у них нет цены.
-    /// </summary>
     /// <summary>Разноски оплаты и заказы поставщика, на которые можно разнести остаток (D85).</summary>
     public async Task<KnitErp.Application.Finance.PaymentAllocationsDto> GetPaymentAllocationsAsync(long paymentId, CancellationToken ct = default)
     {
@@ -681,26 +677,52 @@ public sealed class PurchaseService(
 
     private KnitErp.Application.Finance.PaymentAllocator Allocator => new(db, clock, currentUser, sales: false);
 
+    /// <summary>
+    /// Расчёты с поставщиками на дату: поступило и возвращено по проведённым документам по заказам (по ценам заказа с НДС),
+    /// оплачено — действующие оплаты; вводный остаток (D133) — к поступившему (наш долг) или к оплаченному (наш аванс).
+    /// Поступления без заказа в расчёты не входят: у них нет цены.
+    /// </summary>
+
     public async Task<IReadOnlyList<SupplierBalanceDto>> BalancesAsync(DateOnly? asOf = null, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.PurchaseView, ct);
         await guard.DemandAsync(Permissions.PriceView, ct);
-        var org = ctx.OrganizationId;
+        return await ComputeBalancesAsync(ctx.OrganizationId, asOf, null, ct);
+    }
+
+    /// <summary>Расчёты с поставщиками (всеми или одним) на дату; права проверяет вызывающий.</summary>
+    private async Task<IReadOnlyList<SupplierBalanceDto>> ComputeBalancesAsync(long org, DateOnly? asOf, long? supplierId, CancellationToken ct)
+    {
         var docs = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == org && d.PurchaseOrderId != null && d.Status == StockDocumentStatus.Posted
-                        && (asOf == null || d.DocumentDate <= asOf))
+                        && (asOf == null || d.DocumentDate <= asOf)
+                        && (supplierId == null || db.PurchaseOrders.Any(o => o.Id == d.PurchaseOrderId && o.SupplierId == supplierId)))
             .SelectMany(d => d.Lines.Select(l => new { d.Kind, OrderId = d.PurchaseOrderId!.Value, l.ItemId, l.Quantity }))
             .ToListAsync(ct);
         docs = docs.Select(d => d with { Kind = StockOperationKinds.OrderKind(d.Kind) }).ToList(); // D354 (сессия 4, Р1): акт — как поступление
         var orderIds = docs.Select(d => d.OrderId).Distinct().ToList();
         var orders = await db.PurchaseOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
         var paid = await db.SupplierPayments.AsNoTracking()
-            .Where(p => p.OrganizationId == org && p.Status == SupplierPaymentStatus.Posted && (asOf == null || p.PaymentDate <= asOf))
+            .Where(p => p.OrganizationId == org && p.Status == SupplierPaymentStatus.Posted && (asOf == null || p.PaymentDate <= asOf)
+                        && (supplierId == null || p.SupplierId == supplierId))
             .GroupBy(p => p.SupplierId).Select(g => new { g.Key, Sum = g.Sum(p => p.Amount) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
 
         var moved = docs.GroupBy(d => orders[d.OrderId].SupplierId).ToDictionary(g => g.Key, g => (
             Received: Money.Round(g.Where(d => d.Kind == StockOperationKind.Receipt).Sum(d => d.Quantity * orders[d.OrderId].UnitCostWithVat(d.ItemId))),
             Returned: Money.Round(g.Where(d => d.Kind == StockOperationKind.ReturnToSupplier).Sum(d => d.Quantity * orders[d.OrderId].UnitCostWithVat(d.ItemId)))));
+        // D133: вводный остаток — наш долг поставщику к поступившему, наш аванс поставщику — к оплаченному.
+        foreach (var (supplier, list) in await PurchaseOpeningBalances.BySupplierAsync(db, org, supplierId is { } one ? [one] : null, asOf, ct))
+        {
+            var debt = list.Where(b => b.Amount > 0).Sum(b => b.Amount);
+            var advance = -list.Where(b => b.Amount < 0).Sum(b => b.Amount);
+            var m = moved.GetValueOrDefault(supplier);
+            moved[supplier] = (m.Received + debt, m.Returned);
+            if (advance > 0)
+            {
+                paid[supplier] = paid.GetValueOrDefault(supplier) + advance;
+            }
+        }
+
         var supplierIds = moved.Keys.Union(paid.Keys).ToList();
         var names = await db.Counterparties.AsNoTracking().Where(c => supplierIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         return supplierIds.Select(id => new SupplierBalanceDto(id, names[id],

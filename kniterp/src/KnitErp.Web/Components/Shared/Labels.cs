@@ -147,6 +147,8 @@ public static class AuditLabels
         [AuditActions.PurchaseOrderCancelled] = "Заказ поставщику отменён",
         [AuditActions.SupplierPaymentCreated] = "Оплата поставщику",
         [AuditActions.SupplierPaymentCancelled] = "Оплата поставщику отменена",
+        [AuditActions.SupplierOpeningBalanceChanged] = "Вводный остаток расчётов с поставщиком введён или аннулирован",
+        [AuditActions.PurchaseSettingsChanged] = "Изменены настройки закупок",
         [AuditActions.SalesOrderCreated] = "Создан заказ покупателя",
         [AuditActions.SalesOrderChanged] = "Изменён заказ покупателя",
         [AuditActions.SalesOrderConfirmed] = "Заказ покупателя подтверждён",
