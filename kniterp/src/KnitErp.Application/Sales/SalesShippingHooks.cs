@@ -34,7 +34,7 @@ internal static class SalesShippingHooks
             && await db.SalesReturnDetails.Include(d => d.Lines).SingleOrDefaultAsync(d => d.OrganizationId == ctx.OrganizationId && d.StockDocumentId == doc.Id, ct)
                 is { } details)
         {
-            details.Validate(doc.WarehouseId, doc.Lines.ToDictionary(l => l.ItemId, l => l.Quantity));
+            details.Validate(doc.WarehouseId, doc.Lines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity))); // компонент может быть в нескольких комплектах (D352)
         }
     }
 
@@ -159,12 +159,14 @@ internal static class SalesShippingHooks
         await db.LockAsync($"kniterp.order.sales.{orderId}", ct);
         var ordered = await db.SalesOrders.AsNoTracking().Where(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId)
             .SelectMany(o => o.Lines).GroupBy(l => l.ItemId).Select(g => new { g.Key, Sum = g.Sum(l => l.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
-        var moved = await db.StockDocuments.AsNoTracking()
+        // D352 (каталог): строки комплекта — в комплектах, как в заказе (BundleLines.InOrderTerms).
+        var raw = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId == orderId && d.Status == StockDocumentStatus.Posted && d.Id != doc.Id)
-            .SelectMany(d => d.Lines.Select(l => new { d.Kind, l.ItemId, l.Quantity })).ToListAsync(ct);
-        var over = doc.Lines.Select(l => (l.ItemId, l.Quantity,
-                Left: ordered.GetValueOrDefault(l.ItemId)
-                      - moved.Where(m => m.ItemId == l.ItemId).Sum(m => m.Kind == StockOperationKind.Shipment ? m.Quantity : m.Kind == StockOperationKind.CustomerReturn ? -m.Quantity : 0)))
+            .SelectMany(d => d.Lines.Select(l => new { d.Id, d.Kind, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity })).ToListAsync(ct);
+        var moved = BundleLines.InOrderTerms(raw.Select(m => ((m.Id, m.Kind), m.ItemId, m.Quantity, m.BundleItemId, m.BundleQuantity)));
+        var over = doc.OrderLines().GroupBy(l => l.ItemId).Select(g => (ItemId: g.Key, Quantity: g.Sum(l => l.Quantity),
+                Left: ordered.GetValueOrDefault(g.Key)
+                      - moved.Where(m => m.ItemId == g.Key).Sum(m => m.Key.Kind == StockOperationKind.Shipment ? m.Quantity : m.Key.Kind == StockOperationKind.CustomerReturn ? -m.Quantity : 0)))
             .Where(x => x.Quantity > x.Left).ToList();
         if (over.Count > 0)
         {

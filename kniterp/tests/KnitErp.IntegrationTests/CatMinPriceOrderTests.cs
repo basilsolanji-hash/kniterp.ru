@@ -33,7 +33,8 @@ public sealed class CatMinPriceOrderTests(SqlTestHost host) : IClassFixture<SqlT
         var store = await s.Warehouses.CreateWarehouseAsync("Склад", null);
         var customer = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Магазин»", null, null, false, true, null));
         var day = new DateOnly(2026, 10, 1);
-        var order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(day, customer, store, day, null, false, null));
+        // Цены заказа с НДС — как минимальная цена (вид цен по умолчанию с НДС): D1104 сравнивает цены с НДС.
+        var order = await s.Sales.CreateOrderAsync(new SalesOrderHeader(day, customer, store, day, null, true, null));
         // Свитер: 1100 со скидкой 10 % = 990 — ниже 1000; шапка: ровно 1000 — не ниже.
         await s.Sales.SetOrderLineAsync(order, sweater, 1, 1100m, 22m, 10m, (await s.Sales.GetOrderAsync(order)).RowVersion);
         await s.Sales.SetOrderLineAsync(order, hat, 1, 1000m, 22m, (await s.Sales.GetOrderAsync(order)).RowVersion);
