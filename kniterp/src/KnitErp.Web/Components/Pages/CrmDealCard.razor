@@ -40,9 +40,13 @@ else
     </div>
     <TagPicker Entity="TaggedEntity.CrmDeal" EntityId="Id" ReadOnly="@(!_deal.CanEdit)" />
 
+    @* D699: итог действия — всплывающим сообщением внизу экрана, а не баннером над лентой: не сдвигает страницу и виден там, где нажали. *@
     @if (_message is not null)
     {
-        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+        <div class="@(_isError ? "flash error crm-toast" : "flash crm-toast")" role="@(_isError ? "alert" : "status")">
+            <span>@_message</span>
+            <button type="button" class="secondary" @onclick="() => _message = null" aria-label="@L("Закрыть сообщение")">×</button>
+        </div>
     }
     @if (_suggestion is { } next)
     {
@@ -60,13 +64,47 @@ else
         {
             var s = _deal.Stages[i];
             var current = s.Id == _deal.StageId;
+            var passed = !current && i < currentIndex && s.Kind == CrmStageKind.Open;
             <li>
-                <button type="button" class="@(current ? "current" : i < currentIndex && s.Kind == CrmStageKind.Open ? "passed" : null)"
+                <button type="button" class="@(current ? "current" : passed ? "passed" : null)"
                         aria-current="@(current ? "step" : null)" disabled="@(_busy || current || !_deal.CanEdit || s.IsArchived)"
+                        title="@(passed ? L("Этап пройден") : null)"
                         @onclick="() => StageClickAsync(s)">@s.Name</button>
             </li>
         }
     </ol>
+
+    @if (NextStep() is { } step)
+    {
+        @* D699: одно главное действие по состоянию сделки — менеджеру не нужно искать нужную кнопку на длинной карточке. *@
+        <div class="crm-next" role="region" aria-label="@L("Дальше")">
+            <span class="crm-next-label">@L("Дальше")</span>
+            <span class="crm-next-hint">@step.Hint</span>
+            @if (step.Href is not null)
+            {
+                <a class="button" href="@step.Href">@step.Label</a>
+            }
+            else if (step.Action is not null)
+            {
+                <button type="button" @onclick="step.Action" disabled="@_busy">@step.Label</button>
+            }
+        </div>
+    }
+
+    @if (_wonConfirm is { } won)
+    {
+        <div class="panel" role="alertdialog" aria-label="@L("Закрыть сделку выигранной")">
+            <p>@L("У сделки нет заказа покупателя. Закрыть её выигранной без заказа? Обычно сделка выигрывается сама, когда заказ подтверждён.")</p>
+            <div class="actions">
+                <button type="button" @onclick="() => MoveAsync(won)" disabled="@_busy">@L("Да, закрыть выигранной")</button>
+                @if (_deal.CanCreateOrder)
+                {
+                    <button type="button" class="secondary" @onclick="() => { _wonConfirm = null; return OpenOrderAsync(); }" disabled="@_busy">@L("Создать заказ")</button>
+                }
+                <button type="button" class="secondary" @onclick="() => _wonConfirm = null">@L("Отмена")</button>
+            </div>
+        </div>
+    }
 
     @if (_loseOpen)
     {
@@ -96,7 +134,7 @@ else
 
     <div class="crm-summary">
         <div><span>@L("Покупатель")</span><a href="counterparties/@v.CounterpartyId">@_deal.Counterparty</a></div>
-        <div><span>@L("Контакт")</span>@if (v.ContactId is { } cid) { <a href="crm/contacts/@cid">@_deal.Contact</a> } else { <span>—</span> }</div>
+        <div><span>@L("Контакт")</span>@if (v.ContactId is { } cid) { <span><a href="crm/contacts/@cid">@_deal.Contact</a>@if (_contactEmail is not null) { <a class="crm-quick" href="mailto:@_contactEmail" title="@_contactEmail" aria-label="@L("Написать {0}", _contactEmail)">✉</a> }</span> } else { <span>—</span> }</div>
         <div><span>@L("Сумма")</span><span>@(_deal.Amount is { } a ? $"{Amounts.Format(a)} {v.CurrencyCode}" : "—")</span></div>
         <div><span>@L("Вероятность")</span><span>@_deal.Probability %</span></div>
         <div><span>@L("Ответственный")</span><span>@_deal.Responsible</span></div>
@@ -118,121 +156,52 @@ else
     @* D679: на широком экране — работа по сделке слева, данные и участники справа; на телефоне — одной колонкой. *@
     <div class="crm-layout">
         <div class="crm-main">
-            <h2>@L("Заказы покупателя")</h2>
-            @if (_deal.Orders.Count == 0 && _deal.HiddenOrders == 0)
+            <h2 id="crm-lines">@L("Позиции")</h2>
+            @if (_deal.Lines.Count == 0)
             {
-                <p class="muted small">@L("Заказов по сделке пока нет. Подтверждённый заказ переведёт сделку в «Выиграна».")</p>
-            }
-            else if (_deal.HiddenOrders > 0)
-            {
-                <p class="muted small">@L("Заказов по сделке: {0}. Чтобы видеть их, нужно право «Продажи: просмотр».", _deal.HiddenOrders)</p>
+                <p class="muted small">@L("Позиции каталога необязательны: из них «Создать заказ» составит строки заказа, а сумма сделки посчитается сама.")</p>
             }
             else
             {
-                @if (_deal.Orders.Where(o => o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled && o.Total is not null).ToList() is { Count: > 0 } active)
-                {
-                    var total = active.Sum(o => o.Total ?? 0);
-                    var paid = active.Sum(o => o.Paid ?? 0);
-                    <p class="crm-paid">
-                        @L("Оплачено по сделке: {0} из {1}", Amounts.Format(paid), Amounts.Format(total))
-                        <span class="crm-bar" style="display: inline-block; width: 120px; vertical-align: middle"><i style="width: @(total > 0 ? Math.Min(100, (int)(paid * 100 / total)) : 0)%"></i></span>
-                    </p>
-                }
                 <div class="scroll">
                     <table class="compact">
-                        <thead><tr><th>@L("Заказ")</th><th>@L("Учёт")</th><th>@L("Этап")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th></tr></thead>
+                        <thead><tr><th>@L("Позиция")</th><th class="num">@L("Количество")</th><th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th>@if (canEdit) { <th></th> }</tr></thead>
                         <tbody>
-                            @foreach (var o in _deal.Orders)
+                            @foreach (var l in _deal.Lines)
                             {
                                 <tr>
-                                    <td><a href="sales-orders/@o.Id">@o.Number</a> <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
-                                    <td><span class="tag @SalesOrdersPage.StatusClass(o.Status)">@L(o.StatusName)</span></td>
-                                    <td><StageChip Stage="o.Stage" /></td>
-                                    <td class="num">@Amounts.Format(o.Total)</td>
-                                    <td class="num">@Amounts.Format(o.Paid) @if (o.Payment is { } pay) { <span class="tag @(pay == CrmPaymentState.Paid ? "ok" : pay == CrmPaymentState.Partial ? "warn" : null)">@PaymentName(pay)</span> }</td>
-                                    <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
-                                </tr>
-                                @* D684: действия по заказу — отдельной строкой во всю ширину, чтобы не уезжали за край таблицы. *@
-                                <tr class="crm-order-actions">
-                                    <td colspan="6"><div class="row-actions">
-                                        @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
-                                        {
-                                            <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>
-                                        }
-                                        else if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed && CurrentAccess.Has(Permissions.ProductionOrderEdit))
-                                        {
-                                            <button type="button" class="secondary" @onclick="() => ToProductionAsync(o.Id)" disabled="@_busy">@L("В производство")</button>
-                                        }
-                                        @if (o.InvoiceId is { } inv)
-                                        {
-                                            <a class="small" href="customer-invoices/@inv">@L("Счёт {0}", o.InvoiceNumber ?? "")</a>
-                                            <a class="small" href="print/invoice/@inv" target="_blank" rel="noopener">@L("Печать счёта")</a>
-                                        }
-                                        else if (o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled && o.Total is not null && CurrentAccess.Has(Permissions.SalesEdit))
-                                        {
-                                            <button type="button" class="secondary" @onclick="() => InvoiceAsync(o.Id)" disabled="@_busy">@L("Выставить счёт")</button>
-                                        }
-                                        @if (o.Total is not null && CurrentAccess.Has(Permissions.SalesEdit) && o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled)
-                                        {
-                                            <button type="button" class="secondary" @onclick="() => OpenDocsAsync(o)" disabled="@_busy">@L("Документы клиенту")</button>
-                                        }
-                                        <a class="small" href="sales-orders/@o.Id">@L("Открыть")</a>
-                                    </div></td>
+                                    <td>@l.Code — @l.Name</td>
+                                    <td class="num">@Quantities.Format(l.Quantity) @l.UnitSymbol</td>
+                                    <td class="num">@Amounts.Format(l.Price)</td>
+                                    <td class="num">@Amounts.Format(l.Amount)</td>
+                                    @if (canEdit)
+                                    {
+                                        <td><button type="button" class="secondary" @onclick="() => RemoveLineAsync(l.ItemId)" disabled="@_busy" aria-label="@L("Убрать {0}", l.Code)">×</button></td>
+                                    }
                                 </tr>
                             }
                         </tbody>
                     </table>
                 </div>
             }
-            @if (_docs is { } draft)
+            @if (canEdit && _options.CanSeeAmounts)
             {
-                <form class="panel" @onsubmit="SendDocsAsync" aria-label="@L("Документы клиенту")">
-                    <h3>@L("Документы клиенту по заказу {0}", _docsOrder?.Number ?? "")</h3>
-                    @if (!draft.MailConfigured)
-                    {
-                        <p class="muted small">@L("Почта сервера не настроена — обратитесь к администратору.")</p>
-                    }
-                    <div class="grid">
-                        <label>@L("Кому") <input type="email" @bind="_docsTo" required /></label>
-                        <label class="wide">@L("Тема") <input @bind="_docsSubject" required /></label>
-                        <label class="wide">@L("Текст") <textarea rows="4" @bind="_docsBody"></textarea></label>
-                    </div>
-                    <fieldset class="crm-docs">
-                        <legend>@L("Вложить PDF")</legend>
-                        @foreach (var d in draft.Documents)
-                        {
-                            var key = (d.Document, d.Id);
-                            <label class="inline"><input type="checkbox" checked="@_docsSelected.Contains(key)" @onchange="e => ToggleDoc(key, e.Value is true)" /> @L(d.DocumentName) @d.Number</label>
-                        }
-                    </fieldset>
-                    <div class="actions">
-                        <button type="submit" disabled="@(_busy || !draft.MailConfigured || _docsSelected.Count == 0)">@L("Отправить клиенту")</button>
-                        <button type="button" class="secondary" @onclick="() => _docs = null">@L("Отмена")</button>
-                    </div>
+                <form class="inline-form" @onsubmit="AddLineAsync" aria-label="@L("Добавить позицию")">
+                    <label>@L("Поиск позиции") <input @bind="_itemSearch" @bind:after="SearchItemsAsync" placeholder="@L("Код, название, артикул")" /></label>
+                    <label>
+                        @L("Позиция")
+                        <select @bind="_item" @bind:after="ItemChanged" aria-label="@L("Позиция каталога")">
+                            <option value="">—</option>
+                            @foreach (var i in _items)
+                            {
+                                <option value="@i.Id">@i.Code — @i.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Количество") <input inputmode="decimal" @bind="_qty" /></label>
+                    <label>@L("Цена") <input inputmode="decimal" @bind="_price" /></label>
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
                 </form>
-            }
-            @if (_deal.CanCreateOrder)
-            {
-                @if (_warehouses is null)
-                {
-                    <button type="button" @onclick="OpenOrderAsync" disabled="@_busy">@L("Создать заказ")</button>
-                }
-                else
-                {
-                    <form class="inline-form" @onsubmit="CreateOrderAsync" aria-label="@L("Создать заказ")">
-                        <label>
-                            @L("Склад отгрузки")
-                            <select @bind="_warehouse" required>
-                                @foreach (var w in _warehouses)
-                                {
-                                    <option value="@w.Id">@w.Name</option>
-                                }
-                            </select>
-                        </label>
-                        <button type="submit" disabled="@_busy">@(_orderOffer is null ? L("Создать черновик заказа") : L("Создать заказ по {0}", _orderOffer.Number))</button>
-                        <button type="button" class="secondary" @onclick="() => _warehouses = null">@L("Отмена")</button>
-                    </form>
-                }
             }
 
             @if (_deal.CanSeeAmounts)
@@ -308,58 +277,129 @@ else
                 }
                 else if (_deal.CanEdit && open)
                 {
-                    <p class="muted small">@L("Добавьте позиции ниже — из них сформируется КП.")</p>
+                    <p class="muted small">@L("Добавьте позиции выше — из них сформируется КП.")</p>
                 }
             }
 
-            <h2>@L("Позиции")</h2>
-            @if (_deal.Lines.Count == 0)
+            <h2>@L("Заказы покупателя")</h2>
+            @if (_deal.Orders.Count == 0 && _deal.HiddenOrders == 0)
             {
-                <p class="muted small">@L("Позиции каталога необязательны: из них «Создать заказ» составит строки заказа, а сумма сделки посчитается сама.")</p>
+                <p class="muted small">@L("Заказов по сделке пока нет. Подтверждённый заказ переведёт сделку в «Выиграна».")</p>
+            }
+            else if (_deal.HiddenOrders > 0)
+            {
+                <p class="muted small">@L("Заказов по сделке: {0}. Чтобы видеть их, нужно право «Продажи: просмотр».", _deal.HiddenOrders)</p>
             }
             else
             {
+                @if (_deal.Orders.Where(o => o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled && o.Total is not null).ToList() is { Count: > 0 } active)
+                {
+                    var total = active.Sum(o => o.Total ?? 0);
+                    var paid = active.Sum(o => o.Paid ?? 0);
+                    <p class="crm-paid">
+                        @L("Оплачено по сделке: {0} из {1}", Amounts.Format(paid), Amounts.Format(total))
+                        <span class="crm-bar" style="display: inline-block; width: 120px; vertical-align: middle"><i style="width: @(total > 0 ? Math.Min(100, (int)(paid * 100 / total)) : 0)%"></i></span>
+                    </p>
+                }
                 <div class="scroll">
                     <table class="compact">
-                        <thead><tr><th>@L("Позиция")</th><th class="num">@L("Количество")</th><th class="num">@L("Цена")</th><th class="num">@L("Сумма")</th>@if (canEdit) { <th></th> }</tr></thead>
+                        <thead><tr><th>@L("Заказ")</th><th>@L("Состояние")</th><th class="num">@L("Сумма")</th><th class="num">@L("Оплачено")</th><th>@L("Отгрузка")</th></tr></thead>
                         <tbody>
-                            @foreach (var l in _deal.Lines)
+                            @foreach (var o in _deal.Orders)
                             {
                                 <tr>
-                                    <td>@l.Code — @l.Name</td>
-                                    <td class="num">@Quantities.Format(l.Quantity) @l.UnitSymbol</td>
-                                    <td class="num">@Amounts.Format(l.Price)</td>
-                                    <td class="num">@Amounts.Format(l.Amount)</td>
-                                    @if (canEdit)
-                                    {
-                                        <td><button type="button" class="secondary" @onclick="() => RemoveLineAsync(l.ItemId)" disabled="@_busy" aria-label="@L("Убрать {0}", l.Code)">×</button></td>
-                                    }
+                                    <td class="nowrap"><a href="sales-orders/@o.Id">@o.Number</a> <span class="muted">@o.Date.ToString("dd.MM.yyyy")</span></td>
+                                    <td><span class="tag @SalesOrdersPage.StatusClass(o.Status)">@L(o.StatusName)</span> <StageChip Stage="o.Stage" /></td>
+                                    <td class="num">@Amounts.Format(o.Total)</td>
+                                    <td class="num">@Amounts.Format(o.Paid) @if (o.Payment is { } pay) { <span class="tag @(pay == CrmPaymentState.Paid ? "ok" : pay == CrmPaymentState.Partial ? "warn" : null)">@PaymentName(pay)</span> }</td>
+                                    <td>@SalesOrdersPage.ShippedName(o.Shipped)</td>
+                                </tr>
+                                @* D684: действия по заказу — отдельной строкой во всю ширину, чтобы не уезжали за край таблицы. *@
+                                <tr class="crm-order-actions">
+                                    <td colspan="5"><div class="row-actions">
+                                        @if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft && CurrentAccess.Has(Permissions.SalesEdit))
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => ConfirmOrderAsync(o.Id)" disabled="@_busy">@L("Подтвердить")</button>
+                                        }
+                                        else if (o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed && CurrentAccess.Has(Permissions.ProductionOrderEdit))
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => ToProductionAsync(o.Id)" disabled="@_busy">@L("В производство")</button>
+                                        }
+                                        @if (o.InvoiceId is { } inv)
+                                        {
+                                            <a class="small" href="customer-invoices/@inv">@L("Счёт {0}", o.InvoiceNumber ?? "")</a>
+                                            <a class="small" href="print/invoice/@inv" target="_blank" rel="noopener">@L("Печать счёта")</a>
+                                            @if (o.Payment != CrmPaymentState.Paid && CurrentAccess.Has(Permissions.SalesEdit))
+                                            {
+                                                <a class="small" href="sales-orders/@(o.Id)#payments">@L("Внести оплату")</a>
+                                            }
+                                        }
+                                        else if (o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled && o.Total is not null && CurrentAccess.Has(Permissions.SalesEdit))
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => InvoiceAsync(o.Id)" disabled="@_busy">@L("Выставить счёт")</button>
+                                        }
+                                        @if (o.Total is not null && CurrentAccess.Has(Permissions.SalesEdit) && o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled)
+                                        {
+                                            <button type="button" class="secondary" @onclick="() => OpenDocsAsync(o)" disabled="@_busy">@L("Документы клиенту")</button>
+                                        }
+                                        <a class="small" href="sales-orders/@o.Id">@L("Открыть")</a>
+                                    </div></td>
                                 </tr>
                             }
                         </tbody>
                     </table>
                 </div>
             }
-            @if (canEdit && _options.CanSeeAmounts)
+            @if (_docs is { } draft)
             {
-                <form class="inline-form" @onsubmit="AddLineAsync" aria-label="@L("Добавить позицию")">
-                    <label>@L("Поиск позиции") <input @bind="_itemSearch" @bind:after="SearchItemsAsync" placeholder="@L("Код, название, артикул")" /></label>
-                    <label>
-                        @L("Позиция")
-                        <select @bind="_item" @bind:after="ItemChanged" aria-label="@L("Позиция каталога")">
-                            <option value="">—</option>
-                            @foreach (var i in _items)
-                            {
-                                <option value="@i.Id">@i.Code — @i.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label>@L("Количество") <input inputmode="decimal" @bind="_qty" /></label>
-                    <label>@L("Цена") <input inputmode="decimal" @bind="_price" /></label>
-                    <button type="submit" class="secondary" disabled="@_busy">@L("Добавить")</button>
+                <form class="panel" @onsubmit="SendDocsAsync" aria-label="@L("Документы клиенту")">
+                    <h3>@L("Документы клиенту по заказу {0}", _docsOrder?.Number ?? "")</h3>
+                    @if (!draft.MailConfigured)
+                    {
+                        <p class="muted small">@L("Почта сервера не настроена — обратитесь к администратору.")</p>
+                    }
+                    <div class="grid">
+                        <label>@L("Кому") <input type="email" @bind="_docsTo" required /></label>
+                        <label class="wide">@L("Тема") <input @bind="_docsSubject" required /></label>
+                        <label class="wide">@L("Текст") <textarea rows="4" @bind="_docsBody"></textarea></label>
+                    </div>
+                    <fieldset class="crm-docs">
+                        <legend>@L("Вложить PDF")</legend>
+                        @foreach (var d in draft.Documents)
+                        {
+                            var key = (d.Document, d.Id);
+                            <label class="inline"><input type="checkbox" checked="@_docsSelected.Contains(key)" @onchange="e => ToggleDoc(key, e.Value is true)" /> @L(d.DocumentName) @d.Number</label>
+                        }
+                    </fieldset>
+                    <div class="actions">
+                        <button type="submit" disabled="@(_busy || !draft.MailConfigured || _docsSelected.Count == 0)">@L("Отправить клиенту")</button>
+                        <button type="button" class="secondary" @onclick="() => _docs = null">@L("Отмена")</button>
+                    </div>
                 </form>
             }
-
+            @if (_deal.CanCreateOrder)
+            {
+                @if (_warehouses is null)
+                {
+                    <button type="button" @onclick="OpenOrderAsync" disabled="@_busy">@L("Создать заказ")</button>
+                }
+                else
+                {
+                    <form class="inline-form" @onsubmit="CreateOrderAsync" aria-label="@L("Создать заказ")">
+                        <label>
+                            @L("Склад отгрузки")
+                            <select @bind="_warehouse" required>
+                                @foreach (var w in _warehouses)
+                                {
+                                    <option value="@w.Id">@w.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <button type="submit" disabled="@_busy">@(_orderOffer is null ? L("Создать черновик заказа") : L("Создать заказ по {0}", _orderOffer.Number))</button>
+                        <button type="button" class="secondary" @onclick="() => _warehouses = null">@L("Отмена")</button>
+                    </form>
+                }
+            }
 
             <CrmDealPhotos DealId="Id" CanEdit="@_deal.CanEdit" /> @* D692: фото к сделке (камера телефона) *@
 
@@ -597,6 +637,8 @@ else
         _reassign = v.ResponsibleUserId?.ToString() ?? "";
     }
 
+    private CrmStageDto? _wonConfirm;
+
     private Task StageClickAsync(CrmStageDto stage)
     {
         if (stage.Kind == CrmStageKind.Lost)
@@ -605,7 +647,66 @@ else
             return Task.CompletedTask;
         }
 
+        if (stage.Kind == CrmStageKind.Won && _deal!.Orders.Count == 0 && _deal.HiddenOrders == 0)
+        {
+            _wonConfirm = stage;
+            return Task.CompletedTask;
+        }
+
+        return MoveAsync(stage);
+    }
+
+    private Task MoveAsync(CrmStageDto stage)
+    {
+        _wonConfirm = null;
         return RunAsync(async () => _suggestion = await Deals.MoveAsync(Id, stage.Id, _deal!.RowVersion), L("Сделка на этапе «{0}».", stage.Name));
+    }
+
+    private sealed record Step(string Hint, string Label, Func<Task>? Action = null, string? Href = null);
+
+    /// <summary>D699: следующий шаг по сделке — позиции → КП → заказ → подтверждение → счёт → оплата. Права проверяет сервис, здесь — только подсказка.</summary>
+    private Step? NextStep()
+    {
+        var d = _deal!;
+        var sales = CurrentAccess.Has(Permissions.SalesEdit);
+        var active = d.Orders.Where(o => o.Status != KnitErp.Domain.Sales.SalesOrderStatus.Cancelled).ToList();
+        if (active.FirstOrDefault(o => o.Status == KnitErp.Domain.Sales.SalesOrderStatus.Draft) is { } draft && sales)
+        {
+            return new Step(L("Черновик заказа {0} ждёт подтверждения — после него сделка выиграна.", draft.Number), L("Подтвердить заказ"), () => ConfirmOrderAsync(draft.Id));
+        }
+
+        if (active.FirstOrDefault(o => o.InvoiceId is null && o.Total is not null) is { } noInvoice && sales)
+        {
+            return new Step(L("По заказу {0} нет счёта.", noInvoice.Number), L("Выставить счёт"), () => InvoiceAsync(noInvoice.Id));
+        }
+
+        if (active.FirstOrDefault(o => o.InvoiceId is not null && o.Payment != CrmPaymentState.Paid) is { } unpaid && sales)
+        {
+            return new Step(L("Счёт {0} ждёт оплаты.", unpaid.InvoiceNumber ?? ""), L("Внести оплату"), Href: $"sales-orders/{unpaid.Id}#payments");
+        }
+
+        if (d.Outcome != CrmDealOutcome.Open || !d.CanEdit || active.Count > 0 || d.HiddenOrders > 0)
+        {
+            return null;
+        }
+
+        if (d.CanSeeAmounts && d.Lines.Count == 0 && _options!.CanSeeAmounts)
+        {
+            return new Step(L("Добавьте позиции — из них сформируется КП и заказ."), L("Добавить позиции"), Href: $"crm/deals/{Id}#crm-lines");
+        }
+
+        if (d.CanSeeAmounts && _offers.Count == 0 && d.Lines.Count > 0)
+        {
+            return new Step(L("Позиции есть — сформируйте коммерческое предложение."), L("Сформировать КП"), CreateOfferAsync);
+        }
+
+        if (d.CanCreateOrder && _offers.Count > 0)
+        {
+            var last = _offers[0];
+            return new Step(L("КП {0} готово — отправьте его клиенту или оформите заказ, когда клиент согласится.", last.Number), L("Заказ по КП"), () => OpenOfferOrderAsync(last));
+        }
+
+        return null;
     }
 
     private Task LoseAsync() => RunAsync(async () =>

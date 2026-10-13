@@ -4095,6 +4095,9 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.Property<int>("StaleLeadDays")
                         .HasColumnType("int");
 
+                    b.Property<bool>("VoiceDictation")
+                        .HasColumnType("bit");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DefaultResponsibleUserId");

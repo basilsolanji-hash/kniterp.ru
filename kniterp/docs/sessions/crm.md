@@ -73,6 +73,23 @@
 8. **Базе (D693):** `SecurityHeaders` — `Permissions-Policy: microphone=(self)` вместо `microphone=()`: диктовка заметок CRM через Web Speech API
    браузера. Камера и геолокация не тронуты. Если база против — скажите, кнопка диктовки просто не появится.
 
+## Готово 13.10.2026 (вечер): доработки перед пилотом (D696–D699) и ответ на D132
+- КП в PDF (D696), импорт из CSV amoCRM/Битрикс24 (D697), конфликт правки называет, кто и когда изменил (D698), удобство карточки
+  сделки, списков, чатов, «Моего дня», сводки и настроек (D699). Диктовка — по D132 п. 5: выключена, включает Владелец (миграция
+  `CrmVoiceDictationSetting`, тест `CrmVoiceSettingTests`).
+- **Замечание base.md о составных FK на справочники и позиции** закрыто ещё миграцией `CrmCompositeKeys`: одноколоночными остались только
+  ссылки на `users` (как во всей базе — у пользователя нет `OrganizationId`) и на родителя у дочерних таблиц без `OrganizationId`
+  (`crm_contact_channels`, `crm_deal_participants`).
+- **Базе — точечные правки общего кода (помечены D696/D698/D699):**
+  1. `Application/Common/Exceptions.cs`: `ConcurrencyConflictException(string? objectName = null, string? changedBy = null,
+     DateTime? changedAtLocal = null)` — необязательные поля; старые вызовы без аргументов работают как раньше. `UiErrors` выводит
+     «{объект}: изменил(а) {кто} {когда}», когда поля заданы.
+  2. `Infrastructure/Documents/SalesPdfRenderer.cs` — `partial`; КП — в `CrmOfferPdf.cs`. DI: один singleton `SalesPdfRenderer` отдаётся как
+     `ISalesPdfRenderer` и `ICrmOfferPdfRenderer` (при слиянии с D725/D729 — оставить обе строки).
+  3. `SalesOrderCard.razor`: у заголовка «Оплаты» — `id="payments"` (ссылка «Внести оплату» из сделки).
+  4. `MainLayout.razor`: в группе CRM «Мой день» — первым пунктом.
+- Диапазон D600–D699 исчерпан: следующим решениям CRM нужен новый диапазон — прошу базу назначить.
+
 ## Следующие шаги (решение владельца)
 - Шаблоны сообщений WhatsApp (вне 24-часового окна) и рассылки в мессенджерах — по согласию, как письма.
 - IP-телефония с записями разговоров — проект решения `docs/tz/crm-telephony.md` (выбор провайдера — владелец); ИИ-подсказка «следующее

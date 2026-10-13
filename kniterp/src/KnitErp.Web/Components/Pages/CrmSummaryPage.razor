@@ -33,7 +33,7 @@ else
                 <div><b>@Amounts.Compact(_dash.WeightedAmount ?? 0)</b><span>@L("с учётом вероятности")</span></div>
                 <div>
                     <b>@Amounts.Compact(_dash.WonThisMonth ?? 0)@(_dash.PlanThisMonth is > 0 ? $" / {Amounts.Compact(_dash.PlanThisMonth.Value)}" : "")</b>
-                    <span>@L("факт / план месяца")</span>
+                    <span>@(_dash.PlanThisMonth is > 0 ? L("факт / план месяца") : L("факт месяца · план не задан"))</span>
                     @if (_dash.PlanThisMonth is > 0 and var plan)
                     {
                         <div class="crm-bar"><i style="width: @(Math.Min(100, (int)(100 * (_dash.WonThisMonth ?? 0) / plan)))%"></i></div>
@@ -45,6 +45,13 @@ else
         </div>
     }
 
+    @* D699: частые периоды — одним нажатием, без ввода двух дат. *@
+    <div class="crm-tabs crm-report-tabs" role="group" aria-label="@L("Период")">
+        <button type="button" aria-pressed="@PeriodPressed(0)" @onclick="() => PeriodAsync(0)" disabled="@_busy">@L("Этот месяц")</button>
+        <button type="button" aria-pressed="@PeriodPressed(1)" @onclick="() => PeriodAsync(1)" disabled="@_busy">@L("Прошлый месяц")</button>
+        <button type="button" aria-pressed="@PeriodPressed(2)" @onclick="() => PeriodAsync(2)" disabled="@_busy">@L("Квартал")</button>
+        <button type="button" aria-pressed="@PeriodPressed(3)" @onclick="() => PeriodAsync(3)" disabled="@_busy">@L("С начала года")</button>
+    </div>
     <form class="inline-form" @onsubmit="LoadReportAsync">
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
@@ -387,6 +394,27 @@ else
     }
 
     private Task LoadReportAsync() => RunAsync(LoadAsync);
+
+    private (DateTime From, DateTime To) Period(int kind)
+    {
+        var today = TimeZones.ToLocal(DateTime.UtcNow, CurrentAccess.TimeZoneId).Date;
+        var month = new DateTime(today.Year, today.Month, 1);
+        return kind switch
+        {
+            1 => (month.AddMonths(-1), month.AddDays(-1)),
+            2 => (new DateTime(today.Year, (today.Month - 1) / 3 * 3 + 1, 1), new DateTime(today.Year, (today.Month - 1) / 3 * 3 + 1, 1).AddMonths(3).AddDays(-1)),
+            3 => (new DateTime(today.Year, 1, 1), today),
+            _ => (month, month.AddMonths(1).AddDays(-1)),
+        };
+    }
+
+    private string PeriodPressed(int kind) => Period(kind) == (_from.Date, _to.Date) ? "true" : "false";
+
+    private Task PeriodAsync(int kind)
+    {
+        (_from, _to) = Period(kind);
+        return LoadReportAsync();
+    }
 
     private Task SavePlanAsync() => RunAsync(async () =>
     {
