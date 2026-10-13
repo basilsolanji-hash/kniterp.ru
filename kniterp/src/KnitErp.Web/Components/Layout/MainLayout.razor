@@ -62,6 +62,17 @@
                     continue;
                 }
 
+                @if (group.Key == "settings")
+                {
+                    @* D808 (раздел 0, п. 8): «Настройки» — один пункт, ведёт на страницу всех настроек; пункты раздела — плитки на ней. *@
+                    var here = Navigation.ToBaseRelativePath(Navigation.Uri) == SettingsHref || allowed.Any(i => i.Href == Current);
+                    <a class="nav-single @(here ? "active" : null)" href="@SettingsHref" title="@L(group.Title)" aria-current="@(here ? "page" : null)"
+                       style="@($"--sec: var(--sec-{group.Key})")">
+                        <Icon Name="@group.Key" Size="16" /><span class="nav-text">@L(group.Title)</span>
+                    </a>
+                    continue;
+                }
+
                 var shown = MenuItems(group, allowed);
                 <div class="nav-group @(open ? "open" : "")" style="@($"--sec: var(--sec-{group.Key})")">
                     <button type="button" class="nav-group-head" aria-expanded="@(open ? "true" : "false")" title="@L(group.Title)"
@@ -330,6 +341,12 @@
     private static readonly string[] Order =
         ["home", "discussions", "sales", "purchases", "warehouse", "production", "money", "hr", "crm", "dev", "catalogs", "settings"];
 
+    /// <summary>
+    /// D808: страница всех настроек. Пока единой страницы `/settings` нет (её делает сессия № 1, этап 2б) — страница раздела
+    /// с плитками по подзаголовкам; когда `/settings` появится, здесь меняется только адрес.
+    /// </summary>
+    public const string SettingsHref = "section/settings";
+
     public static IEnumerable<NavGroup> Ordered => Order.Select(k => Groups.Single(g => g.Key == k));
 
     private static readonly Dictionary<string, string[]> MainHrefs = new()
@@ -343,7 +360,6 @@
         ["crm"] = ["crm/today", "crm/deals", "crm/leads", "crm/contacts", "crm/chats", "crm/tasks"],
         ["dev"] = ["dev/models", "dev/my", "dev/patterns", "dev/tech", "dev/machines"],
         ["catalogs"] = ["catalog", "counterparties", "warehouses", "catalog/labels", "units"],
-        ["settings"] = ["organization", "users", "roles", "legal-entities", "launch", "audit"],
     };
 
     /// <summary>Пункты группы в меню: частые, на которые есть право, и текущая страница, если она среди редких.</summary>

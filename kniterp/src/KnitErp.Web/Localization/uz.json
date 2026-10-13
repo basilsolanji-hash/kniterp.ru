@@ -1176,7 +1176,6 @@
   "УНП: 9 цифр": "UNP: 9 ta raqam",
   "Убрать": "Olib tashlash",
   "Убрать из избранного: {0}": "Tanlanganlardan olib tashlash: {0}",
-  "Уведомлений: {0}": "Bildirishnomalar: {0}",
   "Уведомления": "Bildirishnomalar",
   "Уволен": "Ishdan boʻshatilgan",
   "Уволить": "Ishdan boʻshatish",
@@ -6442,5 +6441,6 @@
   "Создать документ или запись": "Hujjat yoki yozuv yaratish",
   "Профиль и пароль": "Profil va parol",
   "Сессии и устройства": "Seanslar va qurilmalar",
-  "задачи": "vazifalar"
+  "задачи": "vazifalar",
+  "Создать новое": "Yangisini yaratish"
 }

@@ -38,10 +38,6 @@
             <button type="button" class="quick-btn" aria-haspopup="menu" aria-expanded="@Expanded("all")" @onclick="@(() => Toggle("all"))"
                     title="@L("Ещё")" aria-label="@L("Ещё")">
                 <Icon Name="all" />
-                @if (Badge > 0)
-                {
-                    <span class="badge" aria-label="@L("Уведомлений: {0}", Badge)">@Badge</span>
-                }
             </button>
             @if (_menu == "all")
             {
@@ -128,12 +124,12 @@
 
         <div class="menu-anchor">
             <button type="button" class="quick-btn labeled quick-create" aria-haspopup="menu" aria-expanded="@Expanded("create")" @onclick="@(() => Toggle("create"))"
-                    title="@L("Создать документ или запись")" aria-label="@(Compact ? L("Создать") : null)">
+                    title="@L("Создать документ или запись")" aria-label="@L("Создать новое")">
                 <span class="plus" aria-hidden="true">+</span>@if (!Compact) { <span class="quick-text">@L("Создать")</span> }
             </button>
             @if (_menu == "create")
             {
-                <div class="menu menu-wide" role="menu" aria-label="@L("Создать")">
+                <div class="menu menu-wide" role="menu" aria-label="@L("Создать новое")">
                     @foreach (var a in items)
                     {
                         <a role="menuitem" class="menu-item" href="@a.Href" @onclick="Close"><Icon Name="@a.Icon" Size="16" /><span class="quick-label">@L(a.Title)</span></a>

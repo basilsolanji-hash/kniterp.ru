@@ -869,7 +869,7 @@
         .nav-search { display: flex; align-items: center; gap: 8px; width: 100%; margin: 0 0 6px; padding: 6px 10px; border: 1px solid var(--line);
                       border-radius: 6px; background: var(--field); color: var(--muted); font-weight: 400; text-align: left; }
         .nav-search:hover { border-color: var(--accent); color: var(--text); }
-        .nav-search kbd { margin-left: auto; font-size: 10px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted-2); }
+        .nav-search kbd { margin-left: auto; font-size: 10px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted-2); white-space: nowrap; }
         .shell.narrow .nav-search { justify-content: center; padding: 8px 0; }
         .nav-favorites { margin: 0 0 6px; }
         .nav-favorites .nav-section { padding-left: 10px; }
@@ -892,9 +892,10 @@
             .bottom-nav span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
             .menu-toggle { display: none !important; }
             .side:has(> .nav-body.open) .menu-toggle { display: inline-block !important; } /* «Закрыть» вверху открытого меню */
+            .side:has(> .nav-body.open) .side-head .quickbar { display: none; } /* при открытом меню в строке логотипа только «Закрыть» — иначе она не помещается */
             main.main { padding-bottom: 80px; }
             body:has(knit-assistant) main.main { padding-bottom: 160px; }
-            knit-assistant { --knit-bottom: 72px; }
+            body knit-assistant { --knit-bottom: 72px; } /* выше нижней панели; общее правило ниже по файлу не должно перебить */
             .side > .nav-body.open { padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
         }
         @@media print { .bottom-nav { display: none !important; } }
@@ -1036,6 +1037,9 @@
             .side-tools { display: block; }
             .quickbar.compact .profile { border-left: 0; margin-left: 0; padding: 2px; }
             .quickbar.compact .quick-btn { border: 1px solid var(--line-strong); }
+            /* D806: на телефоне число непрочитанных — меткой в углу значка, а не рядом (иначе панель шире 390 px). */
+            .quickbar.compact .quick-btn { justify-content: center; padding: 0; width: 40px; }
+            .quickbar.compact .quick-btn .badge { position: absolute; top: -6px; right: -6px; min-width: 18px; padding: 0 4px; font-size: 11px; line-height: 18px; }
             .drawer { top: auto; left: 0; width: 100vw; z-index: 80; height: 88vh; height: 88dvh; border-left: 0; border-top: 1px solid var(--line-strong); border-radius: 14px 14px 0 0;
                       transform: translateY(105%); box-shadow: 0 -12px 32px var(--shadow); }
             .drawer.open { transform: none; }
