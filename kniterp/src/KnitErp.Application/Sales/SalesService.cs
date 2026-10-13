@@ -238,32 +238,49 @@ public sealed class SalesService(
         var docs = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId == id)
             .OrderBy(d => d.DocumentDate).ThenBy(d => d.Id)
-            .Select(d => new { d.Id, d.Number, d.Kind, d.DocumentDate, d.Status, Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity }).ToList() })
+            .Select(d => new { d.Id, d.Number, d.Kind, d.DocumentDate, d.Status,
+                Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }).ToList() })
             .ToListAsync(ct);
-        decimal Moved(long itemId, StockOperationKind kind) =>
-            docs.Where(d => d.Kind == kind && d.Status == StockDocumentStatus.Posted).SelectMany(d => d.Lines).Where(l => l.ItemId == itemId).Sum(l => l.Quantity);
+        // D352 (сессия 4, Р2): строки документов в терминах заказа — комплект количеством комплектов.
+        var posted = BundleLines.InOrderTerms(docs.Where(d => d.Status == StockDocumentStatus.Posted)
+            .SelectMany(d => d.Lines.Select(l => ((d.Id, d.Kind), l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity))));
+        decimal Moved(long itemId, StockOperationKind kind) => posted.Where(l => l.Key.Kind == kind && l.ItemId == itemId).Sum(l => l.Quantity);
 
         var prices = ctx.Permissions.Has(Permissions.PriceView);
-        var stock = await db.StockMovements.AsNoTracking()
-            .Where(m => m.OrganizationId == ctx.OrganizationId && m.WarehouseId == order.WarehouseId && itemIds.Contains(m.ItemId))
-            .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
-        var reservedByOthers = await Reservations.ByWarehouseItemAsync(db, ctx.OrganizationId, [order.WarehouseId], itemIds, order.Id, ct);
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
-        var bundles = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id) && i.Type == ItemType.Bundle).Select(i => i.Id)
-            .ToListAsync(ct); // D302 (сессия 4)
+        var bundles = await BundleShipments.BundleIdsAsync(db, ctx.OrganizationId, itemIds, ct); // D302 (сессия 4)
+        // D352 (сессия 4, Р2): у комплекта остаток и «Доступно» — сколько наборов можно собрать из компонентов на складе заказа.
+        var specs = bundles.Count == 0 ? [] : await KnitErp.Application.Catalog.BundleService.SpecsAsync(db, ctx.OrganizationId, bundles, ct);
+        var stockIds = itemIds.Concat(specs.Select(s => s.ComponentItemId)).Distinct().ToList();
+        var stock = await db.StockMovements.AsNoTracking()
+            .Where(m => m.OrganizationId == ctx.OrganizationId && m.WarehouseId == order.WarehouseId && stockIds.Contains(m.ItemId))
+            .GroupBy(m => m.ItemId).Select(g => new { g.Key, Sum = g.Sum(m => m.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+        var reservedByOthers = await Reservations.ByWarehouseItemAsync(db, ctx.OrganizationId, [order.WarehouseId], stockIds, order.Id, ct);
+        var free = stock.ToDictionary(s => s.Key, s => s.Value - reservedByOthers.GetValueOrDefault((order.WarehouseId, s.Key)));
+        (decimal Stock, decimal Reserved) StockOf(long itemId, byte precision)
+        {
+            if (!bundles.Contains(itemId))
+            {
+                return (stock.GetValueOrDefault(itemId), reservedByOthers.GetValueOrDefault((order.WarehouseId, itemId)));
+            }
+
+            var whole = BundleExpansion.Available(itemId, specs, stock, precision);
+            return (whole, whole - Math.Min(whole, BundleExpansion.Available(itemId, specs, free, precision)));
+        }
+
         var lines = order.Lines.Select(l =>
         {
             var item = items[l.ItemId];
+            var (onHand, reserved) = StockOf(l.ItemId, item.Precision);
             return new SalesOrderLineDto(l.ItemId, item.Code, item.Name, item.Symbol, item.Precision, l.Quantity,
                 prices ? l.Price : null, l.VatPercent, prices ? l.Amount : null, prices ? l.VatAmount : null,
                 Moved(l.ItemId, StockOperationKind.Shipment), Moved(l.ItemId, StockOperationKind.CustomerReturn),
-                l.DiscountPercent, stock.GetValueOrDefault(l.ItemId), reservedByOthers.GetValueOrDefault((order.WarehouseId, l.ItemId)),
-                !services.Contains(l.ItemId), bundles.Contains(l.ItemId), prices ? item.MinPrice : null); // D350: минимальная цена — только с правом на цены
+                l.DiscountPercent, onHand, reserved, !services.Contains(l.ItemId) || bundles.Contains(l.ItemId), bundles.Contains(l.ItemId),
+                prices ? item.MinPrice : null); // D350: минимальная цена — только с правом на цены
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);
-        decimal Value(StockOperationKind kind) => Money.Round(docs.Where(d => d.Kind == kind && d.Status == StockDocumentStatus.Posted)
-            .SelectMany(d => d.Lines).Sum(l => l.Quantity * order.UnitCostWithVat(l.ItemId)));
+        decimal Value(StockOperationKind kind) => Money.Round(posted.Where(l => l.Key.Kind == kind).Sum(l => l.Quantity * order.UnitCostWithVat(l.ItemId)));
 
         var canEdit = ctx.Permissions.Has(Permissions.SalesEdit) && prices;
         var canDocs = order.Status is SalesOrderStatus.Confirmed or SalesOrderStatus.Closed
@@ -606,22 +623,30 @@ public sealed class SalesService(
         var moved = await MovedAsync(ctx, [orderId], ct);
         // D300 (сессия 4): строки-услуги со склада не отгружаются — они закрываются актом или УПД.
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
-        // D302 (сессия 4): отгрузка комплекта компонентами — запрос Р2 к сессии № 1; до неё не отгружаем, чтобы не потерять списание.
-        var lineIds = order.Lines.Select(l => l.ItemId).ToList();
-        var bundleCodes = await db.Items.AsNoTracking().Where(i => lineIds.Contains(i.Id) && i.Type == ItemType.Bundle).Select(i => i.Code).ToListAsync(ct);
-        if (bundleCodes.Count > 0)
-        {
-            throw new BusinessRuleException("sales.order.bundle_shipment",
-                $"В заказе комплекты ({string.Join(", ", bundleCodes)}): отгрузка комплекта его компонентами ещё не подключена. Пока замените комплект в заказе составом.");
-        }
-
-        var lines = order.Lines.Where(l => !services.Contains(l.ItemId))
+        // D352 (сессия 4, Р2): комплект отгружается компонентами — остаток строки комплекта разворачивается по текущему составу,
+        // строки разворота помнят комплект и количество наборов. Состав фиксируется документом.
+        var bundles = await BundleShipments.BundleIdsAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
+        var left = order.Lines.Where(l => !services.Contains(l.ItemId) || bundles.Contains(l.ItemId))
             .Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
-        if (lines.Count == 0)
+        if (left.Count == 0)
         {
-            throw services.Count == order.Lines.Count
+            throw services.Count == order.Lines.Count && bundles.Count == 0
                 ? new BusinessRuleException("sales.order.services_only", "В заказе только услуги — со склада отгружать нечего, они закрываются актом или УПД.")
                 : new BusinessRuleException("sales.order.shipped", "По заказу всё уже отгружено.");
+        }
+
+        var lines = new List<StockLineSpec>();
+        foreach (var (itemId, quantity) in left)
+        {
+            if (bundles.Contains(itemId))
+            {
+                lines.AddRange((await BundleShipments.ExpandAsync(db, ctx.OrganizationId, itemId, quantity, ct))
+                    .Select(c => new StockLineSpec(c.ItemId, c.Quantity, itemId, quantity)));
+            }
+            else
+            {
+                lines.Add(new StockLineSpec(itemId, quantity));
+            }
         }
 
         var reason = await DefaultReasonAsync(ctx, StockOperationKind.Shipment, "Продажа покупателю", ct);
@@ -637,8 +662,24 @@ public sealed class SalesService(
         var order = await LoadOrderAsync(ctx, orderId, ct);
         var moved = await MovedAsync(ctx, [orderId], ct);
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct); // D300 (сессия 4)
-        var lines = order.Lines.Where(l => !services.Contains(l.ItemId))
-            .Select(l => (l.ItemId, Quantity: Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
+        // D352 (сессия 4, Р2): комплект возвращается тем же разворотом — компонентами, отгруженными в его составе.
+        var bundles = await BundleShipments.BundleIdsAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
+        var shipped = bundles.Count == 0 ? [] : await BundleShipments.ShippedAsync(db, ctx.OrganizationId, orderId, ct);
+        var lines = new List<StockLineSpec>();
+        foreach (var l in order.Lines.Where(l => !services.Contains(l.ItemId) || bundles.Contains(l.ItemId)))
+        {
+            var net = Net(moved, orderId, l.ItemId);
+            if (net <= 0)
+            {
+                continue;
+            }
+
+            lines.AddRange(bundles.Contains(l.ItemId)
+                ? (await BundleShipments.ReturnAsync(db, ctx.OrganizationId, l.ItemId, net, shipped.GetValueOrDefault(l.ItemId), ct))
+                    .Select(c => new StockLineSpec(c.ItemId, c.Quantity, l.ItemId, net))
+                : [new StockLineSpec(l.ItemId, net)]);
+        }
+
         if (lines.Count == 0)
         {
             throw new BusinessRuleException("sales.order.nothing_shipped", "По заказу ещё ничего не отгружено — возвращать нечего.");
@@ -832,12 +873,15 @@ public sealed class SalesService(
 
     private async Task<IReadOnlyList<CustomerBalanceDto>> ComputeBalancesAsync(long org, DateOnly? asOf, long? customerId, CancellationToken ct)
     {
-        var docs = await db.StockDocuments.AsNoTracking()
+        var raw = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == org && d.SalesOrderId != null && d.Status == StockDocumentStatus.Posted
                         && (asOf == null || d.DocumentDate <= asOf)
                         && (customerId == null || db.SalesOrders.Any(o => o.Id == d.SalesOrderId && o.CustomerId == customerId)))
-            .SelectMany(d => d.Lines.Select(l => new { d.Kind, OrderId = d.SalesOrderId!.Value, l.ItemId, l.Quantity }))
+            .SelectMany(d => d.Lines.Select(l => new { d.Id, d.Kind, OrderId = d.SalesOrderId!.Value, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }))
             .ToListAsync(ct);
+        // D352 (сессия 4, Р2): комплект — по цене строки заказа на количество комплектов.
+        var docs = BundleLines.InOrderTerms(raw.Select(r => ((r.Id, r.Kind, r.OrderId), r.ItemId, r.Quantity, r.BundleItemId, r.BundleQuantity)))
+            .Select(x => new { x.Key.Kind, x.Key.OrderId, x.ItemId, x.Quantity }).ToList();
         var orderIds = docs.Select(d => d.OrderId).Distinct().ToList();
         var orders = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
         var paid = await db.CustomerPayments.AsNoTracking()
@@ -874,14 +918,16 @@ public sealed class SalesService(
         moved.Where(m => m.OrderId == orderId && m.ItemId == itemId)
             .Sum(m => m.Kind == StockOperationKind.Shipment ? m.Quantity : -m.Quantity);
 
+    /// <summary>Движения по строкам заказов; комплект (D352) — количеством комплектов, а не компонентами.</summary>
     private async Task<IReadOnlyList<(long OrderId, StockOperationKind Kind, long ItemId, decimal Quantity)>> MovedAsync(
         AccessContext ctx, IReadOnlyCollection<long> orderIds, CancellationToken ct) =>
-        (await db.StockDocuments.AsNoTracking()
-            .Where(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId != null && orderIds.Contains(d.SalesOrderId.Value)
-                        && d.Status == StockDocumentStatus.Posted)
-            .SelectMany(d => d.Lines.Select(l => new { OrderId = d.SalesOrderId!.Value, d.Kind, l.ItemId, l.Quantity }))
-            .ToListAsync(ct))
-        .Select(x => (x.OrderId, x.Kind, x.ItemId, x.Quantity)).ToList();
+        BundleLines.InOrderTerms((await db.StockDocuments.AsNoTracking()
+                .Where(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId != null && orderIds.Contains(d.SalesOrderId.Value)
+                            && d.Status == StockDocumentStatus.Posted)
+                .SelectMany(d => d.Lines.Select(l => new { d.Id, OrderId = d.SalesOrderId!.Value, d.Kind, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }))
+                .ToListAsync(ct))
+            .Select(x => ((x.Id, x.OrderId, x.Kind), x.ItemId, x.Quantity, x.BundleItemId, x.BundleQuantity)))
+        .Select(x => (x.Key.OrderId, x.Key.Kind, x.ItemId, x.Quantity)).ToList();
 
     /// <summary>Оплаты с фильтрами; фильтры — до проекции в DTO, чтобы запрос переводился в SQL.</summary>
     private IQueryable<CustomerPaymentDto> PaymentsQuery(

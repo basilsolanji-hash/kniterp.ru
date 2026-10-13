@@ -395,7 +395,7 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
             throw new NotFoundException("Документ");
         }
 
-        var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
+        var itemIds = doc.ItemTotals().Select(l => l.ItemId).ToList();
         var items = await (from i in db.Items.AsNoTracking()
                            join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
                            where itemIds.Contains(i.Id)
@@ -441,7 +441,7 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
             }
         }
 
-        var result = doc.Lines.OrderBy(l => items[l.ItemId].Code).Select(l =>
+        var result = doc.ItemTotals().OrderBy(l => items[l.ItemId].Code).Select(l =>
         {
             var item = items[l.ItemId];
             return new DocumentBatchItemDto(l.ItemId, item.Code, item.Name, item.Symbol, item.Precision, l.Quantity,
@@ -501,7 +501,8 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
         CancellationToken ct = default)
     {
         var (ctx, doc) = await LoadDocumentAsync(documentId, rowVersion, ct);
-        var line = doc.Lines.FirstOrDefault(l => l.ItemId == itemId)
+        // D352 (сессия 4, Р2): позиция может быть в нескольких строках (отдельно и в комплектах) — разбивка на их сумму.
+        var line = doc.ItemTotals().Where(l => l.ItemId == itemId).Select(l => ((long ItemId, decimal Quantity)?)l).SingleOrDefault()
                    ?? throw new BusinessRuleException("stock.document.line_missing", "Такой позиции в документе нет.");
         var batch = await db.StockBatches.AsNoTracking().SingleOrDefaultAsync(b => b.Id == batchId && b.OrganizationId == ctx.OrganizationId, ct)
                     ?? throw new NotFoundException("Партия");
@@ -650,7 +651,7 @@ internal static class StockBatchLedger
             return [];
         }
 
-        var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
+        var itemIds = doc.ItemTotals().Select(l => l.ItemId).ToList();
         var batchIds = rows.Select(r => r.BatchId).Distinct().ToList();
         var batches = await db.StockBatches.AsNoTracking().Where(b => batchIds.Contains(b.Id)).ToDictionaryAsync(b => b.Id, ct);
         var codes = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, ct);
@@ -659,7 +660,7 @@ internal static class StockBatchLedger
             throw new BusinessRuleException("stock.batch.stray", $"Разбивка по партии {batches[stray.BatchId].Number} — для позиции, которой нет в строках.");
         }
 
-        foreach (var line in doc.Lines)
+        foreach (var line in doc.ItemTotals())
         {
             var sum = rows.Where(r => r.ItemId == line.ItemId).Sum(r => r.Quantity);
             if (sum != 0 && sum != line.Quantity)
@@ -691,7 +692,7 @@ internal static class StockBatchLedger
                     $"{codes[x.r.ItemId]}, партия {batches[x.r.BatchId].Number}: нужно {Quantities.Format(x.r.Quantity)}, есть {Quantities.Format(x.Have)}")) + ".");
             }
 
-            var auto = doc.Lines.Where(l => rows.All(r => r.ItemId != l.ItemId)).ToList();
+            var auto = doc.ItemTotals().Where(l => rows.All(r => r.ItemId != l.ItemId)).ToList();
             if (auto.Count > 0 && balances.Any(b => b.Sum > 0 && auto.Any(l => l.ItemId == b.ItemId)))
             {
                 var autoIds = auto.Select(l => l.ItemId).ToList();

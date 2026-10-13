@@ -82,8 +82,10 @@ public sealed class PrintService(IKnitErpDbContext db, IAccessGuard guard)
         var order = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).SingleAsync(o => o.Id == doc.SalesOrderId, ct);
         var (entity, account) = await SellerAsync(ctx.OrganizationId, order.LegalEntityId, order.BankAccountId, ct);
         var warehouse = await db.Warehouses.AsNoTracking().Where(w => w.Id == doc.WarehouseId).Select(w => w.Name).SingleAsync(ct);
-        var items = await ItemsAsync(doc.Lines.Select(l => l.ItemId), ct);
-        var lines = doc.Lines
+        // D352 (сессия 4, Р2): комплект — одной строкой по цене заказа (код товара — код комплекта); компоненты видны в отгрузке.
+        var ordered = doc.OrderLines();
+        var items = await ItemsAsync(ordered.Select(l => l.ItemId), ct);
+        var lines = ordered
             .Select(l =>
             {
                 var orderLine = order.Lines.Single(o => o.ItemId == l.ItemId);

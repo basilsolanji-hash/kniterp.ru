@@ -1,5 +1,6 @@
 using KnitErp.Application.Access;
 using KnitErp.Application.Common;
+using KnitErp.Application.Sales;
 using KnitErp.Application.Structure;
 using KnitErp.Domain.Access;
 using KnitErp.Domain.Audit;
@@ -17,8 +18,13 @@ public sealed record StockDocumentRowDto(
     public string StatusName => StockDocument.StatusName(Status);
 }
 
+/// <summary>
+/// Строка документа. BundleItemId, BundleCode, BundleQuantity — у строки разворота комплекта (D352, сессия 4, Р2): компонент
+/// отгружен в составе комплекта; правится количество комплекта целиком, а не строка компонента.
+/// </summary>
 public sealed record StockDocumentLineDto(
-    long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Available);
+    long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Available,
+    long? BundleItemId = null, string? BundleCode = null, string? BundleName = null, decimal? BundleQuantity = null, string? BundleUnitSymbol = null);
 
 public sealed record StockDocumentDto(
     long Id, string Number, StockOperationKind Kind, StockDocumentStatus Status, DateOnly DocumentDate,
@@ -33,7 +39,9 @@ public sealed record StockDocumentDto(
     public string StatusName => StockDocument.StatusName(Status);
 
     /// <summary>Строки, которых не хватает на складе-отправителе (для расходных документов в черновике).</summary>
-    public IEnumerable<StockDocumentLineDto> Shortages => Lines.Where(l => l.Available is { } a && a < l.Quantity);
+    // D352 (сессия 4, Р2): позиция бывает в нескольких строках (отдельно и в комплектах) — сравнивается их сумма.
+    public IEnumerable<StockDocumentLineDto> Shortages => Lines.GroupBy(l => l.ItemId)
+        .Where(g => g.First().Available is { } a && a < g.Sum(l => l.Quantity)).Select(g => g.First());
 }
 
 public sealed record ReasonLookupDto(long Id, string Name, bool RequiresComment);
@@ -159,7 +167,8 @@ public sealed class StockDocumentService(
         }
 
         var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
-        var items = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id))
+        var lookupIds = itemIds.Concat(doc.Lines.Where(l => l.BundleItemId != null).Select(l => l.BundleItemId!.Value)).Distinct().ToList();
+        var items = await db.Items.AsNoTracking().Where(i => lookupIds.Contains(i.Id))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision })
             .ToDictionaryAsync(x => x.Id, ct);
         long?[] userIds = [doc.CreatedByUserId, doc.PostedByUserId, doc.ReversedByUserId];
@@ -189,10 +198,12 @@ public sealed class StockDocumentService(
                 .ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
         }
 
-        var lines = doc.Lines.Select(l => (Line: l, Item: items[l.ItemId]))
+        // D352 (сессия 4, Р2): сначала отдельные строки, затем комплекты — каждый своими компонентами.
+        var lines = doc.Lines.Select(l => (Line: l, Item: items[l.ItemId], Bundle: l.BundleItemId is { } b ? items[b] : null))
             .Select(x => new StockDocumentLineDto(x.Line.ItemId, x.Item.Code, x.Item.Name, x.Item.Symbol, x.Item.Precision, x.Line.Quantity,
-                available is null ? null : available.GetValueOrDefault(x.Line.ItemId)))
-            .OrderBy(l => l.Code).ToList();
+                available is null ? null : available.GetValueOrDefault(x.Line.ItemId),
+                x.Line.BundleItemId, x.Bundle?.Code, x.Bundle?.Name, x.Line.BundleQuantity, x.Bundle?.Symbol))
+            .OrderBy(l => l.BundleCode != null).ThenBy(l => l.BundleCode).ThenBy(l => l.Code).ToList();
 
         var canEdit = doc.Status == StockDocumentStatus.Draft && WarehouseScope.Covers(ctx, Permissions.WarehouseDocumentCreate, doc.WarehouseId);
         var canPost = doc.Status == StockDocumentStatus.Draft && WarehouseScope.Covers(ctx, Permissions.WarehouseDocumentPost, doc.WarehouseId);
@@ -254,7 +265,12 @@ public sealed class StockDocumentService(
     /// Права и области — те же, что у обычного черновика.
     /// </summary>
     public async Task<long> CreateWithLinesAsync(
-        StockOperationKind kind, StockDocumentHeader header, IReadOnlyList<(long ItemId, decimal Quantity)> lines, CancellationToken ct = default)
+        StockOperationKind kind, StockDocumentHeader header, IReadOnlyList<(long ItemId, decimal Quantity)> lines, CancellationToken ct = default) =>
+        await CreateWithLinesAsync(kind, header, lines.Select(l => new StockLineSpec(l.ItemId, l.Quantity)).ToList(), ct);
+
+    /// <summary>То же со строками разворота комплектов (D352, сессия 4, Р2): отгрузка и возврат по заказу покупателя.</summary>
+    public async Task<long> CreateWithLinesAsync(
+        StockOperationKind kind, StockDocumentHeader header, IReadOnlyList<StockLineSpec> lines, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
         await ValidateHeaderAsync(ctx, kind, header, ct);
@@ -264,12 +280,16 @@ public sealed class StockDocumentService(
         var items = await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && ids.Contains(i.Id))
             .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new EntryItemDto(i.Id, i.Code, i.Name, u.Symbol, u.Precision))
             .ToDictionaryAsync(i => i.Id, ct);
-        foreach (var (itemId, quantity) in lines)
+        foreach (var l in lines)
         {
-            StockEntry.EnsurePrecision(items.GetValueOrDefault(itemId) ?? throw new NotFoundException("Номенклатура"), quantity);
+            StockEntry.EnsurePrecision(items.GetValueOrDefault(l.ItemId) ?? throw new NotFoundException("Номенклатура"), l.Quantity);
         }
 
         await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, ids, ct); // D300 (сессия 4)
+        foreach (var bundle in lines.Where(l => l.BundleItemId != null).GroupBy(l => l.BundleItemId!.Value))
+        {
+            await EnsureBundleAsync(ctx, bundle.Key, bundle.First().BundleQuantity ?? 0, ct); // D352 (сессия 4, Р2)
+        }
 
         await using var tx = await db.BeginTransactionAsync(ct);
         var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, StockDocument.NumberPrefix(kind), ct);
@@ -305,7 +325,7 @@ public sealed class StockDocumentService(
         var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
         await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, [itemId], ct); // D300 (сессия 4)
         StockEntry.EnsurePrecision(item, quantity);
-        var before = doc.Lines.FirstOrDefault(l => l.ItemId == itemId)?.Quantity;
+        var before = doc.Lines.FirstOrDefault(l => l.ItemId == itemId && l.BundleItemId == null)?.Quantity;
         doc.SetLine(itemId, quantity);
         Audit(ctx, AuditActions.StockDocumentChanged, doc, before is null ? null : $"{item.Code}: {Quantities.Format(before.Value)}",
             $"{item.Code}: {Quantities.Format(quantity)} {item.UnitSymbol}", "Строка");
@@ -315,11 +335,70 @@ public sealed class StockDocumentService(
     public async Task RemoveLineAsync(long id, long itemId, byte[] rowVersion, CancellationToken ct = default)
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
-        var line = doc.Lines.FirstOrDefault(l => l.ItemId == itemId);
+        var line = doc.Lines.FirstOrDefault(l => l.ItemId == itemId && l.BundleItemId == null);
         doc.RemoveLine(itemId);
         var code = await db.Items.AsNoTracking().Where(i => i.Id == itemId).Select(i => i.Code).SingleAsync(ct);
         Audit(ctx, AuditActions.StockDocumentChanged, doc, $"{code}: {Quantities.Format(line!.Quantity)}", "строка удалена", "Строка");
         await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>
+    /// D352 (сессия 4, Р2): количество комплекта в отгрузке или возврате по заказу. Отгрузка разворачивает комплект по текущему
+    /// составу (это черновик; после проведения состав в документе уже не меняется), возврат — пропорционально отгруженному по заказу.
+    /// Комплект — строка заказа; количество — по точности единицы комплекта (для «шт» — целые наборы).
+    /// </summary>
+    public async Task SetBundleAsync(long id, long bundleItemId, decimal quantity, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
+        if (!StockDocument.WithCustomer(doc.Kind) || doc.SalesOrderId is not { } orderId)
+        {
+            throw new BusinessRuleException("item.bundle_not_stocked", "Комплект не хранится на складе — в складском документе укажите его компоненты.");
+        }
+
+        var code = await EnsureBundleAsync(ctx, bundleItemId, quantity, ct);
+        if (!await db.SalesOrders.AnyAsync(o => o.Id == orderId && o.Lines.Any(l => l.ItemId == bundleItemId), ct))
+        {
+            throw new BusinessRuleException("sales.order.bundle_not_in_order", $"Комплекта {code} нет в заказе.");
+        }
+
+        var components = doc.Kind == StockOperationKind.Shipment
+            ? await BundleShipments.ExpandAsync(db, ctx.OrganizationId, bundleItemId, quantity, ct)
+            : await BundleShipments.ReturnAsync(db, ctx.OrganizationId, bundleItemId, quantity,
+                (await BundleShipments.ShippedAsync(db, ctx.OrganizationId, orderId, ct)).GetValueOrDefault(bundleItemId), ct);
+        var before = doc.Lines.FirstOrDefault(l => l.BundleItemId == bundleItemId)?.BundleQuantity;
+        doc.SetBundle(bundleItemId, quantity, components);
+        Audit(ctx, AuditActions.StockDocumentChanged, doc, before is null ? null : $"{code}: {Quantities.Format(before.Value)}",
+            $"{code}: {Quantities.Format(quantity)}, компонентов {components.Count}", "Комплект");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>D352: убрать комплект — все строки его разворота — из черновика.</summary>
+    public async Task RemoveBundleAsync(long id, long bundleItemId, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
+        var before = doc.Lines.FirstOrDefault(l => l.BundleItemId == bundleItemId)?.BundleQuantity;
+        doc.RemoveBundle(bundleItemId);
+        var code = await db.Items.AsNoTracking().Where(i => i.Id == bundleItemId).Select(i => i.Code).SingleAsync(ct);
+        Audit(ctx, AuditActions.StockDocumentChanged, doc, $"{code}: {Quantities.Format(before ?? 0)}", "комплект удалён", "Комплект");
+        await db.SaveOrConflictAsync(ct);
+    }
+
+    /// <summary>Комплект своей организации; количество наборов больше нуля и по точности единицы комплекта. Возвращает код.</summary>
+    private async Task<string> EnsureBundleAsync(AccessContext ctx, long bundleItemId, decimal quantity, CancellationToken ct)
+    {
+        var bundle = await db.Items.AsNoTracking().Where(i => i.Id == bundleItemId && i.OrganizationId == ctx.OrganizationId)
+                         .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id,
+                             (i, u) => new { i.Type, Entry = new EntryItemDto(i.Id, i.Code, i.Name, u.Symbol, u.Precision) })
+                         .SingleOrDefaultAsync(ct)
+                     ?? throw new NotFoundException("Номенклатура");
+        if (bundle.Type != KnitErp.Domain.Catalog.ItemType.Bundle)
+        {
+            throw new BusinessRuleException("catalog.bundle.not_bundle", $"Позиция {bundle.Entry.Code} — не комплект. Состав бывает только у типа «Комплекты».");
+        }
+
+        Quantities.EnsurePositive(quantity);
+        StockEntry.EnsurePrecision(bundle.Entry, quantity);
+        return bundle.Entry.Code;
     }
 
     /// <summary>Загрузка строк из Excel: заменяет все строки черновика; при любой ошибке не меняется ничего.</summary>
@@ -513,25 +592,39 @@ public sealed class StockDocumentService(
         }
     }
 
-    /// <summary>Возврат от покупателя по заказу — не больше отгруженного по этому заказу за вычетом прежних возвратов (D65).</summary>
+    /// <summary>
+    /// Возврат от покупателя по заказу — не больше отгруженного по этому заказу за вычетом прежних возвратов (D65).
+    /// D352 (сессия 4, Р2): отдельные строки и строки комплектов считаются раздельно — компонент из комплекта возвращается только
+    /// в составе того же комплекта, и комплектов — не больше отгруженных.
+    /// </summary>
     private async Task EnsureReturnWithinShippedAsync(AccessContext ctx, StockDocument doc, long orderId, CancellationToken ct)
     {
         var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
+        var bundleIds = doc.Lines.Where(l => l.BundleItemId != null).Select(l => l.BundleItemId!.Value).Distinct().ToList();
         var moved = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == ctx.OrganizationId && d.SalesOrderId == orderId && d.Status == StockDocumentStatus.Posted)
-            .SelectMany(d => d.Lines.Select(l => new { d.Kind, l.ItemId, l.Quantity }))
-            .Where(x => itemIds.Contains(x.ItemId))
+            .SelectMany(d => d.Lines.Select(l => new { d.Id, d.Kind, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }))
+            .Where(x => itemIds.Contains(x.ItemId) || (x.BundleItemId != null && bundleIds.Contains(x.BundleItemId.Value)))
             .ToListAsync(ct);
-        var over = doc.Lines.Select(l => (l.ItemId, l.Quantity,
-                Left: moved.Where(m => m.ItemId == l.ItemId && m.Kind == StockOperationKind.Shipment).Sum(m => m.Quantity)
-                      - moved.Where(m => m.ItemId == l.ItemId && m.Kind == StockOperationKind.CustomerReturn).Sum(m => m.Quantity)))
+        static decimal Sign(StockOperationKind kind) => kind == StockOperationKind.Shipment ? 1 : -1;
+        var over = doc.Lines.Select(l => (Name: (l.ItemId, l.BundleItemId), l.Quantity,
+                Left: moved.Where(m => m.ItemId == l.ItemId && m.BundleItemId == l.BundleItemId).Sum(m => Sign(m.Kind) * m.Quantity)))
             .Where(x => x.Quantity > x.Left).ToList();
+        // Комплектов по документу — одно количество на все его строки.
+        var bundlesLeft = BundleLines.InOrderTerms(moved.Where(m => m.BundleItemId != null)
+                .Select(m => ((m.Id, m.Kind), m.ItemId, m.Quantity, m.BundleItemId, m.BundleQuantity)))
+            .GroupBy(x => x.ItemId).ToDictionary(g => g.Key, g => g.Sum(x => Sign(x.Key.Kind) * x.Quantity));
+        over.AddRange(doc.OrderLines().Where(l => bundleIds.Contains(l.ItemId))
+            .Select(l => (Name: (l.ItemId, (long?)null), l.Quantity, Left: bundlesLeft.GetValueOrDefault(l.ItemId)))
+            .Where(x => x.Quantity > x.Left));
         if (over.Count > 0)
         {
-            var codes = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, ct);
+            var ids = itemIds.Concat(bundleIds).Distinct().ToList();
+            var codes = await db.Items.AsNoTracking().Where(i => ids.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, ct);
+            string Name((long ItemId, long? BundleItemId) x) => x.BundleItemId is { } b ? $"{codes[x.ItemId]} (в комплекте {codes[b]})" : codes[x.ItemId];
             throw new BusinessRuleException("sales.return.exceeds",
                 "Возврат больше отгруженного по заказу — " + string.Join("; ", over.Take(10).Select(x =>
-                    $"{codes[x.ItemId]}: возвращается {Quantities.Format(x.Quantity)}, отгружено {Quantities.Format(x.Left)}")) + ".");
+                    $"{Name(x.Name)}: возвращается {Quantities.Format(x.Quantity)}, отгружено {Quantities.Format(x.Left)}")) + ".");
         }
     }
 

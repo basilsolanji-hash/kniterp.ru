@@ -204,6 +204,32 @@ public static class BundleExpansion
         return decimal.Round(own.Sum(c => unitCosts[c.ComponentItemId] * c.Quantity), 4);
     }
 
+    /// <summary>
+    /// D352 (сессия 4, Р2): возврат части комплектов — компоненты пропорционально отгруженному (нетто) по этому комплекту, а не по
+    /// текущему составу: состав зафиксирован отгрузкой. Возврат всех комплектов возвращает компоненты целиком; частичный — доля,
+    /// округлённая по точности единицы компонента и не больше отгруженного.
+    /// </summary>
+    public static IReadOnlyList<(long ItemId, decimal Quantity)> Proportional(
+        decimal quantity, decimal shippedBundles, IReadOnlyDictionary<long, decimal> shippedComponents, IReadOnlyDictionary<long, byte> precisions)
+    {
+        if (quantity <= 0)
+        {
+            throw new BusinessRuleException("catalog.bundle.quantity", "Количество комплекта — больше нуля.");
+        }
+
+        if (quantity > shippedBundles)
+        {
+            throw new BusinessRuleException("sales.return.bundle_exceeds", "Комплектов возвращается больше, чем отгружено по заказу.");
+        }
+
+        return shippedComponents.Where(c => c.Value > 0)
+            .Select(c => (c.Key, quantity == shippedBundles
+                ? c.Value
+                : Math.Min(c.Value, decimal.Round(c.Value * quantity / shippedBundles, precisions.GetValueOrDefault(c.Key), MidpointRounding.AwayFromZero))))
+            .Where(c => c.Item2 > 0)
+            .ToList();
+    }
+
     private static decimal Ceiling(decimal value, byte precision)
     {
         var factor = Pow10(precision);

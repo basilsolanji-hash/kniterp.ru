@@ -26,9 +26,12 @@ internal static class Reservations
         }
 
         // D300 (сессия 4): услуга не хранится на складе — под неё ничего не резервируется.
+        // D352 (сессия 4, Р2): комплект держит компоненты — неотгруженный остаток наборов по текущему составу; отбор по itemIds —
+        // после разворота, поэтому строки комплектов читаются всегда.
         var lines = await orders.SelectMany(o => o.Lines.Select(l => new { OrderId = o.Id, o.WarehouseId, l.ItemId, l.Quantity }))
-            .Where(l => itemIds == null || itemIds.Contains(l.ItemId))
-            .Where(l => !db.Items.Any(i => i.Id == l.ItemId && ItemTypes.NotStocked.Contains(i.Type)))
+            .Select(l => new { l.OrderId, l.WarehouseId, l.ItemId, l.Quantity, Bundle = db.Items.Any(i => i.Id == l.ItemId && i.Type == ItemType.Bundle) })
+            .Where(l => itemIds == null || itemIds.Contains(l.ItemId) || l.Bundle)
+            .Where(l => l.Bundle || !db.Items.Any(i => i.Id == l.ItemId && ItemTypes.NotStocked.Contains(i.Type)))
             .ToListAsync(ct);
         if (lines.Count == 0)
         {
@@ -36,17 +39,27 @@ internal static class Reservations
         }
 
         var orderIds = lines.Select(l => l.OrderId).Distinct().ToList();
-        var moved = await db.StockDocuments.AsNoTracking()
-            .Where(d => d.OrganizationId == organizationId && d.SalesOrderId != null && orderIds.Contains(d.SalesOrderId.Value)
-                        && d.Status == StockDocumentStatus.Posted)
-            .SelectMany(d => d.Lines.Select(l => new { OrderId = d.SalesOrderId!.Value, d.Kind, l.ItemId, l.Quantity }))
-            .ToListAsync(ct);
-        var net = moved.GroupBy(m => (m.OrderId, m.ItemId))
-            .ToDictionary(g => g.Key, g => g.Sum(m => m.Kind == StockOperationKind.Shipment ? m.Quantity : -m.Quantity));
+        var moved = BundleLines.InOrderTerms((await db.StockDocuments.AsNoTracking()
+                .Where(d => d.OrganizationId == organizationId && d.SalesOrderId != null && orderIds.Contains(d.SalesOrderId.Value)
+                            && d.Status == StockDocumentStatus.Posted)
+                .SelectMany(d => d.Lines.Select(l => new { d.Id, OrderId = d.SalesOrderId!.Value, d.Kind, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }))
+                .ToListAsync(ct))
+            .Select(m => ((m.Id, m.OrderId, m.Kind), m.ItemId, m.Quantity, m.BundleItemId, m.BundleQuantity)));
+        var net = moved.GroupBy(m => (m.Key.OrderId, m.ItemId))
+            .ToDictionary(g => g.Key, g => g.Sum(m => m.Key.Kind == StockOperationKind.Shipment ? m.Quantity : -m.Quantity));
 
+        var bundleIds = lines.Where(l => l.Bundle).Select(l => l.ItemId).Distinct().ToList();
+        var specs = bundleIds.Count == 0 ? [] : await KnitErp.Application.Catalog.BundleService.SpecsAsync(db, organizationId, bundleIds, ct);
+        var ownSpecs = specs.ToLookup(s => s.BundleItemId);
         return lines
-            .Select(l => (Key: (l.WarehouseId, l.ItemId), Left: Math.Max(0, l.Quantity - net.GetValueOrDefault((l.OrderId, l.ItemId)))))
+            .Select(l => (l.WarehouseId, l.ItemId, l.Bundle, Left: Math.Max(0, l.Quantity - net.GetValueOrDefault((l.OrderId, l.ItemId)))))
             .Where(x => x.Left > 0)
+            .SelectMany(x => !x.Bundle
+                ? [(Key: (x.WarehouseId, x.ItemId), x.Left)]
+                : ownSpecs[x.ItemId].Any()
+                    ? BundleExpansion.Expand(x.ItemId, x.Left, ownSpecs[x.ItemId]).Select(c => (Key: (x.WarehouseId, c.ItemId), Left: c.Quantity))
+                    : [])
+            .Where(x => itemIds == null || itemIds.Contains(x.Key.Item2))
             .GroupBy(x => x.Key)
             .ToDictionary(g => g.Key, g => g.Sum(x => x.Left));
     }

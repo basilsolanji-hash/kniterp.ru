@@ -8,6 +8,9 @@ public enum CostSource : byte
     None = 0,
     Purchases = 1,
     TechCard = 2,
+
+    /// <summary>D352 (сессия 4, Р2): комплект — по компонентам его строк разворота.</summary>
+    Components = 3,
 }
 
 /// <summary>

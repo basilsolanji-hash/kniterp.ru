@@ -3017,5 +3017,16 @@
   "Укажите число упаковок.": "Qadoqlar sonini kiriting.",
   "Упаковок": "Qadoqlar",
   "Число упаковок": "Qadoqlar soni",
-  "в количество": "miqdorga"
+  "в количество": "miqdorga",
+  "Количество комплекта {0}": "{0} to‘plami miqdori",
+  "Количество комплекта изменено.": "To‘plam miqdori o‘zgartirildi.",
+  "Комплект не хранится на складе — в складском документе укажите его компоненты.": "To‘plam omborda saqlanmaydi — ombor hujjatida uning tarkibiy qismlarini ko‘rsating.",
+  "Комплекта {0} нет в заказе.": "{0} to‘plami buyurtmada yo‘q.",
+  "Комплектов возвращается больше, чем отгружено по заказу.": "Buyurtma bo‘yicha jo‘natilganidan ko‘p to‘plam qaytarilmoqda.",
+  "У комплекта {0} не задан состав — отгружать нечего. Заполните состав в карточке комплекта.": "{0} to‘plamining tarkibi belgilanmagan — jo‘natadigan narsa yo‘q. Tarkibni to‘plam kartochkasida to‘ldiring.",
+  "У строк одного комплекта разное количество комплектов.": "Bitta to‘plam qatorlarida to‘plamlar miqdori har xil.",
+  "Удалить комплект {0}": "{0} to‘plamini o‘chirish",
+  "Удалить комплект со всеми компонентами?": "To‘plam barcha tarkibiy qismlari bilan o‘chirilsinmi?",
+  "комплект — компоненты ниже": "to‘plam — tarkibiy qismlari quyida",
+  "компонентам": "tarkibiy qismlar"
 }

@@ -1387,13 +1387,24 @@ internal sealed class StockDocumentLineConfiguration : IEntityTypeConfiguration<
         b.ToTable("stock_document_lines", t =>
         {
             t.HasCheckConstraint("ck_stock_document_lines_quantity", "[Quantity] > 0");
+            // D352 (сессия 4, Р2): строка разворота комплекта — комплект и количество наборов вместе.
+            t.HasCheckConstraint("ck_stock_document_lines_bundle",
+                "([BundleItemId] IS NULL AND [BundleQuantity] IS NULL) OR ([BundleItemId] IS NOT NULL AND [BundleQuantity] IS NOT NULL AND [BundleQuantity] > 0)");
             t.HasTrigger("tr_stock_document_lines_draft_only");
+            t.HasTrigger("tr_stock_document_lines_bundle");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
+        b.Property(x => x.BundleQuantity).HasColumnType("decimal(18,6)");
         b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => new { x.DocumentId, x.ItemId }).IsUnique().HasDatabaseName("ux_stock_document_lines_doc_item");
+        b.HasOne<Item>().WithMany().HasForeignKey(x => x.BundleItemId).OnDelete(DeleteBehavior.Restrict)
+            .HasConstraintName("fk_stock_document_lines_bundle");
+        // D352: позиция повторяется, если пришла из разных комплектов или отдельно и из комплекта; NULL в уникальном индексе
+        // SQL Server равен NULL — отдельная строка позиции по-прежнему одна.
+        b.HasIndex(x => new { x.DocumentId, x.ItemId, x.BundleItemId }).IsUnique().HasFilter(null)
+            .HasDatabaseName("ux_stock_document_lines_doc_item_bundle");
+        b.HasIndex(x => x.BundleItemId).HasFilter("[BundleItemId] IS NOT NULL").HasDatabaseName("ix_stock_document_lines_bundle");
     }
 }
 
