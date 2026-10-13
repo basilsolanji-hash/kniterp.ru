@@ -220,7 +220,8 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
             Items = catalog ? db.Items.Count(i => i.OrganizationId == org && !i.IsArchived) : 0,
             Cards = catalog ? db.TechCards.Count(t => t.OrganizationId == org && t.Status == TechCardStatus.Active) : 0,
             WithoutVat = withoutVat
-                ? db.StockDocuments.Count(d => d.OrganizationId == org && d.Kind == StockOperationKind.Receipt && d.PurchaseOrderId != null
+                ? db.StockDocuments.Count(d => d.OrganizationId == org && d.PurchaseOrderId != null
+                                               && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.SupplierServiceAct) // D354
                                                && d.CounterpartyId != null && d.Status == StockDocumentStatus.Posted
                                                && !db.ReceivedVatInvoices.Any(i => i.ReceiptDocumentId == d.Id && i.Status == ReceivedVatInvoiceStatus.Registered))
                 : 0,
@@ -321,7 +322,8 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                    from ol in o.Lines.Where(x => x.ItemId == (l.BundleItemId ?? l.ItemId)).DefaultIfEmpty()
                                    group (l.BundleQuantity ?? l.Quantity) by new
                                    {
-                                       o.CustomerId, cp.Name, d.Kind,
+                                       // D354 (сессия 4, Р1): акт оказания услуг — как отгрузка (в продажах и долге).
+                                       o.CustomerId, cp.Name, Kind = d.Kind == StockOperationKind.ServiceAct ? StockOperationKind.Shipment : d.Kind,
                                        Day = d.DocumentDate >= windowStart && d.DocumentDate <= today ? (DateOnly?)d.DocumentDate : null,
                                        Amount = (decimal?)ol.Amount, LineQuantity = (decimal?)ol.Quantity,
                                    } into g
@@ -385,7 +387,9 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                                .SelectMany(d => d.Lines.Where(x => (x.BundleItemId ?? x.ItemId) == l.ItemId
                                                                                    && (x.BundleItemId == null
                                                                                        || x.Id == d.Lines.Where(y => y.BundleItemId == x.BundleItemId).Min(y => y.Id)))
-                                                   .Select(x => d.Kind == StockOperationKind.Shipment ? (x.BundleQuantity ?? x.Quantity) : -(x.BundleQuantity ?? x.Quantity)))
+                                                   // D354 (сессия 4, Р1): строку-услугу закрывает акт оказания услуг.
+                                                   .Select(x => d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.ServiceAct
+                                                       ? (x.BundleQuantity ?? x.Quantity) : -(x.BundleQuantity ?? x.Quantity)))
                                                .Sum(),
                                    })
                     .ToListAsync(ct);
@@ -407,7 +411,8 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                    from ol in o.Lines.Where(x => x.ItemId == l.ItemId).DefaultIfEmpty()
                                    group l.Quantity by new
                                    {
-                                       o.SupplierId, d.Kind,
+                                       // D354 (сессия 4, Р1): акт услуг поставщика — как поступление.
+                                       o.SupplierId, Kind = d.Kind == StockOperationKind.SupplierServiceAct ? StockOperationKind.Receipt : d.Kind,
                                        Day = d.DocumentDate >= windowStart && d.DocumentDate <= today ? (DateOnly?)d.DocumentDate : null,
                                        Amount = (decimal?)ol.Amount, LineQuantity = (decimal?)ol.Quantity,
                                    } into g
@@ -463,7 +468,8 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                               : db.StockDocuments.Where(d => d.OrganizationId == org && d.PurchaseOrderId == o.Id
                                                                              && d.Status == StockDocumentStatus.Posted)
                                                   .SelectMany(d => d.Lines.Where(x => x.ItemId == l.ItemId)
-                                                      .Select(x => d.Kind == StockOperationKind.Receipt ? x.Quantity : -x.Quantity))
+                                                      .Select(x => d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.SupplierServiceAct
+                                                          ? x.Quantity : -x.Quantity)) // D354
                                                   .Sum(),
                                       })
                     .ToListAsync(ct);

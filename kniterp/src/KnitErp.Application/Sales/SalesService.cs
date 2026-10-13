@@ -242,8 +242,9 @@ public sealed class SalesService(
                 Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }).ToList() })
             .ToListAsync(ct);
         // D352 (сессия 4, Р2): строки документов в терминах заказа — комплект количеством комплектов.
+        // D354 (сессия 4, Р1): акт услуг закрывает строку-услугу как отгрузка — «отгружено», суммы и долг считают его вместе с отгрузками.
         var posted = BundleLines.InOrderTerms(docs.Where(d => d.Status == StockDocumentStatus.Posted)
-            .SelectMany(d => d.Lines.Select(l => ((d.Id, d.Kind), l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity))));
+            .SelectMany(d => d.Lines.Select(l => ((d.Id, Kind: StockOperationKinds.OrderKind(d.Kind)), l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity))));
         decimal Moved(long itemId, StockOperationKind kind) => posted.Where(l => l.Key.Kind == kind && l.ItemId == itemId).Sum(l => l.Quantity);
 
         var prices = ctx.Permissions.Has(Permissions.PriceView);
@@ -655,6 +656,39 @@ public sealed class SalesService(
             lines, ct);
     }
 
+    /// <summary>
+    /// D354 (сессия 4, Р1): акт оказания услуг по заказу — черновик со строками-услугами на ещё не закрытое количество.
+    /// Цена и НДС — из заказа; проведение движений склада не пишет. Права и область склада — как у отгрузки.
+    /// </summary>
+    public async Task<long> CreateServiceActAsync(long orderId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.SalesView, ct);
+        var order = await LoadOrderAsync(ctx, orderId, ct);
+        var moved = await MovedAsync(ctx, [orderId], ct);
+        var services = await ServiceIdsAsync(ctx, order.Lines.Select(l => l.ItemId), ct);
+        var lines = order.Lines.Where(l => services.Contains(l.ItemId))
+            .Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
+        if (lines.Count == 0)
+        {
+            throw services.Count == 0
+                ? new BusinessRuleException("sales.order.no_services", "В заказе нет услуг — акт не нужен, товары оформляются отгрузкой.")
+                : new BusinessRuleException("sales.order.services_closed", "Все услуги заказа уже закрыты актами.");
+        }
+
+        var reason = await DefaultReasonAsync(ctx, StockOperationKind.ServiceAct, "Оказание услуг", ct);
+        return await documents.CreateWithLinesAsync(StockOperationKind.ServiceAct,
+            new StockDocumentHeader(order.WarehouseId, null, order.CustomerId, reason, await TodayAsync(ctx, ct), $"Акт по заказу {order.Number}", SalesOrderId: orderId),
+            lines, ct);
+    }
+
+    /// <summary>D354: услуги среди позиций (без комплектов — они отгружаются компонентами).</summary>
+    private async Task<HashSet<long>> ServiceIdsAsync(AccessContext ctx, IEnumerable<long> itemIds, CancellationToken ct)
+    {
+        var ids = itemIds.Distinct().ToList();
+        return (await db.Items.AsNoTracking().Where(i => i.OrganizationId == ctx.OrganizationId && ids.Contains(i.Id) && i.Type == ItemType.Service)
+            .Select(i => i.Id).ToListAsync(ct)).ToHashSet();
+    }
+
     /// <summary>Возврат по заказу: черновик со всем полученным; лишние строки удаляют, количества уменьшают.</summary>
     public async Task<long> CreateReturnAsync(long orderId, CancellationToken ct = default)
     {
@@ -879,8 +913,9 @@ public sealed class SalesService(
                         && (customerId == null || db.SalesOrders.Any(o => o.Id == d.SalesOrderId && o.CustomerId == customerId)))
             .SelectMany(d => d.Lines.Select(l => new { d.Id, d.Kind, OrderId = d.SalesOrderId!.Value, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }))
             .ToListAsync(ct);
-        // D352 (сессия 4, Р2): комплект — по цене строки заказа на количество комплектов.
-        var docs = BundleLines.InOrderTerms(raw.Select(r => ((r.Id, r.Kind, r.OrderId), r.ItemId, r.Quantity, r.BundleItemId, r.BundleQuantity)))
+        // D352 (сессия 4, Р2): комплект — по цене строки заказа на количество комплектов. D354 (Р1): акт услуг — как отгрузка.
+        var docs = BundleLines.InOrderTerms(raw.Select(r => ((r.Id, Kind: StockOperationKinds.OrderKind(r.Kind), r.OrderId), r.ItemId, r.Quantity,
+                r.BundleItemId, r.BundleQuantity)))
             .Select(x => new { x.Key.Kind, x.Key.OrderId, x.ItemId, x.Quantity }).ToList();
         var orderIds = docs.Select(d => d.OrderId).Distinct().ToList();
         var orders = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
@@ -918,7 +953,9 @@ public sealed class SalesService(
         moved.Where(m => m.OrderId == orderId && m.ItemId == itemId)
             .Sum(m => m.Kind == StockOperationKind.Shipment ? m.Quantity : -m.Quantity);
 
-    /// <summary>Движения по строкам заказов; комплект (D352) — количеством комплектов, а не компонентами.</summary>
+    /// <summary>
+    /// Движения по строкам заказов; комплект (D352) — количеством комплектов, а не компонентами; акт услуг (D354) — как отгрузка.
+    /// </summary>
     private async Task<IReadOnlyList<(long OrderId, StockOperationKind Kind, long ItemId, decimal Quantity)>> MovedAsync(
         AccessContext ctx, IReadOnlyCollection<long> orderIds, CancellationToken ct) =>
         BundleLines.InOrderTerms((await db.StockDocuments.AsNoTracking()
@@ -926,7 +963,7 @@ public sealed class SalesService(
                             && d.Status == StockDocumentStatus.Posted)
                 .SelectMany(d => d.Lines.Select(l => new { d.Id, OrderId = d.SalesOrderId!.Value, d.Kind, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }))
                 .ToListAsync(ct))
-            .Select(x => ((x.Id, x.OrderId, x.Kind), x.ItemId, x.Quantity, x.BundleItemId, x.BundleQuantity)))
+            .Select(x => ((x.Id, x.OrderId, Kind: StockOperationKinds.OrderKind(x.Kind)), x.ItemId, x.Quantity, x.BundleItemId, x.BundleQuantity)))
         .Select(x => (x.Key.OrderId, x.Key.Kind, x.ItemId, x.Quantity)).ToList();
 
     /// <summary>Оплаты с фильтрами; фильтры — до проекции в DTO, чтобы запрос переводился в SQL.</summary>

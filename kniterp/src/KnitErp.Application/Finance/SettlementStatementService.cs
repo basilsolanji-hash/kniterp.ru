@@ -128,7 +128,8 @@ public sealed class SettlementStatementService(IKnitErpDbContext db, IAccessGuar
         var ids = orders.Keys.ToList();
         var docs = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == org && d.SalesOrderId != null && ids.Contains(d.SalesOrderId.Value) && d.Status == StockDocumentStatus.Posted
-                        && d.DocumentDate <= to && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn))
+                        && d.DocumentDate <= to
+                        && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn || d.Kind == StockOperationKind.ServiceAct))
             .Select(d => new { d.Number, d.DocumentDate, d.Kind, OrderId = d.SalesOrderId!.Value,
                 Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }).ToList() })
             .ToListAsync(ct);
@@ -138,9 +139,13 @@ public sealed class SettlementStatementService(IKnitErpDbContext db, IAccessGuar
             // D352 (сессия 4, Р2): комплект — по цене строки заказа на количество комплектов.
             var value = Money.Round(BundleLines.InOrderTerms(d.Lines.Select(l => (0, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity)))
                 .Sum(l => l.Quantity * order.UnitCostWithVat(l.ItemId)));
-            return d.Kind == StockOperationKind.Shipment
-                ? new SettlementRowDto(d.DocumentDate, $"Отгрузка (УПД) № {d.Number} по заказу {order.Number}", value, 0)
-                : new SettlementRowDto(d.DocumentDate, $"Возврат от покупателя № {d.Number} по заказу {order.Number}", 0, value, 1);
+            // D354 (сессия 4, Р1): акт оказания услуг — в дебет, как отгрузка.
+            return d.Kind switch
+            {
+                StockOperationKind.Shipment => new SettlementRowDto(d.DocumentDate, $"Отгрузка (УПД) № {d.Number} по заказу {order.Number}", value, 0),
+                StockOperationKind.ServiceAct => new SettlementRowDto(d.DocumentDate, $"Акт оказания услуг № {d.Number} по заказу {order.Number}", value, 0),
+                _ => new SettlementRowDto(d.DocumentDate, $"Возврат от покупателя № {d.Number} по заказу {order.Number}", 0, value, 1),
+            };
         });
     }
 
@@ -151,7 +156,8 @@ public sealed class SettlementStatementService(IKnitErpDbContext db, IAccessGuar
         var ids = orders.Keys.ToList();
         var docs = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == org && d.PurchaseOrderId != null && ids.Contains(d.PurchaseOrderId.Value) && d.Status == StockDocumentStatus.Posted
-                        && d.DocumentDate <= to && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.ReturnToSupplier))
+                        && d.DocumentDate <= to
+                        && (d.Kind == StockOperationKind.Receipt || d.Kind == StockOperationKind.ReturnToSupplier || d.Kind == StockOperationKind.SupplierServiceAct))
             .Select(d => new { d.Number, d.DocumentDate, d.Kind, OrderId = d.PurchaseOrderId!.Value, Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity }).ToList() })
             .ToListAsync(ct);
         return docs.Select(d =>
@@ -159,9 +165,14 @@ public sealed class SettlementStatementService(IKnitErpDbContext db, IAccessGuar
             var order = orders[d.OrderId];
             var value = Money.Round(d.Lines.Sum(l => l.Quantity * order.UnitCostWithVat(l.ItemId)));
             var invoice = order.SupplierInvoice is { } si ? $", счёт {si}" : "";
-            return d.Kind == StockOperationKind.Receipt
-                ? new SettlementRowDto(d.DocumentDate, $"Поступление № {d.Number} по заказу {order.Number}{invoice}", 0, value)
-                : new SettlementRowDto(d.DocumentDate, $"Возврат поставщику № {d.Number} по заказу {order.Number}", value, 0, 1);
+            // D354 (сессия 4, Р1): акт услуг поставщика — в кредит, как поступление.
+            return d.Kind switch
+            {
+                StockOperationKind.Receipt => new SettlementRowDto(d.DocumentDate, $"Поступление № {d.Number} по заказу {order.Number}{invoice}", 0, value),
+                StockOperationKind.SupplierServiceAct =>
+                    new SettlementRowDto(d.DocumentDate, $"Акт услуг поставщика № {d.Number} по заказу {order.Number}{invoice}", 0, value),
+                _ => new SettlementRowDto(d.DocumentDate, $"Возврат поставщику № {d.Number} по заказу {order.Number}", value, 0, 1),
+            };
         });
     }
 }

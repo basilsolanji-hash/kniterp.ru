@@ -32,9 +32,10 @@ public sealed record PurchaseOrderRowDto(
     public string StatusName => PurchaseOrder.StatusName(Status);
 }
 
+/// <summary>Строка заказа поставщику. Stocked = false — услуга (D354, сессия 4, Р1): на склад не поступает, закрывается актом поставщика.</summary>
 public sealed record PurchaseOrderLineDto(
     long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Price, decimal? VatPercent,
-    decimal? Amount, decimal? VatAmount, decimal Received, decimal Returned, string? SupplierArticle = null)
+    decimal? Amount, decimal? VatAmount, decimal Received, decimal Returned, string? SupplierArticle = null, bool Stocked = true)
 {
     public decimal Left => Math.Max(0, Quantity - Received + Returned);
 }
@@ -218,8 +219,10 @@ public sealed class PurchaseService(
             .OrderBy(d => d.DocumentDate).ThenBy(d => d.Id)
             .Select(d => new { d.Id, d.Number, d.Kind, d.DocumentDate, d.Status, Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity }).ToList() })
             .ToListAsync(ct);
+        // D354 (сессия 4, Р1): акт услуг поставщика закрывает строку-услугу как поступление — в «получено», суммах и долге.
         decimal Moved(long itemId, StockOperationKind kind) =>
-            docs.Where(d => d.Kind == kind && d.Status == StockDocumentStatus.Posted).SelectMany(d => d.Lines).Where(l => l.ItemId == itemId).Sum(l => l.Quantity);
+            docs.Where(d => StockOperationKinds.OrderKind(d.Kind) == kind && d.Status == StockDocumentStatus.Posted).SelectMany(d => d.Lines)
+                .Where(l => l.ItemId == itemId).Sum(l => l.Quantity);
 
         var prices = ctx.Permissions.Has(Permissions.PriceView);
         // D351 (сессия 4, Р5): артикул поставщика заказа у позиции и подсказка, чей поставщик основной у большинства строк.
@@ -236,17 +239,18 @@ public sealed class PurchaseService(
             mainHint = await db.Counterparties.AsNoTracking().Where(c => c.Id == mainOfMost.Key).Select(c => c.Name).SingleAsync(ct);
         }
 
+        var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D354: строки-услуги закрываются актом
         var lines = order.Lines.Select(l =>
         {
             var item = items[l.ItemId];
             return new PurchaseOrderLineDto(l.ItemId, item.Code, item.Name, item.Symbol, item.Precision, l.Quantity,
                 prices ? l.Price : null, l.VatPercent, prices ? l.Amount : null, prices ? l.VatAmount : null,
                 Moved(l.ItemId, StockOperationKind.Receipt), Moved(l.ItemId, StockOperationKind.ReturnToSupplier),
-                articles.GetValueOrDefault(l.ItemId));
+                articles.GetValueOrDefault(l.ItemId), !services.Contains(l.ItemId));
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);
-        decimal Value(StockOperationKind kind) => Money.Round(docs.Where(d => d.Kind == kind && d.Status == StockDocumentStatus.Posted)
+        decimal Value(StockOperationKind kind) => Money.Round(docs.Where(d => StockOperationKinds.OrderKind(d.Kind) == kind && d.Status == StockDocumentStatus.Posted)
             .SelectMany(d => d.Lines).Sum(l => l.Quantity * order.UnitCostWithVat(l.ItemId)));
 
         var canEdit = ctx.Permissions.Has(Permissions.PurchaseEdit) && prices;
@@ -445,6 +449,31 @@ public sealed class PurchaseService(
         var reason = await DefaultReasonAsync(ctx, StockOperationKind.Receipt, "Закупка у поставщика", ct);
         return await documents.CreateWithLinesAsync(StockOperationKind.Receipt,
             new StockDocumentHeader(order.WarehouseId, null, order.SupplierId, reason, await TodayAsync(ctx, ct), $"По заказу {order.Number}", orderId),
+            lines, ct);
+    }
+
+    /// <summary>
+    /// D354 (сессия 4, Р1): акт услуг поставщика (доработка, доставка) по заказу — черновик со строками-услугами на ещё не закрытое
+    /// количество. Цена и НДС — из заказа, долг поставщику растёт при проведении; движений склада нет. Права — как у поступления.
+    /// </summary>
+    public async Task<long> CreateServiceActAsync(long orderId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.PurchaseView, ct);
+        var order = await LoadOrderAsync(ctx, orderId, ct);
+        var moved = await MovedAsync(ctx, [orderId], ct);
+        var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
+        var lines = order.Lines.Where(l => services.Contains(l.ItemId))
+            .Select(l => (l.ItemId, Quantity: l.Quantity - Net(moved, orderId, l.ItemId))).Where(l => l.Quantity > 0).ToList();
+        if (lines.Count == 0)
+        {
+            throw services.Count == 0
+                ? new BusinessRuleException("purchase.order.no_services", "В заказе нет услуг — акт не нужен, товары оформляются поступлением.")
+                : new BusinessRuleException("purchase.order.services_closed", "Все услуги заказа уже закрыты актами.");
+        }
+
+        var reason = await DefaultReasonAsync(ctx, StockOperationKind.SupplierServiceAct, "Услуги поставщика", ct);
+        return await documents.CreateWithLinesAsync(StockOperationKind.SupplierServiceAct,
+            new StockDocumentHeader(order.WarehouseId, null, order.SupplierId, reason, await TodayAsync(ctx, ct), $"Акт по заказу {order.Number}", orderId),
             lines, ct);
     }
 
@@ -651,6 +680,7 @@ public sealed class PurchaseService(
                         && (asOf == null || d.DocumentDate <= asOf))
             .SelectMany(d => d.Lines.Select(l => new { d.Kind, OrderId = d.PurchaseOrderId!.Value, l.ItemId, l.Quantity }))
             .ToListAsync(ct);
+        docs = docs.Select(d => d with { Kind = StockOperationKinds.OrderKind(d.Kind) }).ToList(); // D354 (сессия 4, Р1): акт — как поступление
         var orderIds = docs.Select(d => d.OrderId).Distinct().ToList();
         var orders = await db.PurchaseOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
         var paid = await db.SupplierPayments.AsNoTracking()
@@ -693,7 +723,7 @@ public sealed class PurchaseService(
                         && d.Status == StockDocumentStatus.Posted)
             .SelectMany(d => d.Lines.Select(l => new { OrderId = d.PurchaseOrderId!.Value, d.Kind, l.ItemId, l.Quantity }))
             .ToListAsync(ct))
-        .Select(x => (x.OrderId, x.Kind, x.ItemId, x.Quantity)).ToList();
+        .Select(x => (x.OrderId, StockOperationKinds.OrderKind(x.Kind), x.ItemId, x.Quantity)).ToList(); // D354: акт — как поступление
 
     /// <summary>Оплаты с фильтрами; фильтры — до проекции в DTO, чтобы запрос переводился в SQL.</summary>
     private IQueryable<SupplierPaymentDto> PaymentsQuery(

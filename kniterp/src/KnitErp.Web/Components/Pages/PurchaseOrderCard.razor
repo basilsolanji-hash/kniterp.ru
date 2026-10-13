@@ -233,6 +233,11 @@ else
         {
             <button type="button" @onclick="ReceiptAsync" disabled="@_busy">@L("Оформить поступление")</button>
         }
+        @* D354 (сессия 4, Р1): строки-услуги (доработка, доставка) закрываются актом поставщика — без движений склада. *@
+        @if (_order.CanCreateDocuments && _order.Status == PurchaseOrderStatus.Confirmed && _order.Lines.Any(l => !l.Stocked && l.Left > 0))
+        {
+            <button type="button" class="secondary" @onclick="ServiceActAsync" disabled="@_busy">@L("Акт услуг поставщика")</button>
+        }
         @if (_order.CanCreateDocuments && _order.Received != ReceiptState.None)
         {
             <button type="button" class="secondary" @onclick="ReturnAsync" disabled="@_busy">@L("Оформить возврат")</button>
@@ -484,6 +489,8 @@ else
     private Task CancelAsync() => RunAsync(() => Purchases.CancelOrderAsync(Id, _order!.RowVersion), L("Заказ отменён."));
 
     private Task ReceiptAsync() => GoAsync(() => Purchases.CreateReceiptAsync(Id));
+
+    private Task ServiceActAsync() => GoAsync(() => Purchases.CreateServiceActAsync(Id));
 
     private Task ReturnAsync() => GoAsync(() => Purchases.CreateReturnAsync(Id));
 

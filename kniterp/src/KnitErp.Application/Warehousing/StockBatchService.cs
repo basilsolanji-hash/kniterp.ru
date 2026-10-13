@@ -395,6 +395,11 @@ public sealed class StockBatchService(IKnitErpDbContext db, IAccessGuard guard, 
             throw new NotFoundException("Документ");
         }
 
+        if (StockOperationKinds.IsServiceAct(doc.Kind))
+        {
+            return new DocumentBatchesDto(false, true, [], [], doc.RowVersion, []); // D354 (сессия 4, Р1): у услуг партий нет
+        }
+
         var itemIds = doc.ItemTotals().Select(l => l.ItemId).ToList();
         var items = await (from i in db.Items.AsNoTracking()
                            join u in db.Units.AsNoTracking() on i.UnitId equals u.Id

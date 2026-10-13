@@ -18,13 +18,34 @@ public enum StockOperationKind : byte
 
     /// <summary>Возврат от покупателя: приход на склад, не больше отгруженного по заказу (D65).</summary>
     CustomerReturn = 7,
+
+    /// <summary>D354 (сессия 4, Р1): акт оказания услуг по заказу покупателя — строки-услуги, проведение без движений склада.</summary>
+    ServiceAct = 8,
+
+    /// <summary>D354: акт услуг поставщика по заказу поставщику (доработка, доставка) — без движений склада.</summary>
+    SupplierServiceAct = 9,
 }
 
 public static class StockOperationKinds
 {
     public static readonly IReadOnlyList<StockOperationKind> All =
         [StockOperationKind.Receipt, StockOperationKind.WriteOff, StockOperationKind.Transfer, StockOperationKind.Inventory,
-         StockOperationKind.ReturnToSupplier, StockOperationKind.Shipment, StockOperationKind.CustomerReturn];
+         StockOperationKind.ReturnToSupplier, StockOperationKind.Shipment, StockOperationKind.CustomerReturn,
+         StockOperationKind.ServiceAct, StockOperationKind.SupplierServiceAct];
+
+    /// <summary>D354 (сессия 4, Р1): акты услуг — документы без движений склада, строки только услуги.</summary>
+    public static bool IsServiceAct(StockOperationKind kind) => kind is StockOperationKind.ServiceAct or StockOperationKind.SupplierServiceAct;
+
+    /// <summary>
+    /// D354: вид в терминах заказа — акт услуг закрывает строку заказа так же, как отгрузка (поступление): «отгружено» по заказу
+    /// покупателя = отгрузки + акты, «получено» по заказу поставщику = поступления + акты поставщика.
+    /// </summary>
+    public static StockOperationKind OrderKind(StockOperationKind kind) => kind switch
+    {
+        StockOperationKind.ServiceAct => StockOperationKind.Shipment,
+        StockOperationKind.SupplierServiceAct => StockOperationKind.Receipt,
+        _ => kind,
+    };
 
     public static string Name(StockOperationKind kind) => kind switch
     {
@@ -35,6 +56,8 @@ public static class StockOperationKinds
         StockOperationKind.ReturnToSupplier => "Возврат поставщику",
         StockOperationKind.Shipment => "Отгрузка покупателю",
         StockOperationKind.CustomerReturn => "Возврат от покупателя",
+        StockOperationKind.ServiceAct => "Акт оказания услуг",
+        StockOperationKind.SupplierServiceAct => "Акт услуг поставщика",
         _ => kind.ToString(),
     };
 }
@@ -74,6 +97,8 @@ public sealed class OperationReason
         (StockOperationKind.ReturnToSupplier, "Возврат поставщику", false),
         (StockOperationKind.Shipment, "Продажа покупателю", false),
         (StockOperationKind.CustomerReturn, "Возврат от покупателя", false),
+        (StockOperationKind.ServiceAct, "Оказание услуг", false), // D354 (сессия 4, Р1); то же — в миграции CatServiceActs
+        (StockOperationKind.SupplierServiceAct, "Услуги поставщика", false),
     ];
 
     public static OperationReason Create(long organizationId, StockOperationKind kind, string name, bool requiresComment)

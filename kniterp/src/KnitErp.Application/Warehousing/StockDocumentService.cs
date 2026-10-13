@@ -244,13 +244,25 @@ public sealed class StockDocumentService(
         return await StockEntry.ActiveItems(db, ctx.OrganizationId, stockedOnly: true).ToListAsync(ct);
     }
 
+    /// <summary>D354 (сессия 4, Р1): позиции для строк документа вида kind — у акта услуг только услуги, у остальных — хранимые.</summary>
+    public async Task<IReadOnlyList<EntryItemDto>> ListItemsForEntryAsync(StockOperationKind kind, CancellationToken ct = default)
+    {
+        if (!StockOperationKinds.IsServiceAct(kind))
+        {
+            return await ListItemsForEntryAsync(ct);
+        }
+
+        var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
+        return await StockEntry.ActiveServices(db, ctx.OrganizationId).ToListAsync(ct);
+    }
+
     public async Task<long> CreateAsync(StockOperationKind kind, StockDocumentHeader header, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
-        var prefix = StockDocument.NumberPrefix(kind);
+        var prefix = StockDocument.CounterPrefix(kind);
         await ValidateHeaderAsync(ctx, kind, header, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
-        var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, prefix, ct);
+        var number = StockDocument.NumberFromCounter(kind, await DocumentNumbers.NextAsync(db, ctx.OrganizationId, prefix, ct));
         var doc = StockDocument.Create(ctx.OrganizationId, number, kind, header, ctx.UserId, clock.UtcNow);
         db.StockDocuments.Add(doc);
         await db.SaveChangesAsync(ct);
@@ -285,14 +297,15 @@ public sealed class StockDocumentService(
             StockEntry.EnsurePrecision(items.GetValueOrDefault(l.ItemId) ?? throw new NotFoundException("Номенклатура"), l.Quantity);
         }
 
-        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, ids, ct); // D300 (сессия 4)
+        await EnsureLineItemsAsync(ctx, kind, header.SalesOrderId, header.PurchaseOrderId, ids, ct); // D300, D354 (сессия 4)
         foreach (var bundle in lines.Where(l => l.BundleItemId != null).GroupBy(l => l.BundleItemId!.Value))
         {
             await EnsureBundleAsync(ctx, bundle.Key, bundle.First().BundleQuantity ?? 0, ct); // D352 (сессия 4, Р2)
         }
 
         await using var tx = await db.BeginTransactionAsync(ct);
-        var number = await DocumentNumbers.NextAsync(db, ctx.OrganizationId, StockDocument.NumberPrefix(kind), ct);
+        var number = StockDocument.NumberFromCounter(kind,
+            await DocumentNumbers.NextAsync(db, ctx.OrganizationId, StockDocument.CounterPrefix(kind), ct));
         var doc = StockDocument.Create(ctx.OrganizationId, number, kind, header, ctx.UserId, clock.UtcNow);
         doc.ReplaceLines(lines);
         db.StockDocuments.Add(doc);
@@ -323,7 +336,7 @@ public sealed class StockDocumentService(
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
         var item = await StockEntry.ActiveItems(db, ctx.OrganizationId, itemId).SingleOrDefaultAsync(ct) ?? throw new NotFoundException("Номенклатура");
-        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, [itemId], ct); // D300 (сессия 4)
+        await EnsureLineItemsAsync(ctx, doc.Kind, doc.SalesOrderId, doc.PurchaseOrderId, [itemId], ct); // D300, D354 (сессия 4)
         StockEntry.EnsurePrecision(item, quantity);
         var before = doc.Lines.FirstOrDefault(l => l.ItemId == itemId && l.BundleItemId == null)?.Quantity;
         doc.SetLine(itemId, quantity);
@@ -350,7 +363,7 @@ public sealed class StockDocumentService(
     public async Task SetBundleAsync(long id, long bundleItemId, decimal quantity, byte[] rowVersion, CancellationToken ct = default)
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
-        if (!StockDocument.WithCustomer(doc.Kind) || doc.SalesOrderId is not { } orderId)
+        if (doc.Kind is not (StockOperationKind.Shipment or StockOperationKind.CustomerReturn) || doc.SalesOrderId is not { } orderId)
         {
             throw new BusinessRuleException("item.bundle_not_stocked", "Комплект не хранится на складе — в складском документе укажите его компоненты.");
         }
@@ -405,6 +418,12 @@ public sealed class StockDocumentService(
     public async Task<LineImportResult> ImportLinesAsync(long id, Stream file, byte[] rowVersion, CancellationToken ct = default)
     {
         var (ctx, doc) = await LoadForEditAsync(id, rowVersion, ct);
+        if (StockOperationKinds.IsServiceAct(doc.Kind))
+        {
+            // D354 (сессия 4, Р1): строки акта — услуги заказа; загрузка из Excel проверяет хранимые позиции и акту не подходит.
+            throw new BusinessRuleException("stock.service_act.import", "Строки акта услуг берутся из заказа — загрузка из Excel для акта не используется.");
+        }
+
         var (rows, lines) = await StockEntry.ParseLinesAsync(db, spreadsheet, ctx.OrganizationId, file, ct);
         if (rows.Any(r => r.Errors.Count > 0))
         {
@@ -467,7 +486,7 @@ public sealed class StockDocumentService(
             throw new BusinessRuleException("stock.document.archived_item", $"Позиции в архиве: {string.Join(", ", archived.Take(10))}.");
         }
 
-        await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, itemIds, ct); // D300 (сессия 4)
+        await EnsureLineItemsAsync(ctx, doc.Kind, doc.SalesOrderId, doc.PurchaseOrderId, itemIds, ct); // D300, D354 (сессия 4)
         var requiresComment = doc.ReasonId is { } rid
                               && await db.OperationReasons.AsNoTracking().Where(r => r.Id == rid).Select(r => r.RequiresComment).SingleAsync(ct);
         // Аудит 10.10.2026 (п. 2): проверка лимита возврата и проведение — под блокировкой заказа до конца транзакции,
@@ -482,6 +501,19 @@ public sealed class StockDocumentService(
         {
             await db.LockAsync($"kniterp.order.sales.{salesOrderId}", ct);
             await EnsureReturnWithinShippedAsync(ctx, doc, salesOrderId, ct);
+        }
+
+        // D354 (сессия 4, Р1): акт закрывает не больше заказанного за вычетом прежних актов — под блокировкой заказа, как возврат.
+        if (doc.Kind == StockOperationKind.ServiceAct && doc.SalesOrderId is { } actOrderId)
+        {
+            await db.LockAsync($"kniterp.order.sales.{actOrderId}", ct);
+            await EnsureActWithinOrderAsync(ctx, doc, ct);
+        }
+
+        if (doc.Kind == StockOperationKind.SupplierServiceAct && doc.PurchaseOrderId is { } actPurchaseId)
+        {
+            await db.LockAsync($"kniterp.order.purchase.{actPurchaseId}", ct);
+            await EnsureActWithinOrderAsync(ctx, doc, ct);
         }
 
         var batchMoves = await StockBatchLedger.PlanPostAsync(db, ctx, doc, ct);
@@ -567,6 +599,63 @@ public sealed class StockDocumentService(
         foreach (var (warehouseId, itemId, quantity) in deltas)
         {
             db.StockMovements.Add(StockMovement.Create(ctx.OrganizationId, warehouseId, itemId, quantity, doc.DocumentDate, source, doc.Id, clock.UtcNow));
+        }
+    }
+
+    /// <summary>
+    /// D354 (сессия 4, Р1): позиции строк по виду документа. Складской документ — только хранимые позиции (D300); акт услуг —
+    /// только услуги, и каждая есть в строках своего заказа (цена и НДС берутся оттуда).
+    /// </summary>
+    private async Task EnsureLineItemsAsync(
+        AccessContext ctx, StockOperationKind kind, long? salesOrderId, long? purchaseOrderId, IReadOnlyCollection<long> itemIds, CancellationToken ct)
+    {
+        if (!StockOperationKinds.IsServiceAct(kind))
+        {
+            await StockEntry.EnsureStockedAsync(db, ctx.OrganizationId, itemIds, ct);
+            return;
+        }
+
+        await StockEntry.EnsureServicesAsync(db, ctx.OrganizationId, itemIds, ct);
+        var ordered = salesOrderId is { } so
+            ? await db.SalesOrders.AsNoTracking().Where(o => o.Id == so && o.OrganizationId == ctx.OrganizationId)
+                .SelectMany(o => o.Lines.Select(l => l.ItemId)).ToListAsync(ct)
+            : await db.PurchaseOrders.AsNoTracking().Where(o => o.Id == purchaseOrderId && o.OrganizationId == ctx.OrganizationId)
+                .SelectMany(o => o.Lines.Select(l => l.ItemId)).ToListAsync(ct);
+        var missing = itemIds.Except(ordered).ToList();
+        if (missing.Count > 0)
+        {
+            var codes = await db.Items.AsNoTracking().Where(i => missing.Contains(i.Id)).OrderBy(i => i.Code).Select(i => i.Code).ToListAsync(ct);
+            var list = string.Join(", ", codes.Take(10));
+            throw new BusinessRuleException("stock.service_act.not_in_order", $"Этих услуг нет в заказе: {list}. В акт входят только услуги заказа.");
+        }
+    }
+
+    /// <summary>
+    /// D354 (сессия 4, Р1): акт по строке-услуге — не больше заказанного за вычетом других проведённых актов по этому заказу.
+    /// Сторнированный акт не считается — услугу можно закрыть новым актом.
+    /// </summary>
+    private async Task EnsureActWithinOrderAsync(AccessContext ctx, StockDocument doc, CancellationToken ct)
+    {
+        var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
+        var ordered = doc.SalesOrderId is { } so
+            ? await db.SalesOrders.AsNoTracking().Where(o => o.Id == so)
+                .SelectMany(o => o.Lines.Where(l => itemIds.Contains(l.ItemId)).Select(l => new { l.ItemId, l.Quantity })).ToListAsync(ct)
+            : await db.PurchaseOrders.AsNoTracking().Where(o => o.Id == doc.PurchaseOrderId)
+                .SelectMany(o => o.Lines.Where(l => itemIds.Contains(l.ItemId)).Select(l => new { l.ItemId, l.Quantity })).ToListAsync(ct);
+        var closed = await db.StockDocuments.AsNoTracking()
+            .Where(d => d.OrganizationId == ctx.OrganizationId && d.Kind == doc.Kind && d.Status == StockDocumentStatus.Posted && d.Id != doc.Id
+                        && (doc.SalesOrderId != null ? d.SalesOrderId == doc.SalesOrderId : d.PurchaseOrderId == doc.PurchaseOrderId))
+            .SelectMany(d => d.Lines.Where(l => itemIds.Contains(l.ItemId)).Select(l => new { l.ItemId, l.Quantity }))
+            .ToListAsync(ct);
+        var over = doc.Lines.Select(l => (l.ItemId, l.Quantity,
+                Left: ordered.Where(o => o.ItemId == l.ItemId).Sum(o => o.Quantity) - closed.Where(c => c.ItemId == l.ItemId).Sum(c => c.Quantity)))
+            .Where(x => x.Quantity > x.Left).ToList();
+        if (over.Count > 0)
+        {
+            var codes = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.Code, ct);
+            var list = string.Join("; ", over.Take(10).Select(x =>
+                $"{codes[x.ItemId]}: в акте {Quantities.Format(x.Quantity)}, осталось закрыть {Quantities.Format(Math.Max(0, x.Left))}"));
+            throw new BusinessRuleException("stock.service_act.exceeds", $"Акт больше заказанного — {list}.");
         }
     }
 
@@ -661,7 +750,7 @@ public sealed class StockDocumentService(
         {
             var order = await db.PurchaseOrders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)
                         ?? throw new NotFoundException("Заказ поставщику");
-            var allowed = kind == StockOperationKind.Receipt
+            var allowed = kind is StockOperationKind.Receipt or StockOperationKind.SupplierServiceAct // D354: акт — как поступление
                 ? order.Status == KnitErp.Domain.Purchasing.PurchaseOrderStatus.Confirmed
                 : order.Status is KnitErp.Domain.Purchasing.PurchaseOrderStatus.Confirmed or KnitErp.Domain.Purchasing.PurchaseOrderStatus.Closed;
             if (!allowed)
@@ -679,7 +768,7 @@ public sealed class StockDocumentService(
         {
             var order = await db.SalesOrders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == salesId && o.OrganizationId == ctx.OrganizationId, ct)
                         ?? throw new NotFoundException("Заказ покупателя");
-            var allowed = kind == StockOperationKind.Shipment
+            var allowed = kind is StockOperationKind.Shipment or StockOperationKind.ServiceAct // D354: акт — как отгрузка
                 ? order.Status == KnitErp.Domain.Sales.SalesOrderStatus.Confirmed
                 : order.Status is KnitErp.Domain.Sales.SalesOrderStatus.Confirmed or KnitErp.Domain.Sales.SalesOrderStatus.Closed;
             if (!allowed)
