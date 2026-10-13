@@ -180,7 +180,7 @@ public sealed class DevAnalyticsService(IKnitErpDbContext db, IAccessGuard guard
                 ["Версий рисунка на модель", N(r.PatternVersionsPerModel)], ["Образцов передано заказчикам", $"{r.SamplesToCustomers}"],
                 ["Оставлены у заказчиков или проданы", $"{r.SamplesKeptBySoldTo}"], ["Возвращены", $"{r.SamplesReturned}"],
             ]),
-            new("Повторное использование рисунков", ["Рисунок", "Название", "Моделей"],
+            new("Повтор рисунков", ["Рисунок", "Название", "Моделей"],
                 (r.PatternReuse ?? []).Select(x => (IReadOnlyList<string>)[x.Number, x.Name, $"{x.Models}"]).ToList(), new HashSet<int> { 2 }),
             new("Стадии", ["Стадия", "В работе", "Дольше нормы", "Просрочен запуск", "Среднее, дн."],
                 r.Stages.Select(s => (IReadOnlyList<string>)[s.Name, $"{s.Open}", $"{s.Overdue}", $"{s.Late}", N(s.AvgDays)]).ToList(), new HashSet<int> { 1, 2, 3, 4 }),
