@@ -1014,12 +1014,8 @@ else
 
     private Task RemoveLineAsync(SalesOrderLineDto l) => RunAsync(() => Sales.RemoveOrderLineAsync(Id, l.ItemId, _order!.RowVersion), null);
 
-    // D350 (сессия 4, Р3): подтверждение не блокируется ценой ниже минимальной — предупреждение со списком позиций.
-    private Task ConfirmAsync() => RunAsync(async () =>
-    {
-        var below = await Sales.ConfirmOrderAsync(Id, _order!.RowVersion);
-        _message = below.Count > 0 ? L("Заказ подтверждён. Ниже минимальной цены: {0}.", string.Join(", ", below)) : L("Заказ подтверждён.");
-    }, null);
+    // D1104 сильнее D350: цена ниже минимальной подтверждается только с правом и причиной (ConfirmOverrideAsync).
+    private Task ConfirmAsync() => RunAsync(() => Sales.ConfirmOrderAsync(Id, _order!.RowVersion), L("Заказ подтверждён."));
 
     private Task CloseAsync() => RunAsync(() => Sales.CloseOrderAsync(Id, _order!.RowVersion), L("Заказ закрыт."));
 

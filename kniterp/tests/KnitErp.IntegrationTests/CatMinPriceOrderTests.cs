@@ -8,8 +8,8 @@ using Microsoft.EntityFrameworkCore;
 namespace KnitErp.IntegrationTests;
 
 /// <summary>
-/// D350 (сессия 4, Р3): цена ниже минимальной в заказе покупателя — подсветка строки, предупреждение при подтверждении и пометка
-/// в журнале; подтверждение не блокируется.
+/// D350 (сессия 4, Р3): цена ниже минимальной в заказе покупателя — подсветка строки. После слияния с продажами действует D1104:
+/// подтверждение с ценой ниже минимальной — только с правом «цена ниже минимальной» и причиной, разрешение пишется в журнал.
 /// </summary>
 public sealed class CatMinPriceOrderTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
@@ -43,12 +43,15 @@ public sealed class CatMinPriceOrderTests(SqlTestHost host) : IClassFixture<SqlT
         Assert.Equal(1000m, dto.Lines.Single(l => l.ItemId == sweater).MinPrice);
         Assert.False(dto.Lines.Single(l => l.ItemId == hat).BelowMinimum);
 
-        var below = await s.Sales.ConfirmOrderAsync(order, dto.RowVersion);
-        Assert.Equal(["СВ-1"], below);
+        // D1104: без причины не подтверждается, с причиной — подтверждается, позиция ниже минимальной — в журнале.
+        Assert.Equal("sales.price.override_reason",
+            (await Assert.ThrowsAsync<KnitErp.Domain.Common.BusinessRuleException>(() => s.Sales.ConfirmOrderAsync(order, dto.RowVersion))).Code);
+        await s.Sales.ConfirmOrderAsync(order, (await s.Sales.GetOrderAsync(order)).RowVersion, "Распродажа");
         Assert.Equal(SalesOrderStatus.Confirmed, (await s.Sales.GetOrderAsync(order)).Status);
         await using var db = host.NewDb();
-        var audit = await db.AuditEntries.Where(a => a.OrganizationId == org.OrganizationId && a.Action == AuditActions.SalesOrderConfirmed).SingleAsync();
-        Assert.Contains("ниже минимальной цены: СВ-1", audit.Reason);
+        var audit = await db.AuditEntries.Where(a => a.OrganizationId == org.OrganizationId && a.Action == AuditActions.SalesPriceOverride).SingleAsync();
+        Assert.Contains("СВ-1", audit.Before);
+        Assert.DoesNotContain("ШП-1", audit.Before);
     }
 
     private async Task<CreatedOrganization> CreateOrgAsync()
