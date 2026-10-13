@@ -129,12 +129,15 @@ public sealed class SettlementStatementService(IKnitErpDbContext db, IAccessGuar
         var docs = await db.StockDocuments.AsNoTracking()
             .Where(d => d.OrganizationId == org && d.SalesOrderId != null && ids.Contains(d.SalesOrderId.Value) && d.Status == StockDocumentStatus.Posted
                         && d.DocumentDate <= to && (d.Kind == StockOperationKind.Shipment || d.Kind == StockOperationKind.CustomerReturn))
-            .Select(d => new { d.Number, d.DocumentDate, d.Kind, OrderId = d.SalesOrderId!.Value, Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity }).ToList() })
+            .Select(d => new { d.Number, d.DocumentDate, d.Kind, OrderId = d.SalesOrderId!.Value,
+                Lines = d.Lines.Select(l => new { l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }).ToList() })
             .ToListAsync(ct);
         return docs.Select(d =>
         {
             var order = orders[d.OrderId];
-            var value = Money.Round(d.Lines.Sum(l => l.Quantity * order.UnitCostWithVat(l.ItemId)));
+            // D352 (сессия 4, Р2): комплект — по цене строки заказа на количество комплектов.
+            var value = Money.Round(BundleLines.InOrderTerms(d.Lines.Select(l => (0, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity)))
+                .Sum(l => l.Quantity * order.UnitCostWithVat(l.ItemId)));
             return d.Kind == StockOperationKind.Shipment
                 ? new SettlementRowDto(d.DocumentDate, $"Отгрузка (УПД) № {d.Number} по заказу {order.Number}", value, 0)
                 : new SettlementRowDto(d.DocumentDate, $"Возврат от покупателя № {d.Number} по заказу {order.Number}", 0, value, 1);

@@ -129,7 +129,9 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             docs = docs.Where(d => EntityOf(d) == only).ToList();
         }
 
-        var itemIds = docs.SelectMany(d => d.Lines.Select(l => l.ItemId)).Distinct().ToList();
+        // D352 (сессия 4, Р2): документ по заказу покупателя выгружается строками заказа — комплект одной строкой, как в УПД.
+        static IReadOnlyList<(long ItemId, decimal Quantity)> Goods(StockDocument d) => d.SalesOrderId is not null ? d.OrderLines() : d.ItemTotals();
+        var itemIds = docs.SelectMany(Goods).Select(l => l.ItemId).Distinct().ToList();
         var items = await (from i in db.Items.AsNoTracking()
                            join u in db.Units.AsNoTracking() on i.UnitId equals u.Id
                            where itemIds.Contains(i.Id)
@@ -196,7 +198,7 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             // Цены — из строк заказа: доля суммы строки заказа по количеству документа.
             IReadOnlyList<(long ItemId, decimal Quantity, decimal Amount, decimal Vat, decimal? VatPercent)> Priced(
                 IEnumerable<(long ItemId, decimal Quantity, decimal Amount, decimal Vat, decimal? VatPercent)> orderLines) =>
-                d.Lines.Select(l =>
+                Goods(d).Select(l =>
                 {
                     var match = orderLines.Where(o => o.ItemId == l.ItemId).ToList();
                     var qty = match.Sum(o => o.Quantity);
@@ -245,7 +247,7 @@ public sealed class EnterpriseDataExportService(IKnitErpDbContext db, IAccessGua
             }
 
             var goods = new XElement(Ed + "Товары");
-            foreach (var l in d.Lines.OrderBy(l => items[l.ItemId].Code))
+            foreach (var l in Goods(d).OrderBy(l => items[l.ItemId].Code))
             {
                 var row = new XElement(Ed + "Строка", ItemRef(l.ItemId), UnitRef(l.ItemId), new XElement(Ed + "Количество", Qty(l.Quantity)));
                 if (priced?.FirstOrDefault(p => p.ItemId == l.ItemId) is { Quantity: > 0 } p)

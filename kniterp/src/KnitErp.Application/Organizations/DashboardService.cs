@@ -313,11 +313,13 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                 // Отгрузки и возвраты по заказам: день — в окне двух периодов графика, раньше и позже — только в расчёты.
                 var moved = await (from d in db.StockDocuments.AsNoTracking()
                                    where d.OrganizationId == org && d.SalesOrderId != null && d.Status == StockDocumentStatus.Posted
-                                   from l in d.Lines
+                                   // D352 (сессия 4, Р2): комплект — строкой заказа: одна (первая) строка разворота на документ, количество комплектов.
+                                   from l in d.Lines.Where(x => x.BundleItemId == null
+                                                                || x.Id == d.Lines.Where(y => y.BundleItemId == x.BundleItemId).Min(y => y.Id))
                                    join o in db.SalesOrders.AsNoTracking() on d.SalesOrderId equals o.Id
                                    join cp in db.Counterparties.AsNoTracking() on o.CustomerId equals cp.Id
-                                   from ol in o.Lines.Where(x => x.ItemId == l.ItemId).DefaultIfEmpty()
-                                   group l.Quantity by new
+                                   from ol in o.Lines.Where(x => x.ItemId == (l.BundleItemId ?? l.ItemId)).DefaultIfEmpty()
+                                   group (l.BundleQuantity ?? l.Quantity) by new
                                    {
                                        o.CustomerId, cp.Name, d.Kind,
                                        Day = d.DocumentDate >= windowStart && d.DocumentDate <= today ? (DateOnly?)d.DocumentDate : null,
@@ -379,8 +381,11 @@ public sealed class DashboardService(IKnitErpDbContext db, IAccessGuard guard, I
                                        Net = l == null
                                            ? 0m
                                            : db.StockDocuments.Where(d => d.OrganizationId == org && d.SalesOrderId == o.Id && d.Status == StockDocumentStatus.Posted)
-                                               .SelectMany(d => d.Lines.Where(x => x.ItemId == l.ItemId)
-                                                   .Select(x => d.Kind == StockOperationKind.Shipment ? x.Quantity : -x.Quantity))
+                                               // D352 (сессия 4, Р2): строка комплекта — по первой строке его разворота, количеством комплектов.
+                                               .SelectMany(d => d.Lines.Where(x => (x.BundleItemId ?? x.ItemId) == l.ItemId
+                                                                                   && (x.BundleItemId == null
+                                                                                       || x.Id == d.Lines.Where(y => y.BundleItemId == x.BundleItemId).Min(y => y.Id)))
+                                                   .Select(x => d.Kind == StockOperationKind.Shipment ? (x.BundleQuantity ?? x.Quantity) : -(x.BundleQuantity ?? x.Quantity)))
                                                .Sum(),
                                    })
                     .ToListAsync(ct);

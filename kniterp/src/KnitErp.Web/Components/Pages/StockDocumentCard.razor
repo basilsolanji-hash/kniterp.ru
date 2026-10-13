@@ -157,8 +157,37 @@ else
                 }
                 @foreach (var l in _doc.Lines)
                 {
-                    <tr class="@(l.Available is { } a && a < l.Quantity ? "short" : "")">
-                        <td>@l.Code</td>
+                    @if (l.BundleItemId is { } bundleId && _doc.Lines.First(x => x.BundleItemId == bundleId) == l)
+                    {
+                        @* D352 (сессия 4, Р2): комплект — заголовком над своими компонентами; меняется количество комплектов целиком. *@
+                        <tr>
+                            <td><b>@l.BundleCode</b></td>
+                            <td><b>@l.BundleName</b> <span class="muted">@L("комплект — компоненты ниже")</span></td>
+                            <td class="num">
+                                @if (_doc.CanEdit)
+                                {
+                                    <input value="@BundleQtyText(l)" @onchange="e => _bundleQty[bundleId] = e.Value?.ToString() ?? string.Empty" inputmode="decimal" size="6"
+                                           aria-label="@L("Количество комплекта {0}", l.BundleCode)" />
+                                }
+                                else
+                                {
+                                    <b>@Quantities.Format(l.BundleQuantity ?? 0)</b>
+                                }
+                            </td>
+                            <td>@l.BundleUnitSymbol</td>
+                            @if (showAvailable) { <td></td> }
+                            @if (_doc.CanEdit)
+                            {
+                                <td>
+                                    <button type="button" class="secondary" @onclick="() => SetBundleAsync(l)" disabled="@_busy">@L("Изменить")</button>
+                                    <ConfirmButton Class="secondary" OnConfirm="() => RemoveBundleAsync(l)" Disabled="@_busy" AriaLabel="@L("Удалить комплект {0}", l.BundleCode)" Question='@L("Удалить комплект со всеми компонентами?")'>@L("Удалить")</ConfirmButton>
+                                </td>
+                            }
+                        </tr>
+                    }
+                    var total = _doc.Lines.Where(x => x.ItemId == l.ItemId).Sum(x => x.Quantity);
+                    <tr class="@(l.Available is { } a && a < total ? "short" : "")">
+                        <td>@(l.BundleItemId is null ? l.Code : $"↳ {l.Code}")</td>
                         <td>@l.Name</td>
                         <td class="num">@Quantities.Format(l.Quantity)</td>
                         <td>@l.UnitSymbol</td>
@@ -166,9 +195,13 @@ else
                         {
                             <td class="num">@Quantities.Format(l.Available ?? 0)</td>
                         }
-                        @if (_doc.CanEdit)
+                        @if (_doc.CanEdit && l.BundleItemId is null)
                         {
                             <td><ConfirmButton Class="secondary" OnConfirm="() => RemoveLineAsync(l)" Disabled="@_busy" AriaLabel="@L("Удалить строку {0}", l.Code)" Question='@L("Удалить?")'>@L("Удалить")</ConfirmButton></td>
+                        }
+                        else if (_doc.CanEdit)
+                        {
+                            <td></td>
                         }
                     </tr>
                 }
@@ -496,6 +529,25 @@ else
     }, null);
 
     private Task RemoveLineAsync(StockDocumentLineDto line) => RunAsync(() => Documents.RemoveLineAsync(Id, line.ItemId, _doc!.RowVersion), null);
+
+    // D352 (сессия 4, Р2): количество комплекта в отгрузке или возврате по заказу — компоненты пересчитывает сервер.
+    private readonly Dictionary<long, string> _bundleQty = [];
+
+    private string BundleQtyText(StockDocumentLineDto l) =>
+        _bundleQty.TryGetValue(l.BundleItemId!.Value, out var text) ? text : Quantities.Format(l.BundleQuantity ?? 0);
+
+    private Task SetBundleAsync(StockDocumentLineDto l) => RunAsync(async () =>
+    {
+        if (!Quantities.TryParse(BundleQtyText(l), out var qty))
+        {
+            throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));
+        }
+
+        await Documents.SetBundleAsync(Id, l.BundleItemId!.Value, qty, _doc!.RowVersion);
+        _bundleQty.Remove(l.BundleItemId.Value);
+    }, L("Количество комплекта изменено."));
+
+    private Task RemoveBundleAsync(StockDocumentLineDto l) => RunAsync(() => Documents.RemoveBundleAsync(Id, l.BundleItemId!.Value, _doc!.RowVersion), null);
 
     private Task ImportAsync(InputFileChangeEventArgs e) => RunAsync(async () =>
     {

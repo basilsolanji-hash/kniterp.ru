@@ -70,14 +70,16 @@ public sealed class VatInvoiceService(IKnitErpDbContext db, IAccessGuard guard, 
 
         var docs = await q.OrderBy(x => x.d.DocumentDate).ThenBy(x => x.d.Number).Take(MaxRows)
             .Select(x => new { x.d.Id, x.d.Number, x.d.DocumentDate, x.d.Status, OrderId = x.d.SalesOrderId!.Value, x.Name, x.Inn, x.Kpp, x.OrderNumber, x.Seller,
-                Lines = x.d.Lines.Select(l => new { l.ItemId, l.Quantity }).ToList() })
+                Lines = x.d.Lines.Select(l => new { l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity }).ToList() })
             .ToListAsync(ct);
         var orderIds = docs.Select(d => d.OrderId).Distinct().ToList();
         var orders = await db.SalesOrders.AsNoTracking().Include(o => o.Lines).Where(o => orderIds.Contains(o.Id)).ToDictionaryAsync(o => o.Id, ct);
         return docs.Select(d =>
         {
             var order = orders[d.OrderId];
-            var (amount, vat) = d.Lines.Aggregate((Amount: 0m, Vat: 0m), (acc, l) =>
+            // D352 (сессия 4, Р2): комплект — строкой заказа, как в УПД.
+            var ordered = BundleLines.InOrderTerms(d.Lines.Select(l => (0, l.ItemId, l.Quantity, l.BundleItemId, l.BundleQuantity)));
+            var (amount, vat) = ordered.Aggregate((Amount: 0m, Vat: 0m), (acc, l) =>
             {
                 var (a, v) = Money.LineAmounts(l.Quantity, order.Lines.Single(x => x.ItemId == l.ItemId).NetPrice,
                     order.Lines.Single(x => x.ItemId == l.ItemId).VatPercent, order.PricesIncludeVat);

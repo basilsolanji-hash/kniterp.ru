@@ -5250,6 +5250,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
 
+                    b.Property<long?>("BundleItemId")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal?>("BundleQuantity")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<long>("DocumentId")
                         .HasColumnType("bigint");
 
@@ -5261,15 +5267,23 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BundleItemId")
+                        .HasDatabaseName("ix_stock_document_lines_bundle")
+                        .HasFilter("[BundleItemId] IS NOT NULL");
+
                     b.HasIndex("ItemId");
 
-                    b.HasIndex("DocumentId", "ItemId")
+                    b.HasIndex("DocumentId", "ItemId", "BundleItemId")
                         .IsUnique()
-                        .HasDatabaseName("ux_stock_document_lines_doc_item");
+                        .HasDatabaseName("ux_stock_document_lines_doc_item_bundle");
 
                     b.ToTable("stock_document_lines", "kniterp", t =>
                         {
+                            t.HasTrigger("tr_stock_document_lines_bundle");
+
                             t.HasTrigger("tr_stock_document_lines_draft_only");
+
+                            t.HasCheckConstraint("ck_stock_document_lines_bundle", "([BundleItemId] IS NULL AND [BundleQuantity] IS NULL) OR ([BundleItemId] IS NOT NULL AND [BundleQuantity] IS NOT NULL AND [BundleQuantity] > 0)");
 
                             t.HasCheckConstraint("ck_stock_document_lines_quantity", "[Quantity] > 0");
                         });
@@ -7181,6 +7195,12 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("KnitErp.Domain.Warehousing.StockDocumentLine", b =>
                 {
+                    b.HasOne("KnitErp.Domain.Catalog.Item", null)
+                        .WithMany()
+                        .HasForeignKey("BundleItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_document_lines_bundle");
+
                     b.HasOne("KnitErp.Domain.Warehousing.StockDocument", null)
                         .WithMany("Lines")
                         .HasForeignKey("DocumentId")
