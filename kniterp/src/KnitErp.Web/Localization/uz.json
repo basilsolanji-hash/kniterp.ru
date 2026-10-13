@@ -4746,7 +4746,6 @@
   "Сначала выберите станок детали — от него зависит число нитеводителей.": "Avval detal dastgohini tanlang — ip yoʻnaltirgichlar soni unga bogʻliq.",
   "Сначала добавьте детали на вкладке «Детали и заправка».": "Avval «Detallar va ip oʻtkazish» varagʻida detallarni qoʻshing.",
   "Сначала добавьте цвета рисунка.": "Avval naqsh ranglarini qo‘shing.",
-  "Сначала заведите подразделения и должности в разделе «Структура».": "Avval «Tuzilma» boʻlimida boʻlinmalar va lavozimlarni yarating.",
   "Сначала заведите характеристики — например, «Цвет» и «Размер»:": "Avval xususiyatlarni kiriting — masalan, «Rang» va «O'lcham»:",
   "Сначала загрузите файл рисунка текущей версии.": "Avval joriy versiyaning naqsh faylini yuklang.",
   "Сначала перенесите или архивируйте вложенные подразделения.": "Avval ichki boʻlinmalarni koʻchiring yoki arxivlang.",
@@ -6666,5 +6665,7 @@
   "Новое значение: {0}": "Yangi qiymat: {0}",
   "Поиск в списке": "Ro‘yxatdan qidirish",
   "Поиск: {0}": "Qidiruv: {0}",
-  "Есть несохранённые изменения. Уйти без сохранения?": "Saqlanmagan o‘zgarishlar bor. Saqlamasdan chiqasizmi?"
+  "Есть несохранённые изменения. Уйти без сохранения?": "Saqlanmagan o‘zgarishlar bor. Saqlamasdan chiqasizmi?",
+  "Подразделений или должностей пока нет — добавьте их кнопкой «+ Добавить» под списком.": "Bo‘linmalar yoki lavozimlar hali yo‘q — ularni ro‘yxat ostidagi «+ Qo‘shish» tugmasi bilan qo‘shing.",
+  "Подразделений или должностей пока нет — их заводит пользователь с правом «Структура: изменение».": "Bo‘linmalar yoki lavozimlar hali yo‘q — ularni «Tuzilma: o‘zgartirish» huquqiga ega foydalanuvchi kiritadi."
 }

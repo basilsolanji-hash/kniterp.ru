@@ -45,7 +45,9 @@ else
             <h2>@(_mode == Mode.Hire ? L("Приём сотрудника") : L("Карточка: {0}", _target!.FullName))</h2>
             @if (_options is { Departments.Count: 0 } or { Positions.Count: 0 })
             {
-                <p class="muted">@L("Сначала заведите подразделения и должности в разделе «Структура».")</p>
+                <p class="muted">@(CurrentAccess.Has(Permissions.DepartmentEdit)
+                    ? L("Подразделений или должностей пока нет — добавьте их кнопкой «+ Добавить» под списком.")
+                    : L("Подразделений или должностей пока нет — их заводит пользователь с правом «Структура: изменение».") )</p>
             }
             <EditForm Model="_form" OnValidSubmit="SaveAsync" FormName="employee">
                 <div class="grid">
