@@ -310,8 +310,13 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await UploadPatternAsync(page);
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Рисунок");
 
-        // Деталь: станок, вес, заправка, программа машины.
+        // Пряжа и вязка модели (ТЗ §8): плотность на 10 см.
         await page.GetByRole(AriaRole.Tab, new() { Name = "Детали и заправка" }).ClickAsync();
+        await Click(page, "Изменить пряжу и вязку", null);
+        await page.GetByLabel("Петель на 10 см").FillAsync("28");
+        await Click(page, "Сохранить пряжу и вязку", "Пряжа и вязка сохранены");
+
+        // Деталь: станок, вес, заправка, программа машины.
         await page.GetByLabel("Новая деталь").FillAsync("Перед");
         await Click(page, "Добавить деталь", "Деталь добавлена");
         await page.GetByRole(AriaRole.Link, new() { Name = "Перед", Exact = true }).ClickAsync();
@@ -339,6 +344,8 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Click(page, "Добавить точку", null);
         await page.GetByLabel("Длина изделия, размер 46").FillAsync("62");
         await Click(page, "Сохранить табель мер", null);
+        await page.GetByLabel("Вес изделия, размер 46").FillAsync("410");
+        await Click(page, "Сохранить вес", "Вес изделия сохранён");
 
         // Образец № 1 — на доработку; доработка рисунка — его новая версия.
         await page.GetByRole(AriaRole.Tab, new() { Name = "Образцы" }).ClickAsync();

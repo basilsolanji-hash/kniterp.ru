@@ -81,7 +81,11 @@ public sealed record DevSaveResult(int Saved, IReadOnlyList<string> Conflicts);
 public sealed record DevShopSettingsDto(int FactTolerancePercent, IReadOnlyList<DevSectionDto> Sections, int LabelWidthMm, int LabelHeightMm, bool LabelsOnA4,
     bool CanEdit);
 
-public sealed record DevSizeDto(long Id, string Name, bool IsBase, int? PerBox);
+/// <summary>Размер сетки модели; <paramref name="WeightGrams"/> — вес изделия этого размера, г (ТЗ §8).</summary>
+public sealed record DevSizeDto(long Id, string Name, bool IsBase, int? PerBox, decimal? WeightGrams = null);
+
+/// <summary>Точка шаблона табеля мер категории (ТЗ §9): допуск ± см и шаг градации (+ см на размер).</summary>
+public sealed record DevCategoryMeasureDto(long Id, DevCategory Category, string Name, decimal Tolerance, decimal? Step, int SortOrder);
 
 public sealed record DevMeasureDto(long Id, string Name, decimal Tolerance, decimal? Step, IReadOnlyDictionary<long, decimal> Values);
 

@@ -3,7 +3,8 @@
 @inject DevGate Gate
 @inject DevTechService Tech
 
-@* Детали модели (D711): у каждой — техзадание дессинатора и техкарта вязания для цеха. *@
+@* Детали модели (D711): у каждой — техзадание дессинатора и техкарта вязания для цеха. Сверху — пряжа и вязка модели (ТЗ §8). *@
+<DevKnittingBlock ModelId="ModelId" />
 @if (_message is not null)
 {
     <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>

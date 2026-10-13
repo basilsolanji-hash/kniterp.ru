@@ -378,6 +378,95 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         });
     }
 
+    /// <summary>
+    /// Заполнить табель мер по шаблону категории модели (ТЗ §9): добавляются точки шаблона, которых в табеле ещё нет (по названию),
+    /// в порядке шаблона и в пределах <see cref="DevMeasure.MaxPerModel"/>. Возвращает, сколько точек добавлено.
+    /// </summary>
+    public async Task<int> ApplyMeasureTemplateAsync(long modelId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        var added = 0;
+        await RunAsync(async () =>
+        {
+            var model = await tech.FindEditableModelAsync(ctx, modelId, ct);
+            var template = await db.DevCategoryMeasures.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.Category == model.Category)
+                .OrderBy(x => x.SortOrder).ThenBy(x => x.Id).ToListAsync(ct);
+            var existing = await db.DevMeasures.Where(m => m.OrganizationId == ctx.OrganizationId && m.ModelId == modelId)
+                .Select(m => new { m.Name, m.SortOrder }).ToListAsync(ct);
+            var names = new HashSet<string>(existing.Select(e => e.Name), StringComparer.OrdinalIgnoreCase);
+            var order = existing.Count == 0 ? 0 : existing.Max(e => e.SortOrder);
+            var count = existing.Count;
+            var addedNames = new List<string>();
+            foreach (var t in template)
+            {
+                if (names.Contains(t.Name))
+                {
+                    continue;
+                }
+
+                if (count >= DevMeasure.MaxPerModel)
+                {
+                    if (addedNames.Count == 0)
+                    {
+                        throw new BusinessRuleException("dev.measure.limit", $"В табеле мер — не больше {DevMeasure.MaxPerModel} точек.");
+                    }
+
+                    break;
+                }
+
+                db.DevMeasures.Add(DevMeasure.Create(ctx.OrganizationId, modelId, t.Name, t.Tolerance, t.Step, ++order));
+                names.Add(t.Name);
+                addedNames.Add(t.Name);
+                count++;
+            }
+
+            if (addedNames.Count > 0)
+            {
+                Audit(ctx, nameof(DevModel), modelId, null, string.Join(", ", addedNames), $"{model.Number}: табель мер по шаблону категории");
+                await db.SaveOrConflictAsync(ct);
+            }
+
+            added = addedNames.Count;
+        });
+        return added;
+    }
+
+    /// <summary>Вес изделия по размерам, г (ТЗ §8): только размеры этой модели; пустое значение снимает вес.</summary>
+    public async Task SetSizeWeightsAsync(long modelId, IReadOnlyList<(long SizeId, decimal? Grams)> weights, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var model = await tech.FindEditableModelAsync(ctx, modelId, ct);
+            var ids = weights.Select(w => w.SizeId).Distinct().ToList();
+            var sizes = await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId && ids.Contains(s.Id)).ToListAsync(ct);
+            if (sizes.Count != ids.Count)
+            {
+                throw new NotFoundException("Размер");
+            }
+
+            var changed = new List<string>();
+            foreach (var (sizeId, grams) in weights)
+            {
+                var size = sizes.Single(s => s.Id == sizeId);
+                var value = grams is { } g ? decimal.Round(g, 2) : (decimal?)null;
+                if (size.WeightGrams == value)
+                {
+                    continue;
+                }
+
+                size.SetWeight(value);
+                changed.Add($"{size.Name} — {value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—"} г");
+            }
+
+            if (changed.Count > 0)
+            {
+                Audit(ctx, nameof(DevModel), modelId, null, string.Join("; ", changed), $"{model.Number}: вес изделия по размерам");
+                await db.SaveOrConflictAsync(ct);
+            }
+        });
+    }
+
     // ---------- Образцы и факт цеха ----------
 
     public async Task<DevSamplesDto> SamplesAsync(long modelId, CancellationToken ct = default)
@@ -976,7 +1065,7 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
     private IQueryable<DevSizeDto> Sizes(long org, long modelId) =>
         db.DevModelSizes.AsNoTracking().Where(s => s.OrganizationId == org && s.ModelId == modelId).OrderBy(s => s.SortOrder)
-            .Select(s => new DevSizeDto(s.Id, s.Name, s.IsBase, s.PerBox));
+            .Select(s => new DevSizeDto(s.Id, s.Name, s.IsBase, s.PerBox, s.WeightGrams));
 
     private async Task<(List<long> MeasureIds, List<long> SizeIds)> MeasureScopeAsync(AccessContext ctx, long modelId, CancellationToken ct) =>
         (await db.DevMeasures.Where(m => m.OrganizationId == ctx.OrganizationId && m.ModelId == modelId).Select(m => m.Id).ToListAsync(ct),
