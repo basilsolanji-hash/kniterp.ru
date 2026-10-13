@@ -47,6 +47,7 @@ else
             <div><span>@L("Разработка модели, дн.")</span><b>@DevFormat.Number(r.AvgDevelopmentDays)</b></div>
             <div><span>@L("Рисунок, дн.")</span><b>@DevFormat.Number(r.AvgPatternDays)</b></div>
             <div><span>@L("Образцов на модель")</span><b>@DevFormat.Number(r.SamplesPerModel)</b></div>
+            <div><span>@L("Версий рисунка на модель")</span><b>@DevFormat.Number(r.PatternVersionsPerModel)</b></div>
         </div>
 
         <div class="dev-panels">
@@ -77,6 +78,12 @@ else
                     <div><span>@L("На доработку")</span><b>@r.SamplesRework</b></div>
                     <div><span>@L("Отклонены")</span><b>@r.SamplesRejected</b></div>
                     <div><span>@L("Ждут решения")</span><b>@r.SamplesWaiting</b></div>
+                </div>
+                <h3>@L("У заказчиков за период")</h3>
+                <div class="dev-cost-tiles compact">
+                    <div><span>@L("Переданы")</span><b>@r.SamplesToCustomers</b></div>
+                    <div><span>@L("Оставлены или проданы")</span><b>@r.SamplesKeptBySoldTo</b></div>
+                    <div><span>@L("Возвращены")</span><b>@r.SamplesReturned</b></div>
                 </div>
                 <h3>@L("Причины доработок")</h3>
                 @if (r.ReworkReasons.Count == 0)
@@ -112,6 +119,22 @@ else
                             </tbody>
                         </table>
                     </div>
+                }
+            </div>
+            <div class="panel">
+                <h2>@L("Повторное использование рисунков")</h2>
+                @if (r.PatternReuse is not { Count: > 0 } reuse)
+                {
+                    <p class="muted">@L("Пока ни один рисунок не выбран в двух и более моделях.")</p>
+                }
+                else
+                {
+                    <ul class="dev-files">
+                        @foreach (var x in reuse)
+                        {
+                            <li><a href="dev/patterns/@x.PatternId">@x.Number</a> @x.Name — <b>@x.Models</b> @L("моделей")</li>
+                        }
+                    </ul>
                 }
             </div>
             <div class="panel" id="samples-out">

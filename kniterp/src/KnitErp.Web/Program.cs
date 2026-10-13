@@ -573,6 +573,28 @@ app.MapGet("/dev/files/{id:long}", async (long id, string? inline, KnitErp.Appli
     }
 });
 
+// Файл версии рисунка (D727): право, своя организация, журнал скачивания — в сервисе; вложением, без угадывания типа.
+app.MapGet("/dev/pattern-files/{id:long}", async (long id, string? inline, KnitErp.Application.Development.DevPatternService patterns, HttpContext http, CancellationToken ct) =>
+{
+    try
+    {
+        var preview = inline is "1" or "true";
+        var (fileName, contentType, content) = await patterns.GetFileAsync(id, preview, ct);
+        http.Response.Headers.CacheControl = "private, no-store";
+        http.Response.Headers.XContentTypeOptions = "nosniff";
+        http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
+        return preview ? Results.File(content, contentType) : Results.File(content, contentType, fileName);
+    }
+    catch (AccessDeniedException)
+    {
+        return Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+    catch (NotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 // Технический паспорт изделия (D725): PDF; право и своя организация — в сервисе. ?inline=1 — открыть в браузере для печати.
 app.MapGet("/dev/models/{id:long}/passport.pdf", async (long id, string? inline, KnitErp.Application.Development.DevPassportService passports,
     KnitErp.Application.Development.IDevPassportRenderer renderer, HttpContext http, CancellationToken ct) =>

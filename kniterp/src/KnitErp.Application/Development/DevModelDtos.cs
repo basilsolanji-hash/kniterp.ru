@@ -56,7 +56,8 @@ public sealed record DevModelDto(
     IReadOnlyList<DevStageEntryDto> History, IReadOnlyList<DevFileDto> Files, IReadOnlyList<DevStage> MoveTargets, DevStage? NextStage,
     bool CanEdit, bool CanApprove, bool IsLate, bool IsStageOverdue, string CreatedBy, DateTime CreatedAtUtc, byte[] RowVersion,
     IReadOnlyList<string>? Hints = null, bool HasTemplate = false, long? MainSketchFileId = null, int VersionNo = 1, long? PreviousVersionId = null,
-    string? PreviousNumber = null, long? NextVersionId = null, string? NextNumber = null)
+    string? PreviousNumber = null, long? NextVersionId = null, string? NextNumber = null, string? DyeNumber = null, decimal? DensityLoops = null,
+    decimal? DensityRows = null, decimal? ShrinkagePercent = null)
 {
     public string StageName => DevStages.Name(Stage);
     public string CategoryName => DevModel.CategoryName(Category);

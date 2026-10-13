@@ -2,6 +2,7 @@
 @using KnitErp.Application.Development
 @using KnitErp.Domain.Development
 @inject DevModelService Models
+@inject DevPatternService Patterns
 
 <PageTitle>@L("Мои задачи разработки") — knitERP</PageTitle>
 <DevStyles />
@@ -18,6 +19,19 @@ else
 {
     <h1>@L("Мои задачи разработки")</h1>
     <p class="muted">@L("Модели, где вы исполнитель. Сверху — те, что сейчас на вашей стадии; срок стадии — по нормативу из настроек разработки.")</p>
+    @if (_programming is { Count: > 0 })
+    {
+        @* D726: «Рисунок готов к программированию» — задача программисту рисунка, пока к текущей версии нет программы. *@
+        <h2>@L("Рисунки к программированию")</h2>
+        <ul class="dev-tasks">
+            @foreach (var p in _programming)
+            {
+                <li class="now"><a href="dev/patterns/@p.Id"><b>@p.Number</b> @p.Name</a>
+                    <div class="muted small">@L(p.KindName) · @L("версия {0}", p.Version) · @L("нужна программа машины")</div></li>
+            }
+        </ul>
+        <h2>@L("Модели")</h2>
+    }
     @if (_tasks.Count == 0)
     {
         <p class="muted">@L("На вас сейчас нет моделей в работе.")</p>
@@ -47,6 +61,7 @@ else
 
 @code {
     private IReadOnlyList<DevMyTaskDto>? _tasks;
+    private IReadOnlyList<DevPatternRowDto>? _programming;
     private string? _denied;
 
     protected override async Task OnInitializedAsync()
@@ -54,6 +69,7 @@ else
         try
         {
             _tasks = await Models.MyTasksAsync();
+            _programming = await Patterns.MyProgrammingAsync();
         }
         catch (AccessDeniedException ex)
         {

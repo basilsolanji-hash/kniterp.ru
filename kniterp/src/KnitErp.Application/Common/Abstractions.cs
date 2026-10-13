@@ -185,6 +185,13 @@ public interface IKnitErpDbContext : IAsyncDisposable
     DbSet<KnitErp.Domain.Development.DevCategoryTemplate> DevCategoryTemplates { get; }
     DbSet<KnitErp.Domain.Development.DevMachine> DevMachines { get; }
     DbSet<KnitErp.Domain.Development.DevMachineNote> DevMachineNotes { get; }
+    DbSet<KnitErp.Domain.Development.DevPattern> DevPatterns { get; }
+    DbSet<KnitErp.Domain.Development.DevPatternVersion> DevPatternVersions { get; }
+    DbSet<KnitErp.Domain.Development.DevPatternFile> DevPatternFiles { get; }
+    DbSet<KnitErp.Domain.Development.DevPatternColor> DevPatternColors { get; }
+    DbSet<KnitErp.Domain.Development.DevPatternColorway> DevPatternColorways { get; }
+    DbSet<KnitErp.Domain.Development.DevPatternColorwayYarn> DevPatternColorwayYarns { get; }
+    DbSet<KnitErp.Domain.Development.DevCategoryMeasure> DevCategoryMeasures { get; }
     DbSet<KnitErp.Domain.Development.DevModelAccessory> DevModelAccessories { get; }
     DbSet<KnitErp.Domain.Development.DevCostRun> DevCostRuns { get; }
     DbSet<KnitErp.Domain.Development.DevCostLine> DevCostLines { get; }

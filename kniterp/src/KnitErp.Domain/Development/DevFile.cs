@@ -66,6 +66,19 @@ public sealed class DevFile
     /// <summary>Параметры станка на момент загрузки («STOLL CMS 530 · E7 · 8 нитеводителей») — программа хранится вместе с ними.</summary>
     public string? MachineParams { get; private set; }
 
+    /// <summary>Образец, к которому относится фото (D728) — задаётся до вставки.</summary>
+    public long? SampleId { get; private set; }
+
+    public void AttachToSample(long sampleId)
+    {
+        if (Kind != DevFileKind.Photo || Id != 0)
+        {
+            throw new BusinessRuleException("dev.file.sample", "К образцу прикладывается только новое фото.");
+        }
+
+        SampleId = sampleId;
+    }
+
     /// <summary>Привязать программу к детали и станку до сохранения (после вставки файл неизменяем).</summary>
     public void AttachProgram(long detailId, long machineId, string machineParams)
     {

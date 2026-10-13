@@ -61,6 +61,13 @@ public static class DevNotifications
             }
         }
 
+        // D726: рисунки, готовые к программированию, — их программисту.
+        var programming = await DevPatternService.ProgrammerQueue(db, ctx.OrganizationId, me).CountAsync(ct);
+        if (programming > 0)
+        {
+            result.Add(new($"Рисунки ждут программу машины: {programming}", "dev/my", false, $"dev:program:{programming}"));
+        }
+
         // D723: образцы не вернули к сроку — тем, кто ведёт модели (право изменения).
         if (ctx.Permissions.Has(Permissions.DevEdit))
         {

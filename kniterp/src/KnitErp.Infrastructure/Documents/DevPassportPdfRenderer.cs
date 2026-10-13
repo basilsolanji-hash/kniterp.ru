@@ -92,6 +92,27 @@ public sealed class DevPassportPdfRenderer : IDevPassportRenderer
             }
         }
 
+        if (p.Pattern is { } pt)
+        {
+            Heading(sec, "Рисунок");
+            var para = sec.AddParagraph();
+            para.AddFormattedText($"{pt.Number} «{pt.Name}», версия {pt.Version}", TextFormat.Bold);
+            para.AddText(" · " + string.Join(" · ", new[]
+            {
+                pt.Kind, pt.RapportWidth is { } rw ? $"раппорт {rw} петель × {pt.RapportHeight?.ToString(Ru) ?? "—"} рядов" : null,
+                pt.MaxFloatMm is { } f ? $"протяжка до {f.ToString("0.#", Ru)} мм" : null, pt.MachineClass, pt.Colorway is null ? null : $"колорит «{pt.Colorway}»",
+            }.OfType<string>()));
+            if (pt.Colors.Count > 0)
+            {
+                var t = Grid(sec, 12, 50, 24, 26, 74);
+                Header(t, "№", "Цвет", "Доля, %", "Нитеводитель", "Пряжа колорита");
+                foreach (var c in pt.Colors)
+                {
+                    Row(t, c.No.ToString(Ru), c.Name, c.Share?.ToString("0.##", Ru) ?? "—", c.Feeder?.ToString(Ru) ?? "—", c.Yarn ?? "—");
+                }
+            }
+        }
+
         if (p.Palette.Count > 0)
         {
             Heading(sec, "Палитра и пряжа");
@@ -100,6 +121,23 @@ public sealed class DevPassportPdfRenderer : IDevPassportRenderer
             foreach (var c in p.Palette)
             {
                 Row(t, c.Label, c.ItemName ?? "—", c.Note ?? "");
+            }
+        }
+
+        // Пряжа и вязка модели (ТЗ §8): номер краски, плотность на 10 см, усадка после ВТО.
+        var knitting = new (string Label, string? Value)[]
+        {
+            ("Номер краски", p.DyeNumber), ("Петель на 10 см", Num(p.DensityLoops)), ("Рядов на 10 см", Num(p.DensityRows)),
+            ("Усадка после ВТО", p.ShrinkagePercent is { } sh ? Num(sh) + " %" : null),
+        }.Where(x => !string.IsNullOrWhiteSpace(x.Value)).ToList();
+        if (knitting.Count > 0)
+        {
+            Heading(sec, "Пряжа и вязка");
+            var para = sec.AddParagraph();
+            for (var i = 0; i < knitting.Count; i++)
+            {
+                para.AddFormattedText((i > 0 ? " · " : "") + knitting[i].Label + ": ", TextFormat.Bold);
+                para.AddText(knitting[i].Value!);
             }
         }
 
@@ -157,9 +195,10 @@ public sealed class DevPassportPdfRenderer : IDevPassportRenderer
             }
         }
 
-        if (p.Measures.Count > 0 && p.Sizes.Count > 0)
+        var hasWeights = p.Sizes.Any(s => s.WeightGrams is not null);
+        if ((p.Measures.Count > 0 || hasWeights) && p.Sizes.Count > 0)
         {
-            Heading(sec, "Табель мер, см");
+            Heading(sec, p.Measures.Count > 0 ? "Табель мер, см" : "Вес изделия по размерам");
             var sizeWidth = Math.Max(10, (PageWidthMm - 56 - 12) / p.Sizes.Count);
             var widths = new List<double> { 56 };
             widths.AddRange(p.Sizes.Select(_ => sizeWidth));
@@ -170,6 +209,11 @@ public sealed class DevPassportPdfRenderer : IDevPassportRenderer
             {
                 Row(t, [.. new[] { m.Name }.Concat(p.Sizes.Select(s => m.Values.TryGetValue(s.Id, out var v) ? v.ToString("0.#", Ru) : "—"))
                     .Append(m.Tolerance.ToString("0.#", Ru))]);
+            }
+
+            if (hasWeights)
+            {
+                Row(t, [.. new[] { "Вес изделия, г" }.Concat(p.Sizes.Select(s => Num(s.WeightGrams) ?? "—")).Append("")]);
             }
 
             if (p.Sizes.Any(s => s.IsBase))
@@ -224,6 +268,8 @@ public sealed class DevPassportPdfRenderer : IDevPassportRenderer
         renderer.PdfDocument.Save(ms, false);
         return ms.ToArray();
     }
+
+    private static string? Num(decimal? value) => value?.ToString("0.##", Ru);
 
     /// <summary>Ширина и высота PNG (IHDR) или JPEG (маркер SOF); не распознано — (0, 0).</summary>
     internal static (int Width, int Height) ImageSize(byte[] b)

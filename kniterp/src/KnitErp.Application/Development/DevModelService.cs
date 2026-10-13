@@ -30,7 +30,7 @@ public sealed record DevStagePlan(IReadOnlyDictionary<DevStage, (int PlanDays, b
 /// Модели разработки (D701–D708): список и доска по стадиям, карточка, задание, исполнители, стадии и их история, файлы, «Мои задачи».
 /// Смотреть — «Разработка: просмотр», менять — «Разработка: изменение», утверждать — «Разработка: утверждение».
 /// </summary>
-public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock)
+public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IImageShrinker? images = null)
 {
     public const int DefaultPageSize = 50;
 
@@ -144,7 +144,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             targets, next, canEdit && !DevStages.IsFinal(m.Stage), canApprove,
             DevModel.IsLate(m.Stage, m.PlannedLaunch, today), DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), clock.UtcNow),
             users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false }, m.MainSketchFileId,
-            m.VersionNo, m.PreviousVersionId, previous?.Number, next2?.Id, next2?.Number);
+            m.VersionNo, m.PreviousVersionId, previous?.Number, next2?.Id, next2?.Number, m.DyeNumber, m.DensityLoops, m.DensityRows, m.ShrinkagePercent);
     }
 
     /// <summary>
@@ -292,6 +292,33 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             return Task.CompletedTask;
         }, ct);
 
+    /// <summary>Пряжа и вязка (ТЗ §8): номер краски, плотность петель и рядов на 10 см, усадка после ВТО, %. В журнал — изменённые поля.</summary>
+    public Task SetKnittingAsync(long id, string? dyeNumber, decimal? densityLoops, decimal? densityRows, decimal? shrinkage, byte[] rowVersion,
+        CancellationToken ct = default) =>
+        EditAsync(id, rowVersion, Permissions.DevEdit, (ctx, m) =>
+        {
+            (string Field, string? Value)[] Snapshot() =>
+            [
+                ("номер краски", m.DyeNumber), ("петель на 10 см", Num(m.DensityLoops)), ("рядов на 10 см", Num(m.DensityRows)),
+                ("усадка после ВТО, %", Num(m.ShrinkagePercent)),
+            ];
+
+            var before = Snapshot();
+            m.SetKnitting(dyeNumber, densityLoops, densityRows, shrinkage);
+            var after = Snapshot();
+            for (var i = 0; i < before.Length; i++)
+            {
+                if (before[i].Value != after[i].Value)
+                {
+                    Audit(ctx, AuditActions.DevModelChanged, id, before[i].Value, after[i].Value, $"{m.Number}: {before[i].Field}");
+                }
+            }
+
+            return Task.CompletedTask;
+        }, ct);
+
+    private static string? Num(decimal? value) => value?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
     public Task MoveAsync(long id, DevStage to, string? comment, byte[] rowVersion, CancellationToken ct = default) =>
         EditAsync(id, rowVersion, Permissions.DevEdit, async (ctx, m) =>
         {
@@ -369,6 +396,13 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             var last = await db.DevFiles.AsNoTracking()
                 .Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId && f.Kind == kind && f.FileName == name)
                 .MaxAsync(f => (int?)f.Version, ct) ?? 0;
+            // D729 (ТЗ §13): фото и образцы для вдохновения — до 2000 px по длинной стороне; эскизы, рисунки и документы не трогаем.
+            if (kind is DevFileKind.Photo or DevFileKind.Inspiration && images is not null && DevFileTypes.Detect(kind, name, content) is { } type
+                && images.Shrink(content, type, PhotoMaxSide) is { } smaller && smaller.Length > 0)
+            {
+                content = smaller;
+            }
+
             var file = DevFile.Create(ctx.OrganizationId, modelId, kind, name, content, last + 1, comment, clock.UtcNow, ctx.UserId);
             configure?.Invoke(file);
             db.DevFiles.Add(file);
@@ -463,6 +497,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             .OrderByDescending(t => t.ResponsibleNow).ThenByDescending(t => t.IsOverdue).ThenBy(t => t.StageDue ?? DateOnly.MaxValue)
             .ThenByDescending(t => t.Priority).ToList();
     }
+
+    public const int PhotoMaxSide = 2000;
 
     /// <summary>Номер счётчика «dev.model-000001» → «М-00001».</summary>
     public static string FormatNumber(string counter) =>

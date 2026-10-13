@@ -62,6 +62,11 @@ description: Модуль «Разработка» knitERP (D700–D799) — м�
 - Образец у заказчика (D723) — `DevSample.HandToCustomer` / `CloseCustody`, сервис `DevShopService.HandSampleAsync`,
   `CloseSampleCustodyAsync`, список `SamplesOut` (аналитика, колокольчик, главный экран). Закрыть передачу можно и у переданной/отменённой модели.
 
+- Рисунки (D726–D729) — `DevPatternService` (библиотека, карточка, цвета, колориты, файлы версий, статусы, копия, привязка к модели,
+  очередь программиста `ProgrammerQueue`), страницы `/dev/patterns`, `/dev/patterns/{id}`, блок `DevModelPatternBlock`; версии и
+  файлы рисунка — только вставка; утверждённый рисунок — только новой версией. Сетка — `DevPatternGrid` (PNG/BMP/CSV). Фото —
+  `IImageShrinker` (SkiaSharp) до 2000 px.
+
 ## Частые ошибки
 - Карточка, открытая тем же компонентом с другим `Id` («Создать похожую»), сохраняет поля прошлой модели — сбрасывать состояние
   в `OnParametersSetAsync` при смене `Id`.

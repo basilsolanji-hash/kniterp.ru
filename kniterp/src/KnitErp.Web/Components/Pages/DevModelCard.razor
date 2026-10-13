@@ -188,7 +188,7 @@ else
             @BriefTab
             break;
         case Tab.Details:
-            <DevDetailsTab ModelId="Id" CanEdit="@(m.CanEdit || (CurrentAccess.Has(Permissions.DevPattern) && !DevStages.IsFinal(m.Stage)))" />
+            <DevDetailsTab ModelId="Id" CanEdit="@(m.CanEdit || (CurrentAccess.Has(Permissions.DevPattern) && !DevStages.IsFinal(m.Stage)))" OnModelChanged="LoadAsync" />
             break;
         case Tab.Sizes:
             <DevSizesTab ModelId="Id" />
@@ -426,6 +426,7 @@ else
         }
 
         <DevPaletteBlock ModelId="Id" CanEdit="m.CanEdit" />
+        <DevModelPatternBlock ModelId="Id" RowVersion="m.RowVersion" OnChanged="LoadAsync" />
     };
 
     private RenderFragment FilesTab => __builder =>

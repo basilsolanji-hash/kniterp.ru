@@ -310,8 +310,13 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await UploadPatternAsync(page);
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Рисунок");
 
-        // Деталь: станок, вес, заправка, программа машины.
+        // Пряжа и вязка модели (ТЗ §8): плотность на 10 см.
         await page.GetByRole(AriaRole.Tab, new() { Name = "Детали и заправка" }).ClickAsync();
+        await Click(page, "Изменить пряжу и вязку", null);
+        await page.GetByLabel("Петель на 10 см").FillAsync("28");
+        await Click(page, "Сохранить пряжу и вязку", "Пряжа и вязка сохранены");
+
+        // Деталь: станок, вес, заправка, программа машины.
         await page.GetByLabel("Новая деталь").FillAsync("Перед");
         await Click(page, "Добавить деталь", "Деталь добавлена");
         await page.GetByRole(AriaRole.Link, new() { Name = "Перед", Exact = true }).ClickAsync();
@@ -339,6 +344,8 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Click(page, "Добавить точку", null);
         await page.GetByLabel("Длина изделия, размер 46").FillAsync("62");
         await Click(page, "Сохранить табель мер", null);
+        await page.GetByLabel("Вес изделия, размер 46").FillAsync("410");
+        await Click(page, "Сохранить вес", "Вес изделия сохранён");
 
         // Образец № 1 — на доработку; доработка рисунка — его новая версия.
         await page.GetByRole(AriaRole.Tab, new() { Name = "Образцы" }).ClickAsync();
@@ -347,6 +354,12 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByLabel("Решение").SelectOptionAsync(new SelectOptionValue { Label = "На доработку" });
         await page.GetByLabel("Что не так / комментарий").FillAsync("рисунок съехал на 2 петли");
         await Click(page, "Записать решение", "Решение записано");
+        // ТЗ §8: план доработки образца «На доработку» — что меняем.
+        var sample1 = page.Locator("[data-test=dev-sample-1]");
+        await sample1.GetByLabel("Что меняем").FillAsync("сдвинуть рисунок на 2 петли");
+        await sample1.GetByRole(AriaRole.Button, new() { Name = "Сохранить план доработки", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "План доработки сохранён" })).ToBeVisibleAsync();
+        await Assertions.Expect(sample1.Locator("[data-test=dev-sample-rework]")).ToContainTextAsync("сдвинуть рисунок на 2 петли");
         await UploadPatternAsync(page);
         await Assertions.Expect(page.Locator(".dev-files")).ToContainTextAsync("версия 2");
 
@@ -355,11 +368,33 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByLabel("Размер образца").SelectOptionAsync(new SelectOptionValue { Label = "46" });
         await Click(page, "Новый образец", "Образец создан");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Образец № 2" })).ToBeVisibleAsync();
+        // ТЗ §8: паспорт образца — партия пряжи.
+        var sample2 = page.Locator("[data-test=dev-sample-2]");
+        await sample2.GetByLabel("Партия пряжи").FillAsync("П-2026-17");
+        await sample2.GetByRole(AriaRole.Button, new() { Name = "Сохранить паспорт", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Паспорт образца сохранён" })).ToBeVisibleAsync();
+        await Assertions.Expect(sample2.Locator("[data-test=dev-sample-making]")).ToContainTextAsync("П-2026-17");
         await page.GetByLabel("Замер Длина изделия").First.FillAsync("62.5");
         await Click(page, "Сохранить замеры", "Замеры сохранены");
         await page.GetByLabel("Решение").First.SelectOptionAsync(new SelectOptionValue { Label = "Принят" });
         await page.GetByRole(AriaRole.Button, new() { Name = "Записать решение", Exact = true }).First.ClickAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Решение записано" })).ToBeVisibleAsync();
+
+        // ТЗ §8: сравнение образцов рядом — замеры, вес, фото; на телефоне без горизонтальной прокрутки страницы.
+        var compareBoxes = page.GetByRole(AriaRole.Checkbox, new() { Name = "Сравнить", Exact = true });
+        await Assertions.Expect(compareBoxes).ToHaveCountAsync(2);
+        var compareButton = page.GetByRole(AriaRole.Button, new() { Name = "Сравнить выбранные" });
+        await Assertions.Expect(compareButton).ToBeDisabledAsync();
+        await compareBoxes.Nth(0).CheckAsync();
+        await compareBoxes.Nth(1).CheckAsync();
+        await Assertions.Expect(compareButton).ToBeEnabledAsync();
+        await compareButton.ClickAsync();
+        var compare = page.Locator("[data-test=dev-sample-compare]");
+        await Assertions.Expect(compare).ToContainTextAsync("Длина изделия");
+        await Assertions.Expect(compare).ToContainTextAsync("Образец № 1");
+        await page.SetViewportSizeAsync(390, 844);
+        await AssertNoHorizontalScrollAsync(page, "сравнение образцов");
+        await page.SetViewportSizeAsync(1440, 900);
 
         // Расчёт себестоимости и утверждение.
         await page.GetByRole(AriaRole.Tab, new() { Name = "Себестоимость" }).ClickAsync();
@@ -388,6 +423,67 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Новая версия", Exact = true })).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { Name = "Техпаспорт" })).ToBeVisibleAsync();
         await AssertNoHorizontalScrollAsync(page, "переданная модель");
+    });
+
+    /// <summary>
+    /// D726 (ТЗ §7): библиотека рисунков → новый рисунок → сетка CSV и доли по файлу → пряжа колорита → утверждение → рисунок в модели;
+    /// карточка рисунка на телефоне без горизонтальной прокрутки.
+    /// </summary>
+    [SqlFact]
+    public Task Pattern_library_card_and_model_link() => RunAsync("dev-pattern", false, async page =>
+    {
+        var cls = await app.CreateMachineClassAsync("E7 приёмка " + Random.Shared.Next(100, 999), 8);
+        var yarn = await app.CreateYarnAsync("Шерсть рисунок " + Random.Shared.Next(100, 999));
+        var name = "Олени " + Guid.NewGuid().ToString("N")[..4];
+        await page.GotoAsync("dev/patterns");
+        await Ready(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Новый рисунок", Exact = true }).ClickAsync();
+        await page.GetByLabel("Название").FillAsync(name);
+        await page.GetByLabel("Раппорт: петель").FillAsync("4");
+        await SelectContainingAsync(page.GetByLabel("Класс машины").First, cls);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать рисунок", Exact = true }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/dev/patterns/\d+$"));
+        await Ready(page);
+        var patternUrl = page.Url;
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Черновик");
+
+        // Сетка рисунка и доли цветов по файлу.
+        await Assertions.Expect(page.Locator("input[type=file]").First).ToBeEnabledAsync(); // страница стала интерактивной
+        await page.Locator("input[type=file]").First.SetInputFilesAsync(new FilePayload { Name = "oleni.csv", MimeType = "text/csv", Buffer = "1,1,2,2\n1,2,2,2\n"u8.ToArray() });
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Файл загружен" })).ToBeVisibleAsync();
+        await Click(page, "Посчитать доли по файлу", "Доли посчитаны");
+        await Assertions.Expect(page.GetByText("Сумма долей: 100 %")).ToBeVisibleAsync();
+
+        // Ширина изделия кратна раппорту; пряжа обоих цветов в колорите «Основной».
+        await page.GetByLabel("Ширина изделия, петель").FillAsync("24");
+        await Click(page, "Сохранить свойства", "Свойства сохранены");
+        foreach (var color in new[] { "Цвет 1", "Цвет 2" })
+        {
+            await SelectContainingAsync(page.GetByLabel($"Основной, {color}: пряжа"), yarn);
+            await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Раскладка сохранена" })).ToBeVisibleAsync();
+        }
+
+        await Click(page, "Утвердить рисунок", "Статус рисунка");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждён");
+
+        // Рисунок в модели: версия 1, колорит «Основной».
+        await CreateModelAsync(page, "Свитер с рисунком " + Guid.NewGuid().ToString("N")[..4]);
+        var block = page.Locator(".panel").Filter(new() { Has = page.GetByRole(AriaRole.Heading, new() { Name = "Рисунок модели" }) });
+        await SelectContainingAsync(block.Locator("select").First, name);
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Рисунок модели сохранён" })).ToBeVisibleAsync();
+        await block.GetByLabel("Колорит").SelectOptionAsync(new SelectOptionValue { Label = "Основной" });
+        await Click(page, "Сохранить рисунок модели", "Рисунок модели сохранён");
+        await Assertions.Expect(block).ToContainTextAsync("колорит «Основной»");
+
+        await page.SetViewportSizeAsync(390, 844);
+        await page.GotoAsync(patternUrl);
+        await Ready(page);
+        await Assertions.Expect(page.Locator("main")).ToContainTextAsync("Использован в моделях");
+        await AssertNoHorizontalScrollAsync(page, "карточка рисунка");
+        await page.GotoAsync("dev/patterns");
+        await Ready(page);
+        await Assertions.Expect(page.Locator("table")).ToContainTextAsync(name);
+        await AssertNoHorizontalScrollAsync(page, "библиотека рисунков");
     });
 
     private static async Task UploadPatternAsync(IPage page)

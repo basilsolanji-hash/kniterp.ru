@@ -1,0 +1,169 @@
+@using KnitErp.Application.Development
+@inject DevGate Gate
+@inject DevPatternService Patterns
+
+@*
+    Рисунок модели (D726, ТЗ §7): рисунок из библиотеки, его конкретная версия (не «последняя») и колорит. Изменения рисунка — в его карточке;
+    «Скопировать в модель» создаёт новый рисунок-копию и сразу привязывает его.
+*@
+@if (_p is not null)
+{
+    <div class="panel">
+        <h2>@L("Рисунок модели")</h2>
+        @if (_message is not null)
+        {
+            <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+        }
+        @if (_p.PatternId is { } pid)
+        {
+            <p>
+                <a href="dev/patterns/@pid">@_p.Number</a> @_p.Name · @L("версия {0}", _p.Version?.ToString() ?? "—")@(_p.Colorway is null ? "" : " · " + L("колорит «{0}»", _p.Colorway))
+                @if (_p.CurrentVersion is { } cur && _p.Version < cur) { <span class="tag warn">@L("есть версия {0}", cur)</span> }
+            </p>
+        }
+        else
+        {
+            <p class="muted">@L("Рисунок из библиотеки не выбран.")</p>
+        }
+        @if (_p.CanLink)
+        {
+            <form class="inline-form" @onsubmit="LinkAsync">
+                <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
+                    <label>
+                        @L("Рисунок")
+                        <select value="@_pattern" @onchange="PatternChangedAsync" disabled="@_busy">
+                            <option value="">—</option>
+                            @foreach (var o in _p.Patterns)
+                            {
+                                <option value="@o.Id">@o.Name</option>
+                            }
+                        </select>
+                    </label>
+                    @if (_pattern.Length > 0 && _pattern == _p.PatternId?.ToString())
+                    {
+                        <label>
+                            @L("Версия")
+                            <select @bind="_version">
+                                @foreach (var v in _p.Versions)
+                                {
+                                    <option value="@v">@v</option>
+                                }
+                            </select>
+                        </label>
+                        <label>
+                            @L("Колорит")
+                            <select @bind="_colorway">
+                                <option value="">—</option>
+                                @foreach (var c in _p.Colorways)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    <button type="submit" class="secondary" disabled="@_busy">@L("Сохранить рисунок модели")</button>
+                    @if (_p.PatternId is { } src && CanCopy)
+                    {
+                        <button type="button" class="secondary" disabled="@_busy" @onclick="() => CopyAsync(src)">@L("Скопировать рисунок в модель")</button>
+                    }
+                </fieldset>
+            </form>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public long ModelId { get; set; }
+
+    /// <summary>Версия строки модели — для привязки рисунка (конфликт с другой вкладкой).</summary>
+    [Parameter, EditorRequired]
+    public byte[] RowVersion { get; set; } = [];
+
+    /// <summary>После привязки карточка перечитывает модель (новая версия строки).</summary>
+    [Parameter]
+    public EventCallback OnChanged { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private DevModelPatternDto? _p;
+    private string _pattern = string.Empty;
+    private string _version = string.Empty;
+    private string _colorway = string.Empty;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+    private long _loaded;
+
+    private bool CanCopy => CurrentAccess.Has(Permissions.DevPattern);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded != ModelId)
+        {
+            _loaded = ModelId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _p = await Gate.Run(() => Patterns.ModelPatternAsync(ModelId));
+        _pattern = _p.PatternId?.ToString() ?? string.Empty;
+        _version = (_p.Version ?? _p.Versions.FirstOrDefault()).ToString() ?? string.Empty;
+        _colorway = _p.ColorwayId?.ToString() ?? string.Empty;
+    }
+
+    /// <summary>Другой рисунок — сохраняется сразу с его текущей версией; версию и колорит выбирают после.</summary>
+    private Task PatternChangedAsync(ChangeEventArgs e)
+    {
+        _pattern = e.Value as string ?? string.Empty;
+        return RunAsync(() => Patterns.LinkToModelAsync(ModelId, long.TryParse(_pattern, out var p) ? p : null, null, null, RowVersion), L("Рисунок модели сохранён."));
+    }
+
+    private Task LinkAsync() => RunAsync(() => Patterns.LinkToModelAsync(ModelId, long.TryParse(_pattern, out var p) ? p : null,
+        int.TryParse(_version, out var v) ? v : null, long.TryParse(_colorway, out var c) ? c : null, RowVersion), L("Рисунок модели сохранён."));
+
+    private Task CopyAsync(long patternId) => RunAsync(() => Patterns.CopyAsync(patternId, ModelId), L("Создана копия рисунка и привязана к модели."));
+
+    private async Task RunAsync(Func<Task> action, string success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        var changed = false;
+        try
+        {
+            await Gate.Run(action);
+            _message = success;
+            changed = true;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+
+        if (changed)
+        {
+            await OnChanged.InvokeAsync();
+        }
+    }
+}

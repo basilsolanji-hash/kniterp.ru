@@ -302,6 +302,7 @@ public static class AuditActions
     public const string DevMachineNoted = "dev.machine.noted";
     public const string DevSampleRecorded = "dev.sample.recorded";
     public const string DevSampleCustody = "dev.sample.custody";
+    public const string DevPatternChanged = "dev.pattern.changed";
     // CRM (D600–D699). Телефоны и почты — только маской (D612).
     public const string CrmLeadCreated = "crm.lead.created";
     public const string CrmLeadChanged = "crm.lead.changed";

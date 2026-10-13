@@ -44,6 +44,19 @@ public sealed class DevModelSize
 
     public void SetBase(bool isBase) => IsBase = isBase;
 
+    /// <summary>Вес изделия этого размера, г (ТЗ §8 «вес изделия по размерам», D728).</summary>
+    public decimal? WeightGrams { get; private set; }
+
+    public void SetWeight(decimal? grams)
+    {
+        if (grams is <= 0 or > 100_000)
+        {
+            throw new BusinessRuleException("dev.size.weight", "Вес изделия — больше 0 и не больше 100 кг.");
+        }
+
+        WeightGrams = grams;
+    }
+
     public void Reorder(int sortOrder) => SortOrder = sortOrder;
 }
 
@@ -180,5 +193,49 @@ public static class DevMeasureRules
     {
         var deviation = decimal.Round(fact - plan, 1, MidpointRounding.AwayFromZero);
         return (deviation, Math.Abs(deviation) > tolerance);
+    }
+}
+
+/// <summary>
+/// Шаблон табеля мер по категории изделия (D729, ТЗ §9): точки измерения с допуском и шагом градации. Применяется к модели кнопкой —
+/// добавляет недостающие точки в её табель.
+/// </summary>
+public sealed class DevCategoryMeasure
+{
+    public const int MaxPerCategory = 40;
+
+    private DevCategoryMeasure()
+    {
+    }
+
+    public long Id { get; private set; }
+    public long OrganizationId { get; private set; }
+    public DevCategory Category { get; private set; }
+    public string Name { get; private set; } = string.Empty;
+    public decimal Tolerance { get; private set; }
+    public decimal? Step { get; private set; }
+    public int SortOrder { get; private set; }
+
+    public static DevCategoryMeasure Create(long organizationId, DevCategory category, string? name, decimal tolerance, decimal? step, int sortOrder)
+    {
+        if (!Enum.IsDefined(category))
+        {
+            throw new BusinessRuleException("dev.model.category", "Выберите категорию изделия.");
+        }
+
+        if (tolerance is < 0 or > 50 || step is < -50 or > 50)
+        {
+            throw new BusinessRuleException("dev.measure.tolerance", "Допуск — от 0 до 50 см, шаг градации — от −50 до 50 см.");
+        }
+
+        return new DevCategoryMeasure
+        {
+            OrganizationId = organizationId,
+            Category = category,
+            Name = DomainText.Require(name, DevMeasure.NameMaxLength, "Точка измерения"),
+            Tolerance = tolerance,
+            Step = step,
+            SortOrder = sortOrder,
+        };
     }
 }
