@@ -360,6 +360,8 @@ else
             }
 
 
+            <CrmDealPhotos DealId="Id" CanEdit="@_deal.CanEdit" /> @* D692: фото к сделке (камера телефона) *@
+
             <CrmActivities Target="CrmTarget.Deal" TargetId="Id" CanEdit="@_deal.CanEdit" Version="_feedVersion" />
 
             <Discussion Target="TaggedEntity.CrmDeal" TargetId="Id" />

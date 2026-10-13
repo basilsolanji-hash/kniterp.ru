@@ -314,4 +314,7 @@ public static class AuditActions
     public const string CrmMailingQueued = "crm.mailing.queued";
     public const string CrmMailingScheduled = "crm.mailing.scheduled";
     public const string CrmEmailReceived = "crm.email.received";
+    public const string CrmDealPhotoAdded = "crm.deal_photo.added";
+    public const string CrmDealPhotoChanged = "crm.deal_photo.changed";
+    public const string CrmDealPhotoArchived = "crm.deal_photo.archived";
 }

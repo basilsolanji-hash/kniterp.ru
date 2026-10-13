@@ -3156,6 +3156,75 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                     b.ToTable("crm_deal_participants", "kniterp");
                 });
 
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmDealPhoto", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("ArchivedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long?>("ArchivedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Caption")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<byte[]>("Content")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("varchar(20)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2(3)");
+
+                    b.Property<long>("CreatedByUserId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("DealId")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("OrganizationId")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("SizeBytes")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ArchivedByUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("OrganizationId", "DealId", "IsArchived")
+                        .HasDatabaseName("ix_crm_deal_photos_deal");
+
+                    b.ToTable("crm_deal_photos", "kniterp", t =>
+                        {
+                            t.HasCheckConstraint("ck_crm_deal_photos_archive", "([IsArchived] = 0 AND [ArchivedAtUtc] IS NULL AND [ArchivedByUserId] IS NULL) OR ([IsArchived] = 1 AND [ArchivedAtUtc] IS NOT NULL AND [ArchivedByUserId] IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_crm_deal_photos_size", "[SizeBytes] BETWEEN 1 AND 5242880 AND DATALENGTH([Content]) = [SizeBytes]");
+
+                            t.HasCheckConstraint("ck_crm_deal_photos_type", "[ContentType] IN ('image/jpeg', 'image/png', 'image/webp')");
+                        });
+                });
+
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmDealStageHistory", b =>
                 {
                     b.Property<long>("Id")
@@ -12523,6 +12592,37 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_crm_deal_participants_user");
+                });
+
+            modelBuilder.Entity("KnitErp.Domain.Crm.CrmDealPhoto", b =>
+                {
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("ArchivedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_crm_deal_photos_archived_by");
+
+                    b.HasOne("KnitErp.Domain.Access.UserAccount", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_deal_photos_created_by");
+
+                    b.HasOne("KnitErp.Domain.Organizations.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_deal_photos_organization");
+
+                    b.HasOne("KnitErp.Domain.Crm.CrmDeal", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId", "DealId")
+                        .HasPrincipalKey("OrganizationId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_crm_deal_photos_deal");
                 });
 
             modelBuilder.Entity("KnitErp.Domain.Crm.CrmDealStageHistory", b =>

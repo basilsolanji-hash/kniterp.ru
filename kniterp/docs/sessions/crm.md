@@ -70,6 +70,8 @@
 6. Заголовок секрета MAX обязателен — не ослаблен (тест `CrmMessengerHooksTests`).
 7. «Заказ подтверждён» — через `ISalesOrderEvents` (`CrmSalesOrderEvents`); прямой вызов CRM из `SalesService.ConfirmOrderAsync` удалён
    (D683). **Базе:** при слиянии не возвращайте строку `Crm.CrmDealService.OnOrderConfirmedAsync(...)` в `SalesService`.
+8. **Базе (D693):** `SecurityHeaders` — `Permissions-Policy: microphone=(self)` вместо `microphone=()`: диктовка заметок CRM через Web Speech API
+   браузера. Камера и геолокация не тронуты. Если база против — скажите, кнопка диктовки просто не появится.
 
 ## Следующие шаги (решение владельца)
 - Шаблоны сообщений WhatsApp (вне 24-часового окна) и рассылки в мессенджерах — по согласию, как письма.

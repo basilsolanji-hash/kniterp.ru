@@ -23,6 +23,7 @@ public sealed class CrmServices(KnitErpDbContext db, CrmSettingsService settings
     public required CrmEmailTemplateService Templates { get; init; }
     public required CrmMailboxService Mailbox { get; init; }
     public required CrmDealSalesService DealSales { get; init; }
+    public required CrmDealPhotoService Photos { get; init; }
 
     public KnitErpDbContext Db { get; } = db;
     public CrmSettingsService Settings { get; } = settings;
@@ -73,6 +74,7 @@ public static class CrmTestKit
             Mailbox = new CrmMailboxService(db, guard, user, host.Clock, Imap),
             DealSales = new CrmDealSalesService(db, guard, user, host.Clock, new CustomerInvoiceService(db, guard, user, host.Clock),
                 new SalesOrderDocumentsService(db, guard, user, host.Clock, host.Mail)),
+            Photos = new CrmDealPhotoService(db, guard, user, host.Clock),
         };
     }
 
