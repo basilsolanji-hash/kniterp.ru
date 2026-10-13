@@ -3,6 +3,7 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Web.Components.Shared
 @inject StockDocumentService Documents
+@inject KnitErp.Application.Catalog.PackService PackList
 @inject StockBatchService BatchService
 
 <PageTitle>@(_doc?.Number ?? L("Документ")) — knitERP</PageTitle>
@@ -111,6 +112,7 @@ else
                 </datalist>
             </label>
             <label>@L("Количество") <input @bind="_qtyText" inputmode="decimal" size="10" /></label>
+            <PackCount Packs="@PackLookup.Of(_packs, EntryItem()?.Id)" Precision="@(EntryItem()?.Precision ?? 0)" OnQuantity="q => _qtyText = q" />
             <button type="submit" disabled="@_busy">@L("Добавить")</button>
         </form>
         <div class="actions">
@@ -358,6 +360,14 @@ else
 
     private StockDocumentDto? _doc;
     private IReadOnlyList<EntryItemDto> _items = [];
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Catalog.ItemPackDto>> _packs = PackLookup.Empty;
+
+    private EntryItemDto? EntryItem()
+    {
+        var code = _itemText.Split(" — ", 2)[0].Trim();
+        return _items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
+               ?? (PackLookup.ByBarcode(_packs, code) is { } pack ? _items.FirstOrDefault(i => i.Id == pack.ItemId) : null);
+    }
     private StockDocumentOptions? _options;
     private StockDocumentHeaderFields.Model? _header;
     private LineImportResult? _import;
@@ -378,6 +388,7 @@ else
             if (_doc!.CanEdit)
             {
                 _items = await Documents.ListItemsForEntryAsync();
+                _packs = await PackList.AllAsync(); // D353: упаковки для ввода и скана — один раз
             }
         }
         catch (AccessDeniedException ex)
@@ -482,9 +493,13 @@ else
 
     private Task AddLineAsync() => RunAsync(async () =>
     {
-        var code = _itemText.Split(" — ", 2)[0].Trim();
-        var item = _items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
-                   ?? throw new BusinessRuleException("stock.item.unknown", L("Позиция «{0}» не найдена. Выберите из списка.", _itemText));
+        var item = EntryItem() ?? throw new BusinessRuleException("stock.item.unknown", L("Позиция «{0}» не найдена. Выберите из списка.", _itemText));
+        // D353: скан штрихкода упаковки без количества — к строке добавляется коэффициент упаковки.
+        if (string.IsNullOrWhiteSpace(_qtyText) && PackLookup.ByBarcode(_packs, _itemText) is { } scanned)
+        {
+            _qtyText = Quantities.Format((_doc!.Lines.FirstOrDefault(l => l.ItemId == item.Id)?.Quantity ?? 0) + scanned.Factor);
+        }
+
         if (!Quantities.TryParse(_qtyText, out var qty))
         {
             throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5."));

@@ -3013,5 +3013,9 @@
   "Заказ подтверждён. Ниже минимальной цены: {0}.": "Buyurtma tasdiqlandi. Minimal narxdan past: {0}.",
   "Основной поставщик большинства позиций: {0}.": "Ko‘pchilik pozitsiyalarning asosiy yetkazib beruvchisi: {0}.",
   "арт. поставщика {0}": "yetkazib beruvchi art. {0}",
-  "ниже минимальной цены {0}": "minimal narxdan past {0}"
+  "ниже минимальной цены {0}": "minimal narxdan past {0}",
+  "Укажите число упаковок.": "Qadoqlar sonini kiriting.",
+  "Упаковок": "Qadoqlar",
+  "Число упаковок": "Qadoqlar soni",
+  "в количество": "miqdorga"
 }

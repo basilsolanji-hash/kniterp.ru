@@ -4,6 +4,7 @@
 @using KnitErp.Domain.Warehousing
 @using KnitErp.Domain.Common
 @inject SalesService Sales
+@inject KnitErp.Application.Catalog.PackService PackList
 @inject KnitErp.Application.Warehousing.StockBatchService BatchService
 @inject KnitErp.Application.Finance.MoneyService Money
 @inject SalesStageService StageList
@@ -289,6 +290,7 @@ else
                 </datalist>
             </label>
             <label>@L("Количество") <input @bind="_qtyText" inputmode="decimal" size="8" /></label>
+            <PackCount Packs="@PackLookup.Of(_packs, FindItem()?.Id)" Precision="@(FindItem()?.Precision ?? 0)" OnQuantity="q => _qtyText = q" />
             <label>@(_order.PricesIncludeVat ? L("Цена с НДС") : L("Цена без НДС")) <input @bind="_priceText" inputmode="decimal" size="10" /></label>
             <label>
                 @L("НДС")
@@ -617,6 +619,7 @@ else
             if (_order!.CanEdit)
             {
                 _options = await Sales.GetOptionsAsync(_order.OrderDate);
+                _packs = await PackList.AllAsync(); // D353: упаковки для ввода и скана — один раз
                 _vatText = _options.VatRates.FirstOrDefault()?.Percent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
                 _accounts = CurrentAccess.Has(Permissions.PriceView) ? await Money.OptionsAsync() : [];
             }
@@ -749,6 +752,12 @@ else
     {
         if (FindItem() is { } item)
         {
+            // D353: скан штрихкода упаковки без количества — к строке добавляется коэффициент упаковки.
+            if (string.IsNullOrWhiteSpace(_qtyText) && PackLookup.ByBarcode(_packs, _itemText) is { } scanned)
+            {
+                _qtyText = Quantities.Format((_order!.Lines.FirstOrDefault(l => l.ItemId == item.Id)?.Quantity ?? 0) + scanned.Factor);
+            }
+
             _itemText = $"{item.Code} — {item.Name}";
             _vatText = item.VatPercent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             // Цена основного вида из карточки (D79) — если цену ещё не ввели.
@@ -765,8 +774,11 @@ else
         var code = _itemText.Split(" — ", 2)[0].Trim();
         return _options?.Items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
                ?? _options?.Items.FirstOrDefault(i => i.Article is not null && string.Equals(i.Article, code, StringComparison.OrdinalIgnoreCase))
-               ?? _options?.Items.FirstOrDefault(i => i.Barcodes is not null && i.Barcodes.Split(' ').Contains(code));
+               ?? _options?.Items.FirstOrDefault(i => i.Barcodes is not null && i.Barcodes.Split(' ').Contains(code))
+               ?? (PackLookup.ByBarcode(_packs, code) is { } pack ? _options?.Items.FirstOrDefault(i => i.Id == pack.ItemId) : null); // D353: штрихкод упаковки
     }
+
+    private IReadOnlyDictionary<long, IReadOnlyList<KnitErp.Application.Catalog.ItemPackDto>> _packs = PackLookup.Empty;
 
     private void EditLine(SalesOrderLineDto l)
     {

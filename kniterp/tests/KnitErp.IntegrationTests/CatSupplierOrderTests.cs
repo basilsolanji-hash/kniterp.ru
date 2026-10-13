@@ -47,6 +47,24 @@ public sealed class CatSupplierOrderTests(SqlTestHost host) : IClassFixture<SqlT
         Assert.Null((await s.Purchases.GetOrderAsync(old)).MainSupplierHint);
     }
 
+    [SqlFact]
+    public async Task Packs_of_organization_load_once_for_document_entry()
+    {
+        // D353 (сессия 4, Р4): упаковки всех позиций — одним вызовом для ввода «N упаковок» и скана штрихкода упаковки в документах.
+        var org = await CreateOrgAsync();
+        await using var s = host.As(org.OwnerUserId, org.OrganizationId);
+        var piece = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "796").Id;
+        var box = await s.Catalog.CreateUnitAsync(new UnitCommand("BOX", "Коробка тест", "кор", 0));
+        var hat = await s.Catalog.CreateItemAsync(new ItemCommand("ШП-1", "Шапка", ItemType.Finished, piece, null));
+        await s.Catalog.CreateItemAsync(new ItemCommand("ШП-2", "Шапка без упаковки", ItemType.Finished, piece, null));
+        await s.Packs.SetAsync(hat, box, 12, "4600000000015");
+
+        var all = await s.Packs.AllAsync();
+        var pack = Assert.Single(Assert.Single(all).Value);
+        Assert.Equal((hat, 12m, "4600000000015", "кор"), (pack.ItemId, pack.Factor, pack.Barcode, pack.UnitSymbol));
+        Assert.Equal(36m, Packs.ToBase(3, pack.Factor, 0));
+    }
+
     private async Task<CreatedOrganization> CreateOrgAsync()
     {
         int[] w = [2, 4, 10, 3, 5, 9, 4, 6, 8];
