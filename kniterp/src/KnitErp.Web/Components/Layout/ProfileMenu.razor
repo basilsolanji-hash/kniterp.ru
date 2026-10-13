@@ -1,7 +1,8 @@
 @inject PersonalToolsService Personal
 @inject NavigationManager Navigation
 @* D802 (сессия 5): блок пользователя — в правом краю верхней панели. Кнопка: аватар, имя, должность и стрелка (на телефоне —
-   только аватар). Меню: кто вы и где (организация, роли) → действия (вход и коды, смена организации, панель) → «Оформление»
+   только аватар). Меню: кто вы и где (организация, роли) → профиль и пароль, сессии и устройства, смена организации, панель,
+   обучение, поддержка (D807, раздел 0 п. 3) → «Оформление»
    (язык, тема, размер, помощник) → «Выйти», всегда видна внизу; на телефоне меню прокручивается внутри, а не обрезается. *@
 
     <div class="menu-anchor profile-anchor" @onkeydown="@(e => { if (e.Key == "Escape") { _open = false; } })">
@@ -12,7 +13,7 @@
             {
                 <span class="profile-text" aria-hidden="true">
                     <span class="profile-name">@Access.DisplayName</span>
-                    <span class="profile-sub">@L(Access.Subtitle)</span>
+                    <span class="profile-sub">@L(Access.Subtitle) · @Access.OrganizationName</span>
                 </span>
                 <span class="caret" aria-hidden="true">▾</span>
             }
@@ -29,9 +30,12 @@
                     </span>
                 </div>
                 <div class="pm-actions">
-                    <a role="menuitem" class="menu-item" href="security" @onclick="() => _open = false"><Icon Name="settings" Size="16" /><span>@L("Вход и резервные коды")</span></a>
+                    <a role="menuitem" class="menu-item" href="security#password" @onclick="() => _open = false"><Icon Name="settings" Size="16" /><span>@L("Профиль и пароль")</span></a>
+                    <a role="menuitem" class="menu-item" href="security#devices" @onclick="() => _open = false"><Icon Name="links" Size="16" /><span>@L("Сессии и устройства")</span></a>
                     <a role="menuitem" class="menu-item" href="account/organizations" data-enhance-nav="false"><Icon Name="all" Size="16" /><span>@L("Сменить организацию")</span></a>
                     <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(QuickBar.SettingsId))"><Icon Name="favorites" Size="16" /><span>@L("Настроить панель")</span></button>
+                    <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(ToolCatalog.Help))"><Icon Name="help" Size="16" /><span>@L("Обучение")</span></button>
+                    <button type="button" role="menuitem" class="menu-item" @onclick="@(() => Open(ToolCatalog.Support))"><Icon Name="support" Size="16" /><span>@L("Поддержка")</span></button>
                 </div>
                 <div class="menu-caption">@L("Оформление")</div>
                 <div class="pm-row">

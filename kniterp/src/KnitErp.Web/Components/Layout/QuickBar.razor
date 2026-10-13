@@ -11,12 +11,14 @@
                     aria-label="@L("Быстрый поиск (Ctrl+K)")">
                 <Icon Name="search" /><span class="quick-text">@L("Поиск")</span><kbd aria-hidden="true">Ctrl K</kbd>
             </button>
+            @RenderCreate()
             @foreach (var tool in Pinned)
             {
                 @RenderTool(tool, asMenuItem: false)
             }
             <div class="menu-anchor">
-                <button type="button" class="quick-btn labeled" aria-haspopup="menu" aria-expanded="@Expanded("all")" @onclick="@(() => Toggle("all"))">
+                <button type="button" class="quick-btn labeled" aria-haspopup="menu" aria-expanded="@Expanded("all")" @onclick="@(() => Toggle("all"))"
+                        title="@L("Все инструменты")" aria-label="@L("Все инструменты")">
                     <Icon Name="all" /><span class="quick-text">@L("Все инструменты")</span>
                 </button>
                 @if (_menu == "all")
@@ -28,10 +30,13 @@
     }
     else
     {
+        @* D806: на телефоне — поиск, «Создать», уведомления; остальное — в одном меню «Ещё». *@
         @RenderTool(ToolCatalog.Find(ToolCatalog.Search)!, asMenuItem: false)
+        @RenderCreate()
+        @RenderTool(ToolCatalog.Find(ToolCatalog.Notifications)!, asMenuItem: false)
         <div class="menu-anchor">
             <button type="button" class="quick-btn" aria-haspopup="menu" aria-expanded="@Expanded("all")" @onclick="@(() => Toggle("all"))"
-                    title="@L("Инструменты")" aria-label="@L("Инструменты")">
+                    title="@L("Ещё")" aria-label="@L("Ещё")">
                 <Icon Name="all" />
                 @if (Badge > 0)
                 {
@@ -96,14 +101,53 @@
     private IEnumerable<ToolDefinition> Available =>
         ToolCatalog.All.Where(t => t.Id != ToolCatalog.Site || Access.WebsiteUrl is not null);
 
+    /// <summary>
+    /// D806 (раздел 0 ТЗ интерфейса): порядок по умолчанию — уведомления, задачи, календарь, калькулятор, заметки, помощник (после поиска
+    /// и «Создать»). Пока пользователь не менял панель (закреплено умолчание), показывается этот набор; свой выбор — как настроил.
+    /// </summary>
+    private static readonly string[] Recommended =
+        [ToolCatalog.Notifications, ToolCatalog.Tasks, ToolCatalog.Calendar, ToolCatalog.Calculator, ToolCatalog.Notes, ToolCatalog.Assistant];
+
+    private bool IsDefault => Settings.Pinned.SequenceEqual(ToolCatalog.DefaultPinned) || Settings.Pinned.SequenceEqual(ToolCatalog.LegacyDefaultPinned);
+
     private List<ToolDefinition> Pinned =>
-        Settings.Pinned.Select(ToolCatalog.Find).OfType<ToolDefinition>().Where(t => Available.Contains(t) && !ToolCatalog.Fixed.Contains(t.Id)).ToList();
+        (IsDefault ? Recommended : Settings.Pinned).Select(ToolCatalog.Find).OfType<ToolDefinition>()
+            .Where(t => Available.Contains(t) && !ToolCatalog.Fixed.Contains(t.Id)).ToList();
+
+    /// <summary>D806: что можно создать — быстрые действия главной (D108), на которые есть право; сервер проверяет сам.</summary>
+    private IEnumerable<KnitErp.Application.Workspace.DashboardAction> Creatable =>
+        KnitErp.Application.Workspace.DashboardActions.All.Where(a => a.Href.Contains("new=", StringComparison.Ordinal) && Access.Has(a.Permission));
+
+    private RenderFragment RenderCreate() => __builder =>
+    {
+        var items = Creatable.ToList();
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        <div class="menu-anchor">
+            <button type="button" class="quick-btn labeled quick-create" aria-haspopup="menu" aria-expanded="@Expanded("create")" @onclick="@(() => Toggle("create"))"
+                    title="@L("Создать документ или запись")" aria-label="@(Compact ? L("Создать") : null)">
+                <span class="plus" aria-hidden="true">+</span>@if (!Compact) { <span class="quick-text">@L("Создать")</span> }
+            </button>
+            @if (_menu == "create")
+            {
+                <div class="menu menu-wide" role="menu" aria-label="@L("Создать")">
+                    @foreach (var a in items)
+                    {
+                        <a role="menuitem" class="menu-item" href="@a.Href" @onclick="Close"><Icon Name="@a.Icon" Size="16" /><span class="quick-label">@L(a.Title)</span></a>
+                    }
+                </div>
+            }
+        </div>
+    };
 
     private RenderFragment RenderTool(ToolDefinition tool, bool asMenuItem) => __builder =>
     {
         var active = ActiveTool == tool.Id || (tool.Mode == ToolOpenMode.Window && OpenWindows.Contains(tool.Id));
         var css = asMenuItem ? "menu-item" : $"quick-btn{(Compact ? "" : " labeled")}{(active ? " active" : "")}";
-        var label = asMenuItem || !Compact ? null : L(tool.Title);
+        var label = asMenuItem ? null : L(tool.Title); // D806: подпись при наведении и aria-label у каждого значка
         var text = !asMenuItem && !Compact; // D801: подпись видна рядом со значком
         if (tool.Mode == ToolOpenMode.NewTab)
         {

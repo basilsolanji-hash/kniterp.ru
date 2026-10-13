@@ -1472,7 +1472,6 @@
   "сегодня": "bugun",
   "Срочно": "Shoshilinch",
   "Срочные задачи": "Shoshilinch vazifalar",
-  "шт.": "dona",
   "Тёмная": "Qorong'i",
   "Все расчёты с покупателями": "Xaridorlar bilan barcha hisob-kitoblar",
   "Доброе утро": "Xayrli tong",
@@ -6432,5 +6431,16 @@
   "Обмен": "Almashinuv",
   "Организация и доступ": "Tashkilot va kirish",
   "Оформление": "Ko‘rinish",
-  "Профиль: {0}": "Profil: {0}"
+  "Профиль: {0}": "Profil: {0}",
+  "В этом разделе нет страниц, доступных вашей роли. Попросите администратора выдать права.": "Bu bo‘limda sizning rolingizga ochiq sahifalar yo‘q. Administratordan huquq berishni so‘rang.",
+  "Все в разделе": "Bo‘limdagi hammasi",
+  "Главные разделы": "Asosiy bo‘limlar",
+  "Ещё": "Yana",
+  "Найти раздел или документ": "Bo‘lim yoki hujjat topish",
+  "Путь": "Yo‘l",
+  "Раздел не найден": "Bo‘lim topilmadi",
+  "Создать документ или запись": "Hujjat yoki yozuv yaratish",
+  "Профиль и пароль": "Profil va parol",
+  "Сессии и устройства": "Seanslar va qurilmalar",
+  "задачи": "vazifalar"
 }
