@@ -4,6 +4,7 @@
 @using KnitErp.Web.Components.Shared
 @inject StockDocumentService Documents
 @inject StockBatchService BatchService
+@inject KnitErp.Application.Sales.SalesService SalesDocs
 
 <PageTitle>@(_doc?.Number ?? L("Документ")) — knitERP</PageTitle>
 
@@ -313,6 +314,7 @@ else
         }
     }
 
+    <StockDocumentSalesPanel DocumentId="Id" Data="_sales" OnChanged="LoadAsync" /> @* D1108, D1153 (сессия «Продажи») *@
     <div class="actions" style="margin-top: 16px">
         <LabelsButton Lines="@(_doc.Lines.Select(l => (l.ItemId, l.Quantity)))" />
         @if (_doc.CanPost)
@@ -404,7 +406,10 @@ else
     {
         _doc = await Documents.GetAsync(Id);
         _batches = await BatchService.ForDocumentAsync(Id);
+        _sales = await SalesDocs.StockDocumentPanelAsync(Id); // D1108, D1153 (сессия «Продажи»): коды маркировки, качество возврата
     }
+
+    private KnitErp.Application.Sales.StockDocumentSalesDto? _sales;
 
     private string? _scan;
 

@@ -632,7 +632,7 @@ public sealed class SalesTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         var f = await SetUpAsync();
         await using var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId);
         var rules = await s.Stages.RulesAsync();
-        Assert.Equal(6, rules.Count(r => r.StageId != null));
+        Assert.Equal(7, rules.Count(r => r.StageId != null)); // D1150: + «Заказ собран на складе»
         Assert.Null(rules.Single(r => r.Trigger == StageTrigger.PartiallyPaid).StageId);
 
         var receipt = await s.Documents.CreateWithLinesAsync(StockOperationKind.Receipt,

@@ -116,10 +116,30 @@ await page.getByRole('link', { name: 'Счёт-фактура', exact: true }).c
 await page.waitForURL(/docs=upd%2Csf|docs=upd,sf/); await page.waitForFunction(() => document.querySelectorAll('.sheet').length === 4);
 ok('комплект: 3 листа, переключатель форм добавляет счёт-фактуру');
 
+// D1142: прайс-лист — позиция с ценой, отбор «только в наличии», ссылки PDF и Excel.
+await page.goto(`${BASE}/sales-price-list`); await ready(page);
+await page.locator('label:has-text("Поиск") input').fill('ФМ-' + sfx);
+await page.getByRole('button', { name: 'Показать' }).click();
+await page.waitForSelector(`td:has-text("ФМ-${sfx}")`);
+await page.locator('label:has-text("Только в наличии") input').check();
+await page.getByRole('button', { name: 'Показать' }).click();
+await page.waitForSelector(`td:has-text("ФМ-${sfx}")`);
+const pdfHref = await page.getByRole('link', { name: 'PDF', exact: true }).getAttribute('href');
+const pdf = await page.request.get(`${BASE}/${pdfHref}`);
+if (pdf.status() !== 200 || !(await pdf.body()).subarray(0, 4).toString().startsWith('%PDF')) throw new Error('PDF прайс-листа: ' + pdf.status());
+await shot('f-08-price-list');
+ok('прайс-лист: отбор, PDF');
+
+// D1143: журнал «не отгружены полностью» — заказ отгружен полностью, в отборе его нет.
+await page.goto(`${BASE}/sales-orders?unshipped=1`); await ready(page);
+await page.waitForSelector('table');
+if ((await plainText(page.locator('table').first())).includes('Формы ' + sfx)) throw new Error('отгруженный заказ в отборе «не отгружены»');
+ok('журнал: отбор «Не отгружены полностью»');
+
 await page.setViewportSize({ width: 390, height: 844 });
-for (const [url, name] of [[orderUrl, 'order'], [`${BASE}/print/sales-set/${orderId}`, 'set']]) {
+for (const [url, name] of [[orderUrl, 'order'], [`${BASE}/sales-price-list`, 'price-list'], [`${BASE}/print/sales-set/${orderId}`, 'set']]) {
   await page.goto(url); await ready(page);
-  if (name === 'order') await assertNoHorizontalScroll(page, url);
+  if (name !== 'set') await assertNoHorizontalScroll(page, url);
   await shot('f-07-phone-' + name);
 }
 ok('390 px: карточка заказа без горизонтальной прокрутки');

@@ -1,0 +1,73 @@
+@page "/sales-print/packing-list/{Id:long}"
+@layout KnitErp.Web.Components.Layout.PrintLayout
+@using KnitErp.Application.Sales
+@inject SalesService Sales
+
+@* D1151: упаковочный лист отгрузки по нескольким заказам — заказы и позиции, места, вес брутто, способ доставки и трек-номер; без цен. *@
+<PageTitle>@(_doc is null ? "Упаковочный лист" : $"Упаковочный лист {_doc.Number}") — knitERP</PageTitle>
+<style>@@media print { @@page { size: A4 portrait; margin: 12mm; } }</style>
+
+<div class="print-bar">
+    <button type="button" data-print>@L("Печать")</button>
+    <a href="sales-shipments/@Id">@L("← К отгрузке")</a>
+</div>
+
+@if (_error is not null)
+{
+    <div class="sheet portrait"><p>@_error</p></div>
+}
+else if (_doc is null)
+{
+    <div class="sheet portrait"><p>@L("Загрузка…")</p></div>
+}
+else
+{
+    <div class="sheet portrait">
+        <h1>Упаковочный лист № @_doc.Number от @_doc.Date.ToString("dd.MM.yyyy")</h1>
+        <table class="plain">
+            <tr><td style="width: 30%">Отправитель</td><td><b>@_doc.Seller</b>, склад «@_doc.Warehouse»</td></tr>
+            <tr><td>Получатель</td><td><b>@_doc.Customer</b>@(_doc.CustomerAddress is { } a ? ", " + a : "")</td></tr>
+            <tr><td>Способ доставки</td><td>@(_doc.Delivery ?? "—")@(_doc.TrackingNumber is { } t ? $", трек-номер {t}" : "")</td></tr>
+            <tr><td>Мест</td><td>@(_doc.Packages?.ToString() ?? "—")</td></tr>
+            <tr><td>Вес брутто, кг</td><td>@(_doc.GrossWeightKg?.ToString("#,0.###") ?? "—")</td></tr>
+            <tr><td>Заказы</td><td>@string.Join(", ", _doc.Documents.Select(d => $"{d.OrderNumber} (отгрузка {d.DocumentNumber})"))</td></tr>
+        </table>
+        <table class="goods" style="margin-top: 10px">
+            <thead><tr><th>№</th><th>Заказ</th><th>Код</th><th>Наименование</th><th>Кол-во</th><th>Ед.</th></tr></thead>
+            <tbody>
+                @foreach (var l in _doc.Lines)
+                {
+                    <tr><td class="c">@l.No</td><td>@l.OrderNumber</td><td>@l.Code</td><td>@l.Name</td><td class="n">@Quantities.Format(l.Quantity)</td><td class="c">@l.UnitSymbol</td></tr>
+                }
+            </tbody>
+        </table>
+        <p style="margin-top: 10px">Всего строк: @_doc.Lines.Count, единиц: @Quantities.Format(_doc.Lines.Sum(l => l.Quantity))</p>
+        @if (_doc.Comment is not null)
+        {
+            <p>Комментарий: @_doc.Comment</p>
+        }
+        <table class="plain" style="margin-top: 24px">
+            <tr><td style="width: 50%">Упаковал: <span class="line"></span></td><td>Груз принял: <span class="line"></span></td></tr>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private ShipmentGroupDto? _doc;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _doc = await Sales.GetShipmentGroupAsync(Id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+    }
+}

@@ -1,0 +1,193 @@
+@page "/sales-pick-lists/{Id:long}"
+@using KnitErp.Application.Sales
+@using KnitErp.Domain.Sales
+@inject SalesService Sales
+
+@* D1150: задание на сборку — строки по местам хранения, отметка «собрано» по строке или целиком, печать листа сборки. *@
+<PageTitle>@(_list?.Number ?? L("Задание на сборку")) — knitERP</PageTitle>
+<SalesShippingStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_notFound)
+{
+    <h1>@L("Задание на сборку не найдено")</h1>
+    <p><a href="sales-pick-lists">@L("К списку заданий")</a></p>
+}
+else if (_list is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <p><a href="sales-pick-lists">@L("← Задания на сборку")</a></p>
+    <div class="sx-head">
+        <h1>@L("Задание на сборку {0}", _list.Number) <span class="tag">@L(_list.StatusName)</span>@(_list.PartiallyPicked ? " " + L("частично") : "")</h1>
+        <div class="sx-tools">
+            <a class="button secondary" href="sales-print/pick-list/@Id" target="_blank" rel="noopener">@L("Лист сборки")</a>
+        </div>
+    </div>
+    <div class="sx-kv">
+        <div><span>@L("Дата")</span><span>@_list.Date.ToString("dd.MM.yyyy")</span></div>
+        <div><span>@L("Склад")</span><span>@_list.Warehouse</span></div>
+        <div><span>@L("Создал")</span><span>@_list.CreatedBy, @Local(_list.CreatedAtUtc)</span></div>
+        @if (_list.PickedBy is not null)
+        {
+            <div><span>@L("Собрал")</span><span>@_list.PickedBy, @Local(_list.PickedAtUtc!.Value)</span></div>
+        }
+        @if (_list.Comment is not null)
+        {
+            <div><span>@L("Комментарий")</span><span>@_list.Comment</span></div>
+        }
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+
+    <div class="scroll">
+        <table class="sx-table">
+            <thead>
+                <tr>
+                    <th>@L("Место")</th><th>@L("Позиция")</th><th>@L("Заказ")</th><th class="num">@L("К сборке")</th>
+                    @if (_list.Lines.Any(l => l.Stock is not null)) { <th class="num">@L("На складе")</th> }
+                    <th class="num">@L("Собрано")</th>
+                    @if (_list.CanPick) { <th></th> }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in _list.Lines)
+                {
+                    <tr class="@(l.Done ? "" : l.Picked > 0 ? "sx-selected" : "")">
+                        @if (_list.CanPick)
+                        {
+                            <td class="ssh-loc"><input value="@l.Location" @onchange="e => SetLocationAsync(l, e)" maxlength="@SalesPickListLine.LocationMaxLength"
+                                                       placeholder="@L("А-01-02")" aria-label="@L("Место {0}", l.Code)" disabled="@_busy" /></td>
+                        }
+                        else
+                        {
+                            <td>@(l.Location ?? "—")</td>
+                        }
+                        <td>@l.Code <span class="sx-sub">@l.Name</span></td>
+                        <td><a href="sales-orders/@l.OrderId">@l.OrderNumber</a> <span class="sx-sub">@l.Customer</span></td>
+                        <td class="num">@Quantities.Format(l.Quantity) @l.UnitSymbol</td>
+                        @if (_list.Lines.Any(x => x.Stock is not null))
+                        {
+                            <td class="num @(l.Stock < l.Quantity ? "bad" : "")">@(l.Stock is { } s ? Quantities.Format(s) : "—")</td>
+                        }
+                        @if (_list.CanPick)
+                        {
+                            <td class="num ssh-qty"><input value="@Quantities.Format(l.Picked)" @onchange="e => SetPickedAsync(l, e)" inputmode="decimal"
+                                                           aria-label="@L("Собрано {0}", l.Code)" disabled="@_busy" /></td>
+                            <td class="sx-row-actions">
+                                @if (!l.Done)
+                                {
+                                    <button type="button" class="secondary" @onclick="() => PickLineAsync(l)" disabled="@_busy">@L("Собрано")</button>
+                                }
+                            </td>
+                        }
+                        else
+                        {
+                            <td class="num">@Quantities.Format(l.Picked)</td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_list.CanPick)
+    {
+        <div class="actions" style="margin-top: 12px">
+            @if (_list.Status == PickListStatus.Open)
+            {
+                <button type="button" @onclick="PickAllAsync" disabled="@_busy">@L("Собрано полностью")</button>
+                <ConfirmButton Class="secondary" OnConfirm="CancelAsync" Disabled="@_busy" Question='@L("Отменить задание?")'>@L("Отменить задание")</ConfirmButton>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private PickListDto? _list;
+    private bool _busy;
+    private bool _notFound;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+        catch (NotFoundException)
+        {
+            _notFound = true;
+        }
+    }
+
+    private async Task LoadAsync() => _list = await Sales.GetPickListAsync(Id);
+
+    private Task SetPickedAsync(PickLineDto l, ChangeEventArgs e) => RunAsync(() =>
+        Quantities.TryParse(e.Value?.ToString(), out var q)
+            ? Sales.SetPickedAsync(Id, l.Id, q, _list!.RowVersion)
+            : throw new BusinessRuleException("stock.quantity.invalid", L("Укажите количество числом, например 12,5.")), L("Сохранено."));
+
+    private Task PickLineAsync(PickLineDto l) => RunAsync(() => Sales.SetPickedAsync(Id, l.Id, l.Quantity, _list!.RowVersion), L("Сохранено."));
+
+    private Task SetLocationAsync(PickLineDto l, ChangeEventArgs e) => RunAsync(() => Sales.SetPickLocationAsync(Id, l.Id, e.Value?.ToString(), _list!.RowVersion), null);
+
+    private Task PickAllAsync() => RunAsync(() => Sales.PickAllAsync(Id, _list!.RowVersion), L("Задание собрано."));
+
+    private Task CancelAsync() => RunAsync(() => Sales.CancelPickListAsync(Id, _list!.RowVersion), L("Задание отменено."));
+
+    private async Task RunAsync(Func<Task> action, string? success)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+            _message = success;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            try
+            {
+                await LoadAsync();
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+    }
+
+    private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+}

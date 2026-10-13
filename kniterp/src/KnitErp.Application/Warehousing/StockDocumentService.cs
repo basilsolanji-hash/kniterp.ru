@@ -413,6 +413,7 @@ public sealed class StockDocumentService(
         }
 
         await KnitErp.Application.Sales.SalesCredit.EnsureShipmentAsync(db, ctx, doc, clock.UtcNow, ct); // D1105 (сессия «Продажи»)
+        await KnitErp.Application.Sales.SalesShippingHooks.BeforePostAsync(db, ctx, doc, ct); // D1108, D1153 (сессия «Продажи»): коды маркировки, брак возврата
         var batchMoves = await StockBatchLedger.PlanPostAsync(db, ctx, doc, ct);
         doc.Post(ctx.UserId, requiresComment, clock.UtcNow);
         await WriteMovementsAsync(ctx, doc, doc.MovementDeltas(), StockSource.StockDocument, ct);
@@ -427,6 +428,7 @@ public sealed class StockDocumentService(
             await db.SaveChangesAsync(ct);
         }
 
+        await KnitErp.Application.Sales.SalesShippingHooks.AfterPostAsync(db, ctx, this, doc, clock.UtcNow, currentUser.CorrelationId, ct); // D1108, D1151, D1153 (сессия «Продажи»)
         await tx.CommitAsync(ct);
     }
 
@@ -466,6 +468,7 @@ public sealed class StockDocumentService(
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.DocumentDate, ct);
+        await KnitErp.Application.Sales.SalesShippingHooks.BeforeReverseAsync(db, ctx, doc, ct); // D1153, D1159 (сессия «Продажи»)
         var batchMoves = doc.Status == StockDocumentStatus.Posted ? await StockBatchLedger.PlanReverseAsync(db, ctx, doc, ct) : [];
         doc.Reverse(ctx.UserId, reason, clock.UtcNow);
 
@@ -480,6 +483,7 @@ public sealed class StockDocumentService(
         StockBatchLedger.Write(db, ctx, doc, batchMoves, StockSource.StockDocumentReversal, clock.UtcNow);
         Audit(ctx, AuditActions.StockDocumentReversed, doc, "Проведён", "Сторнирован", doc.ReversalReason);
         await ClosedPeriod.SaveAsync(db, ct);
+        await KnitErp.Application.Sales.SalesShippingHooks.AfterReverseAsync(db, ctx, doc, clock.UtcNow, ct); // D1108, D1153 (сессия «Продажи»)
         await tx.CommitAsync(ct);
     }
 

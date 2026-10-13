@@ -1084,6 +1084,7 @@ public sealed partial class SalesService(
             .Where(p => p.OrganizationId == org && p.Status == CustomerPaymentStatus.Posted && (asOf == null || p.PaymentDate <= asOf)
                         && (customerId == null || p.CustomerId == customerId))
             .GroupBy(p => p.CustomerId).Select(g => new { g.Key, Sum = g.Sum(p => p.Amount) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+        await SalesRefunds.SubtractAsync(db, org, customerId is { } only ? [only] : null, asOf, paid, ct); // D1154: возвраты денег покупателю
 
         var moved = docs.GroupBy(d => orders[d.OrderId].CustomerId).ToDictionary(g => g.Key, g => (
             Shipped: Money.Round(g.Where(d => d.Kind == StockOperationKind.Shipment).Sum(d => d.Quantity * orders[d.OrderId].UnitCostWithVat(d.ItemId))),

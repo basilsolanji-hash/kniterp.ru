@@ -21,14 +21,16 @@ public static class SalesDocumentsSetup
             typeof(KnitErp.Web.Components.Pages.SalesCustomerMailTab), KnitErp.Domain.Access.Permissions.SalesView);
     }
 
-    /// <summary>D1140: XML УПД для оператора ЭДО — по проведённой отгрузке, права печатной формы; вложение в windows-1251.</summary>
+    /// <summary>D1140: XML УПД для оператора ЭДО — по проведённой отгрузке, права печатной формы, коды маркировки строк (D1108); вложение в windows-1251.</summary>
     public static void MapUpdXml(this WebApplication app) =>
-        app.MapGet("/sales-documents/upd/{id:long}.xml", async (long id, KnitErp.Application.Printing.PrintService print, IClock clock, HttpContext http,
-            CancellationToken ct) =>
+        app.MapGet("/sales-documents/upd/{id:long}.xml", async (long id, KnitErp.Application.Printing.PrintService print, SalesService sales, IClock clock,
+            HttpContext http, CancellationToken ct) =>
         {
             try
             {
-                var file = await print.UpdXmlAsync(id, null, clock.UtcNow, ct);
+                // D1108: коды маркировки строк (КИЗ) — проданные по отгрузке, для вывода из оборота через ЭДО.
+                var codes = await sales.CodesForShipmentAsync(id, ct);
+                var file = await print.UpdXmlAsync(id, codes.Count == 0 ? null : codes, clock.UtcNow, ct);
                 http.Response.Headers.CacheControl = "no-store";
                 return Results.File(file.Content, "application/xml", file.FileName);
             }
