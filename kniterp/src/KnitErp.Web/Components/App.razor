@@ -560,6 +560,15 @@
         /* D320: подсказка (похожие позиции и т. п.) — не ошибка. */
         .hint.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
         .hint.warn a { color: inherit; margin-left: 6px; }
+        /* D816: строка таблицы открывает объект нажатием в любом месте. */
+        main .scroll table tbody tr[data-row-link] { cursor: pointer; }
+        main .scroll table tbody tr[data-row-link]:hover > td { background: var(--accent-soft-2, var(--field)); }
+        /* D815: список справочника с поиском и «+ Добавить». */
+        .lookup-select { display: inline-flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .lookup-select .lookup-plus { align-self: flex-start; font-size: 13px; min-height: 0; }
+        .lookup-select .lookup-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .lookup-select .lookup-add input { flex: 1; min-width: 140px; }
+        .lookup-select .field-error { color: var(--bad); font-size: 13px; }
         /* D812: фильтры применяются сразу — кнопка «Показать» не нужна (Enter по-прежнему применяет). */
         form[data-autosubmit] .filter-apply { display: none; }
         /* D809: причина у неактивного действия и «только просмотр». */

@@ -1,0 +1,162 @@
+@*
+    D815 (раздел 0 п. 5 ТЗ интерфейса; запрос владельца 13.10, п. 2): список выбора справочника с поиском и «+ Добавить «…»».
+    Новое значение создаёт тот же метод сервиса, что и страница справочника (право проверяет сервер); созданное сразу выбрано.
+    Поиск появляется, когда вариантов больше 12. Без Create — обычный список.
+*@
+<span class="lookup-select">
+    @* Подпись указывает на сам список (for), поиск — между ними и подписан отдельно. *@
+    <label for="@_id">@Label</label>
+    @if (Options.Count + _added.Count > SearchFrom)
+    {
+        <input class="lookup-search" type="search" @bind="_query" @bind:event="oninput" placeholder="@L("Поиск в списке")" aria-label="@L("Поиск: {0}", Label)" disabled="@Disabled" />
+    }
+    <select id="@_id" value="@(Value?.ToString() ?? "")" @onchange="SelectAsync" disabled="@Disabled" required="@Required" title="@Title">
+        @if (AllowEmpty || Value is null)
+        {
+            <option value="">@(EmptyText ?? "—")</option>
+        }
+        @foreach (var o in Visible)
+        {
+            <option value="@o.Id">@o.Name</option>
+        }
+    </select>
+    @if (Create is not null && !Disabled)
+    {
+        @if (_adding)
+        {
+            <span class="lookup-add">
+                <input @bind="_name" @bind:event="oninput" @onkeydown="KeyAsync" maxlength="@MaxLength" placeholder="@L("Новое значение")" aria-label="@L("Новое значение: {0}", Label)" />
+                <button type="button" @onclick="AddAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_name))" title="@(string.IsNullOrWhiteSpace(_name) ? L("Введите название") : null)">@L("Добавить")</button>
+                <button type="button" class="secondary" @onclick="() => { _adding = false; _error = null; }">@L("Отмена")</button>
+            </span>
+        }
+        else
+        {
+            <button type="button" class="link lookup-plus" @onclick="StartAdd">@L("+ Добавить")</button>
+        }
+        @if (_error is not null)
+        {
+            <span class="field-error" role="alert">@_error</span>
+        }
+    }
+</span>
+
+@code {
+    private const int SearchFrom = 12;
+
+    /// <summary>Вариант списка: идентификатор и название.</summary>
+    public sealed record Option(long Id, string Name);
+
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<Option> Options { get; set; } = [];
+
+    [Parameter]
+    public long? Value { get; set; }
+
+    [Parameter]
+    public EventCallback<long?> ValueChanged { get; set; }
+
+    /// <summary>Создание значения (метод сервиса справочника). Нет — «+ Добавить» не показывается.</summary>
+    [Parameter]
+    public Func<string, Task<long>>? Create { get; set; }
+
+    [Parameter]
+    public bool AllowEmpty { get; set; } = true;
+
+    [Parameter]
+    public string? EmptyText { get; set; }
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
+    public bool Required { get; set; }
+
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter]
+    public int MaxLength { get; set; } = 100;
+
+    private readonly string _id = "lk-" + Guid.NewGuid().ToString("N")[..8];
+    private readonly List<Option> _added = [];
+    private string _query = string.Empty;
+    private string _name = string.Empty;
+    private bool _adding;
+    private bool _busy;
+    private string? _error;
+
+    private IEnumerable<Option> Visible
+    {
+        get
+        {
+            var all = Options.Concat(_added.Where(a => Options.All(o => o.Id != a.Id)));
+            if (string.IsNullOrWhiteSpace(_query))
+            {
+                return all;
+            }
+
+            // Выбранное значение остаётся в списке, даже если не подходит под поиск.
+            return all.Where(o => o.Id == Value || o.Name.Contains(_query.Trim(), StringComparison.CurrentCultureIgnoreCase));
+        }
+    }
+
+    private void StartAdd()
+    {
+        _adding = true;
+        _error = null;
+        _name = _query.Trim();
+    }
+
+    private Task SelectAsync(ChangeEventArgs e) =>
+        ValueChanged.InvokeAsync(long.TryParse(e.Value?.ToString(), out var id) ? id : null);
+
+    private async Task KeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await AddAsync();
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        var name = _name.Trim();
+        if (_busy || Create is null || name.Length == 0)
+        {
+            return;
+        }
+
+        // Такое значение уже есть — просто выбираем его, дубль не создаём.
+        var existing = Options.Concat(_added).FirstOrDefault(o => string.Equals(o.Name, name, StringComparison.CurrentCultureIgnoreCase));
+        if (existing is not null)
+        {
+            _adding = false;
+            await ValueChanged.InvokeAsync(existing.Id);
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var id = await Create(name);
+            _added.Add(new Option(id, name));
+            _adding = false;
+            _name = string.Empty;
+            _query = string.Empty;
+            await ValueChanged.InvokeAsync(id);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -4,6 +4,8 @@
 @using KnitErp.Domain.Tagging
 @inject CrmLeadService Leads
 @inject NavigationManager Navigation
+@inject KnitErp.Application.Crm.CrmSettingsService CrmSettings
+@inject KnitErp.Application.Sales.SalesSettingsService SalesSettings
 
 <PageTitle>@(_lead?.Number ?? L("Лид")) — knitERP</PageTitle>
 <CrmStyles />
@@ -128,16 +130,10 @@ else
             <h2>@L("Отказ")</h2>
             <form @onsubmit="RejectAsync">
                 <div class="grid">
-                    <label>
-                        @L("Причина")
-                        <select @bind="_reason" required>
-                            <option value="">—</option>
-                            @foreach (var r in _options.LossReasons)
-                            {
-                                <option value="@r.Id">@r.Name</option>
-                            }
-                        </select>
-                    </label>
+                    @* D815: с поиском и «+ Добавить» (у кого есть право на справочник). *@
+                    <LookupSelect Label="@L("Причина")" Required="true" Options="@(_options.LossReasons.Select(x => new LookupSelect.Option(x.Id, x.Name)).ToList())"
+                                  Value="@(long.TryParse(_reason, out var reasonV) ? reasonV : null)" ValueChanged="@(x => _reason = x?.ToString() ?? string.Empty)"
+                                  Create="@(CurrentAccess.Has(Permissions.CrmSettings) ? name => CrmSettings.CreateReferenceAsync(KnitErp.Domain.Crm.CrmReferenceKind.LossReason, name) : null)" />
                     <label class="wide">@L("Комментарий") <input @bind="_rejectComment" maxlength="@CrmLead.CommentMaxLength" /></label>
                 </div>
                 <div class="actions">
@@ -176,26 +172,14 @@ else
                     <label>@L("Мессенджер") <input @bind="_f.Messenger" maxlength="@CrmText.MessengerMaxLength" placeholder="@L("@имя в Telegram или ссылка")" /></label>
                     <label>@L("Компания") <input @bind="_f.Company" maxlength="@CrmLead.NameMaxLength" /></label>
                     <label>@L("ИНН") <input inputmode="numeric" @bind="_f.Inn" @bind:after="CheckDuplicatesAsync" maxlength="12" /></label>
-                    <label>
-                        @L("Источник")
-                        <select @bind="_f.Source">
-                            <option value="">—</option>
-                            @foreach (var s in _options.Sources)
-                            {
-                                <option value="@s.Id">@s.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label>
-                        @L("Канал продаж")
-                        <select @bind="_f.Channel">
-                            <option value="">—</option>
-                            @foreach (var c in _options.Channels)
-                            {
-                                <option value="@c.Id">@c.Name</option>
-                            }
-                        </select>
-                    </label>
+                    @* D815: с поиском и «+ Добавить» (у кого есть право на справочник). *@
+                    <LookupSelect Label="@L("Источник")" Options="@(_options.Sources.Select(x => new LookupSelect.Option(x.Id, x.Name)).ToList())"
+                                  Value="@(long.TryParse(_f.Source, out var f_SourceV) ? f_SourceV : null)" ValueChanged="@(x => _f.Source = x?.ToString() ?? string.Empty)"
+                                  Create="@(CurrentAccess.Has(Permissions.CrmSettings) ? name => CrmSettings.CreateReferenceAsync(KnitErp.Domain.Crm.CrmReferenceKind.Source, name) : null)" />
+                    @* D815: с поиском и «+ Добавить» (у кого есть право на справочник). *@
+                    <LookupSelect Label="@L("Канал продаж")" Options="@(_options.Channels.Select(x => new LookupSelect.Option(x.Id, x.Name)).ToList())"
+                                  Value="@(long.TryParse(_f.Channel, out var f_ChannelV) ? f_ChannelV : null)" ValueChanged="@(x => _f.Channel = x?.ToString() ?? string.Empty)"
+                                  Create="@(CurrentAccess.Has(Permissions.SalesEdit) ? name => SalesSettings.CreateLookupAsync(KnitErp.Domain.Catalog.LookupKind.SalesChannel, name) : null)" />
                     @if (_lead.CanAll)
                     {
                         <label>

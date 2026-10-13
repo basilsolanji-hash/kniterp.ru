@@ -233,3 +233,98 @@ new MutationObserver(function () {
     kniterpMarkDensity();
     kniterpSyncMascot();
 }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-theme', 'data-density'] });
+
+// ===== Раздел 0 ТЗ интерфейса, п. 6–7 (D816) =====
+(function () {
+    var phone = function () { return window.matchMedia('(max-width: 599px)').matches; };
+    var interactive = 'a, button, input, select, textarea, label, summary, details, [role="button"], [contenteditable]';
+
+    // П. 6: объект открывается нажатием в любом месте строки. Ссылка на карточку — первая ссылка в первых двух ячейках строки
+    // (номер или название); строка помечается data-row-link (курсор-рука). На телефоне строка с «Подробнее» по-прежнему раскрывается.
+    function rowLink(tr) {
+        var cells = Array.prototype.slice.call(tr.children, 0, 2);
+        for (var i = 0; i < cells.length; i++) {
+            var a = cells[i].querySelector('a[href]:not([target]):not([download])');
+            if (a && !a.closest('.row-actions')) return a;
+        }
+        return null;
+    }
+    function markRows() {
+        document.querySelectorAll('main .scroll table:not(.matrix) tbody tr').forEach(function (tr) {
+            var has = !!rowLink(tr);
+            if (has !== tr.hasAttribute('data-row-link')) {
+                if (has) tr.setAttribute('data-row-link', ''); else tr.removeAttribute('data-row-link');
+            }
+        });
+    }
+    document.addEventListener('click', function (e) {
+        if (e.button !== 0 || !e.target.closest) return;
+        var tr = e.target.closest('tr[data-row-link]');
+        if (!tr || e.target.closest(interactive)) return;
+        if (tr.hasAttribute('data-has-opt') && phone()) return; // на телефоне нажатие раскрывает строку
+        var sel = window.getSelection && window.getSelection().toString();
+        if (sel) return; // выделяли текст — не переходим
+        var a = rowLink(tr);
+        if (!a) return;
+        if (e.ctrlKey || e.metaKey || e.shiftKey) { window.open(a.href, '_blank', 'noopener'); return; }
+        a.click(); // переход через ссылку — его перехватывает маршрутизатор Blazor
+    });
+    document.addEventListener('auxclick', function (e) {
+        if (e.button !== 1 || !e.target.closest) return;
+        var tr = e.target.closest('tr[data-row-link]');
+        if (!tr || e.target.closest(interactive)) return;
+        var a = rowLink(tr);
+        if (a) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); }
+    });
+
+    // П. 7: несохранённые изменения. Форма с основной кнопкой отправки (не фильтр) после ввода — «грязная», пока её не отправили
+    // или она не исчезла со страницы. Уход внутри программы спрашивает MainLayout (NavigationLock), закрытие вкладки — браузер.
+    var dirty = null;
+    function primarySubmit(form) { return form.querySelector('button[type="submit"]:not(.secondary):not(.filter-apply):not(.link)'); }
+    function trackedForm(el) {
+        var form = el.closest && el.closest('main form:not([data-autosubmit]):not([data-no-dirty])');
+        return form && primarySubmit(form) ? form : null;
+    }
+    document.addEventListener('input', function (e) { var f = trackedForm(e.target); if (f) dirty = f; });
+    document.addEventListener('submit', function (e) { if (e.target === dirty) dirty = null; }, true);
+    function isDirty() { if (dirty && !dirty.isConnected) dirty = null; return !!dirty; }
+    window.addEventListener('beforeunload', function (e) { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
+
+    // П. 7: Ctrl+S — сохранить: основная кнопка формы, в которой фокус; иначе единственная такая форма на странице.
+    document.addEventListener('keydown', function (e) {
+        if (!(e.ctrlKey || e.metaKey) || !(e.key === 's' || e.key === 'S' || e.key === 'ы' || e.key === 'Ы')) return;
+        var form = document.activeElement && document.activeElement.closest && document.activeElement.closest('main form');
+        if (!form || !primarySubmit(form)) {
+            var forms = Array.prototype.filter.call(document.querySelectorAll('main form:not([data-autosubmit])'), function (f) {
+                var b = primarySubmit(f); return b && b.offsetParent !== null;
+            });
+            form = forms.length === 1 ? forms[0] : null;
+        }
+        if (!form) return;
+        e.preventDefault();
+        var btn = primarySubmit(form);
+        if (!btn || btn.disabled) return;
+        // Поле с фокусом отдаёт значение по событию change — без него форма ушла бы со старым значением.
+        var active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+            active.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        setTimeout(function () { if (form.isConnected) form.requestSubmit(btn); }, 0);
+    });
+
+    // Фильтры НЕ восстанавливаются скриптом: подстановка значений с применением во время загрузки страницы запускала второй
+    // запрос к базе параллельно первому (у вкладки один DbContext — схема Blazor падает). Запоминание фильтров — через адрес
+    // страницы (параметры запроса), по экранам (D816).
+
+    var queued = false;
+    new MutationObserver(function () {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(function () { queued = false; markRows(); });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+
+    window.kniterp = window.kniterp || {};
+    window.kniterp.isDirty = isDirty;
+    window.kniterp.clearDirty = function () { dirty = null; };
+    window.kniterp.confirmLeave = function (text) { return window.confirm(text); };
+})();

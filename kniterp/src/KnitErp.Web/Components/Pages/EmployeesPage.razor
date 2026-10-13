@@ -6,6 +6,7 @@
 @inject EmployeeService Employees
 @inject EmployeeExchangeService Exchange
 @inject KnitErp.Application.Hr.HrSettingsService HrSettings
+@inject KnitErp.Application.Structure.StructureService Structure
 
 <PageTitle>@L("Сотрудники") — knitERP</PageTitle>
 <StepUpDialog @ref="_stepUp" />
@@ -58,26 +59,16 @@ else
                         <label>@L("Дата рождения") <InputDate @bind-Value="_form.BirthDate" /></label>
                         <label class="inline"><InputCheckbox @bind-Value="_form.ShareBirthday" /> @L("Сотрудник согласен, чтобы коллеги видели день рождения (без года)")</label>
                     }
-                    <label>
-                        @L("Подразделение")
-                        <InputSelect @bind-Value="_form.DepartmentId" required>
-                            <option value="0">@L("— выберите —")</option>
-                            @foreach (var d in _options?.Departments ?? [])
-                            {
-                                <option value="@d.Id">@d.Name</option>
-                            }
-                        </InputSelect>
-                    </label>
-                    <label>
-                        @L("Должность")
-                        <InputSelect @bind-Value="_form.PositionId" required>
-                            <option value="0">@L("— выберите —")</option>
-                            @foreach (var p in _options?.Positions ?? [])
-                            {
-                                <option value="@p.Id">@p.Name</option>
-                            }
-                        </InputSelect>
-                    </label>
+                    @* D815: нужного нет в списке — «+ Добавить» здесь же (с правом «Структура: изменение»). *@
+                    <LookupSelect Label="@L("Подразделение")" Required="true" EmptyText="@L("— выберите —")"
+                                  Options="@((_options?.Departments ?? []).Select(x => new LookupSelect.Option(x.Id, x.Name)).ToList())"
+                                  Value="@(_form.DepartmentId == 0 ? null : _form.DepartmentId)" ValueChanged="@(v => _form.DepartmentId = v ?? 0)"
+                                  Create="@(CurrentAccess.Has(Permissions.DepartmentEdit) ? name => Structure.CreateDepartmentAsync(name, null) : null)" />
+                    @* D815: нужного нет в списке — «+ Добавить» здесь же (с правом «Структура: изменение»). *@
+                    <LookupSelect Label="@L("Должность")" Required="true" EmptyText="@L("— выберите —")"
+                                  Options="@((_options?.Positions ?? []).Select(x => new LookupSelect.Option(x.Id, x.Name)).ToList())"
+                                  Value="@(_form.PositionId == 0 ? null : _form.PositionId)" ValueChanged="@(v => _form.PositionId = v ?? 0)"
+                                  Create="@(CurrentAccess.Has(Permissions.DepartmentEdit) ? name => Structure.CreatePositionAsync(name) : null)" />
                 </div>
                 @if (_formError is not null)
                 {

@@ -6659,5 +6659,12 @@
   "Сохранено — панель будет такой же на других устройствах.": "Saqlandi — panel boshqa qurilmalarda ham shunday bo‘ladi.",
   "Сохраняется…": "Saqlanmoqda…",
   "Настройки сохранены.": "Sozlamalar saqlandi.",
-  "Стр.": "Bet"
+  "Стр.": "Bet",
+  "+ Добавить": "+ Qo‘shish",
+  "Введите название": "Nomini kiriting",
+  "Новое значение": "Yangi qiymat",
+  "Новое значение: {0}": "Yangi qiymat: {0}",
+  "Поиск в списке": "Ro‘yxatdan qidirish",
+  "Поиск: {0}": "Qidiruv: {0}",
+  "Есть несохранённые изменения. Уйти без сохранения?": "Saqlanmagan o‘zgarishlar bor. Saqlamasdan chiqasizmi?"
 }

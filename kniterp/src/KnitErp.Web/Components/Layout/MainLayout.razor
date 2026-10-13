@@ -112,6 +112,8 @@
                 <QuickBar Access="_access" Settings="_panel" ActiveTool="@_activeTool" Badge="_badge" OnOpen="OpenTool" OpenWindows="Windows" />
             </header>
         }
+        @* D816 (раздел 0 п. 7): уход со страницы с несохранённой формой — вопрос; ответ «Отмена» оставляет на странице. *@
+        <NavigationLock OnBeforeInternalNavigation="ConfirmLeaveAsync" />
         <main class="main">
             @if (_access is null)
             {
@@ -653,6 +655,28 @@
         var item = Items.Where(i => i.Href.Length == 0 ? route.Length == 0 : Matches(route, i.Href))
             .OrderByDescending(i => i.Href.Length).FirstOrDefault();
         return item is null ? path : path.Contains('/') ? $"{item.Label}: {path[(path.IndexOf('/') + 1)..]}" : item.Label;
+    }
+
+    private async Task ConfirmLeaveAsync(LocationChangingContext context)
+    {
+        try
+        {
+            if (await JS.InvokeAsync<bool>("kniterp.isDirty")
+                && !await JS.InvokeAsync<bool>("kniterp.confirmLeave", L("Есть несохранённые изменения. Уйти без сохранения?")))
+            {
+                context.PreventNavigation();
+                return;
+            }
+
+            await JS.InvokeVoidAsync("kniterp.clearDirty");
+        }
+        catch (JSException)
+        {
+            // Скрипт недоступен — переход не задерживаем.
+        }
+        catch (JSDisconnectedException)
+        {
+        }
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)

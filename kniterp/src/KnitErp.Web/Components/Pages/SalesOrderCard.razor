@@ -8,6 +8,7 @@
 @inject KnitErp.Application.Warehousing.StockBatchService BatchService
 @inject KnitErp.Application.Finance.MoneyService Money
 @inject SalesStageService StageList
+@inject KnitErp.Application.Sales.SalesSettingsService SalesSettings
 @inject CustomerInvoiceService Invoices
 @inject SalesOrderDocumentsService OrderDocuments
 @inject NavigationManager Navigation
@@ -188,34 +189,13 @@ else
                 <form @onsubmit="SaveDetailsAsync">
                     <div class="grid">
                         <label>@L("Время заказа") <input type="time" @bind="_details.Time" /></label>
-                        <label>
-                            @L("Проект")
-                            <select @bind="_details.Project">
-                                <option value="">—</option>
-                                @foreach (var p in _detailOptions!.Projects)
-                                {
-                                    <option value="@p.Id">@p.Name</option>
-                                }
-                                @if (det.ProjectId is { } pid && _detailOptions.Projects.All(p => p.Id != pid))
-                                {
-                                    <option value="@pid">@det.Project (@L("в архиве"))</option>
-                                }
-                            </select>
-                        </label>
-                        <label>
-                            @L("Канал продаж")
-                            <select @bind="_details.Channel">
-                                <option value="">—</option>
-                                @foreach (var c in _detailOptions.Channels)
-                                {
-                                    <option value="@c.Id">@c.Name</option>
-                                }
-                                @if (det.ChannelId is { } cid && _detailOptions.Channels.All(c => c.Id != cid))
-                                {
-                                    <option value="@cid">@det.Channel (@L("в архиве"))</option>
-                                }
-                            </select>
-                        </label>
+                        @* D815: проект и канал — с поиском и «+ Добавить» (право «Продажи: изменение» проверяет сервер). *@
+                        <LookupSelect Label="@L("Проект")" Options="@WithArchived(_detailOptions!.Projects.Select(p => new LookupSelect.Option(p.Id, p.Name)), det.ProjectId, det.Project)"
+                                      Value="@(long.TryParse(_details.Project, out var pv) ? pv : null)" ValueChanged="@(v => _details.Project = v?.ToString() ?? string.Empty)"
+                                      Create="@(name => SalesSettings.CreateLookupAsync(KnitErp.Domain.Catalog.LookupKind.Project, name))" />
+                        <LookupSelect Label="@L("Канал продаж")" Options="@WithArchived(_detailOptions.Channels.Select(c => new LookupSelect.Option(c.Id, c.Name)), det.ChannelId, det.Channel)"
+                                      Value="@(long.TryParse(_details.Channel, out var chv) ? chv : null)" ValueChanged="@(v => _details.Channel = v?.ToString() ?? string.Empty)"
+                                      Create="@(name => SalesSettings.CreateLookupAsync(KnitErp.Domain.Catalog.LookupKind.SalesChannel, name))" />
                         <label>
                             @L("Ответственный")
                             <select @bind="_details.Responsible">
@@ -523,16 +503,11 @@ else
     {
         @* D1137: отмена с причиной из справочника. *@
         <form class="inline-form sx-cancel" @onsubmit="CancelAsync">
-            <label>
-                @L("Причина отмены")
-                <select @bind="_cancelReason" required>
-                    <option value="">@L("— выберите —")</option>
-                    @foreach (var r in _cancelReasons)
-                    {
-                        <option value="@r.Id">@r.Name</option>
-                    }
-                </select>
-            </label>
+            @* D815: своя причина — «+ Добавить» прямо здесь (раньше справочник причин нельзя было пополнить нигде). *@
+            <LookupSelect Label="@L("Причина отмены")" Required="true" EmptyText="@L("— выберите —")"
+                          Options="@(_cancelReasons.Where(r => !r.IsArchived).Select(r => new LookupSelect.Option(r.Id, r.Name)).ToList())"
+                          Value="@(long.TryParse(_cancelReason, out var cr) ? cr : null)" ValueChanged="@(v => _cancelReason = v?.ToString() ?? string.Empty)"
+                          Create="@(name => Sales.CreateCancelReasonAsync(name))" />
             <label>@L("Пояснение") <input @bind="_cancelComment" maxlength="@SalesOrder.CommentMaxLength" size="36" /></label>
             <button type="submit" class="danger" disabled="@_busy">@L("Отменить заказ")</button>
             <button type="button" class="secondary" @onclick="() => _cancelReasons = null" disabled="@_busy">@L("Не отменять")</button>
@@ -1117,4 +1092,16 @@ else
     }
 
     private string Local(DateTime utc) => TimeZones.ToLocal(utc, CurrentAccess.TimeZoneId).ToString("dd.MM.yyyy HH:mm");
+
+    /// <summary>Варианты справочника и выбранное архивное значение (с пометкой), чтобы оно не пропало из списка.</summary>
+    private static IReadOnlyList<LookupSelect.Option> WithArchived(IEnumerable<LookupSelect.Option> options, long? id, string? name)
+    {
+        var list = options.ToList();
+        if (id is { } v && list.All(o => o.Id != v))
+        {
+            list.Add(new LookupSelect.Option(v, $"{name} ({L("в архиве")})"));
+        }
+
+        return list;
+    }
 }
