@@ -67,11 +67,11 @@ else
                                 OrderHref="sales-orders/" CanEdit="CanEdit" Changed="LoadAsync" Closed="() => _allocating = null" />
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, покупатель, заказ")" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

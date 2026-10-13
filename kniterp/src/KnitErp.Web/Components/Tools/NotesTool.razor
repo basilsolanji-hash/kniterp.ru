@@ -3,13 +3,18 @@
 <form class="tool-form" @onsubmit="SaveAsync">
     <label>
         @(_editId is null ? L("Новая заметка") : L("Правка заметки"))
-        <textarea @bind="_text" rows="4" maxlength="5000" placeholder="@L("Видна только вам")"></textarea>
+        <textarea @bind="_text" @bind:after="AutoSaveAsync" rows="4" maxlength="5000" placeholder="@L("Видна только вам")"></textarea>
     </label>
     <div class="actions">
-        <button type="submit" disabled="@_busy">@(_editId is null ? L("Добавить заметку") : L("Сохранить"))</button>
-        @if (_editId is not null)
+        @if (_editId is null)
         {
-            <button type="button" class="secondary" @onclick="Cancel">@L("Отмена")</button>
+            <button type="submit" disabled="@_busy">@L("Добавить заметку")</button>
+        }
+        else
+        {
+            @* D811 (п. 3): правка заметки сохраняется сразу; «Готово» закрывает правку. *@
+            <span class="muted small" aria-live="polite">@(_busy ? L("Сохраняется…") : L("Изменения сохраняются сразу."))</span>
+            <button type="button" class="secondary" @onclick="Cancel">@L("Готово")</button>
         }
     </div>
 </form>
@@ -68,11 +73,16 @@ else
         _text = string.Empty;
     }
 
-    private Task SaveAsync() => RunAsync(async () =>
+    private Task SaveAsync() => _editId is not null ? AutoSaveAsync() : RunAsync(async () =>
     {
         _notes = await Personal.SaveNoteAsync(_editId, _text);
         Cancel();
     });
+
+    /// <summary>Правка существующей заметки сохраняется при уходе из поля; новая — только кнопкой «Добавить заметку».</summary>
+    private Task AutoSaveAsync() => _editId is null || string.IsNullOrWhiteSpace(_text)
+        ? Task.CompletedTask
+        : RunAsync(async () => _notes = await Personal.SaveNoteAsync(_editId, _text));
 
     private Task DeleteAsync(NoteItem n) => RunAsync(async () => _notes = await Personal.DeleteNoteAsync(n.Id));
 

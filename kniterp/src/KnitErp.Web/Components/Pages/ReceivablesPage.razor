@@ -40,7 +40,7 @@ else
         <p class="muted">@L("Показаны только ваши покупатели и покупатели вашего подразделения — так настроено для вашей роли.")</p>
     }
 
-    <form class="sx-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="sx-form" @onsubmit="ReloadAsync">
         <label>@L("На дату") <input type="date" @bind="_asOf" /></label>
         <label>
             @L("Менеджер")
@@ -53,7 +53,7 @@ else
                 <option value="0">@L("Без менеджера")</option>
             </select>
         </label>
-        <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button></div>
+        <div class="sx-actions"><button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button></div>
     </form>
 
     @if (_message is not null)

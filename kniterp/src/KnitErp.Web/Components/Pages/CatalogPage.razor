@@ -249,7 +249,7 @@ else
         }
     </nav>
     <div>
-    <form class="inline-form" @onsubmit="SearchAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="SearchAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Вид")
@@ -278,7 +278,7 @@ else
         </label>
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Код, наименование, артикул или штрихкод")" /></label>
         <label class="inline"><input type="checkbox" @bind="_includeArchived" /> @L("Показать архив")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Найти")</button>
     </form>
 
     @if (_selected.Count > 0 || _allByFilter)

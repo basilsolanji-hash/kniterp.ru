@@ -47,7 +47,7 @@ else
         </div>
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>
             @L("Вид")
             <select @bind="_kind">
@@ -68,7 +68,7 @@ else
                 }
             </select>
         </label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Найти")</button>
     </form>
 
     <div class="scroll">

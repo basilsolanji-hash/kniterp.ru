@@ -64,7 +64,7 @@ else
         </div>
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>
             @L("Склад")
             <select @bind="_filterWarehouse">
@@ -77,7 +77,7 @@ else
         </label>
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         <a class="button secondary" href="@ExportHref" download data-enhance-nav="false" title="@L("Реестр с текущими фильтрами")">Excel</a>
     </form>
 

@@ -41,11 +41,11 @@ else
 
     @if (_tab == 0)
     {
-        <form class="inline-form" @onsubmit="ReloadAsync">
+        <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
             <label>@L("Поиск") <input @bind="_search" placeholder="@L("Партия, цвет, крашение, позиция")" /></label>
             <label class="check"><input type="checkbox" @bind="_onlyBalance" /> @L("Только с остатком")</label>
             <label class="check"><input type="checkbox" @bind="_archived" /> @L("Показать архив")</label>
-            <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+            <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
             @if (_canEdit && _form is null)
             {
                 <button type="button" @onclick="NewBatch" disabled="@_busy">@L("Новая партия")</button>
@@ -143,7 +143,7 @@ else
     }
     else if (_tab == 1 && _balances is not null)
     {
-        <form class="inline-form" @onsubmit="ShowBalancesAsync">
+        <form data-autosubmit class="inline-form" @onsubmit="ShowBalancesAsync">
             <label>
                 @L("Склад")
                 <select @bind="_warehouse">
@@ -155,7 +155,7 @@ else
                 </select>
             </label>
             <label>@L("Поиск") <input @bind="_balanceSearch" placeholder="@L("Позиция, партия, цвет")" /></label>
-            <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+            <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         </form>
         <div class="scroll">
             <table class="compact">

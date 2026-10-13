@@ -22,7 +22,7 @@ else
     }
     else
     {
-        <form class="inline-form" @onsubmit="BuildAsync">
+        <form data-autosubmit class="inline-form" @onsubmit="BuildAsync">
             <label>
                 @L("Касса")
                 <select @bind="_cash">
@@ -34,7 +34,7 @@ else
             </label>
             <label>@L("С") <input type="date" @bind="_from" required /></label>
             <label>@L("По") <input type="date" @bind="_to" required /></label>
-            <button type="submit" disabled="@_busy">@L("Показать")</button>
+            <button type="submit" class="filter-apply" disabled="@_busy">@L("Показать")</button>
             @if (_book is not null && _book.Sheets.Count > 0)
             {
                 <a class="button secondary" href="@PrintHref" target="_blank" rel="noopener">@L("Печать")</a>

@@ -38,9 +38,9 @@ else
         </form>
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label class="inline"><input type="checkbox" @bind="_includeArchived" /> @L("Показать архив")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

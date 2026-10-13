@@ -24,11 +24,11 @@ else
         @L("с адресом, откуда пришёл запрос. Время — {0}. Много неудачных попыток с одного адреса — повод проверить, не подбирают ли пароль.", TimeZones.Label(CurrentAccess.TimeZoneId))
     </p>
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label class="inline"><input type="checkbox" @bind="_failures" /> @L("Только неудачные и блокировки")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

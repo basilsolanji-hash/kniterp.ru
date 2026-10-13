@@ -9,7 +9,7 @@
         .print-bar button { background: #1A7F74; color: #fff; border: 0; border-radius: 4px; padding: 6px 14px; cursor: pointer; font-size: 13px; }
         .print-bar a { color: #1B6F66; }
         .print-bar .warn { color: #8A5A00; }
-        .sheet { background: #fff; color: #000; max-width: 1080px; margin: 0 auto; padding: 18px 20px; font: 11px Arial, sans-serif; line-height: 1.35; }
+        .sheet { background: #fff; color: #000; max-width: 1080px; margin: 0 auto; padding: 18px 20px; font: 11px Arial, 'Liberation Sans', 'DejaVu Sans', sans-serif; line-height: 1.35; }
         .sheet.portrait { max-width: 780px; }
         .sheet h1 { font-size: 16px; font-weight: 700; margin: 14px 0 8px; padding-bottom: 6px; border-bottom: 2px solid #000; color: #000; }
         .sheet table { border-collapse: collapse; width: 100%; color: #000; background: #fff; }
@@ -38,9 +38,20 @@
         .sheet .upd-fields div { display: flex; gap: 6px; }
         .sheet .upd-fields b { min-width: 230px; font-weight: 400; }
         .sheet .upd-fields .code { margin-left: auto; color: #333; }
+        /* D813 (запрос владельца 13.10, п. 5): единый вид печатных форм — длинные названия переносятся, а не обрезаются;
+           шапка таблицы повторяется на каждой странице; строка, итоги и подписи не разрываются между страницами;
+           номер страницы «Стр. N из M» — только на листах документов (этикетки печатаются без него). */
+        .sheet td { overflow-wrap: anywhere; }
+        .sheet th { overflow-wrap: normal; hyphens: manual; }
+        .sheet td.n, .sheet td.num { overflow-wrap: normal; }
+        .sheet thead { display: table-header-group; }
+        .sheet tr, .sheet .totals-print, .sheet .words, .sheet .sign { break-inside: avoid; }
+        .sheet .sign, .sheet .words { break-before: avoid; }
+        .sheet h1, .sheet h2 { break-after: avoid; }
         @@media print {
             .print-bar { display: none; }
-            .sheet { max-width: none; padding: 0; }
+            .sheet { max-width: none; padding: 0; page: doc; }
+            @@page doc { @@bottom-right { content: "@CssText("Стр.") " counter(page) " @CssText("из") " counter(pages); font: 8pt Arial, 'Liberation Sans', sans-serif; color: #555; } }
         }
 </style>
 

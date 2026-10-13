@@ -138,10 +138,10 @@ else
             </section>
         }
 
-        <form class="inline-form" @onsubmit="ReloadAsync">
+        <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
             <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, название, покупатель, ИНН")" size="32" /></label>
             <label class="inline"><input type="checkbox" @bind="_archived" /> @L("Показать архив")</label>
-            <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+            <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         </form>
 
         <div class="scroll">

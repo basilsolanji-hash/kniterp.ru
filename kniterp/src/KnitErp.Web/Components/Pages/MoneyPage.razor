@@ -161,7 +161,7 @@ else
     </div>
 
     <h2 style="margin-top: 18px">@L("Операции")</h2>
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label>
@@ -174,7 +174,7 @@ else
                 }
             </select>
         </label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     @if (_cancel is not null)

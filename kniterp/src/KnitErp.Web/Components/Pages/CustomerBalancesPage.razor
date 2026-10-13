@@ -17,9 +17,9 @@ else
     <h1>@L("Расчёты с покупателями")</h1>
     <p class="muted">@L("Отгружено и возвращено — по проведённым документам по заказам и ценам заказов с НДС; оплачено — действующие оплаты. Долг больше нуля — покупатель должен нам, меньше нуля — его аванс. Отгрузки без заказа сюда не входят: у них нет цены.")</p>
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("На дату") <input type="date" @bind="_asOf" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

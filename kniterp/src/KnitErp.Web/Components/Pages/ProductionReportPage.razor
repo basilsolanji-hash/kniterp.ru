@@ -17,10 +17,10 @@ else
     </div>
     <p class="muted">@L("Заказы в работе — на сегодня; брак — по дате отметки; отклонения расхода и себестоимость — по заказам с датой в периоде.")</p>
 
-    <form class="inline-form" @onsubmit="LoadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="LoadAsync">
         <label>@L("С") <input type="date" @bind="_from" aria-label="@L("Начало периода")" /></label>
         <label>@L("По") <input type="date" @bind="_to" aria-label="@L("Конец периода")" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     @if (_error is not null)

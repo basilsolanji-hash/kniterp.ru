@@ -63,7 +63,7 @@ else
         </div>
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Вид")
@@ -98,7 +98,7 @@ else
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер или контрагент")" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         <a class="button secondary" href="@ExportHref" download data-enhance-nav="false" title="@L("Реестр с текущими фильтрами")">Excel</a>
     </form>
     @if (_rows.Count >= StockDocumentService.MaxListRows)

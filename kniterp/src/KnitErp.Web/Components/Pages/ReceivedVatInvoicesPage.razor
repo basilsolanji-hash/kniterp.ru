@@ -61,7 +61,7 @@ else
         </div>
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         @if (_buyers.Count > 1)
@@ -79,7 +79,7 @@ else
         }
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("номер, поставщик, ИНН, приёмка")" /></label>
         <label class="inline"><input type="checkbox" @bind="_cancelled" /> @L("Показать отменённые")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         <a class="button secondary" href="@ExportHref" download data-enhance-nav="false" title="@L("Выгрузить с текущими фильтрами")">Excel</a>
     </form>
 

@@ -52,7 +52,7 @@ else
         <button type="button" aria-pressed="@PeriodPressed(2)" @onclick="() => PeriodAsync(2)" disabled="@_busy">@L("Квартал")</button>
         <button type="button" aria-pressed="@PeriodPressed(3)" @onclick="() => PeriodAsync(3)" disabled="@_busy">@L("С начала года")</button>
     </div>
-    <form class="inline-form" @onsubmit="LoadReportAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="LoadReportAsync">
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label>
@@ -77,7 +77,7 @@ else
                 </select>
             </label>
         }
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         <a class="button secondary" href="@ExcelHref" download data-enhance-nav="false">@L("Excel")</a>
     </form>
 

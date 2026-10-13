@@ -17,9 +17,9 @@ else if (_board is null)
 else
 {
     <div class="page-head"><h1>@L("Сменные задания")</h1></div>
-    <form class="inline-form" @onsubmit="LoadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="LoadAsync">
         <label>@L("Дата") <input type="date" @bind="_date" aria-label="@L("Дата")" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     @if (_message is not null)

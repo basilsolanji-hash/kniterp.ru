@@ -49,7 +49,7 @@ else
         </div>
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, код или изделие")" /></label>
         <label>
             @L("Статус")
@@ -61,7 +61,7 @@ else
                 }
             </select>
         </label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

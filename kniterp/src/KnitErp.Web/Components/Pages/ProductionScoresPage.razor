@@ -17,9 +17,9 @@ else if (_board is null)
 else
 {
     <div class="page-head"><h1>@L("Баллы и показатели")</h1></div>
-    <form class="inline-form" @onsubmit="LoadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="LoadAsync">
         <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" aria-label="@L("Месяц")" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         @if (CurrentAccess.Has(Permissions.EmployeeView))
         {
             <a class="button secondary" href="production/scores.xlsx?from=@_board.From.ToString("yyyy-MM-dd")&to=@_board.To.ToString("yyyy-MM-dd")" download>@L("Выгрузить в Excel")</a>

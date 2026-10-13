@@ -19,7 +19,7 @@ else
     <h1>@L("Остатки")</h1>
     <p class="muted">@L("Текущий остаток — сумма движений по складу: начальные остатки и проведённые поступления, перемещения и списания.")</p>
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>
             @L("Склад")
             <select @bind="_warehouse">
@@ -41,7 +41,7 @@ else
             </select>
         </label>
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Код или наименование")" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
         <a class="button secondary" href="@ExportHref" download data-enhance-nav="false" title="@L("Выгрузить с текущими фильтрами")">Excel</a>
         @* D325: ценники по одной на позицию и этикетки по остатку — для показанных строк. *@
         <LabelsButton Lines="@(_rows.Where(r => r.Quantity > 0).Select(r => r.ItemId).Distinct().Select(id => (id, 1m)))" Text="@L("Ценники")" />

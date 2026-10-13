@@ -55,7 +55,7 @@ else
         <p class="muted">@L("Суммы, себестоимость и маржа скрыты: нет права «Цены и суммы». ABC строится по количеству.")</p>
     }
 
-    <form class="sx-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="sx-form" @onsubmit="ReloadAsync">
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label>
@@ -133,7 +133,7 @@ else
             <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
         }
 
-        <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button></div>
+        <div class="sx-actions"><button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button></div>
     </form>
 
     <div class="tabs" role="tablist">

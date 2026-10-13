@@ -18,12 +18,12 @@ else
     <h1>@L("Счета покупателям")</h1>
     <p class="muted">@L("Счёт выставляется в карточке подтверждённого заказа покупателя. Оплаченность — по оплатам заказа.")</p>
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("номер, покупатель, ИНН, заказ")" /></label>
         <label>@L("С") <input type="date" @bind="_from" /></label>
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label class="inline"><input type="checkbox" @bind="_cancelled" /> @L("Показать отменённые")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

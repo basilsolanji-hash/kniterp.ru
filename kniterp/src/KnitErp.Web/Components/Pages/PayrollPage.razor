@@ -16,9 +16,9 @@
 else if (_own)
 {
     <div class="page-head"><h1>@L("Мой расчётный листок")</h1></div>
-    <form class="inline-form" @onsubmit="LoadMineAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="LoadMineAsync">
         <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
     @if (_mine is null)
     {
@@ -37,9 +37,9 @@ else
         <div class="row-actions"><a class="button secondary" href="hr/piece-rates">@L("Сдельные расценки")</a></div>
     </div>
 
-    <form class="inline-form" @onsubmit="LoadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="LoadAsync">
         <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     @if (_message is not null)

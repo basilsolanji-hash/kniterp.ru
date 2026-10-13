@@ -30,9 +30,9 @@ else
     </div>
     <p class="sx-lead">@L("План — выручка без НДС на месяц по менеджеру. Факт — отгрузки минус возвраты по заказам, где менеджер ответственный. Сумма 0 — плана нет.")</p>
 
-    <form class="sx-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="sx-form" @onsubmit="ReloadAsync">
         <label>@L("Месяц") <input type="month" @bind="_month" @bind:format="yyyy-MM" /></label>
-        <div class="sx-actions"><button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button></div>
+        <div class="sx-actions"><button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button></div>
     </form>
 
     @if (_message is not null)

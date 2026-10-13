@@ -72,7 +72,7 @@ else
     }
 
     <FoldOnPhone Title="@L("Фильтры")">
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Статус")
@@ -100,7 +100,7 @@ else
         {
             <label class="inline"><input type="checkbox" @bind="_mine" /> @L("Только мои")</label>
         }
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
     </FoldOnPhone>
 

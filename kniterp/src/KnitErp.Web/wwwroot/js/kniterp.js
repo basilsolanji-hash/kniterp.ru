@@ -72,6 +72,14 @@
     document.addEventListener('keydown', function (e) {
         if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('tr[data-has-opt]')) { e.preventDefault(); toggleRow(e.target); }
     });
+    // D812 (запрос владельца 13.10, п. 3): фильтр списка применяется сразу при изменении поля — без кнопки «Показать».
+    // Отправка — с паузой 0,3 с после последнего изменения (несколько выборов подряд — одна загрузка); текст — по Enter или уходу из поля.
+    document.addEventListener('change', function (e) {
+        var form = e.target.closest && e.target.closest('form[data-autosubmit]');
+        if (!form) return;
+        clearTimeout(form._knitApply);
+        form._knitApply = setTimeout(function () { if (form.isConnected) form.requestSubmit(); }, 300);
+    });
     var pending = false;
     new MutationObserver(function () {
         if (pending) return;

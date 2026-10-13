@@ -74,10 +74,10 @@ else
         <CrmImportPanel Kind="KnitErp.Application.Crm.CrmImportKind.Contacts" Applied="ReloadAsync" />
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("ФИО, компания, телефон, почта")" /></label>
         <label class="inline"><input type="checkbox" @bind="_archived" /> @L("С архивом")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

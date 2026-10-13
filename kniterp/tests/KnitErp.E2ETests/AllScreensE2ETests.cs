@@ -47,6 +47,10 @@ public sealed partial class AllScreensE2ETests(HrAppFixture app) : IClassFixture
         await page.RouteAsync("**/__axe.js", r => r.FulfillAsync(new() { ContentType = "application/javascript", Body = axeScript }));
         await page.EmulateMediaAsync(new() { ColorScheme = scheme == "dark" ? ColorScheme.Dark : ColorScheme.Light });
         await page.GotoAsync("");
+        // Главная должна подключиться полностью: иначе переход на первый экран прерывает её подключение, и браузер пишет ошибку.
+        await page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+        await page.WaitForFunctionAsync("() => window.Blazor !== undefined");
+        await page.Locator("main h1").First.WaitForAsync(new() { Timeout = 10000 });
         await page.EvaluateAsync("t => localStorage.setItem('kniterp.theme', t)", scheme);
 
         var problems = new List<string>();

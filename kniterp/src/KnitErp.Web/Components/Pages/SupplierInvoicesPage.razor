@@ -17,10 +17,10 @@ else
     <h1>@L("Счета поставщиков")</h1>
     <p class="muted">@L("Счёт поставщика записывается в шапку заказа поставщику (поле «Счёт поставщика»). Здесь — подтверждённые и закрытые заказы со счётом: сумма, оплачено и сколько осталось оплатить.")</p>
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("счёт, поставщик, ИНН, заказ")" /></label>
         <label class="inline"><input type="checkbox" @bind="_unpaid" /> @L("Только неоплаченные")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     <div class="scroll">

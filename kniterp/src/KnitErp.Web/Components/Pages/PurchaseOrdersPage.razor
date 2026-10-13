@@ -87,7 +87,7 @@ else
         </div>
     }
 
-    <form class="inline-form" @onsubmit="ReloadAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
         <TagFilter Value="_tagId" ValueChanged="TagChangedAsync" />
         <label>
             @L("Статус")
@@ -103,7 +103,7 @@ else
         <label>@L("По") <input type="date" @bind="_to" /></label>
         <label>@L("Поиск") <input @bind="_search" placeholder="@L("Номер, поставщик, счёт")" /></label>
         <label class="inline"><input type="checkbox" @bind="_overdue" /> @L("Только просроченные")</label>
-        <button type="submit" class="secondary" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Показать")</button>
     </form>
 
     var showSums = _rows.Any(r => r.Total is not null);

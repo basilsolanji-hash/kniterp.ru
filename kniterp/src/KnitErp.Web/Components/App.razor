@@ -560,6 +560,8 @@
         /* D320: подсказка (похожие позиции и т. п.) — не ошибка. */
         .hint.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
         .hint.warn a { color: inherit; margin-left: 6px; }
+        /* D812: фильтры применяются сразу — кнопка «Показать» не нужна (Enter по-прежнему применяет). */
+        form[data-autosubmit] .filter-apply { display: none; }
         /* D809: причина у неактивного действия и «только просмотр». */
         .why-disabled { display: inline-flex; align-items: baseline; gap: 4px; font-size: 12.5px; color: var(--muted); margin: 0 6px; }
         .readonly-note { background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text-2); }

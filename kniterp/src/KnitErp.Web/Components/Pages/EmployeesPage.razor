@@ -125,10 +125,10 @@ else
                      Hint="@L("Загрузка принимает новых сотрудников и обновляет ФИО, подразделение и должность существующих по табельному номеру.")"
                      ShownColumns="@([0, 1, 2, 4])" Preview="s => Exchange.PreviewAsync(s)" Apply="r => Exchange.ApplyAsync(r)" Applied="ReloadAsync" />
 
-        <form class="inline-form" @onsubmit="ReloadAsync">
+        <form data-autosubmit class="inline-form" @onsubmit="ReloadAsync">
             <label>@L("Поиск") <input @bind="_search" placeholder="@L("Фамилия, имя или табельный номер")" /></label>
             <label class="inline"><input type="checkbox" @bind="_includeDismissed" /> @L("Показать уволенных")</label>
-            <button type="submit" class="secondary" disabled="@_busy">@L("Найти")</button>
+            <button type="submit" class="filter-apply secondary" disabled="@_busy">@L("Найти")</button>
         </form>
     }
 

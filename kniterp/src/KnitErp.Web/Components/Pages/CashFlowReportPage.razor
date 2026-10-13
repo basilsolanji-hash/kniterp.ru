@@ -19,7 +19,7 @@ else
     <h1>@L("Движение денег (ДДС)")</h1>
     <p class="muted">@L("Деньги на счетах и в кассах: откуда пришли и на что ушли. Перемещения между своими счетами не входят. Это не прибыль: прибыль — в отчёте «Прибыльность».")</p>
 
-    <form class="inline-form" @onsubmit="BuildAsync">
+    <form data-autosubmit class="inline-form" @onsubmit="BuildAsync">
         <label>@L("С") <input type="date" @bind="_from" required /></label>
         <label>@L("По") <input type="date" @bind="_to" required /></label>
         @if (_entities.Count > 1)
@@ -35,7 +35,7 @@ else
                 </select>
             </label>
         }
-        <button type="submit" disabled="@_busy">@L("Показать")</button>
+        <button type="submit" class="filter-apply" disabled="@_busy">@L("Показать")</button>
     </form>
 
     @if (_message is not null)

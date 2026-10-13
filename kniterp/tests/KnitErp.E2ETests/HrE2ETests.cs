@@ -133,7 +133,7 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
 
         await OpenAsync(page, "hr/timesheet");
         await page.GetByLabel("Подразделение").SelectOptionAsync(new SelectOptionValue { Label = department });
-        await page.GetByRole(AriaRole.Button, new() { Name = "Показать" }).ClickAsync();
+        await FilterAppliedAsync(page); // D812: фильтр применяется сам
         await page.GetByRole(AriaRole.Button, new() { Name = "Составить табель по графикам" }).ClickAsync();
         await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Табель составлен");
         var line = page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(lastName) });
@@ -220,7 +220,7 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await OpenAsync(page, "hr/timesheet");
         await page.GetByLabel("Подразделение").SelectOptionAsync(new SelectOptionValue { Label = department });
         await page.GetByLabel("Месяц").FillAsync("2027-03");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Показать" }).ClickAsync();
+        await FilterAppliedAsync(page); // D812: фильтр применяется сам
         await page.GetByRole(AriaRole.Button, new() { Name = "Составить табель по графикам" }).ClickAsync();
         await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Табель составлен");
         await page.GetByRole(AriaRole.Button, new() { Name = "Закрыть табель" }).ClickAsync();
@@ -228,7 +228,7 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
 
         await OpenAsync(page, "hr/payroll");
         await page.GetByLabel("Месяц").FillAsync("2027-03");
-        await page.GetByRole(AriaRole.Button, new() { Name = "Показать" }).ClickAsync();
+        await FilterAppliedAsync(page); // D812: фильтр применяется сам
         await page.GetByRole(AriaRole.Button, new() { Name = "Рассчитать" }).ClickAsync();
         await Expect(page.GetByRole(AriaRole.Status)).ToContainTextAsync("Рассчитано");
         await Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(lastName) })).ToContainTextAsync("30 000,00");
@@ -273,13 +273,13 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
             await OpenAsync(worker, "hr/timesheet");
             await Expect(worker.GetByRole(AriaRole.Heading, new() { Name = "Мой табель" })).ToBeVisibleAsync();
             await worker.GetByLabel("Месяц").FillAsync("2027-03");
-            await worker.GetByRole(AriaRole.Button, new() { Name = "Показать" }).ClickAsync();
+            await FilterAppliedAsync(worker); // D812: фильтр применяется сам
             await Expect(worker.GetByText("табель закрыт")).ToBeVisibleAsync();
 
             await OpenAsync(worker, "hr/payroll");
             await Expect(worker.GetByRole(AriaRole.Heading, new() { Name = "Мой расчётный листок" })).ToBeVisibleAsync();
             await worker.GetByLabel("Месяц").FillAsync("2027-03");
-            await worker.GetByRole(AriaRole.Button, new() { Name = "Показать" }).ClickAsync();
+            await FilterAppliedAsync(worker); // D812: фильтр применяется сам
             await Expect(worker.GetByText("Всего начислено")).ToBeVisibleAsync();
             await Expect(worker.GetByText("30 000,00").First).ToBeVisibleAsync();
 
@@ -483,12 +483,19 @@ public sealed class HrE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
 
         await OpenAsync(page, "hr/timesheet");
         await page.GetByLabel("Подразделение").SelectOptionAsync(new SelectOptionValue { Index = 1 });
-        await page.GetByRole(AriaRole.Button, new() { Name = "Показать" }).ClickAsync();
+        await FilterAppliedAsync(page); // D812: фильтр применяется сам
         await page.WaitForTimeoutAsync(500);
         Assert.True(await NoHorizontalScrollAsync(page), "Горизонтальная прокрутка на табеле");
     });
 
     private static ILocatorAssertions Expect(ILocator locator) => Assertions.Expect(locator);
+
+    /// <summary>D812: фильтр применяется сам через 0,3 с после изменения поля — ждём отправку и ответ сервера.</summary>
+    private static async Task FilterAppliedAsync(IPage page)
+    {
+        await page.Keyboard.PressAsync("Tab"); // уход из поля — событие изменения у даты и месяца
+        await page.WaitForTimeoutAsync(900);
+    }
 
     /// <summary>Снимок экрана для показа владельцу — только если задан KNITERP_E2E_SHOTS (в CI не пишется).</summary>
     private static async Task ShotAsync(IPage page, string name)
