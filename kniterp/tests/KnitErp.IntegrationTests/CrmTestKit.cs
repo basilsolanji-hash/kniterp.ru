@@ -64,7 +64,7 @@ public static class CrmTestKit
             new CrmDealService(db, guard, user, host.Clock, sales), new CrmContactService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet), sales)
         {
             Activities = new CrmActivityService(db, guard, user, host.Clock, host.Mail),
-            Offers = new CrmOfferService(db, guard, user, host.Clock, host.Mail),
+            Offers = new CrmOfferService(db, guard, user, host.Clock, host.Mail, new KnitErp.Infrastructure.Documents.SalesPdfRenderer()),
             Reports = new CrmReportService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet),
             Intake = new CrmIntakeService(db, guard, user, host.Clock),
             Mailings = new CrmMailingService(db, guard, user, host.Clock, host.Mail),

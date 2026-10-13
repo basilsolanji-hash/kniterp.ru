@@ -49,7 +49,9 @@ public static class DependencyInjection
         services.AddTransient<KnitErp.Application.Crm.ICrmMessengerClient>(sp => sp.GetRequiredService<External.WhatsAppMessengerClient>());
         services.AddSingleton<KnitErp.Application.Crm.ICrmMailboxClient, Email.ImapMailboxClient>(); // D676: входящая почта CRM
         // D1123 (продажи): PDF счёта, УПД и заказа для писем клиенту.
-        services.AddSingleton<KnitErp.Application.Sales.ISalesPdfRenderer, Documents.SalesPdfRenderer>();
+        services.AddSingleton<Documents.SalesPdfRenderer>();
+        services.AddSingleton<KnitErp.Application.Sales.ISalesPdfRenderer>(sp => sp.GetRequiredService<Documents.SalesPdfRenderer>());
+        services.AddSingleton<KnitErp.Application.Crm.ICrmOfferPdfRenderer>(sp => sp.GetRequiredService<Documents.SalesPdfRenderer>()); // D696: PDF КП
         return services;
     }
 

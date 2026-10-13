@@ -100,7 +100,7 @@ public static class PaymentQrImage
 /// лицензия Bitstream Vera/DejaVu), встроенный ресурс: на сервере могут отсутствовать системные шрифты с кириллицей. Формы печатаются
 /// по-русски, как HTML-формы (D68): это документы российского учёта. Логотип, печать, подписи и QR — по настройкам юрлица (D1120).
 /// </summary>
-public sealed class SalesPdfRenderer : ISalesPdfRenderer
+public sealed partial class SalesPdfRenderer : ISalesPdfRenderer // partial: КП CRM (D696) — в CrmOfferPdf.cs
 {
     private const string Font = "DejaVu Sans";
     private static readonly CultureInfo Ru = CultureInfo.GetCultureInfo("ru-RU");

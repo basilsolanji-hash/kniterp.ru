@@ -91,6 +91,24 @@ public static class CrmEndpoints
                 : Results.Text(challenge, "text/plain");
         }).AllowAnonymous();
 
+        // D696: PDF коммерческого предложения — права и видимость как у печатной формы.
+        app.MapGet("/crm/offers/{id:long}.pdf", async (CrmOfferService offers, long id, CancellationToken ct) =>
+        {
+            try
+            {
+                var file = await offers.PdfAsync(id, ct);
+                return Results.File(file.Content, file.ContentType, file.FileName);
+            }
+            catch (AccessDeniedException)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            catch (NotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
         app.MapGet("/crm/import-template.xlsx", (CrmImportService import, CrmImportKind kind, CancellationToken ct) =>
             FileAsync(() => import.TemplateAsync(kind, ct), $"shablon-crm-{kind.ToString().ToLowerInvariant()}.xlsx"));
 
