@@ -97,7 +97,7 @@ else
                                 }
                             </InputSelect>
                         </label>
-                        <label>@L("Имя и фамилия") <InputText @bind-Value="_form.DisplayName" maxlength="200" required="@(_form.EmployeeId == 0)" disabled="@(_form.EmployeeId != 0)" /></label>
+                        <label>@L("Имя и фамилия") <InputText @bind-Value="_form.DisplayName" maxlength="200" required="@(_form.EmployeeId == 0)" disabled="@(_form.EmployeeId != 0)" title="@((_form.EmployeeId != 0) ? L("Имя берётся из карточки сотрудника") : null)" /></label>
                         <label>@L("Email для приглашения") <InputText @bind-Value="_form.Email" type="email" maxlength="254" placeholder="name@example.ru" required /></label>
                     }
                     <label>
@@ -257,28 +257,28 @@ else
                                 else
                                 {
                                     <div class="row-actions">
-                                        <button type="button" class="secondary" @onclick="() => _rightsUser = u.UserId" disabled="@(_mode != Mode.None)">@L("Права")</button>
-                                        <button type="button" class="secondary" @onclick="() => OpenChangeRoleAsync(u)" disabled="@(_mode != Mode.None)">@L("Изменить роль")</button>
-                                        <button type="button" class="secondary" @onclick="() => OpenRestrictions(u)" disabled="@(_mode != Mode.None)">@L("Ограничения входа")</button>
+                                        <button type="button" class="secondary" @onclick="() => _rightsUser = u.UserId" disabled="@(_mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Права")</button>
+                                        <button type="button" class="secondary" @onclick="() => OpenChangeRoleAsync(u)" disabled="@(_mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Изменить роль")</button>
+                                        <button type="button" class="secondary" @onclick="() => OpenRestrictions(u)" disabled="@(_mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Ограничения входа")</button>
                                         @if (u.MembershipStatus == MembershipStatus.Active)
                                         {
-                                            <button type="button" class="secondary" @onclick="() => Open(Mode.Block, u)" disabled="@(_mode != Mode.None)">@L("Заблокировать")</button>
+                                            <button type="button" class="secondary" @onclick="() => Open(Mode.Block, u)" disabled="@(_mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Заблокировать")</button>
                                         }
                                         else
                                         {
-                                            <button type="button" class="secondary" @onclick="() => Open(Mode.Unblock, u)" disabled="@(_mode != Mode.None)">@L("Разблокировать")</button>
+                                            <button type="button" class="secondary" @onclick="() => Open(Mode.Unblock, u)" disabled="@(_mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Разблокировать")</button>
                                         }
                                         @if (!u.HasPassword)
                                         {
-                                            <button type="button" class="secondary" @onclick="() => ReissueAsync(u)" disabled="@(_mode != Mode.None || _busy)">@L("Новая ссылка")</button>
+                                            <button type="button" class="secondary" @onclick="() => ReissueAsync(u)" disabled="@(_mode != Mode.None || _busy)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Новая ссылка")</button>
                                         }
                                         else if (u.MembershipStatus == MembershipStatus.Active)
                                         {
-                                            <button type="button" class="secondary" @onclick="() => Open(Mode.ResetPassword, u)" disabled="@(_mode != Mode.None)">@L("Сменить пароль")</button>
+                                            <button type="button" class="secondary" @onclick="() => Open(Mode.ResetPassword, u)" disabled="@(_mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Сменить пароль")</button>
                                         }
                                         @if (u.TwoFactorEnabled)
                                         {
-                                            <button type="button" class="secondary" @onclick="() => Open(Mode.ResetTwoFactor, u)" disabled="@(_mode != Mode.None)">@L("Сбросить 2FA")</button>
+                                            <button type="button" class="secondary" @onclick="() => Open(Mode.ResetTwoFactor, u)" disabled="@(_mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Сбросить 2FA")</button>
                                         }
                                     </div>
                                 }

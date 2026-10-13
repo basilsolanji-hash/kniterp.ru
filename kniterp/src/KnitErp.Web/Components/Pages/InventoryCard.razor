@@ -144,7 +144,7 @@ else
         <p class="muted small">@L("Если указан факт хотя бы по одной партии позиции, позиция считается пересчитанной по партиям: партия без факта спишется до нуля, остаток сверх партий — «без партии». Без фактов по партиям недостача спишется сначала без партии, затем со старых партий.")</p>
         @if (bt2.CanEdit)
         {
-            <div class="actions"><button type="button" class="secondary" @onclick="FillBatchesAsync" disabled="@_busy">@L("Заполнить факт партий по учёту")</button></div>
+            <div class="actions"><button type="button" class="secondary" @onclick="FillBatchesAsync" disabled="@_busy">@L("Заполнить факт партий по учёту")</button><WhyDisabled When="@(_doc.Lines.Count == 0)">@L("Добавьте хотя бы одну строку")</WhyDisabled></div>
             <form class="inline-form" @onsubmit="ScanAsync">
                 <label title="@L("Каждое сканирование прибавляет к факту партии одно место: вес места партии или одну штуку")">@L("Сканер: ярлык места") <input @bind="_scan" placeholder="KB…" size="16" autocomplete="off" /></label>
                 <button type="submit" class="secondary" disabled="@_busy">@L("+1 место")</button>
@@ -223,7 +223,7 @@ else
         <LabelsButton Lines="@(_doc.Lines.Select(l => (l.ItemId, l.Counted ?? l.Book)))" />
         @if (_doc.CanPost)
         {
-            <button type="button" @onclick="PostAsync" disabled="@(_busy || _doc.Lines.Count == 0)">@L("Провести")</button>
+            <button type="button" @onclick="PostAsync" disabled="@(_busy || _doc.Lines.Count == 0)" title="@((_doc.Lines.Count == 0) ? L("Добавьте хотя бы одну строку") : null)">@L("Провести")</button>
         }
         @if (_doc.CanEdit)
         {

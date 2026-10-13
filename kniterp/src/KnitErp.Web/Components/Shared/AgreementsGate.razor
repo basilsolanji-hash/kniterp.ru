@@ -28,7 +28,7 @@
     <label class="inline"><input type="checkbox" @bind="_agree" /> @L("Я прочитал(а) документы и согласен(на) с ними")</label>
     <label>@L("Пароль для подписи") <input type="password" @bind="_password" @bind:event="oninput" autocomplete="current-password" /></label>
     <p class="muted small">@L("Ввод пароля — ваша простая электронная подпись (ст. 9 Федерального закона № 63-ФЗ).")</p>
-    <button type="submit" disabled="@(_busy || !_agree || string.IsNullOrEmpty(_password))">@L("Подписать документы")</button>
+    <button type="submit" disabled="@(_busy || !_agree || string.IsNullOrEmpty(_password))" title="@((!_agree || string.IsNullOrEmpty(_password)) ? L("Отметьте согласие и введите пароль") : null)">@L("Подписать документы")</button>
 </form>
 
 @code {

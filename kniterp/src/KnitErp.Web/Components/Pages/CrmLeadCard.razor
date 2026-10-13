@@ -30,6 +30,8 @@ else
         <h1>@_lead.Number @v.Title</h1>
         <span class="tag @CrmLeadsPage.StatusClass(_lead.Status)">@L(_lead.StatusName)</span>
     </div>
+    <ReadOnlyNote When="@(!_lead.CanEdit)" />
+    <ReadOnlyNote When="@(_lead.CanEdit && _lead.IsClosed)" Text="@L("Лид закрыт — изменения недоступны.")" />
     <TagPicker Entity="TaggedEntity.CrmLead" EntityId="Id" ReadOnly="@(!_lead.CanEdit)" />
 
     @if (_message is not null)
@@ -165,7 +167,7 @@ else
     <div class="panel">
         <h2>@L("Данные лида")</h2>
         <form @onsubmit="SaveAsync">
-            <fieldset disabled="@(!canEdit)">
+            <fieldset disabled="@(!canEdit)" title="@((!canEdit) ? L("Нет права на изменение") : null)">
                 <div class="grid">
                     <label class="wide">@L("Что нужно клиенту") <input @bind="_f.Title" maxlength="@CrmLead.TitleMaxLength" required /></label>
                     <label>@L("Контактное лицо") <input @bind="_f.ContactName" maxlength="@CrmLead.NameMaxLength" /></label>

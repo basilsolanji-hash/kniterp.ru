@@ -50,7 +50,7 @@
                 </div>
                 <label>@L("До (включительно)") <input type="date" @bind="_until" /></label>
                 <label>@L("Причина") <input @bind="_reason" maxlength="500" required="@_deny" placeholder="@(_deny ? L("Обязательна для запрета") : L("Например: на время отпуска коллеги"))" /></label>
-                <button type="submit" disabled="@(_busy || string.IsNullOrEmpty(_code))">@L("Добавить")</button>
+                <button type="submit" disabled="@(_busy || string.IsNullOrEmpty(_code))" title="@((string.IsNullOrEmpty(_code)) ? L("Введите код") : null)">@L("Добавить")</button>
             </form>
         }
 

@@ -35,29 +35,28 @@
                 </section>
             }
 
-            <section class="sf-block" aria-label="@L("Рабочий день")">
+            @* D807 (раздел 0 п. 3): рабочий день — одной строкой (время и задачи), подробности — по нажатию. *@
+            <details class="sf-block sf-day">
+                <summary title="@L("Рабочий день")">
+                    <Icon Name="calendar" Size="14" />
+                    <span class="sf-day-line">@Hours(elapsed) @L("из") @Hours(d.NormMinutes) · @L("задачи") @d.TasksDone/@d.TasksToday</span>
+                    <span class="sf-meter sf-meter-inline" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@percent" aria-label="@L("Отработано от нормы")">
+                        <span style="width: @(percent)%"></span>
+                    </span>
+                </summary>
                 <div class="sf-head">
-                    <span><Icon Name="calendar" Size="14" /> @L("Рабочий день")</span>
+                    <span>@L("Рабочий день")</span>
                     <span class="muted">@(d.StartedLocal is { } s ? L("вход {0}", s.ToString("HH:mm")) : L("вход не найден"))</span>
-                </div>
-                <div class="sf-meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@percent" aria-label="@L("Отработано от нормы")">
-                    <span style="width: @(percent)%"></span>
-                </div>
-                <div class="sf-row">
-                    <span>@Hours(elapsed) @L("из") @Hours(d.NormMinutes)</span>
-                    <b>@(percent)%</b>
                 </div>
                 <div class="sf-row muted">
                     <span>@(remaining > 0 ? L("осталось {0}", Hours(remaining)) : L("норма выполнена"))</span>
+                    <b>@(percent)%</b>
                 </div>
                 <div class="sf-row">
                     <span>@L("Задачи сегодня")</span>
                     <b>@(d.TasksPercent)%</b>
                 </div>
-                <div class="sf-row muted">
-                    <span>@d.TasksDone @L("из") @d.TasksToday @L("шт.")</span>
-                </div>
-            </section>
+            </details>
         }
     }
 

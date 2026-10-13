@@ -278,7 +278,7 @@ else
         {
             var canEdit = _pd.CanEdit && e.Status != EmploymentStatus.Dismissed;
             <EditForm Model="_form" OnValidSubmit="SavePersonalDataAsync" FormName="personal-data">
-                <fieldset disabled="@(!canEdit || _busy)" style="border: 0; padding: 0; margin: 0; min-width: 0">
+                <fieldset disabled="@(!canEdit || _busy)" title="@((!canEdit) ? L("Нет права на изменение") : null)" style="border: 0; padding: 0; margin: 0; min-width: 0">
                     <div class="grid">
                         <label>
                             @L("Пол")

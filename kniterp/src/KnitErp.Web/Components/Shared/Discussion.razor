@@ -100,7 +100,7 @@
                         }
                     </select>
                 }
-                <button type="submit" disabled="@(_busy || string.IsNullOrWhiteSpace(_text))">@L("Отправить")</button>
+                <button type="submit" disabled="@(_busy || string.IsNullOrWhiteSpace(_text))" title="@((string.IsNullOrWhiteSpace(_text)) ? L("Напишите сообщение") : null)">@L("Отправить")</button>
             </div>
         </form>
     }

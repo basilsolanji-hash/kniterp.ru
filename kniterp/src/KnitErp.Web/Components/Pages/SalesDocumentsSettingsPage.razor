@@ -22,6 +22,7 @@ else if (_data is null)
 else
 {
     <div class="sx-head"><h1>@L("Документы и письма продаж")</h1></div>
+    <ReadOnlyNote When="@(!_data.CanEdit)" />
     <p class="sx-lead">@L("Логотип, печать и подписи в счёте, УПД и заказе покупателя; QR-код для оплаты в счёте; письма клиентам — вручную из заказа и счёта или автоматически по событиям.")</p>
 
     <div class="tabs" role="tablist">
@@ -81,13 +82,13 @@ else
 
                 <form class="sx-form" @onsubmit="SaveFlagsAsync">
                     <div class="sx-legend">@L("Что выводить в документах")</div>
-                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnInvoice" disabled="@(!_data.CanEdit)" /> @L("Логотип в счёте")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnOrder" disabled="@(!_data.CanEdit)" /> @L("Логотип в заказе")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.QrOnInvoice" disabled="@(!_data.CanEdit)" /> @L("QR для оплаты в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnInvoice" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Логотип в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.LogoOnOrder" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Логотип в заказе")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.QrOnInvoice" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("QR для оплаты в счёте")</label>
                     <span></span>
-                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnInvoice" disabled="@(!_data.CanEdit)" /> @L("Печать и подписи в счёте")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnUpd" disabled="@(!_data.CanEdit)" /> @L("Печать и подписи в УПД")</label>
-                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnOrder" disabled="@(!_data.CanEdit)" /> @L("Печать и подписи в заказе")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnInvoice" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в счёте")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnUpd" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в УПД")</label>
+                    <label class="inline"><input type="checkbox" @bind="_flags.StampOnOrder" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Печать и подписи в заказе")</label>
                     @if (_data.CanEdit)
                     {
                         <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
@@ -155,10 +156,10 @@ else
                 }
                 else
                 {
-                    <label class="inline w4"><input type="checkbox" @bind="t.AutoSend" disabled="@(!_data.CanEdit)" /> @L("Отправлять автоматически")</label>
+                    <label class="inline w4"><input type="checkbox" @bind="t.AutoSend" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /> @L("Отправлять автоматически")</label>
                 }
-                <label class="w4">@L("Тема") <input @bind="t.Subject" maxlength="@SalesMailTemplate.SubjectMaxLength" disabled="@(!_data.CanEdit)" /></label>
-                <label class="w4">@L("Текст") <textarea rows="5" @bind="t.Body" maxlength="@SalesMailTemplate.BodyMaxLength" disabled="@(!_data.CanEdit)"></textarea></label>
+                <label class="w4">@L("Тема") <input @bind="t.Subject" maxlength="@SalesMailTemplate.SubjectMaxLength" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" /></label>
+                <label class="w4">@L("Текст") <textarea rows="5" @bind="t.Body" maxlength="@SalesMailTemplate.BodyMaxLength" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)"></textarea></label>
                 @if (_data.CanEdit)
                 {
                     <div class="sx-actions"><button type="submit" disabled="@_busy">@L("Сохранить")</button></div>
@@ -175,7 +176,7 @@ else
             @foreach (var s in _data.Stages)
             {
                 <label class="inline">
-                    <input type="checkbox" checked="@_stages.Contains(s.Id)" @onchange="e => ToggleStage(s.Id, e)" disabled="@(!_data.CanEdit)" />
+                    <input type="checkbox" checked="@_stages.Contains(s.Id)" @onchange="e => ToggleStage(s.Id, e)" disabled="@(!_data.CanEdit)" title="@((!_data.CanEdit) ? L("Нет права на изменение") : null)" />
                     @s.Name@(s.IsArchived ? " (" + L("в архиве") + ")" : "")
                 </label>
             }

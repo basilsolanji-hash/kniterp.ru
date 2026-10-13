@@ -28,7 +28,7 @@
 {
     <label>
         @(StockDocument.WithCustomer(Kind) ? L("Покупатель") : L("Поставщик"))
-        <select @bind="Form.CounterpartyId" disabled="@(Form.PurchaseOrderId is not null || Form.SalesOrderId is not null)">
+        <select @bind="Form.CounterpartyId" disabled="@(Form.PurchaseOrderId is not null || Form.SalesOrderId is not null)" title="@((Form.PurchaseOrderId is not null || Form.SalesOrderId is not null) ? L("Контрагент взят из заказа") : null)">
             <option value="">@(Kind == StockOperationKind.Receipt ? L("— без поставщика —") : StockDocument.WithCustomer(Kind) ? L("— выберите покупателя —") : L("— выберите поставщика —"))</option>
             @foreach (var c in Options.Suppliers)
             {

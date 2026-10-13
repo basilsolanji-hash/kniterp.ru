@@ -4,7 +4,7 @@
 *@
 @if (!_asking)
 {
-    <button type="button" class="@Class" disabled="@Disabled" aria-label="@AriaLabel" @onclick="() => _asking = true">@ChildContent</button>
+    <button type="button" class="@Class" disabled="@Disabled" aria-label="@AriaLabel" title="@Title" @onclick="() => _asking = true">@ChildContent</button>
 }
 else
 {
@@ -34,6 +34,10 @@ else
 
     [Parameter]
     public string? AriaLabel { get; set; }
+
+    /// <summary>D809: подсказка при наведении — например, почему действие сейчас недоступно.</summary>
+    [Parameter]
+    public string? Title { get; set; }
 
     private bool _asking;
 

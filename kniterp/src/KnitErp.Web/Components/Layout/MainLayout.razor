@@ -26,10 +26,27 @@
         <div id="nav-body" class="nav-body @(_menuOpen ? "open" : "")">
         @if (_access is not null)
         {
-            @foreach (var group in Groups)
+            @* D805: поиск по разделам и документам — первым, с подсказкой сочетания клавиш. *@
+            <button type="button" class="nav-search" @onclick="() => OpenTool(ToolCatalog.Search)" title="@L("Быстрый поиск (Ctrl+K)")">
+                <Icon Name="search" Size="16" /><span class="nav-text">@L("Найти раздел или документ")</span><kbd class="nav-text" aria-hidden="true">Ctrl K</kbd>
+            </button>
+            @if (_favorites is { Count: > 0 } favorites)
             {
-                var visible = group.Items.Where(i => i.Allowed(_access)).ToList();
-                if (visible.Count == 0)
+                @* D805: избранное пользователя (инструмент «Избранное») — сверху меню. *@
+                <div class="nav-favorites" aria-label="@L("Избранное")">
+                    <span class="nav-section nav-text">@L("Избранное")</span>
+                    @foreach (var f in favorites.Take(7))
+                    {
+                        <a href="@f.Href" class="@(Matches(Navigation.ToBaseRelativePath(Navigation.Uri), f.Href) ? "active" : null)" title="@f.Title">
+                            <Icon Name="favorites" Size="14" /><span class="nav-text">@f.Title</span>
+                        </a>
+                    }
+                </div>
+            }
+            @foreach (var group in Ordered)
+            {
+                var allowed = group.Items.Where(i => i.Allowed(_access)).ToList();
+                if (allowed.Count == 0)
                 {
                     continue; // D800: раздел без единого доступного пункта не показывается
                 }
@@ -37,7 +54,7 @@
                 var open = IsOpen(group);
                 @if (group.Items.Length == 1)
                 {
-                    var item = visible[0];
+                    var item = allowed[0];
                     <NavLink class="nav-single" href="@item.Href" Match="@(item.Href == "" ? NavLinkMatch.All : NavLinkMatch.Prefix)" title="@L(group.Title)"
                              style="@($"--sec: var(--sec-{group.Key})")">
                         <Icon Name="@group.Key" Size="16" /><span class="nav-text">@L(group.Title)</span>
@@ -45,27 +62,34 @@
                     continue;
                 }
 
+                @if (group.Key == "settings")
+                {
+                    @* D808 (раздел 0, п. 8): «Настройки» — один пункт, ведёт на страницу всех настроек; пункты раздела — плитки на ней. *@
+                    var here = Navigation.ToBaseRelativePath(Navigation.Uri) == SettingsHref || allowed.Any(i => i.Href == Current);
+                    <a class="nav-single @(here ? "active" : null)" href="@SettingsHref" title="@L(group.Title)" aria-current="@(here ? "page" : null)"
+                       style="@($"--sec: var(--sec-{group.Key})")">
+                        <Icon Name="@group.Key" Size="16" /><span class="nav-text">@L(group.Title)</span>
+                    </a>
+                    continue;
+                }
+
+                var shown = MenuItems(group, allowed);
                 <div class="nav-group @(open ? "open" : "")" style="@($"--sec: var(--sec-{group.Key})")">
                     <button type="button" class="nav-group-head" aria-expanded="@(open ? "true" : "false")" title="@L(group.Title)"
-                            @onclick="() => Toggle(group.Key)">
+                            @onclick="() => Toggle(group)">
                         <Icon Name="@group.Key" Size="16" /><span class="nav-text">@L(group.Title)</span><span class="caret" aria-hidden="true">▾</span>
                     </button>
                     @if (open)
                     {
                         <div class="nav-items">
-                            @{ string? section = null; }
-                            @foreach (var item in visible)
+                            @foreach (var item in shown)
                             {
-                                @if (item.Section != section)
-                                {
-                                    section = item.Section;
-                                    @if (section is not null)
-                                    {
-                                        <span class="nav-section" role="presentation">@L(section)</span>
-                                    }
-                                }
-
                                 <a href="@item.Href" class="@(item.Href == Current ? "active" : null)" aria-current="@(item.Href == Current ? "page" : null)">@L(item.Label)</a>
+                            }
+                            @if (allowed.Count > shown.Count)
+                            {
+                                var sectionHref = "section/" + group.Key;
+                                <a href="@sectionHref" class="nav-all @(Navigation.ToBaseRelativePath(Navigation.Uri) == sectionHref ? "active" : null)">@L("Все в разделе") <span class="muted">@allowed.Count →</span></a>
                             }
                         </div>
                     }
@@ -111,6 +135,19 @@
             }
         </main>
     </div>
+    @if (_access is not null)
+    {
+        @* D805 (раздел 0): на телефоне — нижняя панель: главная, до трёх главных разделов этой роли и «Ещё» (всё меню). *@
+        <nav class="bottom-nav" aria-label="@L("Главные разделы")">
+            <NavLink href="" Match="NavLinkMatch.All"><Icon Name="home" Size="20" /><span>@L("Главная")</span></NavLink>
+            @foreach (var group in BottomGroups())
+            {
+                <NavLink href="@("section/" + group.Key)"><Icon Name="@group.Key" Size="20" /><span>@L(group.Title)</span></NavLink>
+            }
+            <button type="button" class="@(_menuOpen ? "active" : null)" aria-expanded="@(_menuOpen ? "true" : "false")" aria-controls="nav-body"
+                    @onclick="() => _menuOpen = !_menuOpen"><Icon Name="all" Size="20" /><span>@L("Ещё")</span></button>
+        </nav>
+    }
     @if (_access is not null && _panel is not null && _opened.Count > 0)
     {
         <ToolDrawer Context="ToolContext()" Settings="_panel" Active="@_activeTool" Opened="_opened" HelpArticleId="@_helpArticle"
@@ -132,9 +169,9 @@
     private CurrentAccessDto? _access;
 
     /// <summary>Пункт меню. Planned — функция в плане: виден серым с пометкой «скоро» и никуда не ведёт.</summary>
-    private sealed record NavItem(string Href, string Label, Func<CurrentAccessDto, bool> Allowed, bool Planned = false, string? Section = null);
+    public sealed record NavItem(string Href, string Label, Func<CurrentAccessDto, bool> Allowed, bool Planned = false, string? Section = null);
 
-    private sealed record NavGroup(string Key, string Title, NavItem[] Items);
+    public sealed record NavGroup(string Key, string Title, NavItem[] Items);
 
     private static bool Docs(CurrentAccessDto a) =>
         a.Has(Permissions.WarehouseDocumentCreate) || a.Has(Permissions.WarehouseDocumentPost) || a.Has(Permissions.WarehouseReportView);
@@ -147,7 +184,7 @@
 
     private const string SDocs = "Документы", SPrices = "Цены", SReports = "Отчёты";
 
-    private static readonly NavGroup[] Groups =
+    public static readonly NavGroup[] Groups =
     [
         new("home", "Главная", [I("", "Главная", a => true)]),
         new("discussions", "Обсуждения", [I("discussions", "Обсуждения", a => true)]),
@@ -241,7 +278,7 @@
             I("settlement-statement", "Акт сверки", a => a.Has(Permissions.PriceView) && (a.Has(Permissions.SalesView) || a.Has(Permissions.PurchaseView)), SReports),
         ]),
         // Модуль «Сотрудники» (D200–D299).
-        new("hr", "Кадры",
+        new("hr", "Сотрудники",
         [
             I("employees", "Сотрудники", a => a.HasOwnOnly(Permissions.EmployeeView)),
             I("hr/orders", "Кадровые приказы", a => a.Has(Permissions.HrOrderCreate) || a.Has(Permissions.HrOrderPost)),
@@ -299,9 +336,54 @@
 
     private const string SOrg = "Организация и доступ", SModules = "Модули", SExchange = "Обмен", SControl = "Контроль";
 
+    // D805 (раздел 0 ТЗ интерфейса): порядок групп — по работе пользователя; в меню группы — 3–7 частых пунктов (MainHrefs),
+    // остальные — на странице раздела «section/{ключ}» (SectionPage) по ссылке «Все в разделе».
+    private static readonly string[] Order =
+        ["home", "discussions", "sales", "purchases", "warehouse", "production", "money", "hr", "crm", "dev", "catalogs", "settings"];
+
+    /// <summary>
+    /// D808: страница всех настроек. Пока единой страницы `/settings` нет (её делает сессия № 1, этап 2б) — страница раздела
+    /// с плитками по подзаголовкам; когда `/settings` появится, здесь меняется только адрес.
+    /// </summary>
+    public const string SettingsHref = "section/settings";
+
+    public static IEnumerable<NavGroup> Ordered => Order.Select(k => Groups.Single(g => g.Key == k));
+
+    private static readonly Dictionary<string, string[]> MainHrefs = new()
+    {
+        ["sales"] = ["sales-orders", "customer-invoices", "stock-documents?kind=6", "stock-documents?kind=7", "sales-price-list", "reports/sales"],
+        ["purchases"] = ["purchase-orders", "supplier-invoices", "stock-documents?kind=1&order=1", "stock-documents?kind=5", "catalog/price-list"],
+        ["warehouse"] = ["stock", "stock-documents?kind=1&order=0", "stock-documents?kind=2", "stock-documents?kind=3", "inventory", "stock-documents"],
+        ["production"] = ["production-orders", "production/shift-tasks", "shop", "tech-cards", "production/planning"],
+        ["money"] = ["money", "customer-payments", "supplier-payments", "money/bank-statement", "reports/cash-flow", "settlement-statement"],
+        ["hr"] = ["employees", "hr/timesheet", "hr/payroll", "hr/orders", "hr/schedules"],
+        ["crm"] = ["crm/today", "crm/deals", "crm/leads", "crm/contacts", "crm/chats", "crm/tasks"],
+        ["dev"] = ["dev/models", "dev/my", "dev/patterns", "dev/tech", "dev/machines"],
+        ["catalogs"] = ["catalog", "counterparties", "warehouses", "catalog/labels", "units"],
+    };
+
+    /// <summary>Пункты группы в меню: частые, на которые есть право, и текущая страница, если она среди редких.</summary>
+    private List<NavItem> MenuItems(NavGroup group, List<NavItem> allowed)
+    {
+        if (!MainHrefs.TryGetValue(group.Key, out var main))
+        {
+            return allowed;
+        }
+
+        var current = Current;
+        return allowed.Where(i => main.Contains(i.Href)).OrderBy(i => Array.IndexOf(main, i.Href))
+            .Concat(allowed.Where(i => i.Href == current && !main.Contains(i.Href))).ToList();
+    }
+
+    /// <summary>Разделы нижней панели телефона: первые три доступных из главных участков работы.</summary>
+    private IEnumerable<NavGroup> BottomGroups() =>
+        new[] { "sales", "warehouse", "production", "money", "crm", "purchases", "hr" }
+            .Select(k => Groups.Single(g => g.Key == k)).Where(g => g.Items.Any(i => i.Allowed(_access!))).Take(3);
+
     private static readonly NavItem[] Items = Groups.SelectMany(g => g.Items).Where(i => !i.Planned).ToArray();
 
-    private readonly HashSet<string> _toggled = [];
+    private string? _openKey;
+    private IReadOnlyList<KnitErp.Application.Workspace.FavoriteItem>? _favorites;
     private bool _narrow;
 
     /// <summary>
@@ -322,8 +404,14 @@
     /// <summary>Раздел раскрыт, если в нём текущая страница; щелчок по заголовку меняет это состояние.</summary>
     private bool IsOpen(NavGroup group)
     {
+        if (_openKey is not null)
+        {
+            return _openKey == group.Key;
+        }
+
         var current = Current;
-        return group.Items.Any(i => i.Href == current) ^ _toggled.Contains(group.Key);
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+        return group.Items.Any(i => i.Href == current) || path == "section/" + group.Key;
     }
 
     private static bool Matches(string path, string href)
@@ -339,12 +427,10 @@
         return bare == h || bare.StartsWith(h + "/", StringComparison.Ordinal);
     }
 
-    private void Toggle(string key)
+    /// <summary>D805: раскрыта одна группа — выбранная пользователем, иначе группа текущей страницы.</summary>
+    private void Toggle(NavGroup group)
     {
-        if (!_toggled.Remove(key))
-        {
-            _toggled.Add(key);
-        }
+        _openKey = IsOpen(group) ? "" : group.Key;
     }
 
     private void ToggleNarrow() => _narrow = !_narrow;
@@ -438,7 +524,21 @@
             _panel = new PanelSettings(ToolCatalog.DefaultPinned, ToolCatalog.DefaultVisible);
         }
 
+        await LoadFavoritesAsync();
         _access = access;
+    }
+
+    /// <summary>D805: избранное для верха меню; свой контекст базы (PersonalToolsService), ошибка не мешает работе.</summary>
+    private async Task LoadFavoritesAsync()
+    {
+        try
+        {
+            _favorites = await Personal.GetFavoritesAsync();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _favorites = null;
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -558,14 +658,17 @@
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         _menuOpen = false;
-        _toggled.Clear();
+        _openKey = null;
         _ = InvokeAsync(async () =>
         {
             StateHasChanged();
+            await LoadFavoritesAsync(); // избранное могли изменить в инструменте «Избранное»
             if (DateTime.UtcNow - _badgeAt > TimeSpan.FromMinutes(1))
             {
                 await RefreshBadgeAsync();
             }
+
+            StateHasChanged();
         });
     }
 

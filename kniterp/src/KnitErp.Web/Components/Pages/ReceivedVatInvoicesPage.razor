@@ -44,7 +44,7 @@ else
                     <label>@L("НДС") <input @bind="_vatText" inputmode="decimal" /></label>
                     <label>@L("Комментарий") <input @bind="_comment" maxlength="@ReceivedVatInvoice.CommentMaxLength" /></label>
                 </div>
-                <div class="actions"><button type="submit" disabled="@(_busy || _receiptId is null)">@L("Зарегистрировать")</button></div>
+                <div class="actions"><button type="submit" disabled="@(_busy || _receiptId is null)" title="@((_receiptId is null) ? L("Выберите приёмку") : null)">@L("Зарегистрировать")</button></div>
             </form>
         </div>
     }

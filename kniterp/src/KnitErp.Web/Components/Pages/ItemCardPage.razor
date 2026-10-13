@@ -43,6 +43,8 @@ else
     <div class="page-head">
         <h1>@_item.Name <span class="tag">@L(_item.TypeName)</span> @if (_item.IsArchived) { <span class="tag">@L("архив")</span> }</h1>
     </div>
+    <ReadOnlyNote When="@(!_item.CanEdit)" />
+    <ReadOnlyNote When="@(_item.CanEdit && _item.IsArchived)" Text="@L("Позиция в архиве: верните её из архива, чтобы изменить.")" />
     <TagPicker Entity="KnitErp.Domain.Tagging.TaggedEntity.Item" EntityId="Id" />
 
     @if (_message is not null)
@@ -97,7 +99,7 @@ else
             <div class="grid">
                 <label>
                     @(_settings.RequireGroup && _variants?.Parent is null ? L("Группа (обязательна)") : L("Группа"))
-                    <select @bind="_form.Group" disabled="@(!editable)">
+                    <select @bind="_form.Group" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)">
                         <option value="">@L("без группы")</option>
                         @foreach (var g in _groups)
                         {
@@ -105,11 +107,11 @@ else
                         }
                     </select>
                 </label>
-                <label>@L("Артикул") <input @bind="_form.Article" maxlength="@ItemDetailRules.ArticleMaxLength" disabled="@(!editable)" /></label>
+                <label>@L("Артикул") <input @bind="_form.Article" maxlength="@ItemDetailRules.ArticleMaxLength" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
                 @if (_item.IsStocked)
                 {
                     <label>@L("Страна происхождения (код ОКСМ)")
-                        <input @bind="_form.Country" list="countries" maxlength="3" inputmode="numeric" placeholder="643" disabled="@(!editable)" />
+                        <input @bind="_form.Country" list="countries" maxlength="3" inputmode="numeric" placeholder="643" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" />
                         <datalist id="countries">
                             @foreach (var c in ItemDetailRules.CommonCountries)
                             {
@@ -117,16 +119,16 @@ else
                             }
                         </datalist>
                     </label>
-                    <label>@L("Страна — краткое наименование") <input @bind="_form.CountryName" maxlength="@ItemDetailRules.CountryNameMaxLength" placeholder="@L("подставится по коду")" disabled="@(!editable)" /></label>
-                    <label>@L("Номер декларации на товары") <input @bind="_form.Declaration" maxlength="@ItemDetailRules.DeclarationMaxLength" placeholder="10702010/101026/0012345" disabled="@(!editable)" /></label>
-                    <label>@L("Код ТН ВЭД ЕАЭС") <input @bind="_form.TnVed" maxlength="13" inputmode="numeric" disabled="@(!editable)" /></label>
-                    <label>@L("Вес, кг (на единицу)") <input @bind="_form.Weight" inputmode="decimal" disabled="@(!editable)" /></label>
-                    <label>@L("Объём, м³ (на единицу)") <input @bind="_form.Volume" inputmode="decimal" disabled="@(!editable)" /></label>
-                    <label>@L("Неснижаемый остаток") <input @bind="_form.MinStock" inputmode="decimal" disabled="@(!editable)" /></label>
+                    <label>@L("Страна — краткое наименование") <input @bind="_form.CountryName" maxlength="@ItemDetailRules.CountryNameMaxLength" placeholder="@L("подставится по коду")" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
+                    <label>@L("Номер декларации на товары") <input @bind="_form.Declaration" maxlength="@ItemDetailRules.DeclarationMaxLength" placeholder="10702010/101026/0012345" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
+                    <label>@L("Код ТН ВЭД ЕАЭС") <input @bind="_form.TnVed" maxlength="13" inputmode="numeric" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
+                    <label>@L("Вес, кг (на единицу)") <input @bind="_form.Weight" inputmode="decimal" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
+                    <label>@L("Объём, м³ (на единицу)") <input @bind="_form.Volume" inputmode="decimal" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
+                    <label>@L("Неснижаемый остаток") <input @bind="_form.MinStock" inputmode="decimal" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
                 }
                 @if (_item.CanSeePrices)
                 {
-                    <label>@L("Закупочная цена, без НДС") <input @bind="_form.PurchasePrice" inputmode="decimal" disabled="@(!editable)" /></label>
+                    <label>@L("Закупочная цена, без НДС") <input @bind="_form.PurchasePrice" inputmode="decimal" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
                 }
                 @foreach (var f in _item.CustomFields.Where(f => !f.IsArchived))
                 {
@@ -135,12 +137,12 @@ else
                     {
                         case CustomFieldType.Flag:
                             <label class="inline"><input type="checkbox" checked="@(_form.Values.GetValueOrDefault(field.FieldId) == "true")"
-                                                         @onchange="e => SetFlag(field.FieldId, e)" disabled="@(!editable)" /> @field.Name</label>
+                                                         @onchange="e => SetFlag(field.FieldId, e)" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /> @field.Name</label>
                             break;
                         case CustomFieldType.Catalog:
                             <label>
                                 @field.Name
-                                <select value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)">
+                                <select value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)">
                                     <option value="">—</option>
                                     @foreach (var entry in _entries.GetValueOrDefault(field.CatalogId ?? 0) ?? [])
                                     {
@@ -155,12 +157,12 @@ else
                             break;
                         case CustomFieldType.LongText:
                             @* D328: многострочный текст — во всю ширину формы. *@
-                            <label class="wide">@field.Name <textarea rows="3" maxlength="@CustomFieldDefinition.ValueMaxLength" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)">@_form.Values.GetValueOrDefault(field.FieldId)</textarea></label>
+                            <label class="wide">@field.Name <textarea rows="3" maxlength="@CustomFieldDefinition.ValueMaxLength" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)">@_form.Values.GetValueOrDefault(field.FieldId)</textarea></label>
                             break;
                         case CustomFieldType.Link:
                             <label>
                                 @field.Name
-                                <input type="url" inputmode="url" placeholder="https://" maxlength="@CustomFieldDefinition.ValueMaxLength" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" />
+                                <input type="url" inputmode="url" placeholder="https://" maxlength="@CustomFieldDefinition.ValueMaxLength" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" />
                                 @if (field.Value is { } url && Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "http" or "https")
                                 {
                                     <a href="@u.AbsoluteUri" target="_blank" rel="noopener noreferrer" class="small">@L("открыть")</a>
@@ -171,7 +173,7 @@ else
                             @* D336: поиск по названию или ИНН — список не ограничен первыми 2000; выбранный виден всегда. *@
                             <label>
                                 @field.Name
-                                <select value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)">
+                                <select value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)">
                                     <option value="">—</option>
                                     @if (field.Value is not null && field.Display is not null && _counterparties.All(x => x.Id.ToString() != field.Value))
                                     {
@@ -194,13 +196,13 @@ else
                             </label>
                             break;
                         case CustomFieldType.Date:
-                            <label>@field.Name <input type="date" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" /></label>
+                            <label>@field.Name <input type="date" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
                             break;
                         case CustomFieldType.Number:
-                            <label>@field.Name <input inputmode="decimal" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" /></label>
+                            <label>@field.Name <input inputmode="decimal" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
                             break;
                         default:
-                            <label>@field.Name <input maxlength="@CustomFieldDefinition.ValueMaxLength" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" /></label>
+                            <label>@field.Name <input maxlength="@CustomFieldDefinition.ValueMaxLength" value="@_form.Values.GetValueOrDefault(field.FieldId)" @onchange="e => _form.Values[field.FieldId] = e.Value?.ToString()" disabled="@(!editable)" title="@((!editable) ? L("Нет права на изменение") : null)" /></label>
                             break;
                     }
                 }
@@ -226,7 +228,7 @@ else
                 <div class="grid">
                     <label>
                         @L("Признак предмета расчёта (чек)")
-                        <select @bind="_tradeForm.Subject" disabled="@(!tradeEditable || _item.Type == ItemType.Service)">
+                        <select @bind="_tradeForm.Subject" disabled="@(!tradeEditable || _item.Type == ItemType.Service)" title="@((!tradeEditable) ? L("Нет права на изменение") : null)">
                             @if (_item.Type == ItemType.Service)
                             {
                                 <option value="@PaymentSubject.Service">@L("Услуга")</option>
@@ -240,21 +242,21 @@ else
                     </label>
                     @if (_item.Type != ItemType.Service)
                     {
-                        <label class="inline"><input type="checkbox" @bind="_tradeForm.IsMarked" disabled="@(!tradeEditable)" /> @L("Маркируемый товар («Честный ЗНАК»)")</label>
+                        <label class="inline"><input type="checkbox" @bind="_tradeForm.IsMarked" disabled="@(!tradeEditable)" title="@((!tradeEditable) ? L("Нет права на изменение") : null)" /> @L("Маркируемый товар («Честный ЗНАК»)")</label>
                         <label>
                             @L("Вид продукции")
-                            <select @bind="_tradeForm.Tracking" disabled="@(!tradeEditable || !_tradeForm.IsMarked)">
+                            <select @bind="_tradeForm.Tracking" disabled="@(!tradeEditable || !_tradeForm.IsMarked)" title="@((!tradeEditable) ? L("Нет права на изменение") : null)">
                                 @foreach (var t in Marking.All.Where(t => t != TrackingType.None))
                                 {
                                     <option value="@t">@TrackingName(t)</option>
                                 }
                             </select>
                         </label>
-                        <label>@L("GTIN (14 цифр)") <input @bind="_tradeForm.Gtin" inputmode="numeric" maxlength="16" placeholder="04601234567893" disabled="@(!tradeEditable)" /></label>
+                        <label>@L("GTIN (14 цифр)") <input @bind="_tradeForm.Gtin" inputmode="numeric" maxlength="16" placeholder="04601234567893" disabled="@(!tradeEditable)" title="@((!tradeEditable) ? L("Нет права на изменение") : null)" /></label>
                     }
                     @if (trade.CanSeePrices)
                     {
-                        <label>@L("Минимальная цена продажи") <input @bind="_tradeForm.MinPrice" inputmode="decimal" disabled="@(!tradeEditable)" /></label>
+                        <label>@L("Минимальная цена продажи") <input @bind="_tradeForm.MinPrice" inputmode="decimal" disabled="@(!tradeEditable)" title="@((!tradeEditable) ? L("Нет права на изменение") : null)" /></label>
                     }
                 </div>
                 <p class="muted small">@L("Коды маркировки (DataMatrix), ЭДО и ГИС МТ подключаются отдельно; здесь — признак, вид продукции и GTIN из Национального каталога.")</p>

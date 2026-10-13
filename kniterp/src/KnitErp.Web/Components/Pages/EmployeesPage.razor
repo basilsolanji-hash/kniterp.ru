@@ -49,7 +49,7 @@ else
             <EditForm Model="_form" OnValidSubmit="SaveAsync" FormName="employee">
                 <div class="grid">
                     <label>@L("Табельный номер") <InputText @bind-Value="_form.PersonnelNumber" maxlength="20" required /></label>
-                    <label>@L("Дата приёма") <InputDate @bind-Value="_form.HiredOn" disabled="@(_mode == Mode.Edit)" /></label>
+                    <label>@L("Дата приёма") <InputDate @bind-Value="_form.HiredOn" disabled="@(_mode == Mode.Edit)" title="@((_mode == Mode.Edit) ? L("Дата приёма меняется кадровым приказом") : null)" /></label>
                     <label>@L("Фамилия") <InputText @bind-Value="_form.LastName" maxlength="100" required /></label>
                     <label>@L("Имя") <InputText @bind-Value="_form.FirstName" maxlength="100" required /></label>
                     <label>@L("Отчество") <InputText @bind-Value="_form.MiddleName" maxlength="100" /></label>
@@ -197,14 +197,14 @@ else
                                 @if (e.Status != EmploymentStatus.Dismissed)
                                 {
                                     <div class="row-actions">
-                                        <button type="button" class="secondary" @onclick="() => OpenEditAsync(e)" disabled="@(_busy || _mode != Mode.None)">@L("Изменить")</button>
+                                        <button type="button" class="secondary" @onclick="() => OpenEditAsync(e)" disabled="@(_busy || _mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Изменить")</button>
                                         @if (!_leaveOnlyByOrder)
                                         {
-                                            <button type="button" class="secondary" @onclick="() => ToggleLeaveAsync(e)" disabled="@(_busy || _mode != Mode.None)">
+                                            <button type="button" class="secondary" @onclick="() => ToggleLeaveAsync(e)" disabled="@(_busy || _mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">
                                                 @(e.Status == EmploymentStatus.OnLeave ? L("Вернуть из отпуска") : L("В отпуск"))
                                             </button>
                                         }
-                                        <button type="button" class="secondary" @onclick="() => OpenDismiss(e)" disabled="@(_busy || _mode != Mode.None)">@L("Уволить")</button>
+                                        <button type="button" class="secondary" @onclick="() => OpenDismiss(e)" disabled="@(_busy || _mode != Mode.None)" title="@((_mode != Mode.None) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Уволить")</button>
                                     </div>
                                 }
                             </td>

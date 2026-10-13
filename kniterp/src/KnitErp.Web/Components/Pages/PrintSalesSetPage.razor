@@ -18,7 +18,7 @@
 <SalesPrintStyles />
 
 <div class="print-bar sx-set-bar">
-    <button type="button" data-print disabled="@(_sheets.Count == 0)">@L("Печать комплекта")</button>
+    <button type="button" data-print disabled="@(_sheets.Count == 0)" title="@((_sheets.Count == 0) ? L("Нечего печатать") : null)">@L("Печать комплекта")</button>
     <a href="sales-orders/@OrderId">@L("← К заказу")</a>
     @if (_printables is not null)
     {

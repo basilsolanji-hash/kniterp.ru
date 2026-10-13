@@ -61,7 +61,7 @@ else
                     <fieldset class="perm-group">
                         <legend>
                             <label class="perm-all">
-                                <input type="checkbox" checked="@(on == items.Count)" disabled="@(!items.Any(Allowed))"
+                                <input type="checkbox" checked="@(on == items.Count)" disabled="@(!items.Any(Allowed))" title="@((!items.Any(Allowed)) ? L("Нельзя выдать право, которого нет у вас") : null)"
                                        @onchange="e => ToggleGroup(items, e.Value is true)" />
                                 <b>@L(g.Name)</b> <span class="muted small">@on / @items.Count</span>
                             </label>
@@ -70,7 +70,7 @@ else
                         {
                             var allowed = Allowed(i);
                             <label class="switch @(allowed ? null : "locked")" title="@(allowed ? null : L("Нельзя выдать право выше своего или административное — только Владелец"))">
-                                <input type="checkbox" role="switch" checked="@_edit.Codes.Contains(i.Code)" disabled="@(!allowed)"
+                                <input type="checkbox" role="switch" checked="@_edit.Codes.Contains(i.Code)" disabled="@(!allowed)" title="@((!allowed) ? L("Нельзя выдать право, которого нет у вас") : null)"
                                        @onchange="e => Toggle(i.Code, e.Value is true)" />
                                 <span class="switch-ui" aria-hidden="true"></span>
                                 <span>@L(i.Label)

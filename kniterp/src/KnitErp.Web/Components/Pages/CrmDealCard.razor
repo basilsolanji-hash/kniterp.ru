@@ -38,6 +38,8 @@ else
         <h1>@_deal.Number @v.Title</h1>
         <span class="tag @OutcomeClass(_deal.Outcome)">@L(_deal.OutcomeName)</span>
     </div>
+    <ReadOnlyNote When="@(!_deal.CanEdit)" />
+    <ReadOnlyNote When="@(_deal.CanEdit && !open)" Text="@L("Сделка закрыта — изменения недоступны.")" />
     <TagPicker Entity="TaggedEntity.CrmDeal" EntityId="Id" ReadOnly="@(!_deal.CanEdit)" />
 
     @* D699: итог действия — всплывающим сообщением внизу экрана, а не баннером над лентой: не сдвигает страницу и виден там, где нажали. *@
@@ -68,7 +70,7 @@ else
             <li>
                 <button type="button" class="@(current ? "current" : passed ? "passed" : null)"
                         aria-current="@(current ? "step" : null)" disabled="@(_busy || current || !_deal.CanEdit || s.IsArchived)"
-                        title="@(passed ? L("Этап пройден") : null)"
+                        title="@(passed ? L("Этап пройден") : (!_deal.CanEdit) ? L("Нет права на изменение") : (s.IsArchived) ? L("Этап в архиве") : null)"
                         @onclick="() => StageClickAsync(s)">@s.Name</button>
             </li>
         }
@@ -372,7 +374,7 @@ else
                         }
                     </fieldset>
                     <div class="actions">
-                        <button type="submit" disabled="@(_busy || !draft.MailConfigured || _docsSelected.Count == 0)">@L("Отправить клиенту")</button>
+                        <button type="submit" disabled="@(_busy || !draft.MailConfigured || _docsSelected.Count == 0)" title="@((!draft.MailConfigured) ? L("Почта организации не настроена: CRM → Настройки → Почта") : (_docsSelected.Count == 0) ? L("Отметьте документы для отправки") : null)">@L("Отправить клиенту")</button><WhyDisabled When="@(!draft.MailConfigured)">@L("Почта организации не настроена: CRM → Настройки → Почта")</WhyDisabled>
                         <button type="button" class="secondary" @onclick="() => _docs = null">@L("Отмена")</button>
                     </div>
                 </form>
@@ -411,7 +413,7 @@ else
             <div class="panel">
                 <h2>@L("Данные сделки")</h2>
                 <form @onsubmit="SaveAsync">
-                    <fieldset disabled="@(!canEdit)">
+                    <fieldset disabled="@(!canEdit)" title="@((!canEdit) ? L("Нет права на изменение") : null)">
                         <div class="grid">
                             <label class="wide">@L("Название") <input @bind="_f.Title" maxlength="@CrmDeal.TitleMaxLength" required /></label>
                             <label>
@@ -426,7 +428,7 @@ else
                             </label>
                             @if (_options.CanSeeAmounts)
                             {
-                                <label>@L("Сумма") <input inputmode="decimal" @bind="_f.Amount" disabled="@(_deal.Lines.Count > 0)" /></label>
+                                <label>@L("Сумма") <input inputmode="decimal" @bind="_f.Amount" disabled="@(_deal.Lines.Count > 0)" title="@((_deal.Lines.Count > 0) ? L("Сумма считается по строкам сделки") : null)" /></label>
                                 <label>
                                     @L("Валюта")
                                     <select @bind="_f.Currency">

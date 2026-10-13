@@ -1,0 +1,16 @@
+@*
+    D809 (интерфейс, дополнение 13.10): причина рядом с неактивным действием — видна сразу, в том числе на телефоне, где нет подсказки
+    при наведении. Показывается, только когда условие выполнено (кнопка неактивна не из-за ожидания ответа сервера).
+*@
+@if (When)
+{
+    <span class="why-disabled" role="note"><span aria-hidden="true">ⓘ</span> @ChildContent</span>
+}
+
+@code {
+    [Parameter]
+    public bool When { get; set; }
+
+    [Parameter, EditorRequired]
+    public RenderFragment ChildContent { get; set; } = default!;
+}

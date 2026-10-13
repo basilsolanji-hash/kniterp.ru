@@ -34,13 +34,13 @@
             <div class="flash warn" role="status">@L(_model.CannotEditReason ?? "")</div>
         }
         <form @onsubmit="SaveAsync">
-            <fieldset disabled="@(!_model.CanEdit || _busy)">
+            <fieldset disabled="@(!_model.CanEdit || _busy)" title="@((!_model.CanEdit) ? L("Нет права на изменение") : null)">
                 <legend>@L("Одно устройство")</legend>
                 <label><input type="checkbox" @bind="_singleDevice" data-testid="single-device" /> @L("Работать только на одном устройстве")</label>
                 <p class="muted small">@L("Вход на другом устройстве разрешён, а прежний сеанс получает предупреждение и закрывается через 30 секунд.")</p>
             </fieldset>
 
-            <fieldset disabled="@(!_model.CanEdit || _busy)">
+            <fieldset disabled="@(!_model.CanEdit || _busy)" title="@((!_model.CanEdit) ? L("Нет права на изменение") : null)">
                 <legend>@L("Разрешённые сети (IP)")</legend>
                 <label>@L("Адреса или сети, по одному в строке (до 20). Пусто — без ограничения.")
                     <textarea rows="4" @bind="_networks" placeholder="203.0.113.10&#10;198.51.100.0/24&#10;2001:db8:12::/48" data-testid="networks"></textarea>
@@ -56,7 +56,7 @@
                 }
             </fieldset>
 
-            <fieldset disabled="@(!_model.CanEdit || _busy)">
+            <fieldset disabled="@(!_model.CanEdit || _busy)" title="@((!_model.CanEdit) ? L("Нет права на изменение") : null)">
                 <legend>@L("Время работы")</legend>
                 <label><input type="checkbox" @bind="_scheduleEnabled" data-testid="schedule-enabled" /> @L("Вход только в разрешённые дни и часы")</label>
                 @if (_scheduleEnabled)

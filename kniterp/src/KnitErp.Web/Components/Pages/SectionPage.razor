@@ -1,0 +1,53 @@
+@page "/section/{Key}"
+@using KnitErp.Web.Components.Layout
+@*
+    D805 (сессия 5, раздел 0 ТЗ интерфейса): страница раздела меню — все пункты раздела, на которые есть право, по подзаголовкам
+    («Документы», «Цены», «Отчёты»…). В меню слева — только 3–7 частых пунктов, редкие — здесь. Право на сами страницы проверяет сервер.
+*@
+
+@if (_group is null)
+{
+    <h1>@L("Раздел не найден")</h1>
+    <p><a href="">@L("На главную")</a></p>
+}
+else
+{
+    <PageTitle>@L(_group.Title) — knitERP</PageTitle>
+    <nav class="crumbs" aria-label="@L("Путь")"><a href="">@L("Главная")</a> / <span>@L(_group.Title)</span></nav>
+    <h1>@L(_group.Title)</h1>
+    var allowed = _group.Items.Where(i => i.Allowed(CurrentAccess)).ToList();
+    @if (allowed.Count == 0)
+    {
+        <p class="muted">@L("В этом разделе нет страниц, доступных вашей роли. Попросите администратора выдать права.")</p>
+    }
+    else
+    {
+        <div class="section-hub">
+            @foreach (var part in allowed.GroupBy(i => i.Section))
+            {
+                <section class="panel section-card">
+                    <h2>@L(part.Key ?? _group.Title)</h2>
+                    <ul class="plain">
+                        @foreach (var item in part)
+                        {
+                            <li><a href="@item.Href">@L(item.Label)</a></li>
+                        }
+                    </ul>
+                </section>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter]
+    public string Key { get; set; } = string.Empty;
+
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private MainLayout.NavGroup? _group;
+
+    protected override void OnParametersSet() =>
+        _group = MainLayout.Groups.FirstOrDefault(g => string.Equals(g.Key, Key, StringComparison.Ordinal) && g.Items.Length > 1);
+}

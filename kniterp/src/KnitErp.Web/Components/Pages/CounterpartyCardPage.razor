@@ -339,8 +339,8 @@ else
                                         <div class="row-actions">
                                             @if (k.Status == ContractStatus.Active)
                                             {
-                                                <button type="button" class="secondary" @onclick="() => OpenEditContract(k)" disabled="@(_busy || _form is not null)">@L("Изменить")</button>
-                                                <ConfirmButton Class="secondary" OnConfirm="() => CloseContractAsync(k)" Disabled="@(_busy || _form is not null)" Question='@L("Закрыть договор?")'>@L("Закрыть")</ConfirmButton>
+                                                <button type="button" class="secondary" @onclick="() => OpenEditContract(k)" disabled="@(_busy || _form is not null)" title="@((_form is not null) ? L("Сначала сохраните или закройте открытую форму") : null)">@L("Изменить")</button>
+                                                <ConfirmButton Class="secondary" OnConfirm="() => CloseContractAsync(k)" Disabled="@(_busy || _form is not null)" Title="@((_form is not null) ? L("Сначала сохраните или закройте открытую форму") : null)" Question='@L("Закрыть договор?")'>@L("Закрыть")</ConfirmButton>
                                             }
                                             else
                                             {

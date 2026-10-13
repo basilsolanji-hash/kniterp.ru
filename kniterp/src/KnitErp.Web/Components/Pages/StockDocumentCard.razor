@@ -191,7 +191,7 @@ else
                             @if (_doc.CanEdit)
                             {
                                 <td>
-                                    <button type="button" class="secondary" @onclick="() => SetBundleAsync(l)" disabled="@_busy">@L("Изменить")</button>
+                                    <button type="button" class="secondary" @onclick="() => SetBundleAsync(l)" disabled="@_busy">@L("Изменить")</button><WhyDisabled When="@(_doc.Lines.Count == 0)">@L("Добавьте хотя бы одну строку")</WhyDisabled>
                                     <ConfirmButton Class="secondary" OnConfirm="() => RemoveBundleAsync(l)" Disabled="@_busy" AriaLabel="@L("Удалить комплект {0}", l.BundleCode)" Question='@L("Удалить комплект со всеми компонентами?")'>@L("Удалить")</ConfirmButton>
                                 </td>
                             }
@@ -333,7 +333,7 @@ else
                     <label>@L("Мест (бобин)") <input @bind="_bPackages" inputmode="numeric" /></label>
                     <label>@L("Брутто, кг") <input @bind="_bGross" inputmode="decimal" /></label>
                 </div>
-                <div class="actions"><button type="submit" disabled="@(_busy || _bItemId is null)">@L("Добавить партию")</button></div>
+                <div class="actions"><button type="submit" disabled="@(_busy || _bItemId is null)" title="@((_bItemId is null) ? L("Выберите позицию") : null)">@L("Добавить партию")</button></div>
             </form>
         }
 
@@ -366,7 +366,7 @@ else
         }
         @if (_doc.CanPost)
         {
-            <button type="button" @onclick="PostAsync" disabled="@(_busy || _doc.Lines.Count == 0)">@L("Провести")</button>
+            <button type="button" @onclick="PostAsync" disabled="@(_busy || _doc.Lines.Count == 0)" title="@((_doc.Lines.Count == 0) ? L("Добавьте хотя бы одну строку") : null)">@L("Провести")</button>
         }
         @if (_doc.CanEdit)
         {

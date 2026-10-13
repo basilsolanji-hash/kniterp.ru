@@ -73,7 +73,7 @@ else
                 {
                     <form class="crm-chat-reply" @onsubmit="SendAsync">
                         <textarea rows="2" @bind="_text" @bind:event="oninput" @onkeydown="KeyAsync" aria-label="@L("Сообщение клиенту")" placeholder="@L("Сообщение клиенту — Ctrl+Enter отправит")" maxlength="4000"></textarea>
-                        <button type="submit" disabled="@(_busy || !Connected(_current) || string.IsNullOrWhiteSpace(_text))">@L("Отправить")</button>
+                        <button type="submit" disabled="@(_busy || !Connected(_current) || string.IsNullOrWhiteSpace(_text))" title="@((string.IsNullOrWhiteSpace(_text)) ? L("Напишите сообщение") : (!Connected(_current)) ? L("Канал не подключён") : null)">@L("Отправить")</button>
                     </form>
                 }
             }
