@@ -347,6 +347,12 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByLabel("Решение").SelectOptionAsync(new SelectOptionValue { Label = "На доработку" });
         await page.GetByLabel("Что не так / комментарий").FillAsync("рисунок съехал на 2 петли");
         await Click(page, "Записать решение", "Решение записано");
+        // ТЗ §8: план доработки образца «На доработку» — что меняем.
+        var sample1 = page.Locator("[data-test=dev-sample-1]");
+        await sample1.GetByLabel("Что меняем").FillAsync("сдвинуть рисунок на 2 петли");
+        await sample1.GetByRole(AriaRole.Button, new() { Name = "Сохранить план доработки", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "План доработки сохранён" })).ToBeVisibleAsync();
+        await Assertions.Expect(sample1.Locator("[data-test=dev-sample-rework]")).ToContainTextAsync("сдвинуть рисунок на 2 петли");
         await UploadPatternAsync(page);
         await Assertions.Expect(page.Locator(".dev-files")).ToContainTextAsync("версия 2");
 
@@ -355,6 +361,12 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await page.GetByLabel("Размер образца").SelectOptionAsync(new SelectOptionValue { Label = "46" });
         await Click(page, "Новый образец", "Образец создан");
         await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Образец № 2" })).ToBeVisibleAsync();
+        // ТЗ §8: паспорт образца — партия пряжи.
+        var sample2 = page.Locator("[data-test=dev-sample-2]");
+        await sample2.GetByLabel("Партия пряжи").FillAsync("П-2026-17");
+        await sample2.GetByRole(AriaRole.Button, new() { Name = "Сохранить паспорт", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Паспорт образца сохранён" })).ToBeVisibleAsync();
+        await Assertions.Expect(sample2.Locator("[data-test=dev-sample-making]")).ToContainTextAsync("П-2026-17");
         await page.GetByLabel("Замер Длина изделия").First.FillAsync("62.5");
         await Click(page, "Сохранить замеры", "Замеры сохранены");
         await page.GetByLabel("Решение").First.SelectOptionAsync(new SelectOptionValue { Label = "Принят" });

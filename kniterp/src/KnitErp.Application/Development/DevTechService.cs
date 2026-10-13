@@ -677,6 +677,11 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await db.DevModels.AsNoTracking().SingleOrDefaultAsync(m => m.Id == modelId && m.OrganizationId == ctx.OrganizationId, ct)
         ?? throw new NotFoundException("Модель");
 
+    /// <summary>Загрузка файла модели после проверки права вызывающим (фото образца, D728) — через общие правила файлов модели.</summary>
+    internal Task<long> AddModelFileAsync(AccessContext ctx, long modelId, DevFileKind kind, string? fileName, byte[] content, string? comment,
+        Action<DevFile>? configure, CancellationToken ct) =>
+        models.AddFileCoreAsync(ctx, modelId, kind, fileName, content, comment, configure, ct);
+
     internal async Task<DevModel> FindEditableModelAsync(AccessContext ctx, long modelId, CancellationToken ct)
     {
         var m = await FindModelAsync(ctx, modelId, ct);

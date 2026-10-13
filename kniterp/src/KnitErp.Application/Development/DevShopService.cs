@@ -4,6 +4,7 @@ using KnitErp.Domain.Access;
 using KnitErp.Domain.Audit;
 using KnitErp.Domain.Common;
 using KnitErp.Domain.Development;
+using KnitErp.Domain.Organizations;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 
@@ -406,9 +407,40 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var customer = model.CustomerId is { } cid
             ? await db.Counterparties.AsNoTracking().Where(c => c.Id == cid && c.OrganizationId == org).Select(c => c.Name).SingleOrDefaultAsync(ct)
             : null;
+
+        // ТЗ §8 (D728): колорит, люди паспорта и доработки, фото образца.
+        var colorwayIds = samples.Select(x => x.s.ColorwayId).OfType<long>().Distinct().ToList();
+        var colorways = colorwayIds.Count == 0
+            ? []
+            : await db.DevPatternColorways.AsNoTracking().Where(c => c.OrganizationId == org && colorwayIds.Contains(c.Id))
+                .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+        var users = await ActiveUsersAsync(org, ct);
+        var people = users.ToDictionary(u => u.Id, u => u.Name);
+        var otherPeople = samples.SelectMany(x => new[] { x.s.KnittedByUserId, x.s.AssembledByUserId, x.s.ReworkAssigneeUserId }).OfType<long>().Distinct()
+            .Where(id => !people.ContainsKey(id)).ToList();
+        foreach (var (uid, name) in await UserNamesAsync(otherPeople.Cast<long?>(), ct))
+        {
+            people[uid] = name;
+        }
+
+        var photos = await db.DevFiles.AsNoTracking()
+            .Where(f => f.OrganizationId == org && f.ModelId == modelId && f.SampleId != null && sampleIds.Contains(f.SampleId.Value))
+            .OrderBy(f => f.UploadedAtUtc).ThenBy(f => f.Id).Select(f => new { f.Id, SampleId = f.SampleId!.Value }).ToListAsync(ct);
+        string? Person(long? id) => id is { } v ? people.GetValueOrDefault(v) : null;
+
         return new DevSamplesDto(samples.Select(x =>
             {
                 var s = x.s;
+                var facts = details.Select(d => (d.Quantity, Fact: factDtos.FirstOrDefault(f => f.SampleId == s.Id && f.DetailId == d.Id))).ToList();
+                var timed = facts.Where(f => f.Fact?.KnitSeconds is not null).ToList();
+                var weighed = facts.Where(f => f.Fact?.WeightGrams is not null).ToList();
+                var making = new DevSampleMakingDto(s.ColorwayId is { } cw ? colorways.GetValueOrDefault(cw) : null, s.PatternVersion, s.YarnBatch,
+                    s.KnittedByUserId, Person(s.KnittedByUserId), s.AssembledByUserId, Person(s.AssembledByUserId), s.AssemblyMinutes,
+                    timed.Count == 0 ? null : decimal.Round(timed.Sum(f => (decimal)f.Fact!.KnitSeconds!.Value * f.Quantity) / 60m, 1),
+                    weighed.Count == 0 ? null : weighed.Sum(f => f.Fact!.WeightGrams!.Value * f.Quantity));
+                var rework = s.ReworkWhat is null && s.ReworkAssigneeUserId is null && s.ReworkDueDate is null
+                    ? null
+                    : new DevSampleReworkDto(s.ReworkWhat, s.ReworkAssigneeUserId, Person(s.ReworkAssigneeUserId), s.ReworkDueDate);
                 return new DevSampleDto(s.Id, s.No, s.SizeId, sizes.FirstOrDefault(z => z.Id == s.SizeId)?.Name, s.Status, s.Comment, s.CreatedAtUtc, x.User,
                     details.Select(d => (d.Name,
                         factDtos.FirstOrDefault(f => f.SampleId == s.Id && f.DetailId == d.Id),
@@ -426,12 +458,13 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
                         return new DevSampleMeasureDto(m.Id, m.Name, p, m.Tolerance, fact, null, false);
                     }).ToList(),
                     s.RowVersion, s.ReasonId is { } rid ? reasonNames.GetValueOrDefault(rid) : null, s.Custody, s.CustodyRecipient, s.HandedOn, s.ReturnBy,
-                    s.CustodyClosedOn, s.CustodyNote, DevSample.IsReturnOverdue(s.Custody, s.ReturnBy, today));
+                    s.CustodyClosedOn, s.CustodyNote, DevSample.IsReturnOverdue(s.Custody, s.ReturnBy, today), making, rework,
+                    photos.Where(p => p.SampleId == s.Id).Select(p => p.Id).ToList());
             }).ToList(),
             sizes, ctx.Permissions.Has(Permissions.DevEdit) && !DevStages.IsFinal(model.Stage),
             ctx.Permissions.Has(Permissions.DevSample) && !DevStages.IsFinal(model.Stage), (await tech.SettingsAsync(org, ct)).FactTolerancePercent,
             reasons.Where(r => !r.IsArchived).Select(r => new DevOptionDto(r.Id, r.Name)).ToList(), customer, today,
-            ctx.Permissions.Has(Permissions.DevEdit) && model.Stage != DevStage.Cancelled, ctx.Permissions.Has(Permissions.DevEdit));
+            ctx.Permissions.Has(Permissions.DevEdit) && model.Stage != DevStage.Cancelled, ctx.Permissions.Has(Permissions.DevEdit), users);
     }
 
     /// <summary>Сколько образцов сравниваем рядом (ТЗ §8): меньше двух — нечего сравнивать, больше шести — не помещается на экран.</summary>
@@ -462,12 +495,6 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         var details = await db.DevDetails.AsNoTracking().Where(d => d.OrganizationId == org && d.ModelId == modelId).OrderBy(d => d.SortOrder).ThenBy(d => d.Id)
             .Select(d => new { d.Id, d.Name, d.Quantity }).ToListAsync(ct);
 
-        // Допущение (ТЗ §8 «фото»): у образца нет своих фото — фото загружаются в файлы модели (вид «Фото»). Образцу относим фото модели,
-        // загруженные от создания этого образца до создания следующего по номеру образца модели (у последнего — до сих пор).
-        var photos = await db.DevFiles.AsNoTracking().Where(f => f.OrganizationId == org && f.ModelId == modelId && f.Kind == DevFileKind.Photo)
-            .OrderBy(f => f.UploadedAtUtc).ThenBy(f => f.Id).Select(f => new { f.Id, f.UploadedAtUtc }).ToListAsync(ct);
-        var byNo = all.Samples.OrderBy(s => s.No).ToList();
-
         var items = chosen.Select(s =>
         {
             var rows = s.Details.Select((d, i) =>
@@ -478,10 +505,8 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }).ToList();
             var weighed = rows.Where(r => r.FactWeightGrams is not null).ToList();
             decimal? total = weighed.Count == 0 ? null : weighed.Sum(r => r.FactWeightGrams!.Value * r.Quantity);
-            var next = byNo.FirstOrDefault(o => o.No > s.No);
-            var photoIds = photos.Where(p => p.UploadedAtUtc >= s.CreatedAtUtc && (next is null || p.UploadedAtUtc < next.CreatedAtUtc))
-                .Select(p => p.Id).ToList();
-            return new DevSampleCompareItemDto(s.Id, s.No, s.Size, s.Status, s.Reason, s.Comment, s.CreatedAtUtc, rows, total, s.Measures, photoIds);
+            // Фото — только свои фото образца (DevFile.SampleId, D728).
+            return new DevSampleCompareItemDto(s.Id, s.No, s.Size, s.Status, s.Reason, s.Comment, s.CreatedAtUtc, rows, total, s.Measures, s.PhotoFileIds ?? []);
         }).ToList();
 
         var measureNames = chosen[0].Measures.Select(m => m.Name).ToList();
@@ -510,6 +535,7 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
 
             var sample = DevSample.Create(ctx.OrganizationId, modelId, no, sizeId, clock.UtcNow, ctx.UserId);
+            sample.LinkPattern(model.ColorwayId, model.PatternVersion); // D728: колорит и версия рисунка — с модели на момент создания
             db.DevSamples.Add(sample);
             await db.SaveOrConflictAsync(ct);
             Audit(ctx, nameof(DevModel), modelId, null, $"образец № {no}", $"{model.Number}: образец");
@@ -544,6 +570,60 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
             Audit(ctx, nameof(DevModel), s.ModelId, before, DevSample.StatusName(s.Status), $"{model.Number}: образец № {s.No}{(reason is null || s.ReasonId is null ? "" : ", причина: " + reason)}{(s.Comment is null ? "" : ": " + s.Comment)}");
             await db.SaveOrConflictAsync(ct);
         });
+    }
+
+    /// <summary>
+    /// Паспорт образца (ТЗ §8, D728): партия пряжи, кто вязал, кто собирал, время сборки. Пишут конструктор и цех; люди — активные
+    /// пользователи организации (уже записанного неактивного можно оставить).
+    /// </summary>
+    public async Task SetSampleMakingAsync(long sampleId, string? yarnBatch, long? knittedBy, long? assembledBy, int? assemblyMinutes, byte[] rowVersion,
+        CancellationToken ct = default)
+    {
+        var ctx = await DemandEditOrSampleAsync(ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var model = await tech.FindEditableModelAsync(ctx, s.ModelId, ct);
+            await EnsureActiveMembersAsync(ctx, [knittedBy, assembledBy], [s.KnittedByUserId, s.AssembledByUserId], ct);
+            s.SetMaking(yarnBatch, knittedBy, assembledBy, assemblyMinutes);
+            var names = await UserNamesAsync([s.KnittedByUserId, s.AssembledByUserId], ct);
+            Audit(ctx, nameof(DevModel), s.ModelId, null,
+                $"партия: {s.YarnBatch ?? "—"}, вязал: {names.GetValueOrDefault(s.KnittedByUserId ?? 0) ?? "—"}, собирал: "
+                + $"{names.GetValueOrDefault(s.AssembledByUserId ?? 0) ?? "—"}, сборка: {s.AssemblyMinutes?.ToString(CultureInfo.InvariantCulture) ?? "—"} мин",
+                $"{model.Number}: паспорт образца № {s.No}", AuditActions.DevSampleRecorded);
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>План доработки образца «На доработку» (ТЗ §8): что меняем, кто (активный пользователь), срок.</summary>
+    public async Task PlanReworkAsync(long sampleId, string? what, long? assigneeUserId, DateOnly? dueDate, byte[] rowVersion, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevEdit, ct);
+        await RunAsync(async () =>
+        {
+            var s = await db.DevSamples.SingleOrDefaultAsync(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId, ct) ?? throw new NotFoundException("Образец");
+            s.EnsureVersion(s.RowVersion, rowVersion);
+            var model = await tech.FindEditableModelAsync(ctx, s.ModelId, ct);
+            await EnsureActiveMembersAsync(ctx, [assigneeUserId], [s.ReworkAssigneeUserId], ct);
+            s.PlanRework(what, assigneeUserId, dueDate);
+            var names = await UserNamesAsync([s.ReworkAssigneeUserId], ct);
+            Audit(ctx, nameof(DevModel), s.ModelId, null,
+                $"доработка: {s.ReworkWhat}; кто: {names.GetValueOrDefault(s.ReworkAssigneeUserId ?? 0) ?? "—"}; срок: "
+                + (s.ReworkDueDate?.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture) ?? "—"), $"{model.Number}: образец № {s.No}");
+            await db.SaveOrConflictAsync(ct);
+        });
+    }
+
+    /// <summary>Фото образца (ТЗ §8, D728): файл модели вида «Фото», привязанный к образцу; правила файлов модели — те же (предел, стадия).</summary>
+    public async Task<long> AddSamplePhotoAsync(long sampleId, string? fileName, byte[] content, CancellationToken ct = default)
+    {
+        var ctx = await DemandEditOrSampleAsync(ct);
+        var s = await db.DevSamples.AsNoTracking().Where(x => x.Id == sampleId && x.OrganizationId == ctx.OrganizationId)
+                    .Select(x => new { x.ModelId, x.No }).SingleOrDefaultAsync(ct)
+                ?? throw new NotFoundException("Образец");
+        return await tech.AddModelFileAsync(ctx, s.ModelId, DevFileKind.Photo, fileName, content, $"Образец № {s.No}",
+            f => f.AttachToSample(sampleId), ct);
     }
 
     /// <summary>
@@ -672,12 +752,7 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
     /// </summary>
     public async Task<DevSaveResult> SetSampleMeasuresAsync(long sampleId, IReadOnlyList<DevCellEdit> edits, CancellationToken ct = default)
     {
-        var ctx = await guard.CurrentAsync(ct);
-        if (!ctx.Permissions.Has(Permissions.DevEdit) && !ctx.Permissions.Has(Permissions.DevSample))
-        {
-            await guard.DemandAsync(Permissions.DevSample, ct);
-        }
-
+        var ctx = await DemandEditOrSampleAsync(ct);
         DevSaveResult result = new(0, []);
         await RunAsync(async () =>
         {
@@ -906,6 +981,47 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
     private async Task<(List<long> MeasureIds, List<long> SizeIds)> MeasureScopeAsync(AccessContext ctx, long modelId, CancellationToken ct) =>
         (await db.DevMeasures.Where(m => m.OrganizationId == ctx.OrganizationId && m.ModelId == modelId).Select(m => m.Id).ToListAsync(ct),
          await db.DevModelSizes.Where(s => s.OrganizationId == ctx.OrganizationId && s.ModelId == modelId).Select(s => s.Id).ToListAsync(ct));
+
+    /// <summary>Конструктор («изменение») или цех («результат вязки образца»).</summary>
+    private async Task<AccessContext> DemandEditOrSampleAsync(CancellationToken ct)
+    {
+        var ctx = await guard.CurrentAsync(ct);
+        if (!ctx.Permissions.Has(Permissions.DevEdit) && !ctx.Permissions.Has(Permissions.DevSample))
+        {
+            await guard.DemandAsync(Permissions.DevSample, ct);
+        }
+
+        return ctx;
+    }
+
+    private async Task<List<DevOptionDto>> ActiveUsersAsync(long org, CancellationToken ct) =>
+        await (from m in db.OrganizationMembers.AsNoTracking()
+               join u in db.Users.AsNoTracking() on m.UserId equals u.Id
+               where m.OrganizationId == org && m.Status == MembershipStatus.Active
+               orderby u.DisplayName
+               select new DevOptionDto(u.Id, u.DisplayName)).ToListAsync(ct);
+
+    /// <summary>Новые люди (не те, что уже записаны) — только активные пользователи организации.</summary>
+    private async Task EnsureActiveMembersAsync(AccessContext ctx, IEnumerable<long?> users, IEnumerable<long?> unchanged, CancellationToken ct)
+    {
+        var check = users.OfType<long>().Distinct().Except(unchanged.OfType<long>()).ToList();
+        if (check.Count == 0)
+        {
+            return;
+        }
+
+        var active = await db.OrganizationMembers.CountAsync(m => m.OrganizationId == ctx.OrganizationId && check.Contains(m.UserId) && m.Status == MembershipStatus.Active, ct);
+        if (active != check.Count)
+        {
+            throw new BusinessRuleException("dev.model.assignee", "Исполнитель должен быть активным пользователем организации.");
+        }
+    }
+
+    private async Task<Dictionary<long, string>> UserNamesAsync(IEnumerable<long?> users, CancellationToken ct)
+    {
+        var ids = users.OfType<long>().Distinct().ToList();
+        return ids.Count == 0 ? [] : await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName, ct);
+    }
 
     private async Task RunAsync(Func<Task> action)
     {

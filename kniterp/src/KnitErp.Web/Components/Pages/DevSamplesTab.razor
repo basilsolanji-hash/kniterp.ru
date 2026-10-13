@@ -8,6 +8,7 @@
     Образцы (D714): образец № 1, 2, 3 в размере сетки; по деталям — план и факт цеха (время, вес, доли цветов); замеры по табелю мер
     с отклонением (выход за допуск — красным); решение: принят, на доработку, отклонён. Факт цех вносит в техкарте вязания детали.
     Образец у заказчика (D723): передать (кому, когда, вернуть до), вернули, оставили или продали.
+    Паспорт образца (ТЗ §8, D728): колорит и версия рисунка с модели, партия, кто вязал и собирал, время, вес; план доработки; фото образца.
 *@
 @if (_message is not null)
 {
@@ -163,13 +164,13 @@ else
                     </tbody>
                 </table>
             </div>
-            <p class="small muted">@L("Фото — снимки модели, загруженные от создания образца до создания следующего.")</p>
+            <p class="small muted">@L("Фото — снимки, загруженные кнопкой «Фото образца» в карточке образца.")</p>
         </div>
     }
     @foreach (var smp in data.Samples)
     {
         var sample = smp;
-        <div class="panel">
+        <div class="panel" data-test="dev-sample-@smp.No">
             <div class="page-head" style="margin: 0">
                 <h2>@L("Образец № {0}", smp.No)@(smp.Size is null ? "" : " · " + L("размер {0}", smp.Size))</h2>
                 <span class="actions" style="margin: 0; align-items: center">
@@ -240,6 +241,40 @@ else
                 {
                     <div class="actions"><button type="button" class="secondary" @onclick="() => OpenHand(sample)">@L("Передать заказчику")</button></div>
                 }
+            }
+            @if (smp.Making is { } mk && HasFacts(mk))
+            {
+                <dl class="facts dev-facts" data-test="dev-sample-making">
+                    @if (mk.Colorway is not null) { <div><dt>@L("Колорит")</dt><dd>@mk.Colorway</dd></div> }
+                    @if (mk.PatternVersion is { } pv) { <div><dt>@L("Версия рисунка")</dt><dd>@pv</dd></div> }
+                    @if (mk.YarnBatch is not null) { <div><dt>@L("Партия пряжи")</dt><dd>@mk.YarnBatch</dd></div> }
+                    @if (mk.KnittedBy is not null) { <div><dt>@L("Вязал")</dt><dd>@mk.KnittedBy</dd></div> }
+                    @if (mk.AssembledBy is not null) { <div><dt>@L("Собирал")</dt><dd>@mk.AssembledBy</dd></div> }
+                    @if (mk.KnitMinutes is { } km) { <div><dt>@L("Время вязки")</dt><dd>@DevFormat.Duration((int)Math.Round(km * 60m))</dd></div> }
+                    @if (mk.AssemblyMinutes is { } am) { <div><dt>@L("Время сборки")</dt><dd>@L("{0} мин", am)</dd></div> }
+                    @if (mk.WeightGrams is { } wg) { <div><dt>@L("Вес изделия")</dt><dd>@DevFormat.Grams(wg)</dd></div> }
+                </dl>
+            }
+            @if (smp.Rework is { } rw)
+            {
+                <p class="small" data-test="dev-sample-rework">
+                    <strong>@L("Доработка"):</strong> @(rw.What ?? "—")
+                    @if (rw.Assignee is not null) { <span>· @rw.Assignee</span> }
+                    @if (rw.DueDate is { } due) { <span>· @L("срок {0}", due.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture))</span> }
+                </p>
+            }
+            @if (smp.PhotoFileIds is { Count: > 0 } || data.CanEdit || data.CanRecord)
+            {
+                <div class="actions" style="align-items: center">
+                    @foreach (var fid in smp.PhotoFileIds ?? [])
+                    {
+                        <a href="dev/files/@fid" target="_blank" rel="noopener" data-enhance-nav="false"><img class="dev-thumb" style="max-width: 96px; max-height: 96px" src="dev/files/@(fid)?inline=1" alt="@L("Фото образца № {0}", smp.No)" loading="lazy" /></a>
+                    }
+                    @if (data.CanEdit || data.CanRecord)
+                    {
+                        <label class="file-pick" title="@L("До 50 МБ")">@L("Фото образца") <InputFile OnChange="e => UploadPhotoAsync(sample, e)" accept=".png,.jpg,.jpeg" capture="environment" disabled="@_busy" /></label>
+                    }
+                </div>
             }
             <div class="scroll">
                 <table>
@@ -324,6 +359,54 @@ else
                     <button type="submit" disabled="@_busy">@L("Записать решение")</button>
                 </form>
             }
+            @if (data.CanEdit && smp.Status == DevSampleStatus.Rework && _rework.TryGetValue(smp.Id, out var rf))
+            {
+                <h3>@L("План доработки")</h3>
+                <form class="inline-form" @onsubmit="() => PlanReworkAsync(sample)">
+                    <label>@L("Что меняем") <input @bind="rf.What" maxlength="@DevSample.ReworkMaxLength" required /></label>
+                    <label>
+                        @L("Кто")
+                        <select @bind="rf.Assignee">
+                            <option value="">—</option>
+                            @foreach (var u in UserOptions(data, smp.Rework?.AssigneeUserId, smp.Rework?.Assignee))
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Срок") <input type="date" @bind="rf.Due" /></label>
+                    <button type="submit" disabled="@_busy">@L("Сохранить план доработки")</button>
+                </form>
+            }
+            @if ((data.CanEdit || data.CanRecord) && _making.TryGetValue(smp.Id, out var mf))
+            {
+                <h3>@L("Паспорт образца")</h3>
+                <form class="inline-form" @onsubmit="() => SaveMakingAsync(sample)">
+                    <label>@L("Партия пряжи") <input @bind="mf.Batch" maxlength="@DevSample.BatchMaxLength" /></label>
+                    <label>
+                        @L("Кто вязал")
+                        <select @bind="mf.Knitted">
+                            <option value="">—</option>
+                            @foreach (var u in UserOptions(data, smp.Making?.KnittedByUserId, smp.Making?.KnittedBy))
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>
+                        @L("Кто собирал")
+                        <select @bind="mf.Assembled">
+                            <option value="">—</option>
+                            @foreach (var u in UserOptions(data, smp.Making?.AssembledByUserId, smp.Making?.AssembledBy))
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Время сборки, мин") <input type="number" min="0" max="10000" step="1" inputmode="numeric" style="max-width: 100px" @bind="mf.Minutes" /></label>
+                    <button type="submit" disabled="@_busy">@L("Сохранить паспорт")</button>
+                </form>
+            }
         </div>
     }
 }
@@ -382,7 +465,107 @@ else
         }
 
         _resetSample = null;
+
+        // Формы паспорта и доработки — свои у каждого образца; после сохранения (новая версия строки) берут значения сервера.
+        var ids = _s.Samples.Select(x => x.Id).ToHashSet();
+        foreach (var gone in _making.Keys.Where(k => !ids.Contains(k)).ToList())
+        {
+            _making.Remove(gone);
+        }
+
+        foreach (var gone in _rework.Keys.Where(k => !ids.Contains(k)).ToList())
+        {
+            _rework.Remove(gone);
+        }
+
+        foreach (var s in _s.Samples)
+        {
+            if (!_making.TryGetValue(s.Id, out var mf) || !mf.Version.AsSpan().SequenceEqual(s.RowVersion))
+            {
+                _making[s.Id] = new MakingForm
+                {
+                    Version = s.RowVersion,
+                    Batch = s.Making?.YarnBatch,
+                    Knitted = s.Making?.KnittedByUserId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    Assembled = s.Making?.AssembledByUserId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    Minutes = s.Making?.AssemblyMinutes,
+                };
+            }
+
+            if (!_rework.TryGetValue(s.Id, out var rf) || !rf.Version.AsSpan().SequenceEqual(s.RowVersion))
+            {
+                _rework[s.Id] = new ReworkForm
+                {
+                    Version = s.RowVersion,
+                    What = s.Rework?.What,
+                    Assignee = s.Rework?.AssigneeUserId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    Due = s.Rework?.DueDate,
+                };
+            }
+        }
     }
+
+    private sealed class MakingForm
+    {
+        public byte[] Version = [];
+        public string? Batch;
+        public string Knitted = string.Empty;
+        public string Assembled = string.Empty;
+        public int? Minutes;
+    }
+
+    private sealed class ReworkForm
+    {
+        public byte[] Version = [];
+        public string? What;
+        public string Assignee = string.Empty;
+        public DateOnly? Due;
+    }
+
+    private readonly Dictionary<long, MakingForm> _making = [];
+    private readonly Dictionary<long, ReworkForm> _rework = [];
+
+    /// <summary>Активные пользователи; уже записанный, но не активный человек остаётся в списке, чтобы не потеряться при сохранении.</summary>
+    private static IEnumerable<DevOptionDto> UserOptions(DevSamplesDto data, long? currentId, string? currentName)
+    {
+        var users = data.Users ?? [];
+        return currentId is { } id && users.All(u => u.Id != id) ? [.. users, new DevOptionDto(id, currentName ?? "#" + id)] : users;
+    }
+
+    private static bool HasFacts(DevSampleMakingDto m) =>
+        m.Colorway is not null || m.PatternVersion is not null || m.YarnBatch is not null || m.KnittedBy is not null || m.AssembledBy is not null
+        || m.KnitMinutes is not null || m.AssemblyMinutes is not null || m.WeightGrams is not null;
+
+    private static long? ParseId(string value) => long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    private Task SaveMakingAsync(DevSampleDto s)
+    {
+        var f = _making[s.Id];
+        return RunAsync(() => Shop.SetSampleMakingAsync(s.Id, f.Batch, ParseId(f.Knitted), ParseId(f.Assembled), f.Minutes, f.Version), L("Паспорт образца сохранён."));
+    }
+
+    private Task PlanReworkAsync(DevSampleDto s)
+    {
+        var f = _rework[s.Id];
+        return RunAsync(() => Shop.PlanReworkAsync(s.Id, f.What, ParseId(f.Assignee), f.Due, f.Version), L("План доработки сохранён."));
+    }
+
+    private Task UploadPhotoAsync(DevSampleDto s, InputFileChangeEventArgs args) => RunAsync(async () =>
+    {
+        var file = args.File;
+        if (file.Size > DevFile.MaxBytes)
+        {
+            throw new BusinessRuleException("dev.file.size", "Файл модели — до 50 МБ.");
+        }
+
+        using var buffer = new MemoryStream();
+        await using (var stream = file.OpenReadStream(DevFile.MaxBytes))
+        {
+            await stream.CopyToAsync(buffer);
+        }
+
+        await Shop.AddSamplePhotoAsync(s.Id, file.Name, buffer.ToArray());
+    }, L("Фото загружено."));
 
     private static readonly DevSampleCustody[] CloseResults = [DevSampleCustody.Returned, DevSampleCustody.Kept, DevSampleCustody.Sold];
 
