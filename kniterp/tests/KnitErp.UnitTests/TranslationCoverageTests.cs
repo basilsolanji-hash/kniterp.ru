@@ -137,6 +137,8 @@ public sealed partial class TranslationCoverageTests
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevMachineStatus>().Select(KnitErp.Domain.Development.DevMachine.StatusName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevSampleStatus>().Select(KnitErp.Domain.Development.DevSample.StatusName));
         keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevSampleCustody>().Select(KnitErp.Domain.Development.DevSample.CustodyName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevPatternKind>().Select(KnitErp.Domain.Development.DevPattern.KindName));
+        keys.UnionWith(Enum.GetValues<KnitErp.Domain.Development.DevPatternStatus>().Select(KnitErp.Domain.Development.DevPattern.StatusName));
         keys.UnionWith(["Вернули на фабрику"]); // DevSamplesTab.CloseLabel; остальные подписи совпадают с CustodyName
         keys.UnionWith(KnitErp.Domain.Development.DevCompleteness.SectionNames);
         keys.UnionWith(KnitErp.Domain.Development.DevNotes.All);

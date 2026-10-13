@@ -276,6 +276,7 @@ else
 
     <div class="panel">
         <h2>@L("Файлы версии {0}", p.CurrentVersion)</h2>
+        <fieldset class="until-interactive" disabled="@(!RendererInfo.IsInteractive)">
         <div class="actions">
             @if (editable)
             {
@@ -289,6 +290,7 @@ else
                     <InputFile OnChange="e => UploadAsync(e, DevPatternFileKind.Program)" accept="@DevPatternFile.Accept(DevPatternFileKind.Program)" disabled="@_busy" /></label>
             }
         </div>
+        </fieldset>
         @foreach (var v in p.Versions)
         {
             <h3>@L("Версия {0}", v.Version) <span class="muted small">· @v.Change@(v.Reason is null ? "" : " — " + v.Reason) · @v.CreatedBy, @Local(v.CreatedAtUtc)</span></h3>
@@ -329,7 +331,6 @@ else
         }
     </div>
     <div class="panel">
-        <h2>@L("Обсуждение")</h2>
         <Discussion Target="KnitErp.Domain.Tagging.TaggedEntity.DevPattern" TargetId="Id" />
     </div>
 }

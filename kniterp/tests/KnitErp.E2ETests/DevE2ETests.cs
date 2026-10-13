@@ -406,6 +406,67 @@ public sealed class DevE2ETests(HrAppFixture app) : IClassFixture<HrAppFixture>
         await AssertNoHorizontalScrollAsync(page, "переданная модель");
     });
 
+    /// <summary>
+    /// D726 (ТЗ §7): библиотека рисунков → новый рисунок → сетка CSV и доли по файлу → пряжа колорита → утверждение → рисунок в модели;
+    /// карточка рисунка на телефоне без горизонтальной прокрутки.
+    /// </summary>
+    [SqlFact]
+    public Task Pattern_library_card_and_model_link() => RunAsync("dev-pattern", false, async page =>
+    {
+        var cls = await app.CreateMachineClassAsync("E7 приёмка " + Random.Shared.Next(100, 999), 8);
+        var yarn = await app.CreateYarnAsync("Шерсть рисунок " + Random.Shared.Next(100, 999));
+        var name = "Олени " + Guid.NewGuid().ToString("N")[..4];
+        await page.GotoAsync("dev/patterns");
+        await Ready(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Новый рисунок", Exact = true }).ClickAsync();
+        await page.GetByLabel("Название").FillAsync(name);
+        await page.GetByLabel("Раппорт: петель").FillAsync("4");
+        await SelectContainingAsync(page.GetByLabel("Класс машины").First, cls);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать рисунок", Exact = true }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/dev/patterns/\d+$"));
+        await Ready(page);
+        var patternUrl = page.Url;
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Черновик");
+
+        // Сетка рисунка и доли цветов по файлу.
+        await Assertions.Expect(page.Locator("input[type=file]").First).ToBeEnabledAsync(); // страница стала интерактивной
+        await page.Locator("input[type=file]").First.SetInputFilesAsync(new FilePayload { Name = "oleni.csv", MimeType = "text/csv", Buffer = "1,1,2,2\n1,2,2,2\n"u8.ToArray() });
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Файл загружен" })).ToBeVisibleAsync();
+        await Click(page, "Посчитать доли по файлу", "Доли посчитаны");
+        await Assertions.Expect(page.GetByText("Сумма долей: 100 %")).ToBeVisibleAsync();
+
+        // Ширина изделия кратна раппорту; пряжа обоих цветов в колорите «Основной».
+        await page.GetByLabel("Ширина изделия, петель").FillAsync("24");
+        await Click(page, "Сохранить свойства", "Свойства сохранены");
+        foreach (var color in new[] { "Цвет 1", "Цвет 2" })
+        {
+            await SelectContainingAsync(page.GetByLabel($"Основной, {color}: пряжа"), yarn);
+            await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Раскладка сохранена" })).ToBeVisibleAsync();
+        }
+
+        await Click(page, "Утвердить рисунок", "Статус рисунка");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Level = 1 })).ToContainTextAsync("Утверждён");
+
+        // Рисунок в модели: версия 1, колорит «Основной».
+        await CreateModelAsync(page, "Свитер с рисунком " + Guid.NewGuid().ToString("N")[..4]);
+        var block = page.Locator(".panel").Filter(new() { Has = page.GetByRole(AriaRole.Heading, new() { Name = "Рисунок модели" }) });
+        await SelectContainingAsync(block.Locator("select").First, name);
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Рисунок модели сохранён" })).ToBeVisibleAsync();
+        await block.GetByLabel("Колорит").SelectOptionAsync(new SelectOptionValue { Label = "Основной" });
+        await Click(page, "Сохранить рисунок модели", "Рисунок модели сохранён");
+        await Assertions.Expect(block).ToContainTextAsync("колорит «Основной»");
+
+        await page.SetViewportSizeAsync(390, 844);
+        await page.GotoAsync(patternUrl);
+        await Ready(page);
+        await Assertions.Expect(page.Locator("main")).ToContainTextAsync("Использован в моделях");
+        await AssertNoHorizontalScrollAsync(page, "карточка рисунка");
+        await page.GotoAsync("dev/patterns");
+        await Ready(page);
+        await Assertions.Expect(page.Locator("table")).ToContainTextAsync(name);
+        await AssertNoHorizontalScrollAsync(page, "библиотека рисунков");
+    });
+
     private static async Task UploadPatternAsync(IPage page)
     {
         await page.GetByRole(AriaRole.Tab, new() { NameRegex = new Regex("^Файлы") }).ClickAsync();
