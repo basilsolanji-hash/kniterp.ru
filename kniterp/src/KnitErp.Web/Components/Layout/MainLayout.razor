@@ -190,12 +190,12 @@
         ]),
         new("crm", "CRM",
         [
-            // D600 (CRM): лиды, сделки, контакты и настройки воронок.
+            // D600 (CRM): лиды, сделки, контакты и настройки воронок. D699: «Мой день» — первым, с него менеджер начинает работу.
+            new("crm/today", "Мой день", a => a.Has(Permissions.CrmView)),
             new("crm/deals", "Сделки", a => a.Has(Permissions.CrmView)),
             new("crm/leads", "Лиды", a => a.Has(Permissions.CrmView)),
             new("crm/contacts", "Контакты", a => a.Has(Permissions.CrmView)),
             new("crm/chats", "Чаты", a => a.Has(Permissions.CrmView)),
-            new("crm/today", "Мой день", a => a.Has(Permissions.CrmView)),
             new("crm/tasks", "Мои задачи CRM", a => a.Has(Permissions.CrmView)),
             new("crm/summary", "Сводка и отчёты", a => a.Has(Permissions.CrmView)),
             new("crm/mailings", "Рассылки", a => a.Has(Permissions.CrmMailing)),

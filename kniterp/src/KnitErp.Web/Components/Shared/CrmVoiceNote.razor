@@ -26,7 +26,7 @@
                 <button type="button" class="secondary" @onclick="StartAsync" disabled="@Disabled" aria-pressed="false">🎤 @L("Надиктовать")</button>
             }
         </div>
-        <p class="muted small crm-voice-hint">@L("Речь распознаёт браузер. knitERP не отправляет звук и текст сторонним сервисам; браузер может использовать для распознавания свой сервис (например, Chrome — Google). Проверьте текст перед сохранением.")</p>
+        <details class="muted small crm-voice-hint"><summary>ⓘ @L("Как распознаётся речь")</summary>@L("Речь распознаёт браузер. knitERP не отправляет звук и текст сторонним сервисам; браузер может использовать для распознавания свой сервис (например, Chrome — Google). Проверьте текст перед сохранением.")</details>
     }
     @if (_error is not null)
     {

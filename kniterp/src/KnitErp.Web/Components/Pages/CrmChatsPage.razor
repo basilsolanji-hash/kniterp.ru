@@ -16,9 +16,9 @@ else if (_chats is null || _status is null)
 }
 else
 {
+    @* D699: кнопки «Обновить» нет — список и открытый диалог обновляются сами (таймер). *@
     <div class="page-head">
         <h1>@L("Чаты с клиентами")</h1>
-        <button type="button" class="secondary" @onclick="RefreshAsync" disabled="@_busy">@L("Обновить")</button>
     </div>
     @if (!_status.AnyConnected)
     {
@@ -51,10 +51,10 @@ else
                 </button>
             }
         </nav>
-        <section class="crm-chat-view" aria-label="@L("Переписка")">
+        <section class="crm-chat-view @(_current is null ? "empty" : null)" aria-label="@L("Переписка")">
             @if (_current is null)
             {
-                <p class="muted">@L("Выберите диалог слева.")</p>
+                <p class="muted">@L("Выберите диалог в списке.")</p>
             }
             else
             {
@@ -166,15 +166,6 @@ else
     }
 
     private Task OpenAsync(CrmChatDto chat) => RunAsync(() => LoadAsync(chat));
-
-    private Task RefreshAsync() => RunAsync(async () =>
-    {
-        _chats = await Messenger.ChatsAsync();
-        if (_chats.FirstOrDefault(c => c.Peer == _peer) is { } current)
-        {
-            await LoadAsync(current);
-        }
-    });
 
     private Task SendAsync() => RunAsync(async () =>
     {

@@ -83,10 +83,10 @@
 
     @if (_open is not null)
     {
-        <div class="crm-photo-view" role="dialog" aria-modal="true" aria-label="@L("Просмотр фото")">
+        <div class="crm-photo-view" role="dialog" aria-modal="true" aria-label="@L("Просмотр фото")" tabindex="-1" @onkeydown="ViewKey">
             <div class="crm-photo-view-body">
                 <img src="@_open.Href" alt="@(_open.Caption ?? L("Фото к сделке"))" />
-                <p class="muted small">@_open.Author · @TimeZones.ToLocal(_open.CreatedAtUtc, CurrentAccess?.TimeZoneId ?? "Europe/Moscow").ToString("dd.MM.yyyy HH:mm") · @((_open.SizeBytes + 1023) / 1024) @L("КБ")</p>
+                <p class="muted small">@_open.Author · @TimeZones.ToLocal(_open.CreatedAtUtc, CurrentAccess?.TimeZoneId ?? "Europe/Moscow").ToString("dd.MM.yyyy HH:mm") · @Size(_open.SizeBytes)</p>
                 @if (CanEdit && _data?.CanEdit == true)
                 {
                     <form class="inline-form" @onsubmit="SaveCaptionAsync" aria-label="@L("Подпись к фото")">
@@ -200,6 +200,23 @@
         _confirmDelete = false;
         _error = null;
         _flash = null;
+    }
+
+    /// <summary>D699: размер по-человечески — «менее 1 КБ», «850 КБ», «2,4 МБ».</summary>
+    private static string Size(long bytes) =>
+        bytes < 1024 ? L("менее 1 КБ")
+        : bytes < 1024 * 1024 ? L("{0} КБ", (bytes + 1023) / 1024)
+        : L("{0} МБ", (bytes / 1048576m).ToString("0.#"));
+
+    /// <summary>Клавиатура в просмотре: Esc — закрыть, ←/→ — соседние фото.</summary>
+    private void ViewKey(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape": Close(); break;
+            case "ArrowLeft": Step(-1); break;
+            case "ArrowRight": Step(1); break;
+        }
     }
 
     private void Close()

@@ -20,6 +20,16 @@ else
     <h1>@L("Настройки CRM")</h1>
     <p class="muted small">@L("Воронки и их этапы, источники обращений, причины отказа. Ничего не удаляется — уходит в архив; сделки и лиды сохраняют ссылки.")</p>
 
+    @* D699: длинная страница настроек — с оглавлением: раздел открывается одним нажатием, ссылки «crm/settings#…» ведут сразу к нему. *@
+    <nav class="crm-toc" aria-label="@L("Разделы настроек")">
+        <a href="crm/settings#pipelines">@L("Воронки и этапы")</a>
+        <a href="crm/settings#automation">@L("Автоматизация")</a>
+        <a href="crm/settings#messengers">@L("Мессенджеры")</a>
+        <a href="crm/settings#mailbox">@L("Входящая почта")</a>
+        <a href="crm/settings#templates">@L("Шаблоны писем")</a>
+        <a href="crm/settings#references">@L("Справочники")</a>
+    </nav>
+
     @if (_message is not null)
     {
         <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
@@ -27,7 +37,7 @@ else
 
     @if (_auto is not null)
     {
-        <form class="panel" @onsubmit="SaveAutomationAsync" aria-label="@L("Автоматизация")">
+        <form class="panel" id="automation" @onsubmit="SaveAutomationAsync" aria-label="@L("Автоматизация")">
             <h2>@L("Автоматизация")</h2>
             <fieldset disabled="@(!_data.CanEdit)">
                 <div class="grid">
@@ -74,7 +84,7 @@ else
     <CrmMailboxPanel CanEdit="@_data.CanEdit" TimeZoneId="@CurrentAccess.TimeZoneId" />
     <CrmEmailTemplatesPanel CanEdit="@_data.CanEdit" />
 
-    <h2>@L("Воронки")</h2>
+    <h2 id="pipelines">@L("Воронки")</h2>
     @if (_data.CanEdit)
     {
         <form class="inline-form" @onsubmit="CreatePipelineAsync">
@@ -221,7 +231,7 @@ else
 
     private RenderFragment RefList(string title, CrmReferenceKind kind, IReadOnlyList<CrmReferenceDto> items) => __builder =>
     {
-        <section aria-label="@title">
+        <section aria-label="@title" id="@(kind == CrmReferenceKind.Source ? "references" : null)">
             <h2>@title</h2>
             <ul>
                 @foreach (var r in items)
@@ -230,8 +240,16 @@ else
                         @r.Name @if (r.IsArchived) { <span class="tag">@L("архив")</span> }
                         @if (_data!.CanEdit)
                         {
-                            <button type="button" class="secondary" @onclick="() => RunAsync(() => Settings.SetReferenceArchivedAsync(r.Id, !r.IsArchived, r.RowVersion), null)"
-                                    disabled="@_busy">@(r.IsArchived ? L("Вернуть") : L("В архив"))</button>
+                            @if (r.IsArchived)
+                            {
+                                <button type="button" class="secondary" @onclick="() => RunAsync(() => Settings.SetReferenceArchivedAsync(r.Id, false, r.RowVersion), null)"
+                                        disabled="@_busy">@L("Вернуть")</button>
+                            }
+                            else
+                            {
+                                <ConfirmButton Class="secondary" OnConfirm="() => RunAsync(() => Settings.SetReferenceArchivedAsync(r.Id, true, r.RowVersion), null)" Disabled="@_busy"
+                                               Question='@L("Отправить «{0}» в архив?", r.Name)'>@L("В архив")</ConfirmButton>
+                            }
                         }
                     </li>
                 }
