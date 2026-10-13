@@ -99,6 +99,7 @@ public static class DependencyInjection
         services.AddScoped<Crm.CrmMailingService>();
         services.AddScoped<Crm.CrmImportService>();
         services.AddScoped<Crm.CrmMessengerService>();
+        services.AddScoped<Crm.CrmDealSalesService>();
         services.AddScoped<Common.ISalesOrderEvents, Crm.CrmSalesOrderEvents>(); // D683: «заказ подтверждён» → сделка выиграна
         services.AddScoped<Crm.CrmEmailTemplateService>();
         services.AddScoped<Crm.CrmMailboxService>();

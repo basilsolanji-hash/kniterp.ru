@@ -44,9 +44,23 @@ public sealed record CrmStageHistoryDto(string? From, string To, string By, Date
 
 /// <summary>Заказ покупателя базы по сделке — только чтение (D607): этап, сумма, оплата и отгрузка из модуля продаж.</summary>
 public sealed record CrmLinkedOrderDto(
-    long Id, string Number, DateOnly Date, SalesOrderStatus Status, SalesStageRefDto? Stage, decimal? Total, decimal? Paid, ShipmentState Shipped, decimal? Debt)
+    long Id, string Number, DateOnly Date, SalesOrderStatus Status, SalesStageRefDto? Stage, decimal? Total, decimal? Paid, ShipmentState Shipped, decimal? Debt,
+    long? InvoiceId = null, string? InvoiceNumber = null)
 {
     public string StatusName => SalesOrder.StatusName(Status);
+
+    /// <summary>D684: оплата заказа — «оплачен», «частично», «не оплачен» (без права цен — null).</summary>
+    public CrmPaymentState? Payment => Total is not { } t || Paid is not { } p ? null
+        : Status == SalesOrderStatus.Cancelled ? null
+        : p >= t && t > 0 ? CrmPaymentState.Paid : p > 0 ? CrmPaymentState.Partial : CrmPaymentState.None;
+}
+
+/// <summary>Оплата заказа в сделке (D684).</summary>
+public enum CrmPaymentState : byte
+{
+    None = 1,
+    Partial = 2,
+    Paid = 3,
 }
 
 public sealed record CrmDealDto(
@@ -563,10 +577,17 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         var list = new List<CrmLinkedOrderDto>();
+        // D684: действующий счёт заказа — номер и ссылка видны с правом цен (как в модуле продаж).
+        var invoices = ctx.Permissions.Has(Permissions.PriceView)
+            ? await db.CustomerInvoices.AsNoTracking()
+                .Where(i => i.OrganizationId == ctx.OrganizationId && ids.Contains(i.SalesOrderId) && i.Status == CustomerInvoiceStatus.Issued)
+                .Select(i => new { i.SalesOrderId, i.Id, i.Number }).ToListAsync(ct)
+            : [];
         foreach (var orderId in ids)
         {
             var o = await sales.GetOrderAsync(orderId, ct);
-            list.Add(new CrmLinkedOrderDto(o.Id, o.Number, o.OrderDate, o.Status, o.Stage, o.Total, o.Paid, o.Shipped, o.Debt));
+            var invoice = invoices.FirstOrDefault(i => i.SalesOrderId == orderId);
+            list.Add(new CrmLinkedOrderDto(o.Id, o.Number, o.OrderDate, o.Status, o.Stage, o.Total, o.Paid, o.Shipped, o.Debt, invoice?.Id, invoice?.Number));
         }
 
         return (list, 0);
