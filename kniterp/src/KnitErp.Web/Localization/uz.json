@@ -3009,5 +3009,9 @@
   "Позиция «{0}» уже в учёте:": "«{0}» pozitsiyasi allaqachon hisobda:",
   "скрыто": "yashirilgan",
   "Единиц пока нет.": "Birliklar hozircha yo‘q.",
-  "Повторить": "Qayta urinish"
+  "Повторить": "Qayta urinish",
+  "Заказ подтверждён. Ниже минимальной цены: {0}.": "Buyurtma tasdiqlandi. Minimal narxdan past: {0}.",
+  "Основной поставщик большинства позиций: {0}.": "Ko‘pchilik pozitsiyalarning asosiy yetkazib beruvchisi: {0}.",
+  "арт. поставщика {0}": "yetkazib beruvchi art. {0}",
+  "ниже минимальной цены {0}": "minimal narxdan past {0}"
 }

@@ -349,7 +349,7 @@ else
                         <td>@l.UnitSymbol</td>
                         @if (_order.CanSeePrices)
                         {
-                            <td class="num">@(l.Price?.ToString("#,0.00##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")))</td>
+                            <td class="num @(l.BelowMinimum ? "cell-short" : null)" title="@(l.BelowMinimum ? L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice)) : null)">@(l.Price?.ToString("#,0.00##", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")))@if (l.BelowMinimum) { <div class="muted small">@L("ниже минимальной цены {0}", Amounts.Format(l.MinPrice))</div> }</td>
                             <td class="num">@Amounts.Vat(l.VatPercent)</td>
                             <td class="num">@(l.DiscountPercent > 0 ? $"{l.DiscountPercent:0.##}%" : "—")</td>
                             <td class="num">@Amounts.Format(l.Amount)</td>
@@ -802,7 +802,12 @@ else
 
     private Task RemoveLineAsync(SalesOrderLineDto l) => RunAsync(() => Sales.RemoveOrderLineAsync(Id, l.ItemId, _order!.RowVersion), null);
 
-    private Task ConfirmAsync() => RunAsync(() => Sales.ConfirmOrderAsync(Id, _order!.RowVersion), L("Заказ подтверждён."));
+    // D350 (сессия 4, Р3): подтверждение не блокируется ценой ниже минимальной — предупреждение со списком позиций.
+    private Task ConfirmAsync() => RunAsync(async () =>
+    {
+        var below = await Sales.ConfirmOrderAsync(Id, _order!.RowVersion);
+        _message = below.Count > 0 ? L("Заказ подтверждён. Ниже минимальной цены: {0}.", string.Join(", ", below)) : L("Заказ подтверждён.");
+    }, null);
 
     private Task CloseAsync() => RunAsync(() => Sales.CloseOrderAsync(Id, _order!.RowVersion), L("Заказ закрыт."));
 

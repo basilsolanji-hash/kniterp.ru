@@ -50,9 +50,12 @@ public sealed record SalesOrderRowDto(
 public sealed record SalesOrderLineDto(
     long ItemId, string Code, string Name, string UnitSymbol, byte Precision, decimal Quantity, decimal? Price, decimal? VatPercent,
     decimal? Amount, decimal? VatAmount, decimal Shipped, decimal Returned, decimal DiscountPercent = 0, decimal Stock = 0, decimal ReservedByOthers = 0,
-    bool Stocked = true, bool IsBundle = false)
+    bool Stocked = true, bool IsBundle = false, decimal? MinPrice = null)
 {
     public decimal Left => Math.Max(0, Quantity - Shipped + Returned);
+
+    /// <summary>D350 (сессия 4, Р3): цена после скидки строки ниже минимальной цены позиции — предупреждение, не запрет.</summary>
+    public bool BelowMinimum => Price is { } p && TradeRules.BelowMinimum(decimal.Round(p * (1 - DiscountPercent / 100m), 2), MinPrice);
     public decimal Available => Stock - ReservedByOthers;
 
     /// <summary>Не хватает для отгрузки оставшегося — подсветка в строке. Услуга (D300) со склада не отгружается — ей не «не хватает».</summary>
@@ -225,7 +228,7 @@ public sealed class SalesService(
                     ?? throw new NotFoundException("Заказ покупателя");
         var itemIds = order.Lines.Select(l => l.ItemId).ToList();
         var items = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id))
-            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision })
+            .Join(db.Units.AsNoTracking(), i => i.UnitId, u => u.Id, (i, u) => new { i.Id, i.Code, i.Name, u.Symbol, u.Precision, i.MinPrice })
             .ToDictionaryAsync(x => x.Id, ct);
         var customer = await db.Counterparties.AsNoTracking().Where(c => c.Id == order.CustomerId).Select(c => c.Name).SingleAsync(ct);
         var warehouse = await db.Warehouses.AsNoTracking().Where(w => w.Id == order.WarehouseId).Select(w => w.Name).SingleAsync(ct);
@@ -255,7 +258,7 @@ public sealed class SalesService(
                 prices ? l.Price : null, l.VatPercent, prices ? l.Amount : null, prices ? l.VatAmount : null,
                 Moved(l.ItemId, StockOperationKind.Shipment), Moved(l.ItemId, StockOperationKind.CustomerReturn),
                 l.DiscountPercent, stock.GetValueOrDefault(l.ItemId), reservedByOthers.GetValueOrDefault((order.WarehouseId, l.ItemId)),
-                !services.Contains(l.ItemId), bundles.Contains(l.ItemId));
+                !services.Contains(l.ItemId), bundles.Contains(l.ItemId), prices ? item.MinPrice : null); // D350: минимальная цена — только с правом на цены
         }).OrderBy(l => l.Code).ToList();
 
         var payments = await EnrichAsync(ctx, await PaymentsQuery(ctx, orderId: id).ToListAsync(ct), id, ct);
@@ -536,13 +539,25 @@ public sealed class SalesService(
         await db.SaveOrConflictAsync(ct);
     }
 
-    public async Task ConfirmOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default)
+    /// <summary>
+    /// Подтверждение заказа. D350 (сессия 4, Р3): возвращает коды позиций, проданных ниже минимальной цены (после скидки строки) —
+    /// подтверждение не блокируется, пометка пишется в журнал.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> ConfirmOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default)
     {
         var (ctx, order) = await LoadForEditAsync(id, rowVersion, ct);
         await ValidateHeaderAsync(ctx, Header(order) with { LegalEntityId = order.LegalEntityId }, null, ct);
+        var itemIds = order.Lines.Select(l => l.ItemId).ToList();
+        var minPrices = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id) && i.MinPrice != null)
+            .Select(i => new { i.Id, i.Code, i.MinPrice }).ToListAsync(ct);
+        var below = minPrices.Where(m => order.Lines.Any(l => l.ItemId == m.Id
+                && TradeRules.BelowMinimum(decimal.Round(l.NetPrice, 2), m.MinPrice)))
+            .Select(m => m.Code).Order(StringComparer.Ordinal).ToList();
         order.Confirm(ctx.UserId, clock.UtcNow);
-        Audit(ctx, AuditActions.SalesOrderConfirmed, nameof(SalesOrder), id, "Черновик", "Подтверждён", $"{order.Number}: {order.Total:0.00}");
+        Audit(ctx, AuditActions.SalesOrderConfirmed, nameof(SalesOrder), id, "Черновик", "Подтверждён",
+            $"{order.Number}: {order.Total:0.00}" + (below.Count > 0 ? $"; ниже минимальной цены: {string.Join(", ", below)}" : ""));
         await db.SaveOrConflictAsync(ct);
+        return ctx.Permissions.Has(Permissions.PriceView) ? below : [];
     }
 
     public async Task CloseOrderAsync(long id, byte[] rowVersion, CancellationToken ct = default)

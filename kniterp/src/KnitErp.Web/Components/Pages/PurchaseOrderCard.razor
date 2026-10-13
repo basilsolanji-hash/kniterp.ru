@@ -123,6 +123,12 @@ else
         }
     }
 
+    @if (_order.MainSupplierHint is { } hint)
+    {
+        @* D351 (сессия 4, Р5): подсказка, не обязательность. *@
+        <p class="notice">@L("Основной поставщик большинства позиций: {0}.", hint)</p>
+    }
+
     <h2 style="margin-top: 16px">@L("Строки ({0})", _order.Lines.Count)</h2>
 
     @if (editable)
@@ -134,7 +140,7 @@ else
                 <datalist id="po-items">
                     @foreach (var i in _options?.Items ?? [])
                     {
-                        <option value="@($"{i.Code} — {i.Name}")">@(i.Article is null ? i.UnitSymbol : $"{i.Article} · {i.UnitSymbol}")</option>
+                        <option value="@($"{i.Code} — {i.Name}")">@((i.SupplierArticle ?? i.Article) is { } art ? $"{art} · {i.UnitSymbol}" : i.UnitSymbol)</option>
                     }
                 </datalist>
             </label>
@@ -171,7 +177,7 @@ else
                 @foreach (var l in _order.Lines)
                 {
                     <tr>
-                        <td>@l.Code</td>
+                        <td>@l.Code@if (l.SupplierArticle is { } sa) { <div class="muted small">@L("арт. поставщика {0}", sa)</div> }</td>
                         <td>@l.Name</td>
                         <td class="num">@Quantities.Format(l.Quantity)</td>
                         <td>@l.UnitSymbol</td>
@@ -365,7 +371,7 @@ else
             await LoadAsync();
             if (_order!.CanEdit)
             {
-                _options = await Purchases.GetOptionsAsync(_order.OrderDate);
+                _options = await Purchases.GetOptionsAsync(_order.OrderDate, _order.SupplierId); // D351: цены и артикулы этого поставщика
                 _accounts = CurrentAccess.Has(Permissions.PriceView) ? await Money.OptionsAsync() : [];
                 _vatText = _options.VatRates.FirstOrDefault()?.Percent?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
             }
@@ -406,6 +412,7 @@ else
             h.Expected is { } e ? DateOnly.FromDateTime(e) : null, h.Invoice, h.WithVat, h.Comment, long.TryParse(h.Entity, out var le) ? le : null),
             _order!.RowVersion);
         _header = null;
+        _options = await Purchases.GetOptionsAsync(DateOnly.FromDateTime(h.Date), long.Parse(h.Supplier)); // D351: другой поставщик — его цены
     }, L("Сохранено."));
 
     /// <summary>НДС по умолчанию — ставка позиции из номенклатуры.</summary>
@@ -430,6 +437,7 @@ else
         var code = _itemText.Split(" — ", 2)[0].Trim();
         return _options?.Items.FirstOrDefault(i => string.Equals(i.Code, code, StringComparison.OrdinalIgnoreCase))
                ?? _options?.Items.FirstOrDefault(i => i.Article is not null && string.Equals(i.Article, code, StringComparison.OrdinalIgnoreCase))
+               ?? _options?.Items.FirstOrDefault(i => i.SupplierArticle is not null && string.Equals(i.SupplierArticle, code, StringComparison.OrdinalIgnoreCase))
                ?? _options?.Items.FirstOrDefault(i => i.Barcodes is not null && i.Barcodes.Split(' ').Contains(code));
     }
 
