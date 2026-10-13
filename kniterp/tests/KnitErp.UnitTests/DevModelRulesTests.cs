@@ -12,7 +12,7 @@ public sealed class DevModelRulesTests
     private static readonly Func<DevStage, bool> AllEnabled = _ => true;
 
     private static DevModelHeader Header(bool hasPattern = true, DevAudience audience = DevAudience.Women, bool child = false) =>
-        new(" Свитер с оленями ", null, DevCategory.Sweater, audience, child, hasPattern, null, null, new DateOnly(2026, 12, 1), DevPriority.Normal,
+        new(" Свитер с оленями ", null, 1, audience, child, hasPattern, null, null, new DateOnly(2026, 12, 1), DevPriority.Normal,
             new Dictionary<DevRole, long?> { [DevRole.Designer] = 7, [DevRole.Dessinator] = 8 });
 
     private static DevModel NewModel(bool hasPattern = true) => DevModel.Create(1, "М-00001", Header(hasPattern), Now, 3).Model;
@@ -240,9 +240,9 @@ public sealed class DevAutomationRulesTests
     [Fact]
     public void Default_name_joins_category_collection_and_customer()
     {
-        Assert.Equal("Свитер — Осень-зима 2026 — ООО «Пример»", DevAutomationRules.DefaultName(DevCategory.Sweater, "Осень-зима 2026", "ООО «Пример»"));
-        Assert.Equal("Шапка", DevAutomationRules.DefaultName(DevCategory.Hat, null, " "));
-        Assert.True(DevAutomationRules.DefaultName(DevCategory.Hat, new string('я', 300), null).Length <= DevModel.NameMaxLength);
+        Assert.Equal("Свитер — Осень-зима 2026 — ООО «Пример»", DevAutomationRules.DefaultName("Свитер", "Осень-зима 2026", "ООО «Пример»"));
+        Assert.Equal("Шапка", DevAutomationRules.DefaultName("Шапка", null, " "));
+        Assert.True(DevAutomationRules.DefaultName("Шапка", new string('я', 300), null).Length <= DevModel.NameMaxLength);
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public sealed class DevAutomationRulesTests
     [Fact]
     public void Template_fills_only_blank_fields()
     {
-        var t = DevCategoryTemplate.Create(1, DevCategory.Sweater);
+        var t = DevCategoryTemplate.Create(1, 1);
         t.Set("42–52", "молочный", "50% шерсть", null, "ручная стирка");
         var filled = t.FillBlanks(new DevBrief("описание", "44–50", null, 100m, null, 10, null, null, null, null));
         Assert.Equal(("44–50", "молочный", "50% шерсть", "ручная стирка", 100m), (filled.SizeRange!, filled.ColorRange!, filled.Composition!, filled.Care!, filled.TargetCost!.Value));
@@ -308,7 +308,7 @@ public sealed class DevAutomationRulesTests
     }
 
     private static DevPatternValues PatternValues(int? rw = 24, int? width = 120, string? align = null) =>
-        new("Олени", DevPatternKind.JacquardDouble, rw, 30, 7m, 1, width, align, null, null, null);
+        new("Олени", 1, rw, 30, 7m, 1, width, align, null, null, null);
 
     [Fact]
     public void Pattern_statuses_versions_and_editing()

@@ -210,15 +210,16 @@ public sealed class DevCategoryMeasure
 
     public long Id { get; private set; }
     public long OrganizationId { get; private set; }
-    public DevCategory Category { get; private set; }
+    /// <summary>Категория — запись справочника «Категории изделий» (D733).</summary>
+    public long CategoryId { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public decimal Tolerance { get; private set; }
     public decimal? Step { get; private set; }
     public int SortOrder { get; private set; }
 
-    public static DevCategoryMeasure Create(long organizationId, DevCategory category, string? name, decimal tolerance, decimal? step, int sortOrder)
+    public static DevCategoryMeasure Create(long organizationId, long categoryId, string? name, decimal tolerance, decimal? step, int sortOrder)
     {
-        if (!Enum.IsDefined(category))
+        if (categoryId <= 0)
         {
             throw new BusinessRuleException("dev.model.category", "Выберите категорию изделия.");
         }
@@ -231,7 +232,7 @@ public sealed class DevCategoryMeasure
         return new DevCategoryMeasure
         {
             OrganizationId = organizationId,
-            Category = category,
+            CategoryId = categoryId,
             Name = DomainText.Require(name, DevMeasure.NameMaxLength, "Точка измерения"),
             Tolerance = tolerance,
             Step = step,

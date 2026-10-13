@@ -17,6 +17,12 @@ namespace KnitErp.IntegrationTests;
 /// </summary>
 public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
+    private long _org;
+
+    private long Cat(DevCategory category) => DevTestLookups.Category(host, _org, category);
+
+    private long Kind(DevPatternKind kind) => DevTestLookups.PatternKind(host, _org, kind);
+
     private static int _innSeed = 973_100_000;
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
@@ -27,6 +33,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
 
     private Kit As(long userId, long organizationId)
     {
+        _org = organizationId; // D733: категории и виды рисунков — записи справочника этой организации
         var all = host.As(userId, organizationId);
         var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = host.ClientAddress };
         var guard = new AccessGuard(all.Db, user, host.Clock);
@@ -34,8 +41,8 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
             new DevSettingsService(all.Db, guard, user, host.Clock), all);
     }
 
-    private static DevModelHeader Header(string name) =>
-        new(name, null, DevCategory.Sweater, DevAudience.Women, false, true, null, null, new DateOnly(2026, 12, 1), DevPriority.Normal, new Dictionary<DevRole, long?>());
+    private DevModelHeader Header(string name) =>
+        new(name, null, Cat(DevCategory.Sweater), DevAudience.Women, false, true, null, null, new DateOnly(2026, 12, 1), DevPriority.Normal, new Dictionary<DevRole, long?>());
 
     [SqlFact]
     public async Task Pattern_lifecycle_versions_colorways_programming_and_model_link()
@@ -57,7 +64,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
         await using (var k = As(dessinator, org.OrganizationId))
         {
             // Дессинатор: рисунок, сетка CSV (клетка — петля), доли по файлу, колориты с пряжей.
-            pattern = await k.Patterns.CreateAsync(new DevPatternValues("Олени", DevPatternKind.JacquardDouble, 4, 2, 7m, e3, 24, null, null, dessinator, null));
+            pattern = await k.Patterns.CreateAsync(new DevPatternValues("Олени", Kind(DevPatternKind.JacquardDouble), 4, 2, 7m, e3, 24, null, null, dessinator, null));
             var p = await k.Patterns.GetAsync(pattern);
             Assert.Equal(("Р-00001", 1, DevPatternStatus.Draft), (p.Number, p.CurrentVersion, p.Status));
             Assert.Equal("Основной", Assert.Single(p.Colorways).Name);
@@ -93,11 +100,11 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
             p = await k.Patterns.GetAsync(pattern);
             Assert.Equal("dev.pattern.approve.feeders", Code(await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Patterns.MoveAsync(pattern, DevPatternStatus.Approved, p.RowVersion)))); // 2 цвета, у класса 1 нитеводитель
-            await k.Patterns.UpdateAsync(pattern, new DevPatternValues("Олени", DevPatternKind.JacquardDouble, 4, 2, 7m, e7, 26, null, null, dessinator, null), p.RowVersion);
+            await k.Patterns.UpdateAsync(pattern, new DevPatternValues("Олени", Kind(DevPatternKind.JacquardDouble), 4, 2, 7m, e7, 26, null, null, dessinator, null), p.RowVersion);
             p = await k.Patterns.GetAsync(pattern);
             Assert.Equal("dev.pattern.approve.align", Code(await Assert.ThrowsAsync<BusinessRuleException>(() =>
                 k.Patterns.MoveAsync(pattern, DevPatternStatus.Approved, p.RowVersion)))); // 26 не кратно 4
-            await k.Patterns.UpdateAsync(pattern, new DevPatternValues("Олени", DevPatternKind.JacquardDouble, 4, 2, 7m, e7, 26, "центрировать по середине переда", null,
+            await k.Patterns.UpdateAsync(pattern, new DevPatternValues("Олени", Kind(DevPatternKind.JacquardDouble), 4, 2, 7m, e7, 26, "центрировать по середине переда", null,
                 dessinator, technologist), p.RowVersion);
             await k.Patterns.MoveAsync(pattern, DevPatternStatus.Approved, (await k.Patterns.GetAsync(pattern)).RowVersion);
             p = await k.Patterns.GetAsync(pattern);
@@ -151,7 +158,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
             Assert.Contains(v2.Files, f => f.Kind == DevPatternFileKind.Program && f.KnitSeconds == 720);
             Assert.True(p.HasProgram);
             Assert.Single(await k.Patterns.ListAsync(new DevPatternFilter(Colors: 2, MachineClassId: e7)));
-            Assert.Empty(await k.Patterns.ListAsync(new DevPatternFilter(Kind: DevPatternKind.Intarsia)));
+            Assert.Empty(await k.Patterns.ListAsync(new DevPatternFilter(KindId: Kind(DevPatternKind.Intarsia))));
         }
 
         await using (var k = As(dessinator, org.OrganizationId))
@@ -188,6 +195,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
     {
         var org = await CreateOrganizationAsync();
         await using var all = host.As(org.OwnerUserId, org.OrganizationId);
+        _org = org.OrganizationId;
         var user = new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress };
         var guard = new AccessGuard(all.Db, user, host.Clock);
         var models = new DevModelService(all.Db, guard, user, host.Clock, new KnitErp.Infrastructure.Documents.SkiaImageShrinker());
@@ -201,7 +209,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
         var milk = await all.Catalog.CreateItemAsync(new ItemCommand("ПР-М", "Хлопок молочный", ItemType.RawMaterial, kg, null));
         var red = await all.Catalog.CreateItemAsync(new ItemCommand("ПР-К", "Хлопок красный", ItemType.RawMaterial, kg, null));
         var e7 = await settings.AddLookupAsync(DevLookupKind.MachineClass, "E7", 8);
-        var pattern = await patterns.CreateAsync(new DevPatternValues("Полосы", DevPatternKind.Stripes, 2, 2, null, e7, 20, null, null, null, null));
+        var pattern = await patterns.CreateAsync(new DevPatternValues("Полосы", Kind(DevPatternKind.Stripes), 2, 2, null, e7, 20, null, null, null, null));
         var color = await patterns.AddColorAsync(pattern, "Фон", 100, 1);
         var p = await patterns.GetAsync(pattern);
         var main = p.Colorways[0].Id;
@@ -210,7 +218,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
         await patterns.SetYarnAsync(redway, color, red, null);
 
         // Модель: палитра с той же пряжей, деталь с весом — норма пряжи; рисунок и колорит «Основной».
-        var model = await models.CreateAsync(new DevModelHeader("Шарф в полоску", null, DevCategory.Scarf, DevAudience.Unisex, false, true, null, null,
+        var model = await models.CreateAsync(new DevModelHeader("Шарф в полоску", null, Cat(DevCategory.Scarf), DevAudience.Unisex, false, true, null, null,
             new DateOnly(2026, 12, 1), DevPriority.Normal, new Dictionary<DevRole, long?>()));
         await tech.AddColorAsync(model, "Основной", milk, null, null);
         var detail = await tech.AddDetailAsync(model, "Полотно", 1);
@@ -243,7 +251,7 @@ public sealed class DevPatternTests(SqlTestHost host) : IClassFixture<SqlTestHos
             "DELETE FROM [kniterp].[dev_pattern_version_colors] WHERE [PatternId] = {0}", pattern));
 
         // Аналитика: рисунок во второй модели — повторное использование.
-        var second = await models.CreateAsync(new DevModelHeader("Шапка в полоску", null, DevCategory.Hat, DevAudience.Unisex, false, true, null, null,
+        var second = await models.CreateAsync(new DevModelHeader("Шапка в полоску", null, Cat(DevCategory.Hat), DevAudience.Unisex, false, true, null, null,
             new DateOnly(2026, 12, 1), DevPriority.Normal, new Dictionary<DevRole, long?>()));
         await patterns.LinkToModelAsync(second, pattern, 1, redway, (await models.GetAsync(second)).RowVersion);
         var report = await new DevAnalyticsService(all.Db, guard, host.Clock, SqlTestHost.Spreadsheet).ReportAsync(new DateOnly(2026, 9, 1), new DateOnly(2026, 10, 9));

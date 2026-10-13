@@ -8,11 +8,10 @@ public sealed record DevModelFilter(
     string? Search = null, bool IncludeFinal = false);
 
 public sealed record DevModelRowDto(
-    long Id, string Number, string Name, DevStage Stage, string? CollectionName, DevCategory Category, string? CustomerName, DevPriority Priority,
+    long Id, string Number, string Name, DevStage Stage, string? CollectionName, string CategoryName, string? CustomerName, DevPriority Priority,
     DateOnly? PlannedLaunch, DateTime StageSinceUtc, bool IsLate, bool IsStageOverdue, string? ResponsibleName)
 {
     public string StageName => DevStages.Name(Stage);
-    public string CategoryName => DevModel.CategoryName(Category);
     public string PriorityName => DevModel.PriorityName(Priority);
     public bool IsOverdue => IsLate || IsStageOverdue;
 }
@@ -29,7 +28,7 @@ public sealed record DevOptionDto(long Id, string Name);
 /// <summary>Списки для формы модели и отборов.</summary>
 public sealed record DevModelOptionsDto(
     IReadOnlyList<DevOptionDto> Collections, IReadOnlyList<DevOptionDto> Customers, IReadOnlyList<DevOptionDto> Users, bool CanEdit,
-    IReadOnlyDictionary<DevRole, long?>? DefaultAssignees = null, bool AutoLaunchDate = false);
+    IReadOnlyDictionary<DevRole, long?>? DefaultAssignees = null, bool AutoLaunchDate = false, IReadOnlyList<DevOptionDto>? Categories = null);
 
 public sealed record DevAssigneeDto(DevRole Role, long? UserId, string? Name)
 {
@@ -50,7 +49,7 @@ public sealed record DevFileDto(long Id, DevFileKind Kind, string FileName, int 
 
 /// <summary>Карточка модели. Целевые суммы задания — только с правом «Разработка: себестоимость и цена» (иначе null).</summary>
 public sealed record DevModelDto(
-    long Id, string Number, string Name, long? CollectionId, string? CollectionName, DevCategory Category, DevAudience Audience, bool ChildSafety,
+    long Id, string Number, string Name, long? CollectionId, string? CollectionName, long CategoryId, string CategoryName, DevAudience Audience, bool ChildSafety,
     bool HasPattern, long? CustomerId, string? CustomerName, long? DealId, DateOnly? PlannedLaunch, DevPriority Priority, DevStage Stage,
     DateTime StageSinceUtc, int StagePlanDays, string? CancelReason, IReadOnlyList<DevAssigneeDto> Assignees, DevBrief Brief, bool CanSeeCost,
     IReadOnlyList<DevStageEntryDto> History, IReadOnlyList<DevFileDto> Files, IReadOnlyList<DevStage> MoveTargets, DevStage? NextStage,
@@ -60,11 +59,10 @@ public sealed record DevModelDto(
     decimal? DensityRows = null, decimal? ShrinkagePercent = null)
 {
     public string StageName => DevStages.Name(Stage);
-    public string CategoryName => DevModel.CategoryName(Category);
     public string AudienceName => DevModel.AudienceName(Audience);
     public string PriorityName => DevModel.PriorityName(Priority);
 
-    public DevModelHeader ToHeader() => new(Name, CollectionId, Category, Audience, ChildSafety, HasPattern, CustomerId, DealId, PlannedLaunch, Priority,
+    public DevModelHeader ToHeader() => new(Name, CollectionId, CategoryId, Audience, ChildSafety, HasPattern, CustomerId, DealId, PlannedLaunch, Priority,
         Assignees.ToDictionary(a => a.Role, a => a.UserId));
 }
 
@@ -84,10 +82,7 @@ public sealed record DevStageSettingDto(DevStage Stage, int PlanDays, bool IsEna
 public sealed record DevLookupDto(long Id, DevLookupKind Kind, string Name, int? Number, bool IsArchived, byte[] RowVersion);
 
 /// <summary>Шаблон задания по категории (D790).</summary>
-public sealed record DevCategoryTemplateDto(DevCategory Category, string? SizeRange, string? ColorRange, string? Composition, string? Labeling, string? Care)
-{
-    public string CategoryName => DevModel.CategoryName(Category);
-}
+public sealed record DevCategoryTemplateDto(long CategoryId, string CategoryName, string? SizeRange, string? ColorRange, string? Composition, string? Labeling, string? Care);
 
 /// <summary>Настройки автоматизации (D791, D792, D795): исполнители по умолчанию, расчёт даты запуска, автопереход, шаблоны.</summary>
 public sealed record DevAutomationDto(

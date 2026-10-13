@@ -154,7 +154,8 @@ public sealed class DevCategoryTemplate
     }
 
     public long OrganizationId { get; private set; }
-    public DevCategory Category { get; private set; }
+    /// <summary>Категория — запись справочника «Категории изделий» (D733).</summary>
+    public long CategoryId { get; private set; }
     public string? SizeRange { get; private set; }
     public string? ColorRange { get; private set; }
     public string? Composition { get; private set; }
@@ -162,14 +163,14 @@ public sealed class DevCategoryTemplate
     public string? Care { get; private set; }
     public byte[] RowVersion { get; private set; } = [];
 
-    public static DevCategoryTemplate Create(long organizationId, DevCategory category)
+    public static DevCategoryTemplate Create(long organizationId, long categoryId)
     {
-        if (!Enum.IsDefined(category))
+        if (categoryId <= 0)
         {
-            throw new BusinessRuleException("dev.model.kind", "Выберите категорию, аудиторию и приоритет.");
+            throw new BusinessRuleException("dev.model.category", "Выберите категорию изделия.");
         }
 
-        return new DevCategoryTemplate { OrganizationId = organizationId, Category = category };
+        return new DevCategoryTemplate { OrganizationId = organizationId, CategoryId = categoryId };
     }
 
     public void Set(string? sizeRange, string? colorRange, string? composition, string? labeling, string? care)
@@ -207,9 +208,9 @@ public static class DevAutomationRules
     }
 
     /// <summary>Название, если пользователь его не ввёл: «Свитер — Осень-зима 2026 — ООО «Пример»».</summary>
-    public static string DefaultName(DevCategory category, string? collection, string? customer)
+    public static string DefaultName(string? category, string? collection, string? customer)
     {
-        var parts = new[] { DevModel.CategoryName(category), collection, customer }.Where(p => !string.IsNullOrWhiteSpace(p));
+        var parts = new[] { category, collection, customer }.Where(p => !string.IsNullOrWhiteSpace(p));
         var name = string.Join(" — ", parts);
         return name.Length > DevModel.NameMaxLength ? name[..DevModel.NameMaxLength] : name;
     }

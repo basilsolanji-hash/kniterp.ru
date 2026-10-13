@@ -9,10 +9,15 @@
                                                        placeholder="@(Initial is null ? L("Пусто — по категории, коллекции и заказчику") : L("Свитер с оленями"))" /></label>
             <label>
                 @L("Категория")
-                <select @bind="_category">
-                    @foreach (var c in Enum.GetValues<DevCategory>())
+                @* D733: категории — справочник «Категории изделий»; архивная остаётся у модели, которая на неё уже ссылается. *@
+                <select @bind="_category" required>
+                    @foreach (var c in Options.Categories ?? [])
                     {
-                        <option value="@c">@L(DevModel.CategoryName(c))</option>
+                        <option value="@c.Id">@L(c.Name)</option>
+                    }
+                    @if (_category != 0 && Options.Categories?.Any(c => c.Id == _category) != true)
+                    {
+                        <option value="@_category">@L("текущая (в архиве)")</option>
                     }
                 </select>
             </label>
@@ -31,7 +36,7 @@
                     <option value="">—</option>
                     @foreach (var c in Options.Collections)
                     {
-                        <option value="@c.Id">@c.Name</option>
+                        <option value="@c.Id">@L(c.Name)</option>
                     }
                 </select>
             </label>
@@ -56,7 +61,7 @@
                     <option value="">—</option>
                     @foreach (var c in Options.Customers)
                     {
-                        <option value="@c.Id">@c.Name</option>
+                        <option value="@c.Id">@L(c.Name)</option>
                     }
                 </select>
             </label>
@@ -108,7 +113,7 @@
     public EventCallback OnCancel { get; set; }
 
     private string _name = string.Empty;
-    private DevCategory _category = DevCategory.Sweater;
+    private long _category;
     private DevAudience _audience = DevAudience.Women;
     private DevPriority _priority = DevPriority.Normal;
     private string _collection = string.Empty;
@@ -131,6 +136,7 @@
         {
             // D791: новая модель сразу с исполнителями по умолчанию из настроек разработки.
             _initialized = true;
+            _category = Options.Categories?.FirstOrDefault()?.Id ?? 0;
             foreach (var (role, user) in Options.DefaultAssignees ?? new Dictionary<DevRole, long?>())
             {
                 _assignees[role] = user;
@@ -141,7 +147,7 @@
 
         _initialized = true;
         _name = h.Name;
-        _category = h.Category;
+        _category = h.CategoryId;
         _audience = h.Audience;
         _priority = h.Priority;
         _collection = h.CollectionId?.ToString() ?? string.Empty;

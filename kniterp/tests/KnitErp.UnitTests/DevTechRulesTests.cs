@@ -235,7 +235,7 @@ public sealed class DevTechRulesTests
         Assert.Null(s.ReasonId);
 
         // D769: номер версии — от 2, не от самой себя.
-        var (m, _) = DevModel.Create(1, "М-00002", new DevModelHeader("Шарф", null, DevCategory.Accessory, DevAudience.Unisex, false, false, null, null, null,
+        var (m, _) = DevModel.Create(1, "М-00002", new DevModelHeader("Шарф", null, 10, DevAudience.Unisex, false, false, null, null, null,
             DevPriority.Normal, new Dictionary<DevRole, long?>()), Now, 3);
         Assert.Throws<BusinessRuleException>(() => m.MarkVersionOf(5, 1));
         m.MarkVersionOf(5, 2);

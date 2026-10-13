@@ -389,7 +389,7 @@ public sealed class DevShopService(IKnitErpDbContext db, IAccessGuard guard, ICu
         await RunAsync(async () =>
         {
             var model = await tech.FindEditableModelAsync(ctx, modelId, ct);
-            var template = await db.DevCategoryMeasures.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.Category == model.Category)
+            var template = await db.DevCategoryMeasures.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.CategoryId == model.CategoryId)
                 .OrderBy(x => x.SortOrder).ThenBy(x => x.Id).ToListAsync(ct);
             var existing = await db.DevMeasures.Where(m => m.OrganizationId == ctx.OrganizationId && m.ModelId == modelId)
                 .Select(m => new { m.Name, m.SortOrder }).ToListAsync(ct);

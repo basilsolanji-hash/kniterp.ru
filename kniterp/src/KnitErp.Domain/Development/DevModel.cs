@@ -3,7 +3,10 @@ using KnitErp.Domain.Organizations;
 
 namespace KnitErp.Domain.Development;
 
-/// <summary>Категория изделия (Допущение D704). Числа хранятся в базе — не перенумеровывать.</summary>
+/// <summary>
+/// Встроенные категории изделия (D704): с D733 категория — запись справочника «Категории изделий», эти значения создаются каждой
+/// организации (код — <see cref="DevLookup.Number"/>), их можно переименовать и дополнить своими.
+/// </summary>
 public enum DevCategory : byte
 {
     Sweater = 1,
@@ -48,7 +51,7 @@ public enum DevRole : byte
 
 /// <summary>Карточка модели: название, классификация, заказчик, исполнители, срок, приоритет.</summary>
 public sealed record DevModelHeader(
-    string Name, long? CollectionId, DevCategory Category, DevAudience Audience, bool ChildSafety, bool HasPattern, long? CustomerId, long? DealId,
+    string Name, long? CollectionId, long CategoryId, DevAudience Audience, bool ChildSafety, bool HasPattern, long? CustomerId, long? DealId,
     DateOnly? PlannedLaunch, DevPriority Priority, IReadOnlyDictionary<DevRole, long?> Assignees);
 
 /// <summary>Задание на разработку (D701): что делаем, в каких размерах и цветах, за сколько, каким тиражом и к какому сроку.</summary>
@@ -82,7 +85,8 @@ public sealed class DevModel
 
     public string Name { get; private set; } = string.Empty;
     public long? CollectionId { get; private set; }
-    public DevCategory Category { get; private set; }
+    /// <summary>Категория — запись справочника «Категории изделий» (D733).</summary>
+    public long CategoryId { get; private set; }
     public DevAudience Audience { get; private set; }
 
     /// <summary>Детское изделие с требованиями ТР ТС 007/2011 (состав, маркировка, гигиена).</summary>
@@ -414,7 +418,7 @@ public sealed class DevModel
 
     private void Apply(DevModelHeader h)
     {
-        if (!Enum.IsDefined(h.Category) || !Enum.IsDefined(h.Audience) || !Enum.IsDefined(h.Priority))
+        if (h.CategoryId <= 0 || !Enum.IsDefined(h.Audience) || !Enum.IsDefined(h.Priority))
         {
             throw new BusinessRuleException("dev.model.kind", "Выберите категорию, аудиторию и приоритет.");
         }
@@ -426,7 +430,7 @@ public sealed class DevModel
 
         Name = DomainText.Require(h.Name, NameMaxLength, "Название");
         CollectionId = h.CollectionId;
-        Category = h.Category;
+        CategoryId = h.CategoryId;
         Audience = h.Audience;
         // ТР ТС 007/2011 касается только детской одежды.
         ChildSafety = h.Audience == DevAudience.Kids && h.ChildSafety;
@@ -475,7 +479,7 @@ public sealed class DevModel
     [
         ("Название", Name),
         ("Коллекция", CollectionId?.ToString()),
-        ("Категория", CategoryName(Category)),
+        ("Категория", CategoryId.ToString()),
         ("Аудитория", AudienceName(Audience)),
         ("ТР ТС 007/2011", ChildSafety ? "да" : "нет"),
         ("Есть рисунок", HasPattern ? "да" : "нет"),

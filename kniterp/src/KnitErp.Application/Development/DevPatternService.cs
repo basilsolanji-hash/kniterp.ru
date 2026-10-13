@@ -11,13 +11,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KnitErp.Application.Development;
 
-public sealed record DevPatternFilter(string? Search = null, DevPatternKind? Kind = null, int? Colors = null, int? RapportWidth = null, long? MachineClassId = null,
+public sealed record DevPatternFilter(string? Search = null, long? KindId = null, int? Colors = null, int? RapportWidth = null, long? MachineClassId = null,
     long? TagId = null, bool IncludeArchived = false);
 
-public sealed record DevPatternRowDto(long Id, string Number, string Name, DevPatternKind Kind, int? RapportWidth, int? RapportHeight, int Colors,
+public sealed record DevPatternRowDto(long Id, string Number, string Name, string KindName, int? RapportWidth, int? RapportHeight, int Colors,
     string? MachineClass, DevPatternStatus Status, int Version, int UsedInModels, bool ReadyForProgramming)
 {
-    public string KindName => DevPattern.KindName(Kind);
     public string StatusName => DevPattern.StatusName(Status);
 }
 
@@ -39,7 +38,7 @@ public sealed record DevPatternUseDto(long ModelId, string Number, string Name, 
 
 /// <summary>Карточка рисунка (D726): свойства, цвета, колориты с пряжей, версии с файлами, где использован, что можно делать.</summary>
 public sealed record DevPatternDto(
-    long Id, string Number, string Name, DevPatternKind Kind, int? RapportWidth, int? RapportHeight, decimal? MaxFloatMm, long? MachineClassId, string? MachineClass,
+    long Id, string Number, string Name, long KindId, string KindName, int? RapportWidth, int? RapportHeight, decimal? MaxFloatMm, long? MachineClassId, string? MachineClass,
     int? MachineFeeders, int? ProductWidthLoops, string? AlignmentRule, string? Note, DevPatternStatus Status, int CurrentVersion, long? DessinatorUserId,
     string? Dessinator, long? ProgrammerUserId, string? Programmer, DateTime? ReadyForProgrammingAtUtc, bool HasProgram, string? CopiedFrom,
     IReadOnlyList<DevPatternColorDto> Colors, IReadOnlyList<DevPatternColorwayDto> Colorways, IReadOnlyList<DevPatternVersionDto> Versions,
@@ -48,12 +47,12 @@ public sealed record DevPatternDto(
     /// <summary>Свойства, цвета, колориты и сетку можно менять: черновик или проверка и текущая версия ещё не утверждалась.</summary>
     public bool IsEditable => Status is DevPatternStatus.Draft or DevPatternStatus.Review && ApprovedVersion != CurrentVersion;
 
-    public string KindName => DevPattern.KindName(Kind);
     public string StatusName => DevPattern.StatusName(Status);
     public decimal ShareTotal => Colors.Sum(c => c.SharePercent ?? 0);
 }
 
-public sealed record DevPatternOptionsDto(IReadOnlyList<DevOptionDto> MachineClasses, IReadOnlyList<DevOptionDto> Yarns, IReadOnlyList<DevOptionDto> Users);
+public sealed record DevPatternOptionsDto(IReadOnlyList<DevOptionDto> MachineClasses, IReadOnlyList<DevOptionDto> Yarns, IReadOnlyList<DevOptionDto> Users,
+    IReadOnlyList<DevOptionDto> Kinds);
 
 /// <summary>Рисунок модели в карточке модели (D726): что привязано и из чего выбирать.</summary>
 public sealed record DevModelPatternDto(long? PatternId, string? Number, string? Name, int? Version, int? CurrentVersion, long? ColorwayId, string? Colorway,
@@ -85,9 +84,9 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
             q = q.Where(p => p.Number.Contains(text) || p.Name.Contains(text));
         }
 
-        if (f.Kind is { } kind)
+        if (f.KindId is { } kind)
         {
-            q = q.Where(p => p.Kind == kind);
+            q = q.Where(p => p.KindId == kind);
         }
 
         if (f.RapportWidth is { } rw)
@@ -113,7 +112,8 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
         var rows = await q.OrderByDescending(p => p.Id).Take(500)
             .Select(p => new
             {
-                p.Id, p.Number, p.Name, p.Kind, p.RapportWidth, p.RapportHeight, p.Status, p.CurrentVersion, p.ReadyForProgrammingAtUtc,
+                p.Id, p.Number, p.Name, p.RapportWidth, p.RapportHeight, p.Status, p.CurrentVersion, p.ReadyForProgrammingAtUtc,
+                Kind = db.DevLookups.Where(l => l.Id == p.KindId).Select(l => l.Name).First(),
                 Colors = db.DevPatternColors.Count(c => c.OrganizationId == org && c.PatternId == p.Id),
                 Class = db.DevLookups.Where(l => l.Id == p.MachineClassId).Select(l => l.Name).FirstOrDefault(),
                 Used = db.DevModels.Count(m => m.OrganizationId == org && m.PatternId == p.Id),
@@ -127,6 +127,8 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.DevView, ct);
         var org = ctx.OrganizationId;
+        await DevLookupDefaults.EnsureAsync(db, org, ct);
+        var kinds = await DevLookupDefaults.OptionsAsync(db, org, DevLookupKind.PatternKind, ct);
         var classes = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.MachineClass && !l.IsArchived)
             .OrderBy(l => l.SortOrder).ThenBy(l => l.Name)
             .Select(l => new DevOptionDto(l.Id, l.Number == null ? l.Name : l.Name + " · " + l.Number + " нитевод.")).ToListAsync(ct);
@@ -138,7 +140,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
                            where m.OrganizationId == org && m.Status == MembershipStatus.Active
                            orderby u.DisplayName
                            select new DevOptionDto(u.Id, u.DisplayName)).ToListAsync(ct);
-        return new DevPatternOptionsDto(classes, yarns, users);
+        return new DevPatternOptionsDto(classes, yarns, users, kinds);
     }
 
     public async Task<DevPatternDto> GetAsync(long id, CancellationToken ct = default)
@@ -183,7 +185,8 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
             ? await db.DevPatterns.AsNoTracking().Where(x => x.Id == src && x.OrganizationId == org).Select(x => x.Number).SingleOrDefaultAsync(ct)
             : null;
         var perms = ctx.Permissions;
-        return new DevPatternDto(p.Id, p.Number, p.Name, p.Kind, p.RapportWidth, p.RapportHeight, p.MaxFloatMm, p.MachineClassId, cls?.Name, cls?.Number,
+        var kindName = await db.DevLookups.AsNoTracking().Where(l => l.Id == p.KindId && l.OrganizationId == org).Select(l => l.Name).SingleAsync(ct);
+        return new DevPatternDto(p.Id, p.Number, p.Name, p.KindId, kindName, p.RapportWidth, p.RapportHeight, p.MaxFloatMm, p.MachineClassId, cls?.Name, cls?.Number,
             p.ProductWidthLoops, p.AlignmentRule, p.Note, p.Status, p.CurrentVersion, p.DessinatorUserId, Name(names, p.DessinatorUserId), p.ProgrammerUserId,
             Name(names, p.ProgrammerUserId), p.ReadyForProgrammingAtUtc,
             files.Any(f => f.Version == p.CurrentVersion && f.Kind == DevPatternFileKind.Program), copied, colors,
@@ -199,7 +202,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
     public async Task<long> CreateAsync(DevPatternValues values, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevPattern, ct);
-        await ValidateAsync(ctx, values, ct);
+        await ValidateAsync(ctx, values, null, ct);
         return await InTransactionAsync(async () =>
         {
             var number = DevPattern.FormatNumber(await DocumentNumbers.NextAsync(db, ctx.OrganizationId, Counter, ct));
@@ -221,7 +224,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
         {
             var p = await LoadAsync(ctx, id, ct);
             p.EnsureVersion(p.RowVersion, rowVersion);
-            await ValidateAsync(ctx, values, ct);
+            await ValidateAsync(ctx, values, p.KindId, ct);
             var before = Describe(p);
             p.Set(values);
             Audit(ctx, p.Id, before, Describe(p), $"{p.Number}: свойства");
@@ -560,7 +563,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
         {
             var src = await LoadAsync(ctx, patternId, ct);
             var number = DevPattern.FormatNumber(await DocumentNumbers.NextAsync(db, org, Counter, ct));
-            var copy = DevPattern.Create(org, number, new DevPatternValues($"{src.Name} (копия)"[..Math.Min(DevPattern.NameMaxLength, src.Name.Length + 8)], src.Kind,
+            var copy = DevPattern.Create(org, number, new DevPatternValues($"{src.Name} (копия)"[..Math.Min(DevPattern.NameMaxLength, src.Name.Length + 8)], src.KindId,
                 src.RapportWidth, src.RapportHeight, src.MaxFloatMm, src.MachineClassId, src.ProductWidthLoops, src.AlignmentRule, src.Note, src.DessinatorUserId,
                 src.ProgrammerUserId), clock.UtcNow, ctx.UserId, src.Id);
             db.DevPatterns.Add(copy);
@@ -691,7 +694,11 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.DevView, ct);
         return (await ProgrammerQueue(db, ctx.OrganizationId, ctx.UserId).OrderBy(p => p.ReadyForProgrammingAtUtc)
-                .Select(p => new { p.Id, p.Number, p.Name, p.Kind, p.RapportWidth, p.RapportHeight, p.Status, p.CurrentVersion }).ToListAsync(ct))
+                .Select(p => new
+                {
+                    p.Id, p.Number, p.Name, Kind = db.DevLookups.Where(l => l.Id == p.KindId).Select(l => l.Name).First(), p.RapportWidth, p.RapportHeight,
+                    p.Status, p.CurrentVersion,
+                }).ToListAsync(ct))
             .Select(p => new DevPatternRowDto(p.Id, p.Number, p.Name, p.Kind, p.RapportWidth, p.RapportHeight, 0, null, p.Status, p.CurrentVersion, 0, true)).ToList();
     }
 
@@ -739,9 +746,12 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
             p.MachineClassId is null ? null : feeders ?? int.MaxValue);
     }
 
-    private async Task ValidateAsync(AccessContext ctx, DevPatternValues v, CancellationToken ct)
+    private async Task ValidateAsync(AccessContext ctx, DevPatternValues v, long? currentKindId, CancellationToken ct)
     {
         var org = ctx.OrganizationId;
+        // D733: вид — запись справочника «Виды рисунков» своей организации; новая ссылка — только на действующую.
+        await DevLookupDefaults.RequireAsync(db, org, DevLookupKind.PatternKind, v.KindId, currentKindId, "dev.pattern.kind",
+            "Вид рисунка не найден или в архиве.", ct);
         if (v.MachineClassId is { } mc && !await db.DevLookups.AnyAsync(l => l.Id == mc && l.OrganizationId == org && l.Kind == DevLookupKind.MachineClass, ct))
         {
             throw new NotFoundException("Класс машины");
@@ -784,7 +794,7 @@ public sealed class DevPatternService(IKnitErpDbContext db, IAccessGuard guard, 
     private static string? Name(Dictionary<long, string> names, long? id) => id is { } v ? names.GetValueOrDefault(v) : null;
 
     private static string Describe(DevPattern p) =>
-        $"{p.Name}; {DevPattern.KindName(p.Kind)}; раппорт {p.RapportWidth}×{p.RapportHeight}; протяжка {p.MaxFloatMm}; ширина {p.ProductWidthLoops}";
+        $"{p.Name}; вид {p.KindId}; раппорт {p.RapportWidth}×{p.RapportHeight}; протяжка {p.MaxFloatMm}; ширина {p.ProductWidthLoops}";
 
     private async Task<AccessContext> DemandAnyAsync(CancellationToken ct, params string[] codes)
     {

@@ -97,10 +97,15 @@ else
                         <label>@L("Название") <input @bind="_form.Name" maxlength="@DevPattern.NameMaxLength" required /></label>
                         <label>
                             @L("Вид рисунка")
+                            @* D733: виды — справочник «Виды рисунков»; архивный остаётся у рисунка, который на него уже ссылается. *@
                             <select @bind="_form.Kind">
-                                @foreach (var k in DevPattern.Kinds)
+                                @foreach (var k in _options.Kinds)
                                 {
-                                    <option value="@k">@L(DevPattern.KindName(k))</option>
+                                    <option value="@k.Id">@L(k.Name)</option>
+                                }
+                                @if (_options.Kinds.All(k => k.Id != _form.Kind))
+                                {
+                                    <option value="@_form.Kind">@L(p.KindName)</option>
                                 }
                             </select>
                         </label>
@@ -354,7 +359,7 @@ else
     private sealed class Form
     {
         public string? Name { get; set; }
-        public DevPatternKind Kind { get; set; }
+        public long Kind { get; set; }
         public int? Rw { get; set; }
         public int? Rh { get; set; }
         public decimal? Float { get; set; }
@@ -424,7 +429,7 @@ else
 
         _form = new Form
         {
-            Name = _p.Name, Kind = _p.Kind, Rw = _p.RapportWidth, Rh = _p.RapportHeight, Float = _p.MaxFloatMm, Class = _p.MachineClassId?.ToString() ?? "",
+            Name = _p.Name, Kind = _p.KindId, Rw = _p.RapportWidth, Rh = _p.RapportHeight, Float = _p.MaxFloatMm, Class = _p.MachineClassId?.ToString() ?? "",
             Width = _p.ProductWidthLoops, Align = _p.AlignmentRule, Note = _p.Note, Dessinator = _p.DessinatorUserId?.ToString() ?? "",
             Programmer = _p.ProgrammerUserId?.ToString() ?? "",
         };

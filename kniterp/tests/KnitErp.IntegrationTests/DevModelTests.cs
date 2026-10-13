@@ -15,12 +15,19 @@ namespace KnitErp.IntegrationTests;
 /// <summary>D700–D709: модели разработки — стадии и история, задание, файлы, права отдела, чужая организация, доска и «Мои задачи».</summary>
 public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
+    private long _org;
+
+    private long Cat(DevCategory category) => DevTestLookups.Category(host, _org, category);
+
+    private long Kind(DevPatternKind kind) => DevTestLookups.PatternKind(host, _org, kind);
+
     private static int _innSeed = 970_000_000;
     private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52];
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02, 0x03, 0x04];
 
     private (DevModelService Models, DevSettingsService Settings, Services All) As(long userId, long organizationId)
     {
+        _org = organizationId; // D733: категории и виды рисунков — записи справочника этой организации
         var all = host.As(userId, organizationId);
         var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = host.ClientAddress };
         var guard = new AccessGuard(all.Db, user, host.Clock);
@@ -34,9 +41,9 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         return await new DevCostService(all.Db, new AccessGuard(all.Db, user, host.Clock), user, host.Clock).SaveAsync(modelId, new DevCostScenario());
     }
 
-    private static DevModelHeader Header(string name = "Свитер «Северный»", long? collection = null, long? customer = null, bool hasPattern = true,
+    private DevModelHeader Header(string name = "Свитер «Северный»", long? collection = null, long? customer = null, bool hasPattern = true,
         DateOnly? launch = null, IReadOnlyDictionary<DevRole, long?>? assignees = null, long? deal = null) =>
-        new(name, collection, DevCategory.Sweater, DevAudience.Women, false, hasPattern, customer, deal, launch ?? new DateOnly(2026, 12, 15),
+        new(name, collection, Cat(DevCategory.Sweater), DevAudience.Women, false, hasPattern, customer, deal, launch ?? new DateOnly(2026, 12, 15),
             DevPriority.Normal, assignees ?? new Dictionary<DevRole, long?>());
 
     [SqlFact]

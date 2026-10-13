@@ -73,7 +73,7 @@ public sealed class DevPassportService(IKnitErpDbContext db, IAccessGuard guard,
 
         var b = m.Brief;
         return new DevPassportDto(organization, await DevTechService.LocalTodayAsync(db, org, clock.UtcNow, ct), m.Number, m.Name, m.VersionNo,
-            DevStages.Name(m.Stage), DevModel.CategoryName(m.Category), DevModel.AudienceName(m.Audience), m.ChildSafety, m.CollectionName, m.CustomerName,
+            DevStages.Name(m.Stage), m.CategoryName, DevModel.AudienceName(m.Audience), m.ChildSafety, m.CollectionName, m.CustomerName,
             b.Description, b.SizeRange, b.ColorRange, b.Composition, b.Labeling, b.Care, sizes.PackBox, sketch, palette, details, sizes.Sizes, sizes.Measures,
             operations, sizes.Details, m.DyeNumber, m.DensityLoops, m.DensityRows, m.ShrinkagePercent, await PatternAsync(org, modelId, ct));
     }
@@ -113,7 +113,8 @@ public sealed class DevPassportService(IKnitErpDbContext db, IAccessGuard guard,
             }
         }
 
-        return new DevPassportPattern(p.Number, p.Name, version, DevPattern.KindName(p.Kind), p.RapportWidth, p.RapportHeight, p.MaxFloatMm, cls, colorway, list);
+        var kind = await db.DevLookups.AsNoTracking().Where(l => l.Id == p.KindId).Select(l => l.Name).SingleAsync(ct);
+        return new DevPassportPattern(p.Number, p.Name, version, kind, p.RapportWidth, p.RapportHeight, p.MaxFloatMm, cls, colorway, list);
     }
 
     /// <summary>PDF и имя файла: «pasport-М-00001.pdf».</summary>

@@ -55,6 +55,7 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
     public async Task<IReadOnlyList<DevLookupDto>> LookupsAsync(DevLookupKind kind, bool includeArchived = false, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        await DevLookupDefaults.EnsureAsync(db, ctx.OrganizationId, ct);
         return await db.DevLookups.AsNoTracking()
             .Where(l => l.OrganizationId == ctx.OrganizationId && l.Kind == kind && (includeArchived || !l.IsArchived))
             .OrderBy(l => l.IsArchived).ThenBy(l => l.SortOrder).ThenBy(l => l.Name)
@@ -140,13 +141,15 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
                            orderby u.DisplayName
                            select new DevOptionDto(u.Id, u.DisplayName)).ToListAsync(ct);
         var names = users.ToDictionary(u => u.Id, u => u.Name);
+        await DevLookupDefaults.EnsureAsync(db, org, ct);
+        var categories = await DevLookupDefaults.OptionsAsync(db, org, DevLookupKind.Category, ct);
         var templates = await db.DevCategoryTemplates.AsNoTracking().Where(t => t.OrganizationId == org).ToListAsync(ct);
         return new DevAutomationDto(
             DevModel.Roles.Select(r => new DevAssigneeDto(r, settings.DefaultOf(r), settings.DefaultOf(r) is { } u ? names.GetValueOrDefault(u) : null)).ToList(),
             settings.AutoLaunchDate, settings.AutoAdvance,
-            Enum.GetValues<DevCategory>().Select(c => templates.FirstOrDefault(t => t.Category == c) is { } t
-                ? new DevCategoryTemplateDto(c, t.SizeRange, t.ColorRange, t.Composition, t.Labeling, t.Care)
-                : new DevCategoryTemplateDto(c, null, null, null, null, null)).ToList(),
+            categories.Select(c => templates.FirstOrDefault(t => t.CategoryId == c.Id) is { } t
+                ? new DevCategoryTemplateDto(c.Id, c.Name, t.SizeRange, t.ColorRange, t.Composition, t.Labeling, t.Care)
+                : new DevCategoryTemplateDto(c.Id, c.Name, null, null, null, null, null)).ToList(),
             users, ctx.Permissions.Has(Permissions.DevSettings));
     }
 
@@ -267,16 +270,18 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
         var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
         try
         {
-            var t = await db.DevCategoryTemplates.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId && x.Category == template.Category, ct);
+            var category = await DevLookupDefaults.RequireAsync(db, ctx.OrganizationId, DevLookupKind.Category, template.CategoryId, null, "dev.model.category",
+                "Категория изделия не найдена или в архиве.", ct);
+            var t = await db.DevCategoryTemplates.SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId && x.CategoryId == category.Id, ct);
             var isNew = t is null;
-            t ??= DevCategoryTemplate.Create(ctx.OrganizationId, template.Category);
+            t ??= DevCategoryTemplate.Create(ctx.OrganizationId, category.Id);
             t.Set(template.SizeRange, template.ColorRange, template.Composition, template.Labeling, template.Care);
             if (isNew)
             {
                 db.DevCategoryTemplates.Add(t);
             }
 
-            Audit(ctx, AuditActions.DevSettingsChanged, null, null, t.IsEmpty ? "очищен" : "сохранён", $"Шаблон задания: {DevModel.CategoryName(template.Category)}");
+            Audit(ctx, AuditActions.DevSettingsChanged, null, null, t.IsEmpty ? "очищен" : "сохранён", $"Шаблон задания: {category.Name}");
             await db.SaveOrConflictAsync(ct);
         }
         catch
@@ -288,26 +293,36 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
 
     // ---------- Шаблоны табеля мер по категориям (D729, ТЗ §9) ----------
 
-    public async Task<IReadOnlyList<DevCategoryMeasureDto>> CategoryMeasuresAsync(DevCategory category, CancellationToken ct = default)
+    /// <summary>Действующие категории изделий (D733) — для вкладок шаблонов табеля мер.</summary>
+    public async Task<IReadOnlyList<DevOptionDto>> CategoriesAsync(CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevView, ct);
-        return await db.DevCategoryMeasures.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.Category == category)
-            .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
-            .Select(x => new DevCategoryMeasureDto(x.Id, x.Category, x.Name, x.Tolerance, x.Step, x.SortOrder)).ToListAsync(ct);
+        await DevLookupDefaults.EnsureAsync(db, ctx.OrganizationId, ct);
+        return await DevLookupDefaults.OptionsAsync(db, ctx.OrganizationId, DevLookupKind.Category, ct);
     }
 
-    public async Task<long> AddCategoryMeasureAsync(DevCategory category, string? name, decimal tolerance, decimal? step, CancellationToken ct = default)
+    public async Task<IReadOnlyList<DevCategoryMeasureDto>> CategoryMeasuresAsync(long categoryId, CancellationToken ct = default)
+    {
+        var ctx = await guard.DemandAsync(Permissions.DevView, ct);
+        return await db.DevCategoryMeasures.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.CategoryId == categoryId)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
+            .Select(x => new DevCategoryMeasureDto(x.Id, x.CategoryId, x.Name, x.Tolerance, x.Step, x.SortOrder)).ToListAsync(ct);
+    }
+
+    public async Task<long> AddCategoryMeasureAsync(long categoryId, string? name, decimal tolerance, decimal? step, CancellationToken ct = default)
     {
         var ctx = await guard.DemandAsync(Permissions.DevSettings, ct);
         var org = ctx.OrganizationId;
-        var existing = await db.DevCategoryMeasures.Where(x => x.OrganizationId == org && x.Category == category)
+        var category = await DevLookupDefaults.RequireAsync(db, org, DevLookupKind.Category, categoryId, null, "dev.model.category",
+            "Категория изделия не найдена или в архиве.", ct);
+        var existing = await db.DevCategoryMeasures.Where(x => x.OrganizationId == org && x.CategoryId == categoryId)
             .Select(x => new { x.Name, x.SortOrder }).ToListAsync(ct);
         if (existing.Count >= DevCategoryMeasure.MaxPerCategory)
         {
             throw new BusinessRuleException("dev.measure.limit", $"В шаблоне табеля мер — не больше {DevCategoryMeasure.MaxPerCategory} точек.");
         }
 
-        var item = DevCategoryMeasure.Create(org, category, name, decimal.Round(tolerance, 2), step is { } st ? decimal.Round(st, 2) : null,
+        var item = DevCategoryMeasure.Create(org, categoryId, name, decimal.Round(tolerance, 2), step is { } st ? decimal.Round(st, 2) : null,
             existing.Count == 0 ? 1 : existing.Max(x => x.SortOrder) + 1);
         if (existing.Any(x => string.Equals(x.Name, item.Name, StringComparison.OrdinalIgnoreCase)))
         {
@@ -319,7 +334,7 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
         {
             await using var tx = await db.BeginTransactionAsync(ct);
             await db.SaveOrConflictAsync(ct);
-            Audit(ctx, AuditActions.DevSettingsChanged, item.Id, null, item.Name, $"Шаблон табеля мер: {DevModel.CategoryName(category)}");
+            Audit(ctx, AuditActions.DevSettingsChanged, item.Id, null, item.Name, $"Шаблон табеля мер: {category.Name}");
             await db.SaveChangesAsync(ct);
             await tx.CommitAsync(ct);
             return item.Id;
@@ -338,8 +353,9 @@ public sealed class DevSettingsService(IKnitErpDbContext db, IAccessGuard guard,
                    ?? throw new NotFoundException("Точка шаблона");
         try
         {
+            var category = await db.DevLookups.AsNoTracking().Where(l => l.Id == item.CategoryId).Select(l => l.Name).SingleAsync(ct);
             db.DevCategoryMeasures.Remove(item);
-            Audit(ctx, AuditActions.DevSettingsChanged, id, item.Name, "убрана", $"Шаблон табеля мер: {DevModel.CategoryName(item.Category)}");
+            Audit(ctx, AuditActions.DevSettingsChanged, id, item.Name, "убрана", $"Шаблон табеля мер: {category}");
             await db.SaveOrConflictAsync(ct);
         }
         catch

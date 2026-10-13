@@ -19,6 +19,12 @@ public enum DevLookupKind : byte
 
     /// <summary>Точка измерения табеля мер (этап 4).</summary>
     MeasurePoint = 5,
+
+    /// <summary>Категория изделия (D733): свитер, кардиган… и свои варианты организации; число — код встроенного значения.</summary>
+    Category = 6,
+
+    /// <summary>Вид рисунка (D733): жаккард, интарсия… и свои варианты; число — код встроенного значения.</summary>
+    PatternKind = 7,
 }
 
 /// <summary>
@@ -52,7 +58,17 @@ public sealed class DevLookup
         DevLookupKind.Weave => "Переплетения",
         DevLookupKind.MachineClass => "Классы машин",
         DevLookupKind.ReworkReason => "Причины доработок",
+        DevLookupKind.Category => "Категории изделий",
+        DevLookupKind.PatternKind => "Виды рисунков",
         _ => "Точки измерения",
+    };
+
+    /// <summary>Встроенные значения справочника (D733): создаются организации при первом обращении к разработке; код — <see cref="Number"/>.</summary>
+    public static IReadOnlyList<(int Code, string Name)> BuiltIn(DevLookupKind kind) => kind switch
+    {
+        DevLookupKind.Category => Enum.GetValues<DevCategory>().Select(c => ((int)c, DevModel.CategoryName(c))).ToList(),
+        DevLookupKind.PatternKind => Enum.GetValues<DevPatternKind>().Select(k => ((int)k, DevPattern.KindName(k))).ToList(),
+        _ => [],
     };
 
     public static DevLookup Create(long organizationId, DevLookupKind kind, string? name, int? number, int sortOrder)

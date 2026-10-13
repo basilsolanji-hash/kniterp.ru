@@ -85,7 +85,7 @@ public sealed record DevShopSettingsDto(int FactTolerancePercent, IReadOnlyList<
 public sealed record DevSizeDto(long Id, string Name, bool IsBase, int? PerBox, decimal? WeightGrams = null);
 
 /// <summary>Точка шаблона табеля мер категории (ТЗ §9): допуск ± см и шаг градации (+ см на размер).</summary>
-public sealed record DevCategoryMeasureDto(long Id, DevCategory Category, string Name, decimal Tolerance, decimal? Step, int SortOrder);
+public sealed record DevCategoryMeasureDto(long Id, long CategoryId, string Name, decimal Tolerance, decimal? Step, int SortOrder);
 
 public sealed record DevMeasureDto(long Id, string Name, decimal Tolerance, decimal? Step, IReadOnlyDictionary<long, decimal> Values);
 

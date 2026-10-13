@@ -13,14 +13,19 @@
 {
     <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
 }
-<div class="tabs dev-tabs" role="tablist">
-    @foreach (var c in Enum.GetValues<DevCategory>())
-    {
-        var category = c;
-        <button type="button" role="tab" class="@(_category == category ? "tab active" : "tab secondary")" aria-selected="@(_category == category ? "true" : "false")"
-                @onclick="() => OpenAsync(category)" disabled="@_busy">@L(DevModel.CategoryName(category))</button>
-    }
-</div>
+@* D733: категорий может быть много (свои варианты организации) — выбор списком, а не вкладками. *@
+@if (_categories is { Count: > 0 })
+{
+    <label class="inline-form" style="margin: 0 0 8px">
+        @L("Категория изделия")
+        <select value="@_category" @onchange="e => OpenAsync(long.TryParse(e.Value?.ToString(), out var id) ? id : 0)" disabled="@_busy">
+            @foreach (var c in _categories)
+            {
+                <option value="@c.Id">@L(c.Name)</option>
+            }
+        </select>
+    </label>
+}
 @if (_rows is null)
 {
     <p class="muted">@L("Загрузка…")</p>
@@ -69,7 +74,8 @@ else
     [CascadingParameter]
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
-    private DevCategory _category = DevCategory.Sweater;
+    private IReadOnlyList<DevOptionDto>? _categories;
+    private long _category;
     private IReadOnlyList<DevCategoryMeasureDto>? _rows;
     private bool _canEdit;
     private string? _name;
@@ -82,11 +88,15 @@ else
     protected override async Task OnInitializedAsync()
     {
         _canEdit = CurrentAccess.Has(Permissions.DevSettings);
-        _category = Enum.GetValues<DevCategory>()[0];
-        _rows = await Gate.Run(() => Settings.CategoryMeasuresAsync(_category));
+        await Gate.Run(async () =>
+        {
+            _categories = await Settings.CategoriesAsync();
+            _category = _categories.FirstOrDefault()?.Id ?? 0;
+            _rows = _category == 0 ? [] : await Settings.CategoryMeasuresAsync(_category);
+        });
     }
 
-    private Task OpenAsync(DevCategory category) => RunAsync(async () =>
+    private Task OpenAsync(long category) => RunAsync(async () =>
     {
         _category = category;
         _rows = await Settings.CategoryMeasuresAsync(category);

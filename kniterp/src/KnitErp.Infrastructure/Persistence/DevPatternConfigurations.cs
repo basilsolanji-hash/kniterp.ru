@@ -13,7 +13,6 @@ internal sealed class DevPatternConfiguration : IEntityTypeConfiguration<DevPatt
     {
         b.ToTable("dev_patterns", t =>
         {
-            t.HasCheckConstraint("ck_dev_patterns_kind", "[Kind] BETWEEN 1 AND 6");
             t.HasCheckConstraint("ck_dev_patterns_status", "[Status] BETWEEN 1 AND 4");
             t.HasCheckConstraint("ck_dev_patterns_rapport",
                 $"([RapportWidth] IS NULL OR [RapportWidth] BETWEEN 1 AND {DevPattern.MaxRapport}) AND ([RapportHeight] IS NULL OR [RapportHeight] BETWEEN 1 AND {DevPattern.MaxRapport})");
@@ -23,7 +22,6 @@ internal sealed class DevPatternConfiguration : IEntityTypeConfiguration<DevPatt
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Number).HasMaxLength(20).IsRequired();
         b.Property(x => x.Name).HasMaxLength(DevPattern.NameMaxLength).IsRequired();
-        b.Property(x => x.Kind).HasConversion<byte>();
         b.Property(x => x.Status).HasConversion<byte>();
         b.Property(x => x.MaxFloatMm).HasPrecision(6, 1);
         b.Property(x => x.AlignmentRule).HasMaxLength(DevPattern.AlignmentMaxLength);
@@ -38,6 +36,9 @@ internal sealed class DevPatternConfiguration : IEntityTypeConfiguration<DevPatt
         b.HasIndex(x => new { x.OrganizationId, x.Status }).HasDatabaseName("ix_dev_patterns_status");
         b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.MachineClassId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_patterns_machine_class");
+        // D733: вид рисунка — запись справочника «Виды рисунков» своей организации.
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.KindId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_patterns_kind");
         b.HasOne<DevPattern>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CopiedFromPatternId }).HasPrincipalKey(p => new { p.OrganizationId, p.Id })
             .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_patterns_copied_from");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DessinatorUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_patterns_dessinator");
@@ -163,12 +164,13 @@ internal sealed class DevCategoryMeasureConfiguration : IEntityTypeConfiguration
         b.ToTable("dev_category_measures", t => t.HasCheckConstraint("ck_dev_category_measures_tolerance", "[Tolerance] >= 0"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
-        b.Property(x => x.Category).HasConversion<byte>();
         b.Property(x => x.Name).HasMaxLength(DevMeasure.NameMaxLength).IsRequired();
         b.Property(x => x.Tolerance).HasPrecision(6, 2);
         b.Property(x => x.Step).HasPrecision(6, 2);
         DevKeys.Org(b);
-        b.HasIndex(x => new { x.OrganizationId, x.Category, x.Name }).IsUnique().HasDatabaseName("ux_dev_category_measures_name");
+        b.HasIndex(x => new { x.OrganizationId, x.CategoryId, x.Name }).IsUnique().HasDatabaseName("ux_dev_category_measures_name");
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CategoryId }).HasPrincipalKey(l => new { l.OrganizationId, l.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_category_measures_category");
     }
 }
 

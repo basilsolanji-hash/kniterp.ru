@@ -39,9 +39,9 @@ else
                     <label>
                         @L("Вид рисунка")
                         <select @bind="_kind">
-                            @foreach (var k in DevPattern.Kinds)
+                            @foreach (var k in _options.Kinds)
                             {
-                                <option value="@k">@L(DevPattern.KindName(k))</option>
+                                <option value="@k.Id">@L(k.Name)</option>
                             }
                         </select>
                     </label>
@@ -74,9 +74,9 @@ else
                 @L("Вид")
                 <select @bind="_fKind">
                     <option value="">@L("все")</option>
-                    @foreach (var k in DevPattern.Kinds)
+                    @foreach (var k in _options?.Kinds ?? [])
                     {
-                        <option value="@k">@L(DevPattern.KindName(k))</option>
+                        <option value="@k.Id">@L(k.Name)</option>
                     }
                 </select>
             </label>
@@ -161,7 +161,7 @@ else
     private bool _archived;
     private bool _creating;
     private string? _name;
-    private DevPatternKind _kind = DevPatternKind.JacquardDouble;
+    private long _kind;
     private int? _rw;
     private int? _rh;
     private string _class = string.Empty;
@@ -181,6 +181,7 @@ else
         try
         {
             _options = await Patterns.OptionsAsync();
+            _kind = _options.Kinds.FirstOrDefault()?.Id ?? 0;
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -192,7 +193,7 @@ else
     private async Task LoadAsync()
     {
         ListState.Patterns = new(_search, _fKind, _fColors, _fRapport, _fClass, _archived);
-        _rows = await Patterns.ListAsync(new DevPatternFilter(_search, Enum.TryParse<DevPatternKind>(_fKind, out var k) ? k : null, _fColors, _fRapport,
+        _rows = await Patterns.ListAsync(new DevPatternFilter(_search, long.TryParse(_fKind, out var k) ? k : null, _fColors, _fRapport,
             long.TryParse(_fClass, out var c) ? c : null, null, _archived));
     }
 

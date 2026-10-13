@@ -2,7 +2,10 @@ using KnitErp.Domain.Common;
 
 namespace KnitErp.Domain.Development;
 
-/// <summary>Вид рисунка (D726, ТЗ §7). Числа хранятся в базе.</summary>
+/// <summary>
+/// Встроенные виды рисунка (D726): с D733 вид — запись справочника «Виды рисунков», эти значения создаются каждой организации
+/// (код — <see cref="DevLookup.Number"/>), их можно переименовать и дополнить своими.
+/// </summary>
 public enum DevPatternKind : byte
 {
     JacquardDouble = 1,
@@ -30,7 +33,7 @@ public enum DevPatternFileKind : byte
 }
 
 public sealed record DevPatternValues(
-    string? Name, DevPatternKind Kind, int? RapportWidth, int? RapportHeight, decimal? MaxFloatMm, long? MachineClassId, int? ProductWidthLoops,
+    string? Name, long KindId, int? RapportWidth, int? RapportHeight, decimal? MaxFloatMm, long? MachineClassId, int? ProductWidthLoops,
     string? AlignmentRule, string? Note, long? DessinatorUserId, long? ProgrammerUserId);
 
 /// <summary>
@@ -56,7 +59,8 @@ public sealed class DevPattern
     public long OrganizationId { get; private set; }
     public string Number { get; private set; } = string.Empty;
     public string Name { get; private set; } = string.Empty;
-    public DevPatternKind Kind { get; private set; }
+    /// <summary>Вид — запись справочника «Виды рисунков» (D733).</summary>
+    public long KindId { get; private set; }
 
     /// <summary>Раппорт по ширине, петель.</summary>
     public int? RapportWidth { get; private set; }
@@ -122,7 +126,6 @@ public sealed class DevPattern
         _ => "В архиве",
     };
 
-    public static readonly IReadOnlyList<DevPatternKind> Kinds = Enum.GetValues<DevPatternKind>();
 
     public static DevPattern Create(long organizationId, string number, DevPatternValues values, DateTime nowUtc, long userId, long? copiedFrom = null)
     {
@@ -165,7 +168,7 @@ public sealed class DevPattern
 
     private void Apply(DevPatternValues v)
     {
-        if (!Enum.IsDefined(v.Kind))
+        if (v.KindId <= 0)
         {
             throw new BusinessRuleException("dev.pattern.kind", "Выберите вид рисунка.");
         }
@@ -181,7 +184,7 @@ public sealed class DevPattern
         }
 
         Name = DomainText.Require(v.Name, NameMaxLength, "Название");
-        Kind = v.Kind;
+        KindId = v.KindId;
         RapportWidth = v.RapportWidth;
         RapportHeight = v.RapportHeight;
         MaxFloatMm = v.MaxFloatMm;

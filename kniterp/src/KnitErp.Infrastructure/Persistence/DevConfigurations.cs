@@ -17,7 +17,6 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
         {
             t.HasCheckConstraint("ck_dev_models_stage", "[Stage] BETWEEN 1 AND 11 OR [Stage] = 99");
             t.HasCheckConstraint("ck_dev_models_version", "[VersionNo] >= 1 AND ([PreviousVersionId] IS NULL OR [VersionNo] >= 2)");
-            t.HasCheckConstraint("ck_dev_models_category", "[Category] BETWEEN 1 AND 10 OR [Category] = 99");
             t.HasCheckConstraint("ck_dev_models_audience", "[Audience] BETWEEN 1 AND 4");
             t.HasCheckConstraint("ck_dev_models_priority", "[Priority] BETWEEN 1 AND 4");
             t.HasCheckConstraint("ck_dev_models_child", "[ChildSafety] = 0 OR [Audience] = 3");
@@ -43,6 +42,9 @@ internal sealed class DevModelConfiguration : IEntityTypeConfiguration<DevModel>
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CollectionId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_collection");
+        // D733: категория — запись справочника «Категории изделий» своей организации.
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CategoryId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_category");
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CustomerId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_models_customer");
         b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DealId })
@@ -166,7 +168,7 @@ internal sealed class DevLookupConfiguration : IEntityTypeConfiguration<DevLooku
     {
         b.ToTable("dev_lookups", t =>
         {
-            t.HasCheckConstraint("ck_dev_lookups_kind", "[Kind] BETWEEN 1 AND 5");
+            t.HasCheckConstraint("ck_dev_lookups_kind", "[Kind] BETWEEN 1 AND 7");
             t.HasCheckConstraint("ck_dev_lookups_number", $"[Number] IS NULL OR [Number] BETWEEN 0 AND {DevLookup.MaxNumber}");
         });
         b.HasKey(x => x.Id);
@@ -223,8 +225,8 @@ internal sealed class DevCategoryTemplateConfiguration : IEntityTypeConfiguratio
 {
     public void Configure(EntityTypeBuilder<DevCategoryTemplate> b)
     {
-        b.ToTable("dev_category_templates", t => t.HasCheckConstraint("ck_dev_category_templates_category", "[Category] BETWEEN 1 AND 10 OR [Category] = 99"));
-        b.HasKey(x => new { x.OrganizationId, x.Category });
+        b.ToTable("dev_category_templates");
+        b.HasKey(x => new { x.OrganizationId, x.CategoryId });
         b.Property(x => x.SizeRange).HasMaxLength(DevModel.ShortTextMaxLength);
         b.Property(x => x.ColorRange).HasMaxLength(DevModel.ShortTextMaxLength);
         b.Property(x => x.Composition).HasMaxLength(DevModel.ShortTextMaxLength);
@@ -232,5 +234,7 @@ internal sealed class DevCategoryTemplateConfiguration : IEntityTypeConfiguratio
         b.Property(x => x.Care).HasMaxLength(DevModel.ShortTextMaxLength);
         b.Property(x => x.RowVersion).IsRowVersion();
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
+        b.HasOne<DevLookup>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CategoryId })
+            .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_dev_category_templates_category");
     }
 }

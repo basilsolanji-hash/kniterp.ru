@@ -13,12 +13,19 @@ namespace KnitErp.IntegrationTests;
 /// <summary>D790–D798: автоматизация разработки — подстановки в новую модель, копия, автопереход, Excel, уведомления и поиск.</summary>
 public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
+    private long _org;
+
+    private long Cat(DevCategory category) => DevTestLookups.Category(host, _org, category);
+
+    private long Kind(DevPatternKind kind) => DevTestLookups.PatternKind(host, _org, kind);
+
     private static int _innSeed = 971_000_000;
     private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
     private (DevModelService Models, DevSettingsService Settings, DevExchangeService Exchange, Services All) As(long userId, long organizationId)
     {
+        _org = organizationId; // D733: категории и виды рисунков — записи справочника этой организации
         var all = host.As(userId, organizationId);
         var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = host.ClientAddress };
         var guard = new AccessGuard(all.Db, user, host.Clock);
@@ -26,9 +33,9 @@ public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTest
         return (models, new DevSettingsService(all.Db, guard, user, host.Clock), new DevExchangeService(all.Db, guard, models, SqlTestHost.Spreadsheet, host.Clock), all);
     }
 
-    private static DevModelHeader Header(string name = "", DevCategory category = DevCategory.Sweater, long? collection = null, bool hasPattern = true,
+    private DevModelHeader Header(string name = "", DevCategory category = DevCategory.Sweater, long? collection = null, bool hasPattern = true,
         DateOnly? launch = null, IReadOnlyDictionary<DevRole, long?>? assignees = null) =>
-        new(name, collection, category, DevAudience.Women, false, hasPattern, null, null, launch, DevPriority.Normal, assignees ?? new Dictionary<DevRole, long?>());
+        new(name, collection, Cat(category), DevAudience.Women, false, hasPattern, null, null, launch, DevPriority.Normal, assignees ?? new Dictionary<DevRole, long?>());
 
     [SqlFact]
     public async Task New_model_gets_defaults_template_launch_date_and_name_copy_keeps_brief()
@@ -38,7 +45,7 @@ public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTest
         var (models, settings, _, s) = As(org.OwnerUserId, org.OrganizationId);
         await using var __ = s;
         await settings.SaveAutomationAsync(new Dictionary<DevRole, long?> { [DevRole.Technologist] = technologist, [DevRole.Designer] = org.OwnerUserId }, true, true);
-        await settings.SaveTemplateAsync(new DevCategoryTemplateDto(DevCategory.Sweater, "42–52", "молочный", "50% шерсть, 50% акрил", null, "ручная стирка"));
+        await settings.SaveTemplateAsync(new DevCategoryTemplateDto(Cat(DevCategory.Sweater), "", "42–52", "молочный", "50% шерсть, 50% акрил", null, "ручная стирка"));
         var collection = await settings.AddLookupAsync(DevLookupKind.Collection, "Осень-зима 2026", null);
 
         var id = await models.CreateAsync(Header(collection: collection, assignees: new Dictionary<DevRole, long?> { [DevRole.Designer] = technologist }));
@@ -58,7 +65,7 @@ public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTest
         Assert.Equal("dev.template.empty", (await Assert.ThrowsAsync<BusinessRuleException>(() => models.FillBriefFromTemplateAsync(hat, h.RowVersion))).Code);
 
         // Задание дополняется из шаблона только в пустых полях.
-        await settings.SaveTemplateAsync(new DevCategoryTemplateDto(DevCategory.Hat, "54–58", null, "100% акрил", null, null));
+        await settings.SaveTemplateAsync(new DevCategoryTemplateDto(Cat(DevCategory.Hat), "", "54–58", null, "100% акрил", null, null));
         h = await models.GetAsync(hat);
         await models.UpdateBriefAsync(hat, h.Brief with { Composition = "шерсть" }, h.RowVersion);
         h = await models.GetAsync(hat);
@@ -109,6 +116,80 @@ public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTest
         Assert.Equal(DevStage.Idea, (await models.GetAsync(other)).Stage);
     }
 
+    /// <summary>
+    /// D733: категория изделия и вид рисунка — справочники организации: свои варианты, переименование встроенных, архив (новая ссылка
+    /// запрещена, у старой модели остаётся), чужая организация, загрузка из Excel по названию своей категории.
+    /// </summary>
+    [SqlFact]
+    public async Task Categories_and_pattern_kinds_are_organization_lookups()
+    {
+        var org = await CreateOrganizationAsync();
+        var other = await CreateOrganizationAsync();
+        long foreignCategory;
+        {
+            var (_, otherSettings, _, os) = As(other.OwnerUserId, other.OrganizationId);
+            await using var ___ = os;
+            foreignCategory = await otherSettings.AddLookupAsync(DevLookupKind.Category, "Чужая категория", null);
+        }
+
+        var (models, settings, exchange, s) = As(org.OwnerUserId, org.OrganizationId);
+        await using var __ = s;
+
+        // Встроенные значения созданы организации при первом обращении; свой вариант — тут же в выборе модели.
+        var options = await models.OptionsAsync();
+        Assert.Equal(Enum.GetValues<DevCategory>().Length, options.Categories!.Count);
+        var poncho = await settings.AddLookupAsync(DevLookupKind.Category, "Пончо", null);
+        options = await models.OptionsAsync();
+        Assert.Contains(options.Categories!, c => c.Id == poncho && c.Name == "Пончо");
+        var id = await models.CreateAsync(new DevModelHeader("", null, poncho, DevAudience.Women, false, true, null, null, new DateOnly(2026, 12, 1),
+            DevPriority.Normal, new Dictionary<DevRole, long?>()));
+        var m = await models.GetAsync(id);
+        Assert.Equal(("Пончо", "Пончо"), (m.CategoryName, m.Name)); // пустое название — по категории
+
+        // Чужая категория и запись другого справочника — отказ.
+        foreach (var wrong in new[] { foreignCategory, await settings.AddLookupAsync(DevLookupKind.Collection, "Лето", null) })
+        {
+            Assert.Equal("dev.model.category", (await Assert.ThrowsAsync<BusinessRuleException>(() => models.CreateAsync(new DevModelHeader("Х", null, wrong,
+                DevAudience.Women, false, true, null, null, null, DevPriority.Normal, new Dictionary<DevRole, long?>())))).Code);
+        }
+
+        // Переименование встроенной категории видно в карточке; архивная — не для новых моделей, у прежней остаётся.
+        var sweater = Cat(DevCategory.Sweater);
+        var row = (await settings.LookupsAsync(DevLookupKind.Category)).Single(l => l.Id == sweater);
+        await settings.RenameLookupAsync(sweater, "Свитер вязаный", row.Number, row.RowVersion);
+        var withSweater = await models.CreateAsync(new DevModelHeader("Свитер «Лес»", null, sweater, DevAudience.Women, false, true, null, null, null,
+            DevPriority.Normal, new Dictionary<DevRole, long?>()));
+        Assert.Equal("Свитер вязаный", (await models.GetAsync(withSweater)).CategoryName);
+        row = (await settings.LookupsAsync(DevLookupKind.Category)).Single(l => l.Id == sweater);
+        await settings.SetLookupArchivedAsync(sweater, true, row.RowVersion);
+        Assert.DoesNotContain((await models.OptionsAsync()).Categories!, c => c.Id == sweater);
+        Assert.Equal("dev.model.category", (await Assert.ThrowsAsync<BusinessRuleException>(() => models.CreateAsync(new DevModelHeader("Новый", null, sweater,
+            DevAudience.Women, false, true, null, null, null, DevPriority.Normal, new Dictionary<DevRole, long?>())))).Code);
+        var current = await models.GetAsync(withSweater);
+        await models.UpdateAsync(withSweater, current.ToHeader() with { Name = "Свитер «Лес-2»" }, current.RowVersion);
+
+        // Excel: своя категория по названию.
+        var header = DevExchangeService.Columns.Take(12).ToList();
+        var file = SqlTestHost.Spreadsheet.Write([new SheetData("Модели", header, [
+            (IReadOnlyList<string>)["Пончо «Туман»", "пончо", "", "", "", "", "", "нет", "", "", "", ""],
+        ])]);
+        var plan = await exchange.PreviewAsync(new MemoryStream(file));
+        Assert.True(plan.CanApply);
+        Assert.Equal(1, (await exchange.ApplyAsync(plan.Rows)).Created);
+        Assert.Contains((await models.ListAsync(new DevModelFilter())).Rows, r => r.Name == "Пончо «Туман»" && r.CategoryName == "Пончо");
+
+        // Вид рисунка: свой вариант в выборе и в карточке рисунка; чужой — отказ.
+        var user = new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress };
+        var patterns = new DevPatternService(s.Db, new AccessGuard(s.Db, user, host.Clock), user, host.Clock);
+        Assert.Equal(Enum.GetValues<DevPatternKind>().Length, (await patterns.OptionsAsync()).Kinds.Count);
+        var embroidery = await settings.AddLookupAsync(DevLookupKind.PatternKind, "Вышивка по трикотажу", null);
+        Assert.Contains((await patterns.OptionsAsync()).Kinds, k => k.Id == embroidery);
+        var pattern = await patterns.CreateAsync(new DevPatternValues("Цветы", embroidery, 10, 10, null, null, null, null, null, null, null));
+        Assert.Equal("Вышивка по трикотажу", (await patterns.GetAsync(pattern)).KindName);
+        Assert.Equal("dev.pattern.kind", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            patterns.CreateAsync(new DevPatternValues("Чужой", poncho, 10, 10, null, null, null, null, null, null, null)))).Code);
+    }
+
     [SqlFact]
     public async Task Excel_template_import_is_all_or_nothing_and_export_reimports_unchanged()
     {
@@ -127,7 +208,7 @@ public sealed class DevAutomationTests(SqlTestHost host) : IClassFixture<SqlTest
         var plan = await exchange.PreviewAsync(new MemoryStream(bad));
         Assert.Equal((1, 1), (plan.ToCreate, plan.ErrorRows));
         var errors = plan.Rows.Single(r => r.Action == ImportAction.Error).Errors;
-        Assert.Contains("Неизвестная категория.", errors);
+        Assert.Contains("Неизвестная категория — добавьте её в справочник «Категории изделий».", errors);
         Assert.Contains("Заказчик не найден среди покупателей.", errors);
         await Assert.ThrowsAsync<BusinessRuleException>(() => exchange.ApplyAsync(plan.Rows));
         Assert.Equal(0, (await models.ListAsync(new DevModelFilter(IncludeFinal: true))).Total);

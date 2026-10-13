@@ -92,9 +92,10 @@ public sealed class DevExchangeService(IKnitErpDbContext db, IAccessGuard guard,
         {
             var collections = await db.DevLookups.Where(l => l.OrganizationId == ctx.OrganizationId && l.Kind == DevLookupKind.Collection)
                 .ToDictionaryAsync(l => l.Name.ToLower(), l => l.Id, ct);
+            var categories = await CategoriesAsync(ctx.OrganizationId, ct);
             foreach (var row in plan.Rows.Where(r => r.Action == ImportAction.Create))
             {
-                var parsed = Parse(row, collections, null, out _);
+                var parsed = Parse(row, collections, categories, null, out _);
                 long? collection = null;
                 if (row.Cell(3).Length > 0)
                 {
@@ -141,6 +142,7 @@ public sealed class DevExchangeService(IKnitErpDbContext db, IAccessGuard guard,
         }
 
         var org = ctx.OrganizationId;
+        var categories = await CategoriesAsync(org, ct);
         var collections = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.Collection)
             .Select(l => new { l.Id, l.Name, l.IsArchived }).ToListAsync(ct);
         var active = collections.Where(c => !c.IsArchived).ToDictionary(c => c.Name.ToLower(), c => c.Id);
@@ -165,7 +167,7 @@ public sealed class DevExchangeService(IKnitErpDbContext db, IAccessGuard guard,
                 continue;
             }
 
-            Parse(row, active, null, out var errors);
+            Parse(row, active, categories, null, out var errors);
             var collection = row.Cell(3).ToLower();
             if (collection.Length > 0 && !active.ContainsKey(collection))
             {
@@ -191,13 +193,15 @@ public sealed class DevExchangeService(IKnitErpDbContext db, IAccessGuard guard,
     }
 
     /// <summary>Разбор значений строки без обращения к базе; ошибки — понятными фразами для протокола.</summary>
-    private static Parsed? Parse(ImportRow row, IReadOnlyDictionary<string, long> collections, long? customer, out List<string> errors)
+    private static Parsed? Parse(ImportRow row, IReadOnlyDictionary<string, long> collections, Categories categories, long? customer,
+        out List<string> errors)
     {
         errors = [];
-        var category = Find(Enum.GetValues<DevCategory>(), DevModel.CategoryName, row.Cell(1), DevCategory.Other);
+        // D733: категория — по названию из справочника «Категории изделий»; пустая — «Прочее» (или первая действующая).
+        long? category = row.Cell(1).Length == 0 ? categories.Default : categories.ByName.TryGetValue(row.Cell(1).ToLower(), out var cat) ? cat : null;
         if (category is null)
         {
-            errors.Add("Неизвестная категория.");
+            errors.Add("Неизвестная категория — добавьте её в справочник «Категории изделий».");
         }
 
         var audience = Find(Enum.GetValues<DevAudience>(), DevModel.AudienceName, row.Cell(2), DevAudience.Women);
@@ -261,6 +265,18 @@ public sealed class DevExchangeService(IKnitErpDbContext db, IAccessGuard guard,
     }
 
     /// <summary>Значение справочника по названию без учёта регистра; пустая ячейка — значение по умолчанию.</summary>
+    private sealed record Categories(IReadOnlyDictionary<string, long> ByName, long? Default);
+
+    private async Task<Categories> CategoriesAsync(long org, CancellationToken ct)
+    {
+        await DevLookupDefaults.EnsureAsync(db, org, ct);
+        var list = await db.DevLookups.AsNoTracking().Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.Category && !l.IsArchived)
+            .OrderBy(l => l.SortOrder).Select(l => new { l.Id, l.Name, l.Number }).ToListAsync(ct);
+        var byName = list.GroupBy(l => l.Name.ToLower()).ToDictionary(g => g.Key, g => g.First().Id);
+        var other = list.FirstOrDefault(l => l.Number == (int)DevCategory.Other) ?? list.FirstOrDefault();
+        return new Categories(byName, other?.Id);
+    }
+
     private static T? Find<T>(IEnumerable<T> values, Func<T, string> name, string text, T empty)
         where T : struct
     {

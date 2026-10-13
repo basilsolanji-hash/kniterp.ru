@@ -73,6 +73,12 @@ description: Модуль «Разработка» knitERP (D700–D799) — м�
   `DevScreenshotTests.Capture_review_screens` (`KNITERP_REVIEW_SHOTS`), замеры в `metrics.jsonl`. В e2e стадию выбирать
   `DevUi.MoveToStageAsync`, меню «Ещё» — `DevUi.OpenMoreAsync` (повторяют нажатие: ввод в первые секунды может потеряться).
 
+- Категория изделия и вид рисунка (D733) — записи `DevLookup` (виды `Category` = 6, `PatternKind` = 7), ссылки `CategoryId`/`KindId` с составным
+  FK; `DevCategory`/`DevPatternKind` — только коды встроенных значений (`DevLookup.Number`). Встроенные создаёт `DevLookupDefaults.EnsureAsync`
+  (вызывать в «списках для выбора»), проверка ссылки — `DevLookupDefaults.RequireAsync` (архивная — только у прежней ссылки). Названия
+  выводить через `L(name)` — встроенные переводятся, свои показываются как есть. В интеграционных тестах id записи — `DevTestLookups`
+  (`Cat(...)`, `Kind(...)` от организации последнего `As()`).
+
 ## Частые ошибки
 - Карточка, открытая тем же компонентом с другим `Id` («Создать похожую»), сохраняет поля прошлой модели — сбрасывать состояние
   в `OnParametersSetAsync` при смене `Id`.

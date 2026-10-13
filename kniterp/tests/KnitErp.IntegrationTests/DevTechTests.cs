@@ -18,6 +18,12 @@ namespace KnitErp.IntegrationTests;
 /// </summary>
 public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 {
+    private long _org;
+
+    private long Cat(DevCategory category) => DevTestLookups.Category(host, _org, category);
+
+    private long Kind(DevPatternKind kind) => DevTestLookups.PatternKind(host, _org, kind);
+
     private static int _innSeed = 972_000_000;
     private static readonly byte[] Program = [0x53, 0x49, 0x4E, 0x00, 0x01, 0x02];
 
@@ -29,6 +35,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
 
     private Kit As(long userId, long organizationId)
     {
+        _org = organizationId; // D733: категории и виды рисунков — записи справочника этой организации
         var all = host.As(userId, organizationId);
         var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = host.ClientAddress };
         var guard = new AccessGuard(all.Db, user, host.Clock);
@@ -42,8 +49,8 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             new DevAnalyticsService(all.Db, guard, host.Clock, SqlTestHost.Spreadsheet), new DevPassportService(all.Db, guard, host.Clock, models, tech, shop));
     }
 
-    private static DevModelHeader Header(string name) =>
-        new(name, null, DevCategory.Accessory, DevAudience.Unisex, false, false, null, null, new DateOnly(2026, 12, 1), DevPriority.Normal,
+    private DevModelHeader Header(string name) =>
+        new(name, null, Cat(DevCategory.Accessory), DevAudience.Unisex, false, false, null, null, new DateOnly(2026, 12, 1), DevPriority.Normal,
             new Dictionary<DevRole, long?>());
 
     [SqlFact]
@@ -821,7 +828,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         {
             var user = new TestUser { UserId = org.OwnerUserId, OrganizationId = org.OrganizationId, ClientAddress = host.ClientAddress };
             var patterns = new DevPatternService(k.All.Db, new AccessGuard(k.All.Db, user, host.Clock), user, host.Clock);
-            var pattern = await patterns.CreateAsync(new DevPatternValues("Ромбы", DevPatternKind.JacquardDouble, 24, 30, null, null, null, null, null, null, null));
+            var pattern = await patterns.CreateAsync(new DevPatternValues("Ромбы", Kind(DevPatternKind.JacquardDouble), 24, 30, null, null, null, null, null, null, null));
             colorway = await patterns.AddColorwayAsync(pattern, "Зима");
             model = await k.Models.CreateAsync(Header("Свитер с ромбами"));
             var front = await k.Tech.AddDetailAsync(model, "Перед", 1);
@@ -914,14 +921,14 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         await using (var k = As(org.OwnerUserId, org.OrganizationId))
         {
             // ТЗ §9: шаблон табеля мер категории — Владелец добавляет и убирает точки, дубль не принимается.
-            await k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Длина изделия", 1m, 2m);
-            chest = await k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Ширина", 0.5m, 1m);
-            var extra = await k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Лишняя точка", 1m, null);
-            await k.Settings.AddCategoryMeasureAsync(DevCategory.Sweater, "Длина рукава", 1m, null);
+            await k.Settings.AddCategoryMeasureAsync(Cat(DevCategory.Accessory), "Длина изделия", 1m, 2m);
+            chest = await k.Settings.AddCategoryMeasureAsync(Cat(DevCategory.Accessory), "Ширина", 0.5m, 1m);
+            var extra = await k.Settings.AddCategoryMeasureAsync(Cat(DevCategory.Accessory), "Лишняя точка", 1m, null);
+            await k.Settings.AddCategoryMeasureAsync(Cat(DevCategory.Sweater), "Длина рукава", 1m, null);
             Assert.Equal("dev.measure.duplicate", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
-                k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Длина изделия", 1m, null))).Code);
+                k.Settings.AddCategoryMeasureAsync(Cat(DevCategory.Accessory), "Длина изделия", 1m, null))).Code);
             await k.Settings.RemoveCategoryMeasureAsync(extra);
-            var template = await k.Settings.CategoryMeasuresAsync(DevCategory.Accessory);
+            var template = await k.Settings.CategoryMeasuresAsync(Cat(DevCategory.Accessory));
             Assert.Equal(new[] { "Длина изделия", "Ширина" }, template.Select(t => t.Name));
             Assert.Equal((1m, 2m), (template[0].Tolerance, template[0].Step!.Value));
             Assert.True(await k.All.Db.AuditEntries.AnyAsync(a => a.OrganizationId == org.OrganizationId && a.Action == AuditActions.DevSettingsChanged
@@ -974,8 +981,8 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         // Образцовщица: шаблон видит, но не меняет; табель по шаблону, вес и пряжу не меняет.
         await using (var k = As(sampler, org.OrganizationId))
         {
-            Assert.Equal(2, (await k.Settings.CategoryMeasuresAsync(DevCategory.Accessory)).Count);
-            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Settings.AddCategoryMeasureAsync(DevCategory.Accessory, "Обхват", 1m, null));
+            Assert.Equal(2, (await k.Settings.CategoryMeasuresAsync(Cat(DevCategory.Accessory))).Count);
+            await Assert.ThrowsAsync<AccessDeniedException>(() => k.Settings.AddCategoryMeasureAsync(Cat(DevCategory.Accessory), "Обхват", 1m, null));
             await Assert.ThrowsAsync<AccessDeniedException>(() => k.Settings.RemoveCategoryMeasureAsync(chest));
             await Assert.ThrowsAsync<AccessDeniedException>(() => k.Shop.ApplyMeasureTemplateAsync(modelId));
             await Assert.ThrowsAsync<AccessDeniedException>(() => k.Shop.SetSizeWeightsAsync(modelId, []));
@@ -987,7 +994,7 @@ public sealed class DevTechTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         var stranger = await CreateOrganizationAsync();
         await using (var k = As(stranger.OwnerUserId, stranger.OrganizationId))
         {
-            Assert.Empty(await k.Settings.CategoryMeasuresAsync(DevCategory.Accessory));
+            Assert.Empty(await k.Settings.CategoryMeasuresAsync(Cat(DevCategory.Accessory)));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Settings.RemoveCategoryMeasureAsync(chest));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.ApplyMeasureTemplateAsync(modelId));
             await Assert.ThrowsAsync<NotFoundException>(() => k.Shop.SetSizeWeightsAsync(modelId, []));

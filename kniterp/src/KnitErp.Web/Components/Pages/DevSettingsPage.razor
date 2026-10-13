@@ -141,7 +141,7 @@ else
         @if (_template is not null)
         {
             <div class="panel">
-                <h3>@L("Шаблон: {0}", L(DevModel.CategoryName(_template.Category)))</h3>
+                <h3>@L("Шаблон: {0}", L(_template.CategoryName))</h3>
                 <form @onsubmit="SaveTemplateAsync">
                     <div class="grid">
                         <label>@L("Размерный ряд") <input @bind="_template.SizeRange" maxlength="@DevModel.ShortTextMaxLength" /></label>
@@ -265,12 +265,26 @@ else
                     {
                         var row = l;
                         <tr>
-                            <td>@row.Name</td>
+                            <td>
+                                @if (_renaming?.Id == row.Id)
+                                {
+                                    <span class="inline-form" style="margin: 0">
+                                        <input @bind="_renameText" maxlength="@DevLookup.NameMaxLength" aria-label="@L("Новое название")" />
+                                        <button type="button" class="secondary" @onclick="RenameAsync" disabled="@_busy">@L("Сохранить")</button>
+                                        <button type="button" class="secondary" @onclick="() => _renaming = null">@L("Отмена")</button>
+                                    </span>
+                                }
+                                else
+                                {
+                                    @row.Name
+                                }
+                            </td>
                             @if (_kind == DevLookupKind.MachineClass) { <td class="num">@(row.Number?.ToString() ?? "—")</td> }
                             <td>@(row.IsArchived ? L("в архиве") : L("действует"))</td>
                             @if (_canEdit)
                             {
                                 <td>
+                                    <button type="button" class="secondary" @onclick="() => { _renaming = row; _renameText = row.Name; }" disabled="@_busy">@L("Переименовать")</button>
                                     <button type="button" class="secondary" @onclick="() => ArchiveAsync(row)" disabled="@_busy">@(row.IsArchived ? L("Вернуть из архива") : L("В архив"))</button>
                                 </td>
                             }
@@ -349,6 +363,8 @@ else
     private bool _isError;
     private string? _newName;
     private int? _newNumber;
+    private DevLookupDto? _renaming;
+    private string? _renameText;
     private DevAutomationDto? _auto;
     private readonly Dictionary<DevRole, long?> _defaults = [];
     private bool _autoLaunch;
@@ -409,14 +425,15 @@ else
 
     private sealed class TemplateForm(DevCategoryTemplateDto t)
     {
-        public DevCategory Category { get; } = t.Category;
+        public long CategoryId { get; } = t.CategoryId;
+        public string CategoryName { get; } = t.CategoryName;
         public string? SizeRange { get; set; } = t.SizeRange;
         public string? ColorRange { get; set; } = t.ColorRange;
         public string? Composition { get; set; } = t.Composition;
         public string? Labeling { get; set; } = t.Labeling;
         public string? Care { get; set; } = t.Care;
 
-        public DevCategoryTemplateDto ToDto() => new(Category, SizeRange, ColorRange, Composition, Labeling, Care);
+        public DevCategoryTemplateDto ToDto() => new(CategoryId, CategoryName, SizeRange, ColorRange, Composition, Labeling, Care);
     }
 
     private async Task LoadAutomationAsync()
@@ -479,6 +496,7 @@ else
     private Task OpenKindAsync(DevLookupKind kind) => RunAsync(async () =>
     {
         _kind = kind;
+        _renaming = null;
         _lookups = await Settings.LookupsAsync(kind, includeArchived: true);
     }, null);
 
@@ -493,6 +511,15 @@ else
     private Task ArchiveAsync(DevLookupDto row) => RunAsync(async () =>
     {
         await Settings.SetLookupArchivedAsync(row.Id, !row.IsArchived, row.RowVersion);
+        _lookups = await Settings.LookupsAsync(_kind, includeArchived: true);
+    }, L("Сохранено."));
+
+    /// <summary>D733: справочники модуля переименовываются — в том числе встроенные категории и виды рисунков; число (код) не меняется.</summary>
+    private Task RenameAsync() => RunAsync(async () =>
+    {
+        var row = _renaming!;
+        await Settings.RenameLookupAsync(row.Id, _renameText, row.Number, row.RowVersion);
+        _renaming = null;
         _lookups = await Settings.LookupsAsync(_kind, includeArchived: true);
     }, L("Сохранено."));
 

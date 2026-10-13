@@ -558,7 +558,7 @@ public sealed class DevTechService(IKnitErpDbContext db, IAccessGuard guard, ICu
                 throw new BusinessRuleException("dev.version.exists", "У этой версии уже есть следующая — изменения вносите в неё.");
             }
 
-            var header = new DevModelHeader(src.Name, src.CollectionId, src.Category, src.Audience, src.ChildSafety, src.HasPattern, src.CustomerId, src.DealId, null,
+            var header = new DevModelHeader(src.Name, src.CollectionId, src.CategoryId, src.Audience, src.ChildSafety, src.HasPattern, src.CustomerId, src.DealId, null,
                 src.Priority, DevModel.Roles.ToDictionary(r => r, src.AssigneeOf));
             var brief = new DevBrief(src.Description, src.SizeRange, src.ColorRange, src.TargetCost, src.TargetPrice, src.RunQuantity, null, src.Composition,
                 src.Labeling, src.Care);

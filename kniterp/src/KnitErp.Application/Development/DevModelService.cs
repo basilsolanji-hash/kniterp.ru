@@ -73,6 +73,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
     {
         var ctx = await guard.DemandAsync(Permissions.DevView, ct);
         var org = ctx.OrganizationId;
+        await DevLookupDefaults.EnsureAsync(db, org, ct);
+        var categories = await DevLookupDefaults.OptionsAsync(db, org, DevLookupKind.Category, ct);
         var collections = await db.DevLookups.AsNoTracking()
             .Where(l => l.OrganizationId == org && l.Kind == DevLookupKind.Collection && !l.IsArchived)
             .OrderBy(l => l.SortOrder).ThenBy(l => l.Name).Select(l => new DevOptionDto(l.Id, l.Name)).ToListAsync(ct);
@@ -84,7 +86,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
         var activeIds = users.Select(u => u.Id).ToHashSet();
         return new DevModelOptionsDto(collections, customers, users, ctx.Permissions.Has(Permissions.DevEdit),
-            DevModel.Roles.ToDictionary(r => r, r => settings.DefaultOf(r) is { } u && activeIds.Contains(u) ? u : (long?)null), settings.AutoLaunchDate);
+            DevModel.Roles.ToDictionary(r => r, r => settings.DefaultOf(r) is { } u && activeIds.Contains(u) ? u : (long?)null), settings.AutoLaunchDate,
+            categories);
     }
 
     public async Task<DevModelDto> GetAsync(long id, CancellationToken ct = default)
@@ -109,6 +112,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         var customer = m.CustomerId is { } kid
             ? await db.Counterparties.AsNoTracking().Where(c => c.Id == kid).Select(c => c.Name).SingleOrDefaultAsync(ct)
             : null;
+        var category = await db.DevLookups.AsNoTracking().Where(l => l.Id == m.CategoryId && l.OrganizationId == ctx.OrganizationId).Select(l => l.Name)
+            .SingleAsync(ct);
 
         var canEdit = ctx.Permissions.Has(Permissions.DevEdit);
         var canApprove = ctx.Permissions.Has(Permissions.DevApprove);
@@ -117,7 +122,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             ? DevStages.Path.Where(s => DevStages.CheckMove(m.Stage, s, m.HasPattern, canApprove, plan.IsEnabled) is null).ToList()
             : [];
         var next = DevStages.Next(m.Stage, m.HasPattern, plan.IsEnabled) is { } n && targets.Contains(n) ? n : (DevStage?)null;
-        var template = await db.DevCategoryTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.OrganizationId == ctx.OrganizationId && t.Category == m.Category, ct);
+        var template = await db.DevCategoryTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.OrganizationId == ctx.OrganizationId && t.CategoryId == m.CategoryId, ct);
         var hints = DevAutomationRules.Hints(m.Stage,
             hasBrief: m.SizeRange is not null || m.RunQuantity is not null || m.Description is not null,
             hasSketch: files.Any(f => f.Kind is DevFileKind.Sketch or DevFileKind.Inspiration),
@@ -130,7 +135,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             : null;
         var next2 = await db.DevModels.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.PreviousVersionId == m.Id)
             .Select(x => new { x.Id, x.Number }).SingleOrDefaultAsync(ct);
-        return new DevModelDto(m.Id, m.Number, m.Name, m.CollectionId, collection, m.Category, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, customer,
+        return new DevModelDto(m.Id, m.Number, m.Name, m.CollectionId, collection, m.CategoryId, category, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, customer,
             m.DealId, m.PlannedLaunch, m.Priority, m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), m.CancelReason,
             DevModel.Roles.Select(r => new DevAssigneeDto(r, m.AssigneeOf(r), m.AssigneeOf(r) is { } u ? users.GetValueOrDefault(u) : null)).ToList(),
             new DevBrief(m.Description, m.SizeRange, m.ColorRange, canSeeCost ? m.TargetCost : null, canSeeCost ? m.TargetPrice : null, m.RunQuantity,
@@ -164,7 +169,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         var m = await db.DevModels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.OrganizationId == ctx.OrganizationId, ct)
                 ?? throw new NotFoundException("Модель");
         var name = m.Name.Length + 8 > DevModel.NameMaxLength ? m.Name : m.Name + " (копия)";
-        var header = new DevModelHeader(name, m.CollectionId, m.Category, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, m.DealId, null, m.Priority,
+        var header = new DevModelHeader(name, m.CollectionId, m.CategoryId, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, m.DealId, null, m.Priority,
             DevModel.Roles.ToDictionary(r => r, m.AssigneeOf));
         var brief = new DevBrief(m.Description, m.SizeRange, m.ColorRange, m.TargetCost, m.TargetPrice, m.RunQuantity, null, m.Composition, m.Labeling, m.Care);
         return await CreateCoreAsync(ctx, header, brief, $"копия {m.Number}", ct);
@@ -175,7 +180,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         EditAsync(id, rowVersion, Permissions.DevEdit, async (ctx, m) =>
         {
             var template = await db.DevCategoryTemplates.AsNoTracking()
-                               .SingleOrDefaultAsync(t => t.OrganizationId == ctx.OrganizationId && t.Category == m.Category, ct);
+                               .SingleOrDefaultAsync(t => t.OrganizationId == ctx.OrganizationId && t.CategoryId == m.CategoryId, ct);
             if (template is null || template.IsEmpty)
             {
                 throw new BusinessRuleException("dev.template.empty", "Для этой категории нет шаблона задания — заполните его в настройках разработки.");
@@ -196,7 +201,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == org, ct) ?? DevSettings.Defaults(org);
         header = await PrepareAsync(ctx, header, settings, ct);
         await ValidateAsync(ctx, header, null, ct);
-        var template = await db.DevCategoryTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.OrganizationId == org && t.Category == header.Category, ct);
+        var template = await db.DevCategoryTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.OrganizationId == org && t.CategoryId == header.CategoryId, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         try
         {
@@ -251,7 +256,9 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             var customer = h.CustomerId is { } k
                 ? await db.Counterparties.AsNoTracking().Where(x => x.Id == k && x.OrganizationId == org).Select(x => x.Name).SingleOrDefaultAsync(ct)
                 : null;
-            name = DevAutomationRules.DefaultName(h.Category, collection, customer);
+            var category = await db.DevLookups.AsNoTracking().Where(l => l.Id == h.CategoryId && l.OrganizationId == org).Select(l => l.Name)
+                .SingleOrDefaultAsync(ct);
+            name = DevAutomationRules.DefaultName(category, collection, customer);
         }
 
         var launch = h.PlannedLaunch;
@@ -576,7 +583,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
                          from l in lj.DefaultIfEmpty()
                          join c in db.Counterparties.AsNoTracking() on m.CustomerId equals c.Id into cj
                          from c in cj.DefaultIfEmpty()
-                         select new { m, Collection = l == null ? null : l.Name, Customer = c == null ? null : c.Name }).ToListAsync(ct);
+                         join k in db.DevLookups.AsNoTracking() on m.CategoryId equals k.Id
+                         select new { m, Collection = l == null ? null : l.Name, Customer = c == null ? null : c.Name, Category = k.Name }).ToListAsync(ct);
         var responsibleIds = raw.Select(x => DevStages.ResponsibleRole(x.m.Stage) is { } r ? x.m.AssigneeOf(r) : null).OfType<long>().Distinct().ToList();
         var names = responsibleIds.Count == 0
             ? new Dictionary<long, string>()
@@ -586,7 +594,7 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         {
             var m = x.m;
             var responsible = DevStages.ResponsibleRole(m.Stage) is { } r && m.AssigneeOf(r) is { } uid ? names.GetValueOrDefault(uid) : null;
-            return new DevModelRowDto(m.Id, m.Number, m.Name, m.Stage, x.Collection, m.Category, x.Customer, m.Priority, m.PlannedLaunch, m.StageSinceUtc,
+            return new DevModelRowDto(m.Id, m.Number, m.Name, m.Stage, x.Collection, x.Category, x.Customer, m.Priority, m.PlannedLaunch, m.StageSinceUtc,
                 DevModel.IsLate(m.Stage, m.PlannedLaunch, today), DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), now), responsible);
         }).ToList();
     }
@@ -631,6 +639,10 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
                 throw new BusinessRuleException("dev.model.assignee", "Исполнитель должен быть активным пользователем организации.");
             }
         }
+
+        // D733: категория — запись справочника «Категории изделий» своей организации; новая ссылка — только на действующую.
+        await DevLookupDefaults.RequireAsync(db, org, DevLookupKind.Category, h.CategoryId, current?.CategoryId, "dev.model.category",
+            "Категория изделия не найдена или в архиве.", ct);
     }
 
     /// <summary>Изменение модели: право, своя организация, версия строки, журнал; при отказе изменения забываются (один DbContext вкладки).</summary>
