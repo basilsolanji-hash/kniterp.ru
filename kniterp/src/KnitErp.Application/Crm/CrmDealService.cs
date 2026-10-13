@@ -511,6 +511,8 @@ public sealed class CrmDealService(IKnitErpDbContext db, IAccessGuard guard, ICu
         }
 
         db.CrmDealOrders.Add(CrmDealOrder.Create(ctx.OrganizationId, id, orderId, ctx.UserId, clock.UtcNow, offerId));
+        // D683: связь и в заказе базы (SalesOrder.CrmDealId, D117) — карточка заказа показывает сделку в «Связанных документах».
+        (await db.SalesOrders.SingleAsync(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId, ct)).LinkCrmDeal(id);
         Audit(ctx, AuditActions.CrmDealOrderCreated, id, null, order.Number, offerNumber ?? deal.Number);
         await db.SaveChangesAsync(ct);
         // Б2 (D665): создан заказ — сделка «Согласование» (только вперёд).

@@ -56,7 +56,8 @@ public static class CrmTestKit
         var db = interceptors.Length == 0 ? host.NewDb() : host.NewDb(interceptors);
         var user = new TestUser { UserId = userId, OrganizationId = organizationId, ApiScope = apiScope };
         var guard = new AccessGuard(db, user, host.Clock);
-        var sales = new SalesService(db, guard, user, host.Clock, new StockDocumentService(db, guard, SqlTestHost.Spreadsheet, user, host.Clock));
+        var sales = new SalesService(db, guard, user, host.Clock, new StockDocumentService(db, guard, SqlTestHost.Spreadsheet, user, host.Clock),
+            [new CrmSalesOrderEvents(host.Clock, user)]); // D683: «заказ подтверждён» → сделка выиграна, как в приложении
         return new CrmServices(db, new CrmSettingsService(db, guard, user, host.Clock), new CrmLeadService(db, guard, user, host.Clock, new FakeRequisitesLookup()),
             new CrmDealService(db, guard, user, host.Clock, sales), new CrmContactService(db, guard, user, host.Clock, SqlTestHost.Spreadsheet), sales)
         {

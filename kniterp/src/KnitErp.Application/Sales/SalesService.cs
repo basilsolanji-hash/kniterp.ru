@@ -713,8 +713,6 @@ public sealed partial class SalesService(
         await db.SaveOrConflictAsync(ct);
         // D110: этап по событию «заказ подтверждён» — после сохранения статуса, в той же транзакции.
         await StageAutomation.ApplyAsync(db, ctx, [id], clock.UtcNow, currentUser.CorrelationId, ct);
-        // D607 (сессия CRM): заказ из сделки подтверждён — сделка «Выиграна», в той же транзакции.
-        await Crm.CrmDealService.OnOrderConfirmedAsync(db, ctx, id, clock.UtcNow, currentUser.CorrelationId, ct);
         await SalesMailOutbox.OnOrderConfirmedAsync(db, ctx, id, clock.UtcNow, ct); // D1124: письмо «заказ оформлен» — в той же транзакции
         await db.SaveChangesAsync(ct);
 

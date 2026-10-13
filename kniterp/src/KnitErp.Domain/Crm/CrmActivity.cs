@@ -245,7 +245,7 @@ public sealed class CrmOffer
         foreach (var l in lines)
         {
             Quantities.EnsurePositive(l.Quantity);
-            offer._lines.Add(new CrmOfferLine(++order, l.ItemId, l.Code, l.Name, l.Unit, l.Quantity, l.Price));
+            offer._lines.Add(new CrmOfferLine(organizationId, ++order, l.ItemId, l.Code, l.Name, l.Unit, l.Quantity, l.Price));
         }
 
         if (offer._lines.Count == 0)
@@ -264,8 +264,9 @@ public sealed class CrmOfferLine
     {
     }
 
-    internal CrmOfferLine(int lineNo, long itemId, string code, string name, string unit, decimal quantity, decimal price)
+    internal CrmOfferLine(long organizationId, int lineNo, long itemId, string code, string name, string unit, decimal quantity, decimal price)
     {
+        OrganizationId = organizationId;
         LineNo = lineNo;
         ItemId = itemId;
         Code = code;
@@ -277,6 +278,10 @@ public sealed class CrmOfferLine
     }
 
     public long Id { get; private set; }
+
+    /// <summary>Организация — для составных внешних ключей на КП и номенклатуру (D682).</summary>
+    public long OrganizationId { get; private set; }
+
     public long OfferId { get; private set; }
     public int LineNo { get; private set; }
     public long ItemId { get; private set; }

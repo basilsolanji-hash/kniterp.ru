@@ -99,6 +99,7 @@ public static class DependencyInjection
         services.AddScoped<Crm.CrmMailingService>();
         services.AddScoped<Crm.CrmImportService>();
         services.AddScoped<Crm.CrmMessengerService>();
+        services.AddScoped<Common.ISalesOrderEvents, Crm.CrmSalesOrderEvents>(); // D683: «заказ подтверждён» → сделка выиграна
         services.AddScoped<Crm.CrmEmailTemplateService>();
         services.AddScoped<Crm.CrmMailboxService>();
         services.AddScoped<Crm.ICrmDashboardSource, Crm.CrmDashboardSource>(); // ТЗ CRM §6: блок главного экрана подключает база

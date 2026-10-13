@@ -235,7 +235,8 @@ internal sealed class CrmDealConfiguration : IEntityTypeConfiguration<CrmDeal>
         b.HasIndex(x => new { x.OrganizationId, x.ResponsibleUserId, x.Outcome }).HasDatabaseName("ix_crm_deals_org_responsible_outcome");
         b.HasIndex(x => new { x.OrganizationId, x.CounterpartyId }).HasDatabaseName("ix_crm_deals_org_counterparty");
 
-        b.HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.DealId).OnDelete(DeleteBehavior.Cascade);
+        b.HasMany(x => x.Lines).WithOne().HasForeignKey(x => new { x.OrganizationId, x.DealId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_crm_deal_lines_deal"); // D682: составной ключ
         b.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_lines");
         b.HasMany(x => x.Participants).WithOne().HasForeignKey(x => x.DealId).OnDelete(DeleteBehavior.Cascade);
         b.Navigation(x => x.Participants).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_participants");
@@ -261,7 +262,8 @@ internal sealed class CrmDealLineConfiguration : IEntityTypeConfiguration<CrmDea
         b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
         b.Property(x => x.Price).HasColumnType("decimal(19,4)");
         b.Property(x => x.Amount).HasColumnType("decimal(19,4)");
-        b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_deal_lines_item");
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_deal_lines_item"); // D682
         b.HasIndex(x => new { x.DealId, x.ItemId }).IsUnique().HasDatabaseName("ux_crm_deal_lines_deal_item");
     }
 }
@@ -377,7 +379,8 @@ internal sealed class CrmActivityConfiguration : IEntityTypeConfiguration<CrmAct
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.AssigneeUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_assignee");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_created_by");
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.DoneByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_done_by");
-        b.HasOne<CrmOffer>().WithMany().HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_offer");
+        b.HasOne<CrmOffer>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.OfferId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_activities_offer"); // D682
         b.HasIndex(x => new { x.OrganizationId, x.Target, x.TargetId, x.CreatedAtUtc }).HasDatabaseName("ix_crm_activities_target");
         b.HasIndex(x => new { x.OrganizationId, x.AssigneeUserId, x.IsDone, x.DueAtUtc }).HasDatabaseName("ix_crm_activities_assignee_due");
         b.HasIndex(x => new { x.OrganizationId, x.Source, x.ExternalRef }).HasFilter("[ExternalRef] IS NOT NULL").IsUnique()
@@ -407,9 +410,11 @@ internal sealed class CrmOfferConfiguration : IEntityTypeConfiguration<CrmOffer>
         b.HasIndex(x => new { x.OrganizationId, x.Number }).IsUnique().HasDatabaseName("ux_crm_offers_org_number");
         b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.DealId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offers_deal");
-        b.HasOne<PriceType>().WithMany().HasForeignKey(x => x.PriceTypeId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offers_price_type");
+        b.HasOne<PriceType>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.PriceTypeId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offers_price_type"); // D682
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offers_created_by");
-        b.HasMany(x => x.Lines).WithOne().HasForeignKey(x => x.OfferId).OnDelete(DeleteBehavior.Restrict);
+        b.HasMany(x => x.Lines).WithOne().HasForeignKey(x => new { x.OrganizationId, x.OfferId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offer_lines_offer"); // D682
         b.Navigation(x => x.Lines).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_lines");
     }
 }
@@ -431,7 +436,8 @@ internal sealed class CrmOfferLineConfiguration : IEntityTypeConfiguration<CrmOf
         b.Property(x => x.Quantity).HasColumnType("decimal(18,6)");
         b.Property(x => x.Price).HasColumnType("decimal(19,4)");
         b.Property(x => x.Amount).HasColumnType("decimal(19,4)");
-        b.HasOne<Item>().WithMany().HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offer_lines_item");
+        b.HasOne<Item>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ItemId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_offer_lines_item"); // D682
         b.HasIndex(x => new { x.OfferId, x.LineNo }).IsUnique().HasDatabaseName("ux_crm_offer_lines_no");
     }
 }
@@ -492,8 +498,11 @@ internal sealed class CrmMailingConfiguration : IEntityTypeConfiguration<CrmMail
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.QueuedByUserId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_queued_by");
         // D675: фоновая отправка ищет запланированные и стоящие в очереди рассылки всех организаций.
         b.HasIndex(x => new { x.Status, x.ScheduledAtUtc }).HasDatabaseName("ix_crm_mailings_queue");
-        b.HasOne<KnitErp.Domain.Tagging.Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_tag");
-        b.HasMany(x => x.Recipients).WithOne().HasForeignKey(x => x.MailingId).OnDelete(DeleteBehavior.Cascade);
+        b.HasOne<KnitErp.Domain.Tagging.Tag>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.TagId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailings_tag"); // D682
+        b.HasMany(x => x.Recipients).WithOne().HasForeignKey(x => new { x.OrganizationId, x.MailingId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Cascade).HasConstraintName("fk_crm_mailing_recipients_mailing"); // D682
+        b.HasAlternateKey(x => new { x.OrganizationId, x.Id }).HasName("ak_crm_mailings_org_id");
         b.Navigation(x => x.Recipients).UsePropertyAccessMode(PropertyAccessMode.Field).HasField("_recipients");
         b.HasIndex(x => new { x.OrganizationId, x.CreatedAtUtc }).HasDatabaseName("ix_crm_mailings_org");
     }
@@ -508,7 +517,8 @@ internal sealed class CrmMailingRecipientConfiguration : IEntityTypeConfiguratio
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Email).HasMaxLength(CrmText.EmailMaxLength).IsRequired();
         b.Property(x => x.AttemptedAtUtc).HasColumnType("datetime2(3)");
-        b.HasOne<CrmContact>().WithMany().HasForeignKey(x => x.ContactId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailing_recipients_contact");
+        b.HasOne<CrmContact>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.ContactId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_crm_mailing_recipients_contact"); // D682
         b.HasIndex(x => new { x.MailingId, x.ContactId }).IsUnique().HasDatabaseName("ux_crm_mailing_recipients");
     }
 }
@@ -591,4 +601,12 @@ internal sealed class CrmMailboxConfiguration : IEntityTypeConfiguration<CrmMail
         b.HasOne<Organization>().WithMany().HasForeignKey(x => x.OrganizationId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<UserAccount>().WithMany().HasForeignKey(x => x.ConnectedByUserId).OnDelete(DeleteBehavior.Restrict);
     }
+}
+
+/// <summary>D683: внешний ключ заказа базы на сделку CRM (SalesOrder.CrmDealId, D117) — составной, в миграции CRM.</summary>
+internal sealed class CrmSalesOrderLinkConfiguration : IEntityTypeConfiguration<SalesOrder>
+{
+    public void Configure(EntityTypeBuilder<SalesOrder> b) =>
+        b.HasOne<CrmDeal>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CrmDealId }).HasPrincipalKey(x => new { x.OrganizationId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_sales_orders_crm_deal");
 }

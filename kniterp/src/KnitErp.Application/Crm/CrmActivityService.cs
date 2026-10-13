@@ -125,8 +125,9 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
         var activities = await ActivitiesQuery(ctx).Where(a => a.Target == target && a.TargetId == targetId)
             .OrderByDescending(a => a.CreatedAtUtc).Take(take).ToListAsync(ct);
         var names = await UserNamesAsync(activities.Select(a => a.AssigneeUserId).Concat(activities.Select(a => a.CreatedByUserId)), ct);
+        var prices = ctx.Permissions.Has(Permissions.PriceView);
         items.AddRange(activities.Select(a => new CrmFeedItemDto(a.IsDone && a.DoneAtUtc is { } done ? done : a.CreatedAtUtc, CrmFeedKind.Activity,
-            $"{CrmActivity.KindName(a.Kind)}: {a.Subject}", a.Text, null, names.GetValueOrDefault(a.CreatedByUserId), ToDto(a, names))));
+            $"{CrmActivity.KindName(a.Kind)}: {a.Subject}", VisibleText(a, prices), null, names.GetValueOrDefault(a.CreatedByUserId), ToDto(a, names, prices: prices))));
 
         var taggedEntity = target switch { CrmTarget.Lead => TaggedEntity.CrmLead, CrmTarget.Deal => TaggedEntity.CrmDeal, _ => TaggedEntity.CrmContact };
         var comments = await (from c in db.DiscussionComments.AsNoTracking()
@@ -155,8 +156,8 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
             .OrderBy(a => a.DueAtUtc).Take(200).ToListAsync(ct);
         var names = await UserNamesAsync(open.Select(a => a.AssigneeUserId), ct);
         var titles = await TitlesAsync(ctx, open, ct);
-        var dtos = open.Select(a => ToDto(a, names, titles)).ToList();
         var amounts = ctx.Permissions.Has(Permissions.PriceView);
+        var dtos = open.Select(a => ToDto(a, names, titles, amounts)).ToList();
         var noStep = await (from d in WithoutNextStep(ctx).Where(d => d.ResponsibleUserId == ctx.UserId)
                             join c in db.Counterparties.AsNoTracking() on d.CounterpartyId equals c.Id
                             join u in db.Users.AsNoTracking() on d.ResponsibleUserId equals u.Id
@@ -415,11 +416,19 @@ public sealed class CrmActivityService(IKnitErpDbContext db, IAccessGuard guard,
         _ => null,
     };
 
+    /// <summary>
+    /// Текст активности для ленты (D680, замечание проверки): письмо с КП и активность КП содержат позиции и цены — без права
+    /// «Цены и суммы» текст не показывается.
+    /// </summary>
+    public const string HiddenPricesText = "Позиции и суммы КП скрыты: нет права «Цены и суммы».";
+
+    private static string? VisibleText(CrmActivity a, bool prices) => a.OfferId is not null && !prices ? HiddenPricesText : a.Text;
+
     private CrmActivityDto ToDto(CrmActivity a, IReadOnlyDictionary<long, string> names,
-        IReadOnlyDictionary<(CrmTarget, long), (string Title, string Href)>? titles = null)
+        IReadOnlyDictionary<(CrmTarget, long), (string Title, string Href)>? titles = null, bool prices = true)
     {
         var t = titles is not null && titles.TryGetValue((a.Target, a.TargetId), out var x) ? x : ((string?)null, (string?)null);
-        return new CrmActivityDto(a.Id, a.Kind, a.Target, a.TargetId, a.Subject, a.Text, a.DueAtUtc, a.AssigneeUserId, names.GetValueOrDefault(a.AssigneeUserId) ?? "—",
+        return new CrmActivityDto(a.Id, a.Kind, a.Target, a.TargetId, a.Subject, VisibleText(a, prices), a.DueAtUtc, a.AssigneeUserId, names.GetValueOrDefault(a.AssigneeUserId) ?? "—",
             a.Result, a.IsDone, a.DoneAtUtc, a.Source, a.CreatedAtUtc, a.IsOverdue(clock.UtcNow), a.RowVersion, t.Item1, t.Item2);
     }
 
