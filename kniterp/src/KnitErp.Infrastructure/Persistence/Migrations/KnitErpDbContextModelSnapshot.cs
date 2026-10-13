@@ -1518,6 +1518,8 @@ namespace KnitErp.Infrastructure.Persistence.Migrations
                         {
                             t.HasTrigger("tr_items_service_without_stock");
 
+                            t.HasTrigger("tr_items_unit_locked");
+
                             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");
 
                             t.HasCheckConstraint("ck_items_bundle", "[Type] <> 11 OR ([MinStock] IS NULL AND [ParentItemId] IS NULL)");

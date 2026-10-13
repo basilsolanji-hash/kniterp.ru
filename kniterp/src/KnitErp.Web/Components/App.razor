@@ -266,6 +266,7 @@
         .checklist .manual .mark { background: var(--warn-bg); color: var(--warn-text); }
         .flash.error { border-color: var(--bad-line); background: var(--bad-bg-2); }
         .flash.warn { border-color: color-mix(in srgb, var(--warn-text) 45%, transparent); background: var(--warn-bg); color: var(--warn-text); }
+        .load-error { flex-wrap: wrap; }
         .denied { border: 1px solid var(--bad-line); background: var(--bad-bg-2); padding: 20px; border-radius: 10px; }
         .denied h1 { font-size: 22px; margin: 8px 0; }
         .denied-code { font-weight: 700; color: var(--bad-text); }
@@ -294,6 +295,12 @@
             .card-flow > .card-sec > h2:first-child { margin-top: 12px !important; }
         }
         .card-sec { min-width: 0; }
+        /* D338: заголовок столбца с сортировкой — кнопка, но выглядит как заголовок; фокус клавиатуры виден. */
+        th > .th-sort { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: inherit; }
+        th > .th-sort:hover { color: var(--text); }
+        .columns-menu { margin: 0 0 6px; }
+        .columns-menu > summary { cursor: pointer; color: var(--text-2); width: max-content; }
+        .columns-menu > .panel { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
         /* Поле выбора файла не шире экрана (на 390 px подпись «Загрузить строки из Excel» с полем давала прокрутку вбок). */
         input[type=file] { max-width: 100%; min-width: 0; }
         label.inline:has(> input[type=file]) { flex-wrap: wrap; max-width: 100%; min-width: 0; }
@@ -901,6 +908,7 @@
         .notice { padding: 10px 12px; border-radius: 8px; background: var(--field); margin-bottom: 8px; border-left: 3px solid var(--line-strong); }
         .notice.action { border-left-color: var(--accent); }
         .notice.warning { border-left-color: var(--warn-text); }
+        .archive-ask p { margin: 0; } .archive-ask ul { margin: 6px 0 10px; padding-left: 20px; }
         .notice-list .notice { display: flex; align-items: flex-start; gap: 8px; }
         .notice button.link { text-align: left; color: var(--text); flex: 1; }
         .notice button.dismiss { background: none; border: 0; color: var(--muted); padding: 0 4px; min-height: 0; cursor: pointer; }

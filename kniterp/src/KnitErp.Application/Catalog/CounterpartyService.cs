@@ -69,6 +69,19 @@ public sealed class CounterpartyService(IKnitErpDbContext db, IAccessGuard guard
 
     public async Task<long> CreateAsync(CounterpartyCommand cmd, CancellationToken ct = default)
     {
+        try
+        {
+            return await CreateAsyncCoreAsync(cmd, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // аудит каталога (D347): транзакция откатилась — несохранённое не должно уйти следующим сохранением вкладки
+            throw;
+        }
+    }
+
+    private async Task<long> CreateAsyncCoreAsync(CounterpartyCommand cmd, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.CatalogEdit, ct);
         var country = cmd.CountryCode ?? await db.Organizations.Where(o => o.Id == ctx.OrganizationId).Select(o => o.CountryCode).SingleAsync(ct);
         var c = Counterparty.Create(ctx.OrganizationId, cmd.Name, cmd.Inn, cmd.Kpp, cmd.IsSupplier, cmd.IsCustomer, cmd.Comment, country);

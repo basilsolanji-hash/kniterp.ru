@@ -446,6 +446,7 @@ internal sealed class ItemConfiguration : IEntityTypeConfiguration<Item>
             t.HasCheckConstraint("ck_items_min_price", "[MinPrice] IS NULL OR [MinPrice] >= 0");
             // D300: услуга — со ставкой НДС, без веса, объёма, неснижаемого остатка и модификаций.
             t.HasTrigger("tr_items_service_without_stock");
+            t.HasTrigger("tr_items_unit_locked"); // D339
             t.HasCheckConstraint("ck_items_service",
                 "[Type] <> 10 OR ([VatRateId] IS NOT NULL AND [WeightKg] IS NULL AND [VolumeM3] IS NULL AND [MinStock] IS NULL AND [ParentItemId] IS NULL)");
             t.HasCheckConstraint("ck_items_archived", "[IsArchived] = 0 OR [ArchivedAtUtc] IS NOT NULL");

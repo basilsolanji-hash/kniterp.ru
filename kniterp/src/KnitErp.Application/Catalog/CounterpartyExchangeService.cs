@@ -66,6 +66,19 @@ public sealed class CounterpartyExchangeService(
 
     public async Task<ImportResult> ApplyAsync(IReadOnlyList<ImportRow> rows, CancellationToken ct = default)
     {
+        try
+        {
+            return await ApplyAsyncCoreAsync(rows, ct);
+        }
+        catch
+        {
+            db.DiscardChanges(); // аудит каталога (D347): транзакция откатилась — несохранённое не должно уйти следующим сохранением вкладки
+            throw;
+        }
+    }
+
+    private async Task<ImportResult> ApplyAsyncCoreAsync(IReadOnlyList<ImportRow> rows, CancellationToken ct)
+    {
         var ctx = await guard.DemandAsync(Permissions.CatalogImport, ct);
         TableImport.EnsureApplicable(rows);
 
