@@ -32,7 +32,8 @@ public sealed record IntegrationOptionsDto(IReadOnlyList<(string Code, string Ti
 /// организации (Владелец, Администратор). Права токена — только из своих и не из запрещённых для API; адрес вебхука — только
 /// HTTPS и не во внутреннюю сеть (защита от SSRF; при отправке адрес проверяется ещё раз — после разрешения имени).
 /// </summary>
-/// D123: выпуск и отзыв токена API — только после повторного подтверждения паролем (StepUpGuard).
+/// D123: выпуск и отзыв токена API — только после повторного подтверждения паролем (StepUpGuard). D128: создание, включение и
+/// выключение подписки — тоже; подписаться можно только на события модулей, которые видишь (WebhookEvents.RequiredPermissions).
 public sealed class IntegrationService(
     IKnitErpDbContext db, IAccessGuard guard, ICurrentUser currentUser, IClock clock, IntegrationSettings settings, KnitErp.Application.Authentication.StepUpGuard stepUp)
 {
@@ -44,7 +45,9 @@ public sealed class IntegrationService(
         var ctx = await guard.DemandAsync(Permissions.OrganizationEdit, ct);
         var codes = ctx.Permissions.GrantedCodes.Where(c => !ApiToken.Forbidden.Contains(c)).OrderBy(c => c, StringComparer.Ordinal)
             .Select(c => (c, Permissions.Describe(c))).ToList();
-        return new IntegrationOptionsDto(codes, WebhookEvents.All);
+        // D128: в форме — только события, на которые пользователь вправе подписаться (сервер всё равно проверит).
+        return new IntegrationOptionsDto(codes,
+            WebhookEvents.All.Where(e => WebhookEvents.RequiredPermissions(e.Event).All(ctx.Permissions.Has)).ToList());
     }
 
     public async Task<IReadOnlyList<ApiTokenDto>> ListTokensAsync(CancellationToken ct = default)
@@ -134,6 +137,17 @@ public sealed class IntegrationService(
 
         var cursor = await db.AuditEntries.MaxAsync(a => (long?)a.Id, ct) ?? 0;
         var (subscription, secret) = WebhookSubscription.Create(ctx.OrganizationId, checkedUrl, events, cursor, ctx.UserId, clock.UtcNow);
+        // D128: подписаться можно только на события модулей, которые видишь сам (при отправке права создателя проверяются снова).
+        foreach (var type in subscription.EventList)
+        {
+            if (WebhookEvents.RequiredPermissions(type).FirstOrDefault(p => !ctx.Permissions.Has(p)) is { } missing)
+            {
+                throw new BusinessRuleException("webhook.event_rights",
+                    $"Нельзя подписаться на событие «{type}»: нет права «{Permissions.Describe(missing)}».");
+            }
+        }
+
+        stepUp.Demand(ctx); // D128: как выпуск токена (D123) — подписка выводит данные организации наружу
         db.WebhookSubscriptions.Add(subscription);
         await db.SaveChangesAsync(ct);
         Audit(ctx, AuditActions.WebhookCreated, nameof(WebhookSubscription), subscription.Id, null, subscription.Url, subscription.Events);
@@ -147,6 +161,7 @@ public sealed class IntegrationService(
         var w = await db.WebhookSubscriptions.SingleOrDefaultAsync(x => x.Id == id && x.OrganizationId == ctx.OrganizationId, ct)
                 ?? throw new NotFoundException("Подписка");
         w.EnsureVersion(w.RowVersion, rowVersion);
+        stepUp.Demand(ctx); // D128
         w.SetActive(active, await db.AuditEntries.MaxAsync(a => (long?)a.Id, ct) ?? 0);
         Audit(ctx, AuditActions.WebhookChanged, nameof(WebhookSubscription), id, null, active ? "включена" : "выключена", w.Url);
         await db.SaveOrConflictAsync(ct);

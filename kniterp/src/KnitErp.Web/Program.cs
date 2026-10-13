@@ -139,7 +139,8 @@ builder.Services.AddOpenApi("v1", o =>
             Title = "knitERP API",
             Version = "v1",
             Description = "Собственный API knitERP. Вход — заголовок Authorization: Bearer knt_… (токен выпускается в разделе «Интеграции»). "
-                          + "Изменяющие запросы принимают Idempotency-Key. Ошибки — application/problem+json с полем code. Лимит — 100 запросов за 5 секунд на токен.",
+                          + "Изменяющие запросы принимают Idempotency-Key; создание заказов, складских документов и оплат (POST /sales-orders, /purchase-orders, "
+                          + "/stock-documents, /customer-payments) без него — 400 idempotency.key_required. Ошибки — application/problem+json с полем code. Лимит — 100 запросов за 5 секунд на токен.",
         };
         document.Components ??= new Microsoft.OpenApi.OpenApiComponents();
         document.Components.SecuritySchemes ??= new Dictionary<string, Microsoft.OpenApi.IOpenApiSecurityScheme>();

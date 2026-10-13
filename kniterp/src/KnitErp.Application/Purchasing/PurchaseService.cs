@@ -390,6 +390,11 @@ public sealed class PurchaseService(
     {
         var ctx = await guard.DemandAsync(Permissions.PurchaseView, ct);
         var order = await LoadOrderAsync(ctx, orderId, ct);
+        // D129 (аудит 12.10.2026, п. 1): повторное нажатие открывает уже созданный черновик, а не создаёт второй на тот же остаток.
+        if (await OpenDraftAsync(ctx, orderId, ct) is { } draft)
+        {
+            return draft;
+        }
         var moved = await MovedAsync(ctx, [orderId], ct);
         // D300 (сессия 4): строки-услуги на склад не поступают — они закрываются актом или УПД поставщика.
         var services = await StockEntry.NotStockedAsync(db, ctx.OrganizationId, order.Lines.Select(l => l.ItemId), ct);
@@ -701,6 +706,21 @@ public sealed class PurchaseService(
             .Where(r => r.OrganizationId == ctx.OrganizationId && r.Kind == kind && !r.IsArchived)
             .Select(r => new { r.Id, r.Name }).ToListAsync(ct);
         return (reasons.FirstOrDefault(r => r.Name == preferred) ?? reasons.FirstOrDefault())?.Id;
+    }
+
+    /// <summary>Черновик документа «поступление» по заказу, если он уже есть (D129). Открыть его можно только с правом создавать складские документы.</summary>
+    private async Task<long?> OpenDraftAsync(AccessContext ctx, long orderId, CancellationToken ct)
+    {
+        var draft = await db.StockDocuments.AsNoTracking()
+            .Where(d => d.OrganizationId == ctx.OrganizationId && d.PurchaseOrderId == orderId && d.Kind == StockOperationKind.Receipt
+                        && d.Status == StockDocumentStatus.Draft)
+            .OrderByDescending(d => d.Id).Select(d => (long?)d.Id).FirstOrDefaultAsync(ct);
+        if (draft is not null)
+        {
+            await guard.DemandAsync(Permissions.WarehouseDocumentCreate, ct);
+        }
+
+        return draft;
     }
 
     private async Task<DateOnly> TodayAsync(AccessContext ctx, CancellationToken ct)

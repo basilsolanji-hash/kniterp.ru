@@ -180,7 +180,8 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             try
             {
                 GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, role.IsAdministrative);
-                GrantPolicy.EnsureNoEscalation(ctx.Permissions, role.Permissions.Select(p => (p.PermissionCode, p.Level)));
+                // D128: область ещё не выбрана — проверяются уровни; область сверит сервер при сохранении.
+                GrantPolicy.EnsureNoEscalation(ctx.Permissions, role.Permissions.Select(p => (p.PermissionCode, p.Level)), GrantScope.Unspecified);
                 return new RoleOptionDto(role.Code, role.Name, role.IsAdministrative, true, null);
             }
             catch (BusinessRuleException ex)
@@ -207,7 +208,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         }
 
         var after = await guard.PreviewWithRoleAsync(userId, ctx.OrganizationId, role, ct);
-        var scope = await ResolveScopeAsync(ctx, departmentId, warehouseId, ct);
+        var (scope, _) = await ResolveScopeAsync(ctx, departmentId, warehouseId, ct);
         return new AccessPreviewDto(Lines(before), Lines(after), scope ?? "Вся организация", role.IsAdministrative, role.IsAdministrative);
     }
 
@@ -257,10 +258,14 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
                 .ToDictionaryAsync(w => w.Id, w => w.Name, ct));
     }
 
-    /// <summary>Проверяет область (своя организация, не в архиве) и возвращает её подпись для журнала; null — вся организация.</summary>
-    private async Task<string?> ResolveScopeAsync(AccessContext ctx, long? departmentId, long? warehouseId, CancellationToken ct)
+    /// <summary>
+    /// Проверяет область (своя организация, не в архиве) и возвращает её подпись для журнала (null — вся организация) и область
+    /// для проверки выдачи (D128: подразделение вместе с предками — область выдающего включает вложенные).
+    /// </summary>
+    private async Task<(string? Name, GrantScope Scope)> ResolveScopeAsync(AccessContext ctx, long? departmentId, long? warehouseId, CancellationToken ct)
     {
         var parts = new List<string>();
+        List<long> lineage = [];
         if (departmentId is { } depId)
         {
             var d = await db.Departments.AsNoTracking().SingleOrDefaultAsync(x => x.Id == depId && x.OrganizationId == ctx.OrganizationId, ct)
@@ -268,6 +273,8 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             parts.Add(d.IsArchived
                 ? throw new BusinessRuleException("structure.department.archived", "Подразделение в архиве.")
                 : $"«{d.Name}» и вложенные");
+            var tree = await KnitErp.Application.Structure.StructureScope.LoadTreeAsync(db, ctx.OrganizationId, ct);
+            lineage = [depId, .. tree.AncestorsOf(depId)];
         }
 
         if (warehouseId is { } whId)
@@ -277,7 +284,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             parts.Add(w.IsArchived ? throw new BusinessRuleException("catalog.archived", "Склад в архиве.") : $"склад «{w.Name}»");
         }
 
-        return parts.Count == 0 ? null : string.Join(", ", parts);
+        return (parts.Count == 0 ? null : string.Join(", ", parts), new GrantScope(departmentId, warehouseId, lineage));
     }
 
     private static List<Role> OrderRoles(List<Role> roles) =>
@@ -306,8 +313,8 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
     {
         var ctx = await guard.DemandAsync(Permissions.UserManage, ct);
         var role = await FindRoleAsync(ctx, cmd.RoleCode, ct);
-        await EnsureMayGrantRoleAsync(ctx, role, cmd.Reason, ct);
-        var scopeName = await ResolveScopeAsync(ctx, cmd.DepartmentId, cmd.WarehouseId, ct);
+        var (scopeName, scope) = await ResolveScopeAsync(ctx, cmd.DepartmentId, cmd.WarehouseId, ct);
+        await EnsureMayGrantRoleAsync(ctx, role, cmd.Reason, scope, ct);
         if (role.IsAdministrative)
         {
             stepUp.Demand(ctx); // D123
@@ -444,7 +451,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         var currentRoleIds = current.Select(a => a.RoleId!.Value).ToList();
         var currentRoles = await db.Roles.Where(r => currentRoleIds.Contains(r.Id)).ToListAsync(ct);
 
-        var scopeName = await ResolveScopeAsync(ctx, cmd.DepartmentId, cmd.WarehouseId, ct);
+        var (scopeName, scope) = await ResolveScopeAsync(ctx, cmd.DepartmentId, cmd.WarehouseId, ct);
 
         if (currentRoles.Count == 1 && currentRoles[0].Id == newRole.Id && current.Count == 1
             && current[0].DepartmentId == cmd.DepartmentId && current[0].WarehouseId == cmd.WarehouseId)
@@ -452,10 +459,22 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
             throw new BusinessRuleException("access.role.unchanged", "Роль не изменилась.");
         }
 
+        // D128: свою роль и её область меняет другой администратор или Владелец — как и свои особые права.
+        // Последний Владелец, понижающий себя, получает прежний ответ «нельзя оставить без Владельца».
+        if (cmd.UserId == ctx.UserId)
+        {
+            if (currentRoles.Any(r => r.Code == SystemRoles.Owner) && newRole.Code != SystemRoles.Owner)
+            {
+                GrantPolicy.EnsureOwnerRemains(await CountActiveOwnersAsync(ctx.OrganizationId, excludeUserId: cmd.UserId, ct));
+            }
+
+            throw new BusinessRuleException("access.role.self", "Свою роль меняет другой администратор или Владелец.");
+        }
+
         // Снять административную роль — тоже управление административными правами.
         var touchesAdmin = newRole.IsAdministrative || currentRoles.Any(r => r.IsAdministrative);
         GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, touchesAdmin);
-        await EnsureMayGrantRoleAsync(ctx, newRole, cmd.Reason, ct);
+        await EnsureMayGrantRoleAsync(ctx, newRole, cmd.Reason, scope, ct);
 
         if (currentRoles.Any(r => r.Code == SystemRoles.Owner) && newRole.Code != SystemRoles.Owner)
         {
@@ -599,6 +618,7 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
 
         if (!deny)
         {
+            // D128: особое право действует на всю организацию с уровнем «Д» — выдать его можно только при своём «Д».
             GrantPolicy.EnsureNoEscalation(ctx.Permissions, [(permissionCode, PermissionLevel.Full)]);
         }
 
@@ -682,12 +702,12 @@ public sealed class UserAccessService(IKnitErpDbContext db, IAccessGuard guard, 
         return new RoleMatrixDto(roles.Select(r => new RoleColumnDto(r.Id, r.Code, r.Name)).ToList(), rows);
     }
 
-    private async Task EnsureMayGrantRoleAsync(AccessContext ctx, Role role, string? reason, CancellationToken ct)
+    private async Task EnsureMayGrantRoleAsync(AccessContext ctx, Role role, string? reason, GrantScope scope, CancellationToken ct)
     {
         try
         {
             GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, role.IsAdministrative);
-            GrantPolicy.EnsureNoEscalation(ctx.Permissions, role.Permissions.Select(p => (p.PermissionCode, p.Level)));
+            GrantPolicy.EnsureNoEscalation(ctx.Permissions, role.Permissions.Select(p => (p.PermissionCode, p.Level)), scope);
         }
         catch (BusinessRuleException ex)
         {

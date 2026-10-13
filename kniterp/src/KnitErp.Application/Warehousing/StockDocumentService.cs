@@ -412,6 +412,20 @@ public sealed class StockDocumentService(
             await EnsureReturnWithinShippedAsync(ctx, doc, salesOrderId, ct);
         }
 
+        // D129 (аудит 12.10.2026, п. 1): отгрузка и поступление по заказу — не больше заказанного за вычетом уже проведённого
+        // (с учётом возвратов), под той же блокировкой заказа. Иначе два черновика «на весь заказ» проводятся оба.
+        if (doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } shipOrderId)
+        {
+            await db.LockAsync($"kniterp.order.sales.{shipOrderId}", ct);
+            await EnsureWithinOrderedAsync(ctx, doc, sales: true, shipOrderId, ct);
+        }
+
+        if (doc.Kind == StockOperationKind.Receipt && doc.PurchaseOrderId is { } receiptOrderId)
+        {
+            await db.LockAsync($"kniterp.order.purchase.{receiptOrderId}", ct);
+            await EnsureWithinOrderedAsync(ctx, doc, sales: false, receiptOrderId, ct);
+        }
+
         await KnitErp.Application.Sales.SalesCredit.EnsureShipmentAsync(db, ctx, doc, clock.UtcNow, ct); // D1105 (сессия «Продажи»)
         var batchMoves = await StockBatchLedger.PlanPostAsync(db, ctx, doc, ct);
         doc.Post(ctx.UserId, requiresComment, clock.UtcNow);
@@ -466,6 +480,20 @@ public sealed class StockDocumentService(
         await using var tx = await db.BeginTransactionAsync(ct);
         var doc = await LoadAsync(ctx, id, Permissions.WarehouseDocumentPost, rowVersion, ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.DocumentDate, ct);
+        // D129 (аудит 12.10.2026, п. 2): сторно отгрузки (поступления) по заказу, после которого проведённые возвраты превысили бы
+        // оставшееся, увело бы «отгружено − возвращено» в минус. Проверка — под блокировкой заказа, как у проведения возврата.
+        if (doc.Status == StockDocumentStatus.Posted && doc.Kind == StockOperationKind.Shipment && doc.SalesOrderId is { } shippedOrderId)
+        {
+            await db.LockAsync($"kniterp.order.sales.{shippedOrderId}", ct);
+            await EnsureNoReturnsBeyondAsync(ctx, doc, sales: true, shippedOrderId, ct);
+        }
+
+        if (doc.Status == StockDocumentStatus.Posted && doc.Kind == StockOperationKind.Receipt && doc.PurchaseOrderId is { } receivedOrderId)
+        {
+            await db.LockAsync($"kniterp.order.purchase.{receivedOrderId}", ct);
+            await EnsureNoReturnsBeyondAsync(ctx, doc, sales: false, receivedOrderId, ct);
+        }
+
         var batchMoves = doc.Status == StockDocumentStatus.Posted ? await StockBatchLedger.PlanReverseAsync(db, ctx, doc, ct) : [];
         doc.Reverse(ctx.UserId, reason, clock.UtcNow);
 
@@ -562,6 +590,75 @@ public sealed class StockDocumentService(
                 "Возврат больше отгруженного по заказу — " + string.Join("; ", over.Take(10).Select(x =>
                     $"{codes[x.ItemId]}: возвращается {Quantities.Format(x.Quantity)}, отгружено {Quantities.Format(x.Left)}")) + ".");
         }
+    }
+
+    /// <summary>
+    /// Проведённое по заказу без документа exceptId: по позициям — отгружено (поступило) и возвращено. Вызывать под блокировкой заказа.
+    /// </summary>
+    private async Task<Dictionary<long, (decimal Forward, decimal Returned)>> OrderMovedAsync(
+        AccessContext ctx, bool sales, long orderId, IReadOnlyCollection<long> itemIds, long exceptId, CancellationToken ct)
+    {
+        var docs = db.StockDocuments.AsNoTracking()
+            .Where(d => d.OrganizationId == ctx.OrganizationId && d.Status == StockDocumentStatus.Posted && d.Id != exceptId);
+        docs = sales ? docs.Where(d => d.SalesOrderId == orderId) : docs.Where(d => d.PurchaseOrderId == orderId);
+        var forward = sales ? StockOperationKind.Shipment : StockOperationKind.Receipt;
+        var moved = await docs.SelectMany(d => d.Lines.Select(l => new { d.Kind, l.ItemId, l.Quantity }))
+            .Where(x => itemIds.Contains(x.ItemId))
+            .ToListAsync(ct);
+        return itemIds.ToDictionary(id => id, id => (
+            moved.Where(m => m.ItemId == id && m.Kind == forward).Sum(m => m.Quantity),
+            moved.Where(m => m.ItemId == id && m.Kind != forward).Sum(m => m.Quantity)));
+    }
+
+    /// <summary>D129: отгрузка (поступление) по заказу — по позиции не больше «заказано − (отгружено − возвращено)».</summary>
+    private async Task EnsureWithinOrderedAsync(AccessContext ctx, StockDocument doc, bool sales, long orderId, CancellationToken ct)
+    {
+        var quantities = doc.Lines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
+        var itemIds = quantities.Keys.ToList();
+        var ordered = sales
+            ? await db.SalesOrders.AsNoTracking().Where(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId)
+                .SelectMany(o => o.Lines).Where(l => itemIds.Contains(l.ItemId))
+                .GroupBy(l => l.ItemId).Select(g => new { g.Key, Sum = g.Sum(l => l.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct)
+            : await db.PurchaseOrders.AsNoTracking().Where(o => o.Id == orderId && o.OrganizationId == ctx.OrganizationId)
+                .SelectMany(o => o.Lines).Where(l => itemIds.Contains(l.ItemId))
+                .GroupBy(l => l.ItemId).Select(g => new { g.Key, Sum = g.Sum(l => l.Quantity) }).ToDictionaryAsync(x => x.Key, x => x.Sum, ct);
+        var moved = await OrderMovedAsync(ctx, sales, orderId, itemIds, doc.Id, ct);
+        var over = quantities
+            .Select(q => (ItemId: q.Key, Quantity: q.Value, Left: Math.Max(0m, ordered.GetValueOrDefault(q.Key) - (moved[q.Key].Forward - moved[q.Key].Returned))))
+            .Where(x => x.Quantity > x.Left).ToList();
+        if (over.Count == 0)
+        {
+            return;
+        }
+
+        var first = over[0];
+        var code = await db.Items.AsNoTracking().Where(i => i.Id == first.ItemId).Select(i => i.Code).SingleAsync(ct);
+        var quantity = Quantities.Format(first.Quantity);
+        var left = Quantities.Format(first.Left);
+        throw sales
+            ? new BusinessRuleException("sales.shipment.exceeds",
+                $"Отгрузка больше заказанного: {code} — отгружается {quantity}, по заказу осталось отгрузить {left}. Проверьте другие отгрузки по этому заказу.")
+            : new BusinessRuleException("purchase.receipt.exceeds",
+                $"Поступление больше заказанного: {code} — поступает {quantity}, по заказу осталось получить {left}. Лишнее оформите поступлением без заказа.");
+    }
+
+    /// <summary>D129: сторно отгрузки (поступления) по заказу — только если проведённые возвраты не превысят оставшееся без этого документа.</summary>
+    private async Task EnsureNoReturnsBeyondAsync(AccessContext ctx, StockDocument doc, bool sales, long orderId, CancellationToken ct)
+    {
+        var quantities = doc.Lines.GroupBy(l => l.ItemId).ToDictionary(g => g.Key, g => g.Sum(l => l.Quantity));
+        var moved = await OrderMovedAsync(ctx, sales, orderId, quantities.Keys.ToList(), doc.Id, ct);
+        var bad = moved.Where(m => m.Value.Returned > m.Value.Forward).Select(m => (ItemId: m.Key, m.Value.Forward, m.Value.Returned)).ToList();
+        if (bad.Count == 0)
+        {
+            return;
+        }
+
+        var first = bad[0];
+        var code = await db.Items.AsNoTracking().Where(i => i.Id == first.ItemId).Select(i => i.Code).SingleAsync(ct);
+        var returned = Quantities.Format(first.Returned);
+        var remaining = Quantities.Format(first.Forward);
+        throw new BusinessRuleException("stock.reverse.returns_exist",
+            $"Нельзя сторнировать: по заказу проведены возвраты {code} — {returned}, а без этого документа останется {remaining}. Сначала сторнируйте возвраты.");
     }
 
     /// <summary>Склады, поставщик и причина — своей организации и действующие; склад документа — в области пользователя.</summary>

@@ -145,7 +145,10 @@ public sealed class RoleService(IKnitErpDbContext db, IAccessGuard guard, ICurre
         await db.SaveOrConflictAsync(ct);
     }
 
-    /// <summary>Нельзя положить в роль право выше своего; административная роль — только Владелец.</summary>
+    /// <summary>
+    /// Нельзя положить в роль право выше своего; административная роль — только Владелец. D128: своя роль даёт права уровня «Д»
+    /// на всю организацию (область задаётся при назначении), поэтому положить в неё право можно только при своём «Д».
+    /// </summary>
     private static void EnsureMayDefine(AccessContext ctx, Role role)
     {
         GrantPolicy.EnsureCanGrantAdministrative(ctx.Permissions, role.IsAdministrative);

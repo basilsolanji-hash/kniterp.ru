@@ -118,6 +118,39 @@ public sealed class CrmTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         Assert.True(customer.IsCustomer);
     }
 
+    /// <summary>
+    /// D128 (аудит 12.10.2026): менеджер, видящий только свои контакты, квалифицирует лид с телефоном клиента другого менеджера —
+    /// получает новый контакт, чужой контакт к его сделке не привязывается и остаётся ему невидим; в журнале — отметка без подробностей.
+    /// </summary>
+    [SqlFact]
+    public async Task Qualification_does_not_link_contact_invisible_to_manager()
+    {
+        var org = await host.CreateCrmOrganizationAsync();
+        var first = await host.CrmUserAsync(org, SystemRoles.SalesManager);
+        var second = await host.CrmUserAsync(org, SystemRoles.SalesManager);
+        long foreign;
+        await using (var crm = host.Crm(first, org.OrganizationId))
+        {
+            foreign = await crm.Contacts.CreateAsync(new CrmContactValues("Сидорова Мария", Phone: "+7 900 000-00-77", Email: "client77@example.org"));
+        }
+
+        await using (var crm = host.Crm(second, org.OrganizationId))
+        {
+            var lead = await crm.Leads.CreateAsync(new CrmLeadValues("Заявка на 50 шапок", ContactName: "Сидорова Мария", Phone: "8 900 000-00-77",
+                CompanyName: "ИП Сидорова"));
+            var result = await crm.Leads.QualifyAsync(lead, new CrmQualifyCommand());
+            Assert.True(result.ContactCreated);
+            Assert.NotEqual(foreign, result.ContactId);
+            Assert.Equal(result.ContactId, (await crm.Db.CrmDeals.AsNoTracking().SingleAsync(d => d.Id == result.DealId)).ContactId);
+            await Assert.ThrowsAsync<NotFoundException>(() => crm.Contacts.GetAsync(foreign));
+        }
+
+        await using var db = host.NewDb();
+        var created = await db.AuditEntries.AsNoTracking().Where(a => a.OrganizationId == org.OrganizationId && a.Action == AuditActions.CrmContactCreated
+                                                                    && a.ActorUserId == second).SingleAsync();
+        Assert.Contains("возможный дубль у другого ответственного", created.Reason);
+    }
+
     [SqlFact]
     public async Task Qualification_is_one_transaction_and_finds_existing_counterparty()
     {

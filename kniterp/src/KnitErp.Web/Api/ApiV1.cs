@@ -89,7 +89,8 @@ public sealed record Page<T>(IReadOnlyList<T> Items, int Offset, int Limit, int?
 
 /// <summary>
 /// Собственный API knitERP, версия 1 (D88). Все операции идут через те же сервисы, что и интерфейс: права, изоляция организации,
-/// бизнес-правила, журнал аудита одинаковы. Изменяющие запросы принимают Idempotency-Key — повтор не выполняет действие дважды.
+/// бизнес-правила, журнал аудита одинаковы. Изменяющие запросы принимают Idempotency-Key — повтор не выполняет действие дважды;
+/// создание заказов, складских документов и оплат без него отклоняется (D129).
 /// Описание — /api/v1/openapi.json, примеры — docs/api.md.
 /// </summary>
 public static class ApiV1
@@ -213,7 +214,7 @@ public static class ApiV1
             }
 
             return ApiResult.Created(await sales.GetOrderAsync(id, ct));
-        }).AddEndpointFilter(IdempotencyAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый заказ покупателя со строками");
+        }).AddEndpointFilter(IdempotencyRequiredAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый заказ покупателя со строками");
 
         api.MapPost("/sales-orders/{id:long}/confirm", async (SalesService sales, long id, RowVersionInput body, CancellationToken ct) =>
         {
@@ -228,7 +229,7 @@ public static class ApiV1
         api.MapPost("/customer-payments", async (SalesService sales, CustomerPaymentInput body, CancellationToken ct) =>
             ApiResult.Created(new IdDto(await sales.CreatePaymentAsync(body.Date, body.CustomerId, body.OrderId, body.Amount, body.Comment,
                 body.DocumentNumber, body.MoneyAccountId, ct))))
-            .AddEndpointFilter(IdempotencyAsync).WithSummary("Записать оплату покупателя");
+            .AddEndpointFilter(IdempotencyRequiredAsync).WithSummary("Записать оплату покупателя");
 
         api.MapGet("/purchase-orders", async (PurchaseService purchases, PurchaseOrderStatus? status, DateOnly? from, DateOnly? to, string? search, long? tagId, int? offset,
                 int? limit, CancellationToken ct) =>
@@ -255,7 +256,7 @@ public static class ApiV1
             }
 
             return ApiResult.Created(await purchases.GetOrderAsync(id, ct));
-        }).AddEndpointFilter(IdempotencyAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый заказ поставщику со строками");
+        }).AddEndpointFilter(IdempotencyRequiredAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый заказ поставщику со строками");
 
         api.MapPost("/purchase-orders/{id:long}/confirm", async (PurchaseService purchases, long id, RowVersionInput body, CancellationToken ct) =>
         {
@@ -305,7 +306,7 @@ public static class ApiV1
             }
 
             return ApiResult.Created(await documents.GetAsync(id, ct));
-        }).AddEndpointFilter(IdempotencyAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый складской документ (поступление, отгрузка, перемещение…)");
+        }).AddEndpointFilter(IdempotencyRequiredAsync).AddEndpointFilter(TransactionAsync).WithSummary("Новый складской документ (поступление, отгрузка, перемещение…)");
 
         api.MapPost("/stock-documents/{id:long}/post", async (StockDocumentService documents, long id, RowVersionInput body, CancellationToken ct) =>
         {
@@ -426,6 +427,16 @@ public static class ApiV1
 
         return result;
     }
+
+    /// <summary>
+    /// D129 (аудит 12.10.2026, п. 6): создание заказов, складских документов и оплат — только с Idempotency-Key. Без ключа повтор
+    /// после обрыва связи создал бы второй документ или вторую оплату, поэтому такой запрос отклоняется с 400.
+    /// </summary>
+    internal static async ValueTask<object?> IdempotencyRequiredAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
+        context.HttpContext.Request.Headers["Idempotency-Key"].ToString().Trim().Length == 0
+            ? ApiErrors.Result(400, "idempotency.key_required",
+                "Нужен заголовок Idempotency-Key (например, UUID): запрос создаёт документ или оплату, и повтор без ключа создал бы второй.")
+            : await IdempotencyAsync(context, next);
 
     /// <summary>
     /// Idempotency-Key: первый успешный ответ сохраняется вместе с хэшем запроса в той же транзакции, что и действие; повтор с тем же

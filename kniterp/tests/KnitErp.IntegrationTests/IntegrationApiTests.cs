@@ -209,6 +209,132 @@ public sealed class IntegrationApiTests(SqlTestHost host) : IClassFixture<SqlTes
         await Assert.ThrowsAsync<NotFoundException>(() => o.Integrations.SendTestAsync(subscriptionId));
     }
 
+    /// <summary>D128: подписка — после повторного подтверждения паролем и только на события модулей, которые видишь сам.</summary>
+    [SqlFact]
+    public async Task Webhook_requires_step_up_and_rights_for_subscribed_events()
+    {
+        var f = await SeedAsync();
+        var admin = await AdminAsync(f.Org);
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            // Администратору запрещён просмотр CRM.
+            await s.Access.GrantIndividualAsync(admin, Permissions.CrmView, true, null, "тест");
+        }
+
+        await using (var s = host.As(admin, f.Org.OrganizationId))
+        {
+            Assert.Equal("webhook.event_rights", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Integrations.CreateWebhookAsync("https://shop.example.ru/hook", ["sales_order.confirmed", "crm.deal.won"]))).Code);
+            Assert.DoesNotContain((await s.Integrations.OptionsAsync()).Events, e => e.Event.StartsWith("crm.", StringComparison.Ordinal));
+            await s.Integrations.CreateWebhookAsync("https://shop.example.ru/hook", ["sales_order.confirmed"]);
+        }
+
+        var other = await CreateOrgAsync();
+        host.AutoStepUp = false;
+        try
+        {
+            await using var s = host.As(other.OwnerUserId, other.OrganizationId);
+            Assert.Equal("auth.stepup.required", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Integrations.CreateWebhookAsync("https://shop.example.ru/hook", ["sales_order.confirmed"]))).Code);
+            Assert.Equal(0, await s.Db.WebhookSubscriptions.CountAsync(w => w.OrganizationId == other.OrganizationId));
+        }
+        finally
+        {
+            host.AutoStepUp = true;
+        }
+
+        long id;
+        await using (var s = host.As(other.OwnerUserId, other.OrganizationId))
+        {
+            id = (await s.Integrations.CreateWebhookAsync("https://shop.example.ru/hook", ["sales_order.confirmed"])).Id;
+        }
+
+        host.AutoStepUp = false;
+        try
+        {
+            // Отметку подтверждения от создания сбрасываем: она живёт 10 минут.
+            host.Clock.UtcNow = host.Clock.UtcNow.AddMinutes(11);
+            await using var s = host.As(other.OwnerUserId, other.OrganizationId);
+            var w = (await s.Integrations.ListWebhooksAsync()).Single();
+            Assert.Equal("auth.stepup.required", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                s.Integrations.SetWebhookActiveAsync(id, false, w.RowVersion))).Code);
+        }
+        finally
+        {
+            host.AutoStepUp = true;
+            host.Clock.UtcNow = new DateTime(2026, 10, 9, 5, 0, 0, DateTimeKind.Utc);
+        }
+    }
+
+    /// <summary>
+    /// D128: событие не уходит, если создатель подписки заблокирован, — ни новое, ни уже поставленное в доставку; причина видна
+    /// в доставке. В теле события нет сумм — только номер документа.
+    /// </summary>
+    [SqlFact]
+    public async Task Webhook_of_blocked_creator_is_not_sent_and_payload_has_no_amounts()
+    {
+        var f = await SeedAsync();
+        var admin = await AdminAsync(f.Org);
+        var sender = new FakeSender();
+        long subscriptionId;
+        await using (var s = host.As(admin, f.Org.OrganizationId))
+        {
+            subscriptionId = (await s.Integrations.CreateWebhookAsync("https://shop.example.ru/hook", ["sales_order.confirmed"])).Id;
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await ConfirmOrderAsync(s, f);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var dispatcher = new WebhookDispatcher(db, sender, host.Clock);
+            Assert.Equal(1, await dispatcher.EnqueueAsync());
+            var payload = (await db.WebhookDeliveries.AsNoTracking().SingleAsync(d => d.SubscriptionId == subscriptionId)).Payload;
+            using var json = System.Text.Json.JsonDocument.Parse(payload);
+            var summary = json.RootElement.GetProperty("data").GetProperty("summary").GetString();
+            var number = await db.SalesOrders.AsNoTracking().Where(o => o.OrganizationId == f.Org.OrganizationId).Select(o => o.Number).SingleAsync();
+            Assert.Equal(number, summary);
+        }
+
+        await using (var s = host.As(f.Org.OwnerUserId, f.Org.OrganizationId))
+        {
+            await s.Access.BlockAsync(admin, "Увольнение");
+            await ConfirmOrderAsync(s, f);
+        }
+
+        await using (var db = host.NewDb())
+        {
+            var dispatcher = new WebhookDispatcher(db, sender, host.Clock);
+            Assert.Equal(0, await dispatcher.EnqueueAsync());
+            Assert.Equal(0, await dispatcher.DeliverAsync());
+            Assert.Empty(sender.Sent);
+            var deliveries = await db.WebhookDeliveries.AsNoTracking().Where(d => d.SubscriptionId == subscriptionId).ToListAsync();
+            Assert.Equal(2, deliveries.Count);
+            Assert.All(deliveries, d =>
+            {
+                Assert.Equal(WebhookDeliveryStatus.Failed, d.Status);
+                Assert.Contains("заблокирован", d.LastError);
+            });
+        }
+    }
+
+    private async Task<long> AdminAsync(CreatedOrganization org)
+    {
+        long id;
+        await using (var s = host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            id = (await s.Access.InviteAsync(new InviteUserCommand($"admin-{Guid.NewGuid():N}@test.local", "Администратор", SystemRoles.Administrator,
+                "Тест"))).UserId;
+        }
+
+        await using var db = host.NewDb();
+        (await db.Users.SingleAsync(u => u.Id == id)).Activate();
+        await db.SaveChangesAsync();
+        return id;
+    }
+
     [Fact]
     public void Delivery_backoff_gives_up_after_about_a_day()
     {

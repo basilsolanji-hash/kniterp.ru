@@ -232,6 +232,9 @@ public sealed class OpeningBalanceService(
         var (ctx, doc) = await LoadForApprovalAsync(id, rowVersion, ct);
         await using var tx = await db.BeginTransactionAsync(ct);
         await ClosedPeriod.EnsureOpenAsync(db, ctx.OrganizationId, doc.AsOfDate, ct);
+        // D129 (аудит 12.10.2026, п. 3): проверка «уже утверждён» и запись движений — под блокировкой склада до конца транзакции,
+        // иначе два документа с одной позицией, утверждённые одновременно, оба проходят проверку.
+        await db.LockWarehousesAsync([doc.WarehouseId], ct);
 
         var itemIds = doc.Lines.Select(l => l.ItemId).ToList();
         var already = await db.StockMovements.AsNoTracking()
