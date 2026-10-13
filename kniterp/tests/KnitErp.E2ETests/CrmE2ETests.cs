@@ -385,6 +385,54 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await Shot(page, "crm-12-deal-paid");
     });
 
+    /// <summary>
+    /// Отчёты CRM (D685–D689): вкладки «Воронка», «Конверсия», «Источники», «Длительность», «План-факт», «Менеджеры» открываются на 1440 и 390 px
+    /// без горизонтальной прокрутки страницы (широкие таблицы — в своей прокрутке), Excel скачивается, ошибок JavaScript нет.
+    /// </summary>
+    [SqlFact]
+    public Task Reports_by_managers_and_sources_fit_390() => RunAsync("crm-reports", false, "light", async page =>
+    {
+        // Лид с источником и сделка из него — чтобы в разрезах были строки.
+        await OpenAsync(page, "crm/leads");
+        await page.GetByLabel("Что нужно клиенту").FillAsync($"150 жилетов {Stamp}");
+        await page.GetByLabel("Контактное лицо").FillAsync("Петрова Ольга");
+        await page.GetByLabel("Телефон").FillAsync("+7 900 000-00-05");
+        await page.GetByLabel("Компания").FillAsync($"ООО «Отчёт {Stamp}»");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить лид" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/leads/\d+$"));
+        await WaitBlazorAsync(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Квалифицировать" }).ClickAsync();
+        await page.GetByLabel("Сумма сделки").FillAsync("45000");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать сделку" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/deals/\d+$"));
+        await WaitBlazorAsync(page);
+
+        var tabs = new[] { ("Воронка", "Воронка по менеджерам"), ("Конверсия", "Конверсия: лид → сделка → выигрыш"), ("Источники", "Источники лидов"),
+            ("Длительность", "Длительность этапов"), ("План-факт", "План-факт по месяцам"), ("Менеджеры", "Менеджеры") };
+        foreach (var (width, suffix) in new[] { (1440, "desktop"), (390, "phone") })
+        {
+            await page.SetViewportSizeAsync(width, width == 390 ? 844 : 900);
+            await OpenAsync(page, "crm/summary");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Сводка и отчёты CRM" })).ToBeVisibleAsync();
+            var group = page.GetByRole(AriaRole.Group, new() { Name = "Разрез отчёта" });
+            foreach (var (tab, heading) in tabs)
+            {
+                await group.GetByRole(AriaRole.Button, new() { Name = tab, Exact = true }).ClickAsync();
+                await Assertions.Expect(group.GetByRole(AriaRole.Button, new() { Name = tab, Exact = true })).ToHaveAttributeAsync("aria-pressed", "true");
+                await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = heading, Exact = true })).ToBeVisibleAsync();
+                await Assertions.Expect(page.Locator(".error")).ToHaveCountAsync(0);
+                Assert.True(await NoHorizontalScrollAsync(page), $"{tab} {width}");
+                await Shot(page, $"crm-report-{suffix}-{Array.FindIndex(tabs, t => t.Item1 == tab) + 1}");
+            }
+        }
+
+        await Assertions.Expect(page.GetByRole(AriaRole.Table, new() { Name = "Конверсия по менеджерам" })).ToHaveCountAsync(0); // вкладка закрыта
+        await page.GetByRole(AriaRole.Group, new() { Name = "Разрез отчёта" }).GetByRole(AriaRole.Button, new() { Name = "Источники", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Table, new() { Name = "Источники лидов" })).ToContainTextAsync("Не указан");
+        var download = await page.RunAndWaitForDownloadAsync(() => page.GetByRole(AriaRole.Link, new() { Name = "Excel" }).ClickAsync());
+        Assert.EndsWith(".xlsx", download.SuggestedFilename);
+    });
+
     private static Task Shot(IPage page, string name)
     {
         var dir = Environment.GetEnvironmentVariable("KNITERP_E2E_ARTIFACTS") ?? Path.GetTempPath();
