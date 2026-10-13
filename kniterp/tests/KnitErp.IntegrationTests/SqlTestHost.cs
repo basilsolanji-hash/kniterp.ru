@@ -283,7 +283,13 @@ public sealed class SqlTestHost : IAsyncLifetime
             new KnitErp.Application.Sales.SalesPriceListService(db, guard, Clock),
             new KnitErp.Application.Sales.SalesReportService(db, guard, user, Clock),
             new KnitErp.Application.Sales.MarketplaceReportService(db, guard, Spreadsheet, user, Clock),
-            new KnitErp.Application.Purchasing.PurchaseSettingsService(db, guard, user, Clock));
+            new KnitErp.Application.Purchasing.PurchaseSettingsService(db, guard, user, Clock),
+            new KnitErp.Application.Automation.AutomationSettingsService(db, guard, user, Clock), // D145
+            new KnitErp.Application.Finance.CurrencyRateService(db, guard, user, Clock), // D146
+            new KnitErp.Application.Finance.RecurringOperationService(db, guard, user, Clock), // D147
+            new KnitErp.Application.Purchasing.SupplierUpdImportService(db, guard, user, Clock, // D149
+                new KnitErp.Application.Purchasing.PurchaseService(db, guard, user, Clock, new StockDocumentService(db, guard, Spreadsheet, user, Clock)),
+                new StockDocumentService(db, guard, Spreadsheet, user, Clock)));
     }
 
     /// <summary>D1123: PDF документов продаж — настоящий (PDFsharp/MigraDoc), без сети и системных шрифтов.</summary>
@@ -417,7 +423,11 @@ public sealed record Services(
     KnitErp.Application.Sales.SalesPriceListService PriceList,
     KnitErp.Application.Sales.SalesReportService SalesReports,
     KnitErp.Application.Sales.MarketplaceReportService Marketplace,
-    KnitErp.Application.Purchasing.PurchaseSettingsService PurchaseSettings) : IAsyncDisposable
+    KnitErp.Application.Purchasing.PurchaseSettingsService PurchaseSettings,
+    KnitErp.Application.Automation.AutomationSettingsService Automation,
+    KnitErp.Application.Finance.CurrencyRateService CurrencyRates,
+    KnitErp.Application.Finance.RecurringOperationService Recurring,
+    KnitErp.Application.Purchasing.SupplierUpdImportService UpdImport) : IAsyncDisposable
 {
     public ValueTask DisposeAsync() => Db.DisposeAsync();
 }

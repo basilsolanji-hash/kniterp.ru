@@ -1,0 +1,208 @@
+@page "/purchase-orders/upd-import"
+@using KnitErp.Application.Purchasing
+@inject SupplierUpdImportService Import
+@inject NavigationManager Nav
+
+@* D149: XML УПД поставщика → черновик поступления по заказу; несопоставленные строки — привязать к позиции или пропустить. *@
+<PageTitle>@L("Загрузка УПД поставщика") — knitERP</PageTitle>
+
+<div class="page-head">
+    <h1>@L("Загрузка УПД поставщика")</h1>
+    @if (OrderId is { } back)
+    {
+        <a class="button secondary" href="purchase-orders/@back">@L("К заказу")</a>
+    }
+</div>
+<p class="muted">@L("Выберите XML-файл УПД (формат ФНС 5.03), полученный по ЭДО. Программа найдёт поставщика по ИНН, сопоставит строки с позициями и создаст черновик поступления по заказу — проводит его кладовщик. Файл не сохраняется.")</p>
+
+@if (_message is not null)
+{
+    <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+}
+
+<div class="panel">
+    <label>@L("Файл УПД (XML, до 5 МБ)") <InputFile OnChange="LoadAsync" accept=".xml" disabled="@_busy" /></label>
+</div>
+
+@if (_p is { } p)
+{
+    <div class="totals" role="status">
+        <span>@L("УПД № {0} от {1}", p.Number, p.Date.ToString("dd.MM.yyyy"))</span>
+        <span>@L("Продавец: {0}, ИНН {1}", p.SellerName, p.SellerInn)</span>
+        <span>@L("Покупатель: ИНН {0}", p.BuyerInn)</span>
+        @if (p.Total is { } total) { <span>@L("Сумма: {0}", Amounts.Format(total))</span> }
+    </div>
+    @if (p.ImportedReceipt is { } done)
+    {
+        <div class="flash error" role="alert">@L("Этот файл уже загружен: поступление {0}.", done)</div>
+    }
+    @foreach (var problem in p.Problems)
+    {
+        <div class="flash error" role="alert">@problem</div>
+    }
+
+    @if (p.Orders.Count > 0)
+    {
+        <label>@L("Заказ поставщику")
+            <select value="@(p.OrderId?.ToString() ?? "")" @onchange="OrderChangedAsync" disabled="@_busy">
+                <option value="">—</option>
+                @foreach (var o in p.Orders)
+                {
+                    <option value="@o.Id">@o.Number @L("от") @o.Date.ToString("dd.MM.yyyy") — @Amounts.Format(o.Total)</option>
+                }
+            </select></label>
+    }
+
+    <div class="scroll">
+        <table class="compact">
+            <thead><tr><th>№</th><th>@L("Товар в УПД")</th><th>@L("Код")</th><th class="num">@L("Кол-во")</th><th class="num">@L("Цена")</th><th>@L("Позиция")</th></tr></thead>
+            <tbody>
+                @foreach (var l in p.Lines)
+                {
+                    var skipped = _decisions.TryGetValue(l.No, out var d) && d is null;
+                    <tr @key="l.No" class="@(skipped ? "archived" : null)">
+                        <td>@l.No</td>
+                        <td>@l.Name</td>
+                        <td class="small">@l.Code @if (l.Barcode is { } bc) { <div class="muted">@bc</div> }</td>
+                        <td class="num">@Quantities.Format(l.Quantity) @l.Unit</td>
+                        <td class="num">@(l.Price is { } pr ? Amounts.Format(pr) : "")
+                            @if (l.OrderPrice is { } op && l.Price is { } up && op != up) { <div class="muted small">@L("в заказе {0}", Amounts.Format(op))</div> }</td>
+                        <td>
+                            @if (skipped)
+                            {
+                                <span class="muted">@L("пропущена")</span>
+                                <button type="button" class="secondary" @onclick="() => UndoAsync(l.No)" disabled="@_busy">@L("Вернуть")</button>
+                            }
+                            else if (l.ItemId is not null)
+                            {
+                                <span class="tag @(l.InOrder ? "ok" : "bad")">@l.ItemCode</span> @l.ItemName
+                                @if (!l.InOrder) { <div class="muted small">@L("нет в заказе")</div> }
+                                <button type="button" class="secondary" @onclick="() => SkipAsync(l.No)" disabled="@_busy">@L("Пропустить")</button>
+                            }
+                            else
+                            {
+                                <span class="tag bad">@L("не найдена")</span>
+                                <select aria-label="@L("Привязать строку {0}", l.No)" @onchange="e => BindAsync(l.No, e.Value?.ToString())" disabled="@_busy">
+                                    <option value="">@L("— привязать к позиции заказа —")</option>
+                                    @foreach (var i in p.OrderItems)
+                                    {
+                                        <option value="@i.Id">@i.Code — @i.Name</option>
+                                    }
+                                </select>
+                                <button type="button" class="secondary" @onclick="() => SkipAsync(l.No)" disabled="@_busy">@L("Пропустить")</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="actions">
+        @if (p.CanSaveBindings)
+        {
+            <label class="inline"><input type="checkbox" @bind="_saveBindings" disabled="@_busy" /> @L("Запомнить привязки (артикул поставщика)")</label>
+        }
+        <button type="button" @onclick="ImportAsync" disabled="@(_busy || p.OrderId is null || p.Problems.Count > 0 || p.ImportedReceipt is not null)">@L("Создать поступление")</button>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "order")]
+    public long? OrderId { get; set; }
+
+    private SupplierUpdPreviewDto? _p;
+    private byte[]? _content;
+    private string? _fileName;
+    private long? _order;
+    private readonly Dictionary<int, long?> _decisions = [];
+    private bool _saveBindings = true;
+    private bool _busy;
+    private string? _message;
+    private bool _isError;
+
+    private Task LoadAsync(InputFileChangeEventArgs e) => RunAsync(async () =>
+    {
+        if (e.File.Size > SupplierUpdXml.MaxBytes)
+        {
+            throw new BusinessRuleException("xml.size", L("Файл пустой или больше 5 МБ."));
+        }
+
+        await using var upload = e.File.OpenReadStream(maxAllowedSize: SupplierUpdXml.MaxBytes);
+        using var buffer = new MemoryStream();
+        await upload.CopyToAsync(buffer);
+        _content = buffer.ToArray();
+        _fileName = e.File.Name;
+        _decisions.Clear();
+        _order = OrderId;
+        await PreviewAsync();
+    });
+
+    private async Task PreviewAsync()
+    {
+        _p = await Import.PreviewAsync(_content!, _order, Decisions());
+        _order = _p.OrderId;
+    }
+
+    private List<UpdLineDecision> Decisions() => _decisions.Select(d => new UpdLineDecision(d.Key, d.Value)).ToList();
+
+    private Task OrderChangedAsync(ChangeEventArgs e) => RunAsync(async () =>
+    {
+        _order = long.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        await PreviewAsync();
+    });
+
+    private Task BindAsync(int no, string? value) => RunAsync(async () =>
+    {
+        if (!long.TryParse(value, out var itemId))
+        {
+            return;
+        }
+
+        _decisions[no] = itemId;
+        await PreviewAsync();
+    });
+
+    private Task SkipAsync(int no) => RunAsync(async () =>
+    {
+        _decisions[no] = null;
+        await PreviewAsync();
+    });
+
+    private Task UndoAsync(int no) => RunAsync(async () =>
+    {
+        _decisions.Remove(no);
+        await PreviewAsync();
+    });
+
+    private Task ImportAsync() => RunAsync(async () =>
+    {
+        var result = await Import.ImportAsync(_content!, _fileName, _order!.Value, Decisions(), _saveBindings);
+        Nav.NavigateTo($"stock-documents/{result.ReceiptId}");
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _message = null;
+        _isError = false;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _message = UiErrors.Message(ex);
+            _isError = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

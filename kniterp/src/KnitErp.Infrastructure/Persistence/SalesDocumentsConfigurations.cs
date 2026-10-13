@@ -55,7 +55,7 @@ internal sealed class SalesMailTemplateConfiguration : IEntityTypeConfiguration<
 {
     public void Configure(EntityTypeBuilder<SalesMailTemplate> b)
     {
-        b.ToTable("sales_mail_templates", t => t.HasCheckConstraint("ck_sales_mail_templates_kind", "[Kind] IN (1, 2, 3, 4)"));
+        b.ToTable("sales_mail_templates", t => t.HasCheckConstraint("ck_sales_mail_templates_kind", "[Kind] IN (1, 2, 3, 4, 5, 6)"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).UseIdentityColumn();
         b.Property(x => x.Kind).HasConversion<byte>();
@@ -96,6 +96,8 @@ internal sealed class CustomerMailSettingsConfiguration : IEntityTypeConfigurati
         b.HasOne<Counterparty>().WithMany().HasForeignKey(x => new { x.OrganizationId, x.CounterpartyId })
             .HasPrincipalKey(x => new { x.OrganizationId, x.Id }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_customer_mail_settings_counterparty");
         b.HasIndex(x => new { x.OrganizationId, x.CounterpartyId }).IsUnique().HasDatabaseName("ux_customer_mail_settings_counterparty");
+        b.Property(x => x.ReminderToken).HasDefaultValueSql("NEWID()"); // D148: у прежних строк — свой случайный ключ
+        b.HasIndex(x => x.ReminderToken).IsUnique().HasDatabaseName("ux_customer_mail_settings_reminder_token");
     }
 }
 
@@ -106,7 +108,7 @@ internal sealed class SalesMailMessageConfiguration : IEntityTypeConfiguration<S
     {
         b.ToTable("sales_mail_messages", t =>
         {
-            t.HasCheckConstraint("ck_sales_mail_messages_kind", "[Kind] IN (1, 2, 3, 4)");
+            t.HasCheckConstraint("ck_sales_mail_messages_kind", "[Kind] IN (1, 2, 3, 4, 5, 6)");
             t.HasCheckConstraint("ck_sales_mail_messages_status", "[Status] IN (1, 2, 3, 4)");
             t.HasCheckConstraint("ck_sales_mail_messages_sent", "([Status] = 2 AND [SentAtUtc] IS NOT NULL) OR ([Status] <> 2 AND [SentAtUtc] IS NULL)");
             t.HasCheckConstraint("ck_sales_mail_messages_attempts", "[Attempts] >= 0");

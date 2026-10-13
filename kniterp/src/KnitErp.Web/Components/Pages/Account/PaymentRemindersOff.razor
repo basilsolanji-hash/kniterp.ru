@@ -1,0 +1,47 @@
+@page "/account/payment-reminders-off/{Token}"
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@layout AccountLayout
+@inject IKnitErpDbContextFactory Factory
+@inject IClock Clock
+
+@*
+    D148: отписка покупателя от напоминаний об оплате по ссылке из письма — без входа. Подтверждение кнопкой (POST): почтовые сканеры
+    открывают ссылки сами. Ответ одинаковый для любого ключа — по нему нельзя узнать, есть ли покупатель.
+*@
+<PageTitle>@L("Отписка от напоминаний") — knitERP</PageTitle>
+<h1>@L("Отписка от напоминаний об оплате")</h1>
+@if (_done)
+{
+    <div class="flash" role="status">@L("Готово: напоминания об оплате больше не придут. Счета и документы по заказам будут приходить как раньше.")</div>
+}
+else
+{
+    <p class="muted">@L("Нажмите кнопку, чтобы больше не получать напоминания о сроках оплаты счетов.")</p>
+    <form method="post" @formname="payment-reminders-off" @onsubmit="UnsubscribeAsync">
+        <AntiforgeryToken />
+        <input type="hidden" name="Confirm" value="1" />
+        <button type="submit">@L("Отписаться")</button>
+    </form>
+}
+
+@code {
+    [Parameter]
+    public string Token { get; set; } = string.Empty;
+
+    [SupplyParameterFromForm]
+    public string? Confirm { get; set; }
+
+    private bool _done;
+
+    private async Task UnsubscribeAsync()
+    {
+        if (Guid.TryParseExact(Token, "N", out var token))
+        {
+            await using var db = Factory.Create();
+            await KnitErp.Application.Sales.PaymentReminders.UnsubscribeAsync(db, token, Clock.UtcNow);
+        }
+
+        _done = true;
+    }
+}

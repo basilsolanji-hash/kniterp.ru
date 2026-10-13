@@ -31,6 +31,13 @@ public sealed class HrAppFixture : IAsyncLifetime
 
     public long SettlementCustomerId { get; private set; }
 
+    /// <summary>D149: подтверждённый заказ поставщику (4 кг пряжи «ПР-E2E» по артикулу поставщика «E2E-ART») и XML УПД к нему.</summary>
+    public long UpdOrderId { get; private set; }
+
+    public byte[] UpdXml { get; private set; } = [];
+
+    private readonly string _orgInn = TestInn();
+
     public async Task InitializeAsync()
     {
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(SqlTestHost.EnvVar)))
@@ -41,6 +48,7 @@ public sealed class HrAppFixture : IAsyncLifetime
         await _host.InitializeAsync();
         await SeedAsync();
         SettlementCustomerId = await SeedSettlementCustomerAsync(SettlementCustomerName);
+        await SeedUpdOrderAsync();
         await using (var db = _host.NewDb())
         {
             _app = await WebAppProcess.StartAsync(Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.GetConnectionString(db.Database)!);
@@ -93,7 +101,7 @@ public sealed class HrAppFixture : IAsyncLifetime
         await using (var s = _host.As(null, null))
         {
             org = await s.Organizations.CreateWithOwnerAsync(new CreateOrganizationCommand(
-                "Общество с ограниченной ответственностью «Кадры-Трикотаж»", "ООО «Кадры-Трикотаж»", TestInn(), null, false,
+                "Общество с ограниченной ответственностью «Кадры-Трикотаж»", "ООО «Кадры-Трикотаж»", _orgInn, null, false,
                 "Europe/Moscow", OwnerEmail, "Владелец", "RU"));
         }
 
@@ -224,6 +232,29 @@ public sealed class HrAppFixture : IAsyncLifetime
         await s.Documents.SetLineAsync(ret, item, 3, (await s.Documents.GetAsync(ret)).RowVersion);
         await s.Documents.PostAsync(ret, (await s.Documents.GetAsync(ret)).RowVersion);
         return customer;
+    }
+
+    /// <summary>D149: поставщик с ИНН, пряжа с его артикулом, подтверждённый заказ; УПД — одна строка по артикулу, одна неизвестная.</summary>
+    private async Task SeedUpdOrderAsync()
+    {
+        const string supplierInn = "500100732259";
+        await using var s = _host.As(_org!.OwnerUserId, _org.OrganizationId);
+        var kg = (await s.Catalog.ListUnitsAsync()).Single(u => u.Code == "166").Id;
+        var store = await s.Warehouses.CreateWarehouseAsync("Склад сырья УПД", null);
+        await s.LegalEntities.AddCashAsync((await s.LegalEntities.ListAsync()).Single(e => e.IsDefault).Id, "Касса цеха"); // D147: для регулярных операций
+        var yarn = await s.Catalog.CreateItemAsync(new KnitErp.Application.Catalog.ItemCommand("ПР-E2E", "Пряжа для УПД", KnitErp.Domain.Catalog.ItemType.RawMaterial, kg, null));
+        var supplier = await s.Counterparties.CreateAsync(new KnitErp.Application.Catalog.CounterpartyCommand("ИП Петров (пряжа)", supplierInn, null, true, false, null));
+        await s.Suppliers.SetAsync(yarn, supplier, "E2E-ART", null, true);
+        UpdOrderId = await s.Purchases.CreateOrderAsync(new KnitErp.Domain.Purchasing.PurchaseOrderHeader(DateOnly.FromDateTime(DateTime.UtcNow), supplier, store, null, null, true, null));
+        await s.Purchases.SetOrderLineAsync(UpdOrderId, yarn, 4, 500m, null, (await s.Purchases.GetOrderAsync(UpdOrderId)).RowVersion);
+        await s.Purchases.ConfirmOrderAsync(UpdOrderId, (await s.Purchases.GetOrderAsync(UpdOrderId)).RowVersion);
+        UpdXml = System.Text.Encoding.UTF8.GetBytes(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><Файл ВерсФорм=\"5.03\"><Документ Функция=\"СЧФДОП\"><СвСчФакт НомерДок=\"E2E-1\" ДатаДок=\"13.10.2026\">" +
+            $"<СвПрод><ИдСв><СвИП ИННФЛ=\"{supplierInn}\"><ФИО Фамилия=\"Петров\" Имя=\"Пётр\"/></СвИП></ИдСв></СвПрод>" +
+            $"<СвПокуп><ИдСв><СвЮЛУч НаимОрг=\"Кадры-Трикотаж\" ИННЮЛ=\"{_orgInn}\"/></ИдСв></СвПокуп></СвСчФакт><ТаблСчФакт>" +
+            "<СведТов НомСтр=\"1\" НаимТов=\"Пряжа шерсть\" КолТов=\"4\" ЦенаТов=\"500\" НалСт=\"без НДС\" СтТовУчНал=\"2000\"><ДопСведТов КодТов=\"E2E-ART\" НаимЕдИзм=\"кг\"/></СведТов>" +
+            "<СведТов НомСтр=\"2\" НаимТов=\"Доставка\" КолТов=\"1\" ЦенаТов=\"300\" НалСт=\"без НДС\" СтТовУчНал=\"300\"><ДопСведТов КодТов=\"DLV\"/></СведТов>" +
+            "</ТаблСчФакт></Документ></Файл>");
     }
 
     /// <summary>Вымышленный ИНН юрлица с верной контрольной цифрой.</summary>
