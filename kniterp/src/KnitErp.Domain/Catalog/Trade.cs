@@ -137,6 +137,25 @@ public static class TradeRules
     /// <summary>Цена ниже минимальной — предупреждение (продавать можно, но с согласием).</summary>
     public static bool BelowMinimum(decimal price, decimal? minPrice) => minPrice is { } m && price < m;
 
+    /// <summary>
+    /// D142: цена ниже минимальной — одно правило для подсветки строки заказа (D350) и проверки подтверждения (D1104). Сравнение — в той
+    /// величине, в которой задана минимальная цена (с НДС или без): цена строки после скидки переводится в неё, обе округляются до копеек.
+    /// </summary>
+    public static bool BelowMinimum(decimal netPrice, bool priceIncludesVat, decimal? vatPercent, decimal? minPrice, bool minIncludesVat) =>
+        minPrice is { } m && decimal.Round(InVatBasis(netPrice, priceIncludesVat, minIncludesVat, vatPercent), 2) < decimal.Round(m, 2);
+
+    /// <summary>Цена в другой величине: с НДС ↔ без НДС по ставке строки (до 4 знаков); без ставки — как есть.</summary>
+    public static decimal InVatBasis(decimal price, bool priceIncludesVat, bool targetIncludesVat, decimal? vatPercent)
+    {
+        var rate = (vatPercent ?? 0) / 100m;
+        if (priceIncludesVat == targetIncludesVat || rate == 0)
+        {
+            return price;
+        }
+
+        return decimal.Round(priceIncludesVat ? price / (1 + rate) : price * (1 + rate), 4);
+    }
+
     public static string PaymentSubjectName(PaymentSubject subject) => subject switch
     {
         PaymentSubject.Service => "Услуга",

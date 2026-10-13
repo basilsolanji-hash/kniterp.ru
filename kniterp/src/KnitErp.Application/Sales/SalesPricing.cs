@@ -149,16 +149,8 @@ public static class SalesPricing
     }
 
     /// <summary>Цена из прайса для строки документа: прайс с НДС, а документ без — НДС вычитается, и наоборот; до 4 знаков.</summary>
-    public static decimal Reprice(decimal price, bool priceIncludesVat, bool documentIncludesVat, decimal? vatPercent)
-    {
-        var rate = (vatPercent ?? 0) / 100m;
-        if (priceIncludesVat == documentIncludesVat || rate == 0)
-        {
-            return price;
-        }
-
-        return decimal.Round(priceIncludesVat ? price / (1 + rate) : price * (1 + rate), 4);
-    }
+    public static decimal Reprice(decimal price, bool priceIncludesVat, bool documentIncludesVat, decimal? vatPercent) =>
+        TradeRules.InVatBasis(price, priceIncludesVat, documentIncludesVat, vatPercent);
 
     /// <summary>Ограничения цены пользователя по его ролям: самое мягкое среди ролей, где оно задано (D1103).</summary>
     public sealed record Limits(decimal? MaxDiscountPercent, long? MinPriceTypeId);
@@ -216,13 +208,18 @@ public static class SalesPricing
         foreach (var line in order.Lines)
         {
             var item = items[line.ItemId];
-            var gross = Reprice(line.NetPrice, order.PricesIncludeVat, true, line.VatPercent);
-            var floor = Math.Max(
-                item.MinPrice is { } m ? Reprice(m, baseType, true, line.VatPercent) : 0,
-                floorPrices.TryGetValue(line.ItemId, out var f) ? Reprice(f, floorIncludesVat, true, line.VatPercent) : 0);
-            if (floor > 0 && decimal.Round(gross, 2) < decimal.Round(floor, 2))
+            // D142: каждая граница — в своей величине (минимальная цена позиции — как базовый вид цены, граница роли — как её вид цены),
+            // тем же правилом, что подсветка строки (TradeRules.BelowMinimum). Нарушено обе — показывается большая.
+            (decimal Floor, bool IncludesVat)?[] floors =
+                [item.MinPrice is { } m ? (m, baseType) : null, floorPrices.TryGetValue(line.ItemId, out var f) ? (f, floorIncludesVat) : null];
+            var broken = floors.OfType<(decimal Floor, bool IncludesVat)>()
+                .Where(x => TradeRules.BelowMinimum(line.NetPrice, order.PricesIncludeVat, line.VatPercent, x.Floor, x.IncludesVat))
+                .OrderByDescending(x => Reprice(x.Floor, x.IncludesVat, true, line.VatPercent)).ToList();
+            if (broken.Count > 0)
             {
-                issues.Add(new PriceIssueDto(line.ItemId, item.Code, PriceIssueKind.BelowMinimum, decimal.Round(gross, 2), decimal.Round(floor, 2)));
+                var (floor, floorVat) = broken[0];
+                issues.Add(new PriceIssueDto(line.ItemId, item.Code, PriceIssueKind.BelowMinimum,
+                    decimal.Round(Reprice(line.NetPrice, order.PricesIncludeVat, floorVat, line.VatPercent), 2), decimal.Round(floor, 2)));
             }
 
             // Ручное снижение: цена строки ниже цены по прайсу и ручная скидка; скидки правил (соглашение, акции — D1106) не в счёт.
