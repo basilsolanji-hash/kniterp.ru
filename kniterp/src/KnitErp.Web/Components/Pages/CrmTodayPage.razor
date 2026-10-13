@@ -1,0 +1,312 @@
+@page "/crm/today"
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+@inject IEmailSender Mail
+
+@*
+    D690, D691: «Мой день» менеджера на телефоне — мои просроченные задачи и задачи на сегодня крупными карточками: клиент, тема, телефон.
+    «Позвонить» открывает звонилку телефона (tel:) и сразу форму результата звонка; «Выполнено» — одним нажатием; заметка — с диктовкой
+    (CrmVoiceNote, D693). Свой контекст базы на каждое действие: отказ или конфликт не оставляют изменённых объектов у вкладки.
+*@
+<PageTitle>@L("Мой день") — knitERP</PageTitle>
+<CrmStyles />
+
+@if (_denied is not null)
+{
+    <AccessDenied Message="@_denied" />
+}
+else if (_data is null)
+{
+    <p class="muted">@L("Загрузка…")</p>
+}
+else
+{
+    <div class="crm-day-head">
+        <h1>@L("Мой день") <span class="muted small">@_data.Date.ToString("dd.MM.yyyy")</span></h1>
+        <a href="crm/tasks">@L("Все мои задачи")</a>
+    </div>
+    @if (_message is not null)
+    {
+        <div class="@(_isError ? "flash error" : "flash")" role="@(_isError ? "alert" : "status")">@_message</div>
+    }
+    <div class="crm-kpi">
+        <div><b class="@(_data.Overdue.Count > 0 ? "warn-text" : null)">@_data.Overdue.Count</b><span>@L("просрочено")</span></div>
+        <div><b>@_data.Today.Count</b><span>@L("на сегодня")</span></div>
+    </div>
+
+    @if (_data.Overdue.Count == 0 && _data.Today.Count == 0)
+    {
+        <p class="muted">@L("На сегодня задач нет. Запланируйте звонок или задачу в карточке сделки или лида.")</p>
+    }
+    @if (_data.Overdue.Count > 0)
+    {
+        <h2>@L("Просрочено")</h2>
+        <div class="crm-day-list">
+            @foreach (var item in _data.Overdue)
+            {
+                @Card(item)
+            }
+        </div>
+    }
+    @if (_data.Today.Count > 0)
+    {
+        <h2>@L("Сегодня")</h2>
+        <div class="crm-day-list">
+            @foreach (var item in _data.Today)
+            {
+                @Card(item)
+            }
+        </div>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    public CurrentAccessDto CurrentAccess { get; set; } = default!;
+
+    private static readonly int[] QuickDays = [1, 3, 7];
+
+    private CrmTodayDto? _data;
+    private string? _denied;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+
+    // Открытая форма: id активности и вид ("call" — результат звонка, "note" — заметка).
+    private long? _formId;
+    private string? _form;
+    private bool _reached = true;
+    private string? _comment;
+    private int? _nextDays;
+    private string? _nextSubject;
+    private bool _completeTask = true;
+    private string? _note;
+
+    private bool CanEdit => CurrentAccess.Has(Permissions.CrmEdit);
+
+    private RenderFragment Card(CrmTodayItemDto item) => __builder =>
+    {
+        var a = item.Activity;
+        var open = _formId == a.Id;
+        <article class="crm-day-card @(a.Overdue ? "late" : null)" aria-label="@a.Subject">
+            <div class="crm-day-top">
+                <span class="tag @(a.Overdue ? "warn" : null)">@CrmActivities.KindName(a.Kind)</span>
+                <span class="@(a.Overdue ? "warn-text" : "muted")">@Due(a)</span>
+            </div>
+            <h3>@a.Subject</h3>
+            <div class="crm-day-client">
+                @if (a.Href is not null)
+                {
+                    <a href="@a.Href">@(item.Client ?? a.TargetTitle)</a>
+                }
+                else
+                {
+                    <span>@(item.Client ?? a.TargetTitle)</span>
+                }
+                @if (item.Client is not null && a.TargetTitle is not null)
+                {
+                    <span class="muted small">@a.TargetTitle</span>
+                }
+                @if (item.ContactName is not null)
+                {
+                    <span class="small">@item.ContactName</span>
+                }
+            </div>
+            @if (!string.IsNullOrEmpty(a.Text))
+            {
+                <p class="small crm-day-text">@a.Text</p>
+            }
+            <div class="crm-day-actions">
+                @if (item.Phone is not null)
+                {
+                    <a class="button crm-day-call" href="tel:@item.Phone" @onclick="() => OpenCall(a)" aria-label="@L("Позвонить: {0}", item.PhoneText ?? "")">
+                        @L("Позвонить") <span class="crm-day-phone">@item.PhoneText</span>
+                    </a>
+                }
+                @if (CanEdit)
+                {
+                    <button type="button" class="secondary" @onclick="() => OpenCall(a)" disabled="@_busy" aria-expanded="@(open && _form == "call" ? "true" : "false")">@L("Результат звонка")</button>
+                    <button type="button" class="secondary" @onclick="() => OpenNote(a)" disabled="@_busy" aria-expanded="@(open && _form == "note" ? "true" : "false")">@L("Заметка")</button>
+                    <button type="button" @onclick="() => CompleteAsync(a)" disabled="@_busy">@L("Выполнено")</button>
+                }
+            </div>
+            @if (open && _form == "call")
+            {
+                <form class="crm-day-form" @onsubmit="() => SaveCallAsync(a)" aria-label="@L("Результат звонка")">
+                    <div class="crm-tabs" role="group" aria-label="@L("Дозвонились?")">
+                        <button type="button" aria-pressed="@(_reached ? "true" : "false")" class="@(_reached ? null : "secondary")" @onclick="() => SetReached(true, a)">@L("Дозвонился")</button>
+                        <button type="button" aria-pressed="@(!_reached ? "true" : "false")" class="@(!_reached ? null : "secondary")" @onclick="() => SetReached(false, a)">@L("Не дозвонился")</button>
+                    </div>
+                    <CrmVoiceNote @bind-Value="_comment" Label="@L("Комментарий")" MaxLength="CrmActivityService.CallCommentMaxLength" Rows="2"
+                                  Placeholder="@L("О чём договорились")" Disabled="_busy" />
+                    <div class="crm-day-next">
+                        <label>
+                            @L("Следующий шаг через, дней")
+                            <input type="number" min="1" max="@CrmActivityService.NextStepMaxDays" inputmode="numeric" @bind="_nextDays" placeholder="@L("не нужен")" />
+                        </label>
+                        <div class="crm-day-chips" role="group" aria-label="@L("Быстрый выбор срока")">
+                            @foreach (var d in QuickDays)
+                            {
+                                <button type="button" class="secondary" aria-pressed="@(_nextDays == d ? "true" : "false")" @onclick="() => _nextDays = d">@DaysText(d)</button>
+                            }
+                            @if (_nextDays is not null)
+                            {
+                                <button type="button" class="secondary" @onclick="() => _nextDays = null">@L("Без следующего шага")</button>
+                            }
+                        </div>
+                        @if (_nextDays is not null)
+                        {
+                            <label class="wide">@L("Тема следующего шага") <input @bind="_nextSubject" maxlength="@CrmActivity.SubjectMaxLength" placeholder="@(_reached ? L("Следующий шаг") : L("Перезвонить"))" /></label>
+                        }
+                    </div>
+                    @if (a.Kind != CrmActivityKind.Call)
+                    {
+                        <label class="check"><input type="checkbox" @bind="_completeTask" /> @L("Задача выполнена")</label>
+                    }
+                    <div class="actions">
+                        <button type="submit" disabled="@_busy">@L("Сохранить звонок")</button>
+                        <button type="button" class="secondary" @onclick="CloseForm">@L("Отмена")</button>
+                    </div>
+                </form>
+            }
+            else if (open && _form == "note")
+            {
+                <form class="crm-day-form" @onsubmit="() => SaveNoteAsync(a)" aria-label="@L("Новая заметка")">
+                    <CrmVoiceNote @bind-Value="_note" Label="@L("Заметка")" Disabled="_busy" />
+                    <div class="actions">
+                        <button type="submit" disabled="@_busy">@L("Сохранить заметку")</button>
+                        <button type="button" class="secondary" @onclick="CloseForm">@L("Отмена")</button>
+                    </div>
+                </form>
+            }
+        </article>
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadAsync();
+        }
+        catch (AccessDeniedException ex)
+        {
+            _denied = UiErrors.Message(ex);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = Factory.Create();
+        _data = await Service(db).TodayAsync();
+    }
+
+    private string Due(CrmActivityDto a)
+    {
+        if (a.DueAtUtc is not { } due)
+        {
+            return "";
+        }
+
+        var local = TimeZones.ToLocal(due, CurrentAccess.TimeZoneId);
+        return a.Overdue && DateOnly.FromDateTime(local) != _data?.Date ? local.ToString("dd.MM HH:mm") : local.ToString("HH:mm");
+    }
+
+    private static string DaysText(int days) => days switch
+    {
+        1 => L("Завтра"),
+        7 => L("Через неделю"),
+        _ => L("Через {0} дн.", days),
+    };
+
+    private void OpenCall(CrmActivityDto a)
+    {
+        if (_formId == a.Id && _form == "call")
+        {
+            return; // форма уже открыта (нажали «Позвонить» второй раз) — введённое не сбрасываем
+        }
+
+        (_formId, _form, _message) = (a.Id, "call", null);
+        (_reached, _comment, _nextDays, _nextSubject, _completeTask) = (true, null, null, null, true);
+    }
+
+    private void OpenNote(CrmActivityDto a)
+    {
+        (_formId, _form, _message, _note) = (a.Id, "note", null, null);
+    }
+
+    private void CloseForm() => (_formId, _form) = (null, null);
+
+    private void SetReached(bool reached, CrmActivityDto a)
+    {
+        _reached = reached;
+        _completeTask = reached;
+        if (!reached && _nextDays is null)
+        {
+            _nextDays = 1; // не дозвонился — по умолчанию перезвонить завтра
+        }
+    }
+
+    private Task SaveCallAsync(CrmActivityDto a) => RunAsync(async db =>
+    {
+        var r = await Service(db).CallResultAsync(new CrmCallResultCommand(a.Id, _reached, _comment, _nextDays, _nextSubject,
+            a.Kind == CrmActivityKind.Call || _completeTask, a.RowVersion));
+        return r.NextStepId is null
+            ? L("Звонок записан.")
+            : L("Звонок записан, следующий шаг — {0}.", DaysText(_nextDays ?? 1).ToLowerInvariant());
+    });
+
+    private Task SaveNoteAsync(CrmActivityDto a) => RunAsync(async db =>
+    {
+        var text = _note?.Trim();
+        if (string.IsNullOrEmpty(text))
+        {
+            throw new BusinessRuleException("crm.note.empty", L("Напишите или надиктуйте текст заметки."));
+        }
+
+        await Service(db).CreateAsync(new CrmActivityCommand(a.Target, a.TargetId, CrmActivityKind.Note,
+            text.Length <= 80 ? text : text[..80] + "…", text, Done: true));
+        return L("Заметка добавлена.");
+    });
+
+    private Task CompleteAsync(CrmActivityDto a) => RunAsync(async db =>
+    {
+        await Service(db).CompleteAsync(a.Id, null, a.RowVersion);
+        return L("Отмечено выполненным.");
+    });
+
+    private CrmActivityService Service(IKnitErpDbContext db) => new(db, new AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock, Mail);
+
+    private async Task RunAsync(Func<IKnitErpDbContext, Task<string>> action)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        (_message, _isError) = (null, false);
+        try
+        {
+            string done;
+            await using (var db = Factory.Create())
+            {
+                done = await action(db);
+            }
+
+            CloseForm();
+            await LoadAsync();
+            _message = done;
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            (_message, _isError) = (UiErrors.Message(ex), true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

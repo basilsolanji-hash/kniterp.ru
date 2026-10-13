@@ -93,6 +93,27 @@ public static class CrmEndpoints
 
         app.MapGet("/crm/import-template.xlsx", (CrmImportService import, CrmImportKind kind, CancellationToken ct) =>
             FileAsync(() => import.TemplateAsync(kind, ct), $"shablon-crm-{kind.ToString().ToLowerInvariant()}.xlsx"));
+
+        // D692: фото сделки — только вошедшему, у кого сделка видна (CrmAccess.Deals); чужое, архивное и чужой организации — 404.
+        // Кэш — только в браузере; nosniff ставят общие заголовки, тип — по сигнатуре, сохранённой при загрузке.
+        app.MapGet("/crm/deal-photos/{id:long}", async (long id, CrmDealPhotoService photos, HttpContext http, CancellationToken ct) =>
+        {
+            try
+            {
+                var (contentType, content) = await photos.ContentAsync(id, ct);
+                http.Response.Headers.CacheControl = "private, max-age=3600";
+                http.Response.Headers.ContentDisposition = "inline";
+                return Results.File(content, contentType);
+            }
+            catch (AccessDeniedException)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            catch (NotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
     }
 
     private static async Task<IResult> FileAsync(Func<Task<byte[]>> build, string fileName)

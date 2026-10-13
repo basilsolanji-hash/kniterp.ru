@@ -187,6 +187,7 @@ public sealed class KnitErpDbContext(DbContextOptions<KnitErpDbContext> options)
     public DbSet<KnitErp.Domain.Crm.CrmPlan> CrmPlans => Set<KnitErp.Domain.Crm.CrmPlan>();
     public DbSet<KnitErp.Domain.Crm.CrmMailing> CrmMailings => Set<KnitErp.Domain.Crm.CrmMailing>();
     public DbSet<KnitErp.Domain.Crm.CrmExternalLink> CrmExternalLinks => Set<KnitErp.Domain.Crm.CrmExternalLink>();
+    public DbSet<KnitErp.Domain.Crm.CrmDealPhoto> CrmDealPhotos => Set<KnitErp.Domain.Crm.CrmDealPhoto>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountRule> SalesDiscountRules => Set<KnitErp.Domain.Sales.SalesDiscountRule>();
     public DbSet<KnitErp.Domain.Sales.SalesDiscountSettings> SalesDiscountSettings => Set<KnitErp.Domain.Sales.SalesDiscountSettings>();
     public DbSet<KnitErp.Domain.Sales.SalesCancelReason> SalesCancelReasons => Set<KnitErp.Domain.Sales.SalesCancelReason>();

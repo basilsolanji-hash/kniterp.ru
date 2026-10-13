@@ -178,7 +178,7 @@ public sealed class CrmDeal
                 throw new BusinessRuleException("crm.deal.too_many_lines", $"В сделке не больше {MaxLines} позиций.");
             }
 
-            line = new CrmDealLine(itemId);
+            line = new CrmDealLine(OrganizationId, itemId);
             _lines.Add(line);
         }
 
@@ -260,9 +260,13 @@ public sealed class CrmDealLine
     {
     }
 
-    internal CrmDealLine(long itemId) => ItemId = itemId;
+    internal CrmDealLine(long organizationId, long itemId) => (OrganizationId, ItemId) = (organizationId, itemId);
 
     public long Id { get; private set; }
+
+    /// <summary>Организация — для составных внешних ключей на сделку и номенклатуру (D682).</summary>
+    public long OrganizationId { get; private set; }
+
     public long DealId { get; private set; }
     public long ItemId { get; private set; }
     public decimal Quantity { get; private set; }

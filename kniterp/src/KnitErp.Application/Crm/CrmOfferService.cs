@@ -86,7 +86,7 @@ public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, IC
         db.CrmOffers.Add(offer);
         await db.SaveChangesAsync(ct);
         db.CrmActivities.Add(CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.OfferSent, CrmTarget.Deal, deal.Id, $"КП {offer.Number}",
-            $"Сумма {offer.Amount:N2} {offer.CurrencyCode}, действует до {offer.ValidUntil:dd.MM.yyyy}", null, ctx.UserId, ctx.UserId, clock.UtcNow, done: true,
+            $"Действует до {offer.ValidUntil:dd.MM.yyyy}" /* D680: без суммы — лента видна и без права цен */, null, ctx.UserId, ctx.UserId, clock.UtcNow, done: true,
             offerId: offer.Id));
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmOfferCreated, nameof(CrmOffer), offer.Id.ToString(),
             null, $"{offer.Number}: {offer.Amount:0.00} {offer.CurrencyCode}", deal.Number, currentUser.CorrelationId));
@@ -134,6 +134,12 @@ public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, IC
 
         var subject = $"Коммерческое предложение {offer.Number} от {offer.Date:dd.MM.yyyy} — {offer.Seller}";
         var text = Render(offer, message);
+        // D680 (замечание проверки): запись в ленту собирается и проверяется (длина темы и текста) до отправки — письмо не уйдёт без записи.
+        var a = CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Email, CrmTarget.Deal, offer.DealId,
+            subject.Length > CrmActivity.SubjectMaxLength ? subject[..(CrmActivity.SubjectMaxLength - 1)] + "…" : subject,
+            text.Length > CrmActivity.TextMaxLength ? text[..(CrmActivity.TextMaxLength - 1)] + "…" : text, null, ctx.UserId, ctx.UserId,
+            clock.UtcNow, done: true, result: $"отправлено на {CrmText.MaskEmail(address)}", source: CrmActivitySource.Mail, offerId: offer.Id);
+        await EnsureOfferQuotaAsync(ctx, ct);
         await CrmEmailTemplateService.EnsureEmailQuotaAsync(db, ctx, clock.UtcNow, ct);
         var (replyTo, replyName) = await CrmEmailTemplateService.ReplyToAsync(db, ctx.UserId, ct);
         if (!await mail.SendAsync(new EmailMessage(address, subject, text, CrmEmailHtml.FromText(text, $"Ответ на это письмо придёт менеджеру: {replyName}."), replyTo,
@@ -142,12 +148,23 @@ public sealed class CrmOfferService(IKnitErpDbContext db, IAccessGuard guard, IC
             throw new BusinessRuleException("crm.mail.failed", "Письмо не отправлено: почтовый сервер не принял его. Попробуйте позже.");
         }
 
-        var a = CrmActivity.Create(ctx.OrganizationId, CrmActivityKind.Email, CrmTarget.Deal, offer.DealId, subject, text, null, ctx.UserId, ctx.UserId, clock.UtcNow,
-            done: true, result: $"отправлено на {CrmText.MaskEmail(address)}", source: CrmActivitySource.Mail, offerId: offer.Id);
         db.CrmActivities.Add(a);
         db.AuditEntries.Add(AuditEntry.Create(clock.UtcNow, ctx.OrganizationId, ctx.UserId, AuditActions.CrmEmailSent, nameof(CrmOffer), id.ToString(),
             null, $"{offer.Number} → {CrmText.MaskEmail(address)}", offer.DealNumber, currentUser.CorrelationId));
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>КП письмом — не больше 30 в час от сотрудника (D680): защита от рассылки КП вместо «Рассылок».</summary>
+    public const int OffersPerUserPerHour = 30;
+
+    private async Task EnsureOfferQuotaAsync(AccessContext ctx, CancellationToken ct)
+    {
+        var since = clock.UtcNow.AddHours(-1);
+        if (await db.CrmActivities.AsNoTracking().CountAsync(a => a.OrganizationId == ctx.OrganizationId && a.CreatedByUserId == ctx.UserId
+                && a.OfferId != null && a.Kind == CrmActivityKind.Email && a.CreatedAtUtc >= since, ct) >= OffersPerUserPerHour)
+        {
+            throw new BusinessRuleException("crm.offer.quota", $"Не больше {OffersPerUserPerHour} КП письмом в час от одного сотрудника. Попробуйте позже.");
+        }
     }
 
     /// <summary>Текст КП для письма — моноширинной таблицей, читается в любом почтовом клиенте.</summary>

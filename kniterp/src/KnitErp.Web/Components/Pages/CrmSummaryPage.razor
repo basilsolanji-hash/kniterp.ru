@@ -77,39 +77,78 @@ else
     var r = _report;
     <div class="crm-kpi">
         <div><b>@r.Leads</b><span>@L("лидов")</span></div>
-        <div><b>@(r.LeadToDeal?.ToString("0.#") ?? "—") %</b><span>@L("лид → сделка")</span></div>
+        <div><b>@Pct(r.LeadToDeal)</b><span>@L("лид → сделка")</span></div>
         <div><b>@r.DealsCreated</b><span>@L("новых сделок")</span></div>
-        <div><b>@(r.DealToWon?.ToString("0.#") ?? "—") %</b><span>@L("сделка → выигрыш")</span></div>
+        <div><b>@Pct(r.DealToWon)</b><span>@L("сделка → выигрыш")</span></div>
         <div><b>@r.Won / @r.Lost</b><span>@L("выиграно / проиграно")</span></div>
-        <div><b>@r.AvgCycleDays.ToString("0.#")</b><span>@L("дней — средний цикл сделки")</span></div>
+        <div><b>@Days(r.Cycle.AvgDays) / @Days(r.Cycle.MedianDays)</b><span>@L("дней — цикл сделки: среднее / медиана")</span></div>
     </div>
 
-    <h2>@L("Воронка «{0}»", r.Pipeline)</h2>
-    <div class="scroll">
-        <table class="compact">
-            <thead><tr><th>@L("Этап")</th><th class="num">@L("Дошло")</th><th></th>@if (r.CanSeeAmounts) { <th class="num">@L("Сумма")</th> }<th class="num">@L("Конверсия дальше")</th><th class="num">@L("Дней на этапе")</th></tr></thead>
-            <tbody>
-                @{ var max = Math.Max(1, r.Funnel.Select(f => f.Reached).DefaultIfEmpty(0).Max()); }
-                @foreach (var f in r.Funnel)
-                {
-                    <tr>
-                        <td><span class="stage stage-@f.Color">@f.Stage</span></td>
-                        <td class="num">@f.Reached</td>
-                        <td><div class="crm-bar"><i style="width: @(100 * f.Reached / max)%"></i></div></td>
-                        @if (r.CanSeeAmounts)
+    <div class="crm-tabs crm-report-tabs" role="group" aria-label="@L("Разрез отчёта")">
+        <button type="button" aria-pressed="@Pressed("funnel")" @onclick='() => _tab = "funnel"'>@L("Воронка")</button>
+        <button type="button" aria-pressed="@Pressed("conversion")" @onclick='() => _tab = "conversion"'>@L("Конверсия")</button>
+        <button type="button" aria-pressed="@Pressed("sources")" @onclick='() => _tab = "sources"'>@L("Источники")</button>
+        <button type="button" aria-pressed="@Pressed("speed")" @onclick='() => _tab = "speed"'>@L("Длительность")</button>
+        <button type="button" aria-pressed="@Pressed("plan")" @onclick='() => _tab = "plan"'>@L("План-факт")</button>
+        <button type="button" aria-pressed="@Pressed("managers")" @onclick='() => _tab = "managers"'>@L("Менеджеры")</button>
+    </div>
+
+    @switch (_tab)
+    {
+        case "funnel":
+            <h2>@L("Воронка «{0}»", r.Pipeline)</h2>
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Этап")</th><th class="num">@L("Дошло")</th><th></th>@if (r.CanSeeAmounts) { <th class="num">@L("Сумма")</th> }<th class="num">@L("Конверсия дальше")</th><th class="num">@L("Дней на этапе")</th></tr></thead>
+                    <tbody>
+                        @{ var max = Math.Max(1, r.Funnel.Select(f => f.Reached).DefaultIfEmpty(0).Max()); }
+                        @foreach (var f in r.Funnel)
                         {
-                            <td class="num">@Amounts.Format(f.Amount)</td>
+                            <tr>
+                                <td><span class="stage stage-@f.Color">@f.Stage</span></td>
+                                <td class="num">@f.Reached</td>
+                                <td><div class="crm-bar"><i style="width: @(100 * f.Reached / max)%"></i></div></td>
+                                @if (r.CanSeeAmounts)
+                                {
+                                    <td class="num">@Amounts.Format(f.Amount)</td>
+                                }
+                                <td class="num">@Pct(f.ConversionToNext)</td>
+                                <td class="num">@f.AvgDays.ToString("0.#")</td>
+                            </tr>
                         }
-                        <td class="num">@(f.ConversionToNext is { } c ? $"{c:0.#} %" : "—")</td>
-                        <td class="num">@f.AvgDays.ToString("0.#")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+                    </tbody>
+                </table>
+            </div>
 
-    <div class="dash-cols">
-        <section>
+            <h2>@L("Воронка по менеджерам")</h2>
+            @if (r.ManagerFunnel.Count == 0)
+            {
+                <p class="muted small">@L("Нет данных за период.")</p>
+            }
+            else
+            {
+                <p class="muted small">@(r.CanSeeAmounts ? L("В ячейке — сколько сделок дошло до этапа, ниже — конверсия в следующий этап и сумма.") : L("В ячейке — сколько сделок дошло до этапа, ниже — конверсия в следующий этап."))</p>
+                <div class="scroll">
+                    <table class="compact crm-matrix" aria-label="@L("Воронка по менеджерам")">
+                        <thead><tr><th>@L("Менеджер")</th>@foreach (var f in r.Funnel) { <th class="num">@f.Stage</th> }</tr></thead>
+                        <tbody>
+                            @foreach (var m in r.ManagerFunnel)
+                            {
+                                <tr>
+                                    <th scope="row">@m.Manager</th>
+                                    @foreach (var c in m.Steps)
+                                    {
+                                        <td class="num">
+                                            <span class="crm-cell"><b>@c.Reached</b><small>@(c.ConversionToNext is { } cv ? $"{cv:0.#} %" : "")@(c.Amount is { } a && c.Reached > 0 ? (c.ConversionToNext is null ? "" : " · ") + Amounts.Compact(a) : "")</small></span>
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+
             <h2>@L("Причины проигрыша")</h2>
             @if (r.LossReasons.Count == 0) { <p class="muted small">@L("Проигрышей за период нет.")</p> }
             else
@@ -118,64 +157,164 @@ else
                     @foreach (var x in r.LossReasons) { <tr><td>@x.Reason</td><td class="num">@x.Deals</td>@if (r.CanSeeAmounts) { <td class="num">@Amounts.Format(x.Amount)</td> }</tr> }
                 </tbody></table>
             }
-        </section>
-        <section>
-            <h2>@L("Источники")</h2>
+            break;
+
+        case "conversion":
+            <h2>@L("Конверсия: лид → сделка → выигрыш")</h2>
+            <p class="muted small">@L("Лиды и сделки, созданные в периоде; выигрыш — на сегодня.")</p>
+            <div class="scroll">
+                <table class="compact crm-matrix" aria-label="@L("Конверсия по менеджерам")">
+                    <thead><tr><th>@L("Менеджер")</th><th class="num">@L("Лидов")</th><th class="num">@L("Со сделкой")</th><th class="num">@L("лид → сделка")</th><th class="num">@L("Сделок")</th><th class="num">@L("Выиграно")</th><th class="num">@L("сделка → выигрыш")</th><th class="num">@L("лид → выигрыш")</th>@if (r.CanSeeAmounts) { <th class="num">@L("Сумма выигрышей")</th> }</tr></thead>
+                    <tbody>
+                        @foreach (var x in r.ManagerConversion.Prepend(r.Conversion))
+                        {
+                            <tr class="@(x.Id is null ? "crm-total" : null)">
+                                <th scope="row">@(x.Id is null ? L("Вся организация") : x.Name)</th>
+                                <td class="num">@x.Leads</td><td class="num">@x.LeadDeals</td><td class="num">@Pct(x.LeadToDeal)</td>
+                                <td class="num">@x.Deals</td><td class="num">@x.Won</td><td class="num">@Pct(x.DealToWon)</td><td class="num">@Pct(x.LeadToWon)</td>
+                                @if (r.CanSeeAmounts) { <td class="num">@Amounts.Format(x.WonAmount)</td> }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            break;
+
+        case "sources":
+            <h2>@L("Источники лидов")</h2>
             @if (r.Sources.Count == 0) { <p class="muted small">@L("Нет данных за период.")</p> }
             else
             {
-                <table class="compact">
-                    <thead><tr><th>@L("Источник")</th><th class="num">@L("Лидов")</th><th class="num">@L("Сделок")</th><th class="num">@L("Выиграно")</th>@if (r.CanSeeAmounts) { <th class="num">@L("Выручка")</th> }</tr></thead>
+                <div class="scroll">
+                    <table class="compact crm-matrix" aria-label="@L("Источники лидов")">
+                        <thead><tr><th>@L("Источник")</th><th class="num">@L("Лидов")</th><th class="num">@L("лид → сделка")</th><th class="num">@L("Сделок")</th><th class="num">@L("Выиграно")</th><th class="num">@L("сделка → выигрыш")</th><th class="num">@L("лид → выигрыш")</th>@if (r.CanSeeAmounts) { <th class="num">@L("Выручка")</th> }</tr></thead>
+                        <tbody>
+                            @foreach (var x in r.Sources)
+                            {
+                                <tr><th scope="row">@(x.Id is null ? L("Не указан") : x.Name)</th><td class="num">@x.Leads</td><td class="num">@Pct(x.LeadToDeal)</td><td class="num">@x.Deals</td><td class="num">@x.Won</td>
+                                    <td class="num">@Pct(x.DealToWon)</td><td class="num">@Pct(x.LeadToWon)</td>@if (r.CanSeeAmounts) { <td class="num">@Amounts.Format(x.Revenue)</td> }</tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <p class="muted small">@L("Выручка — оплаты по заказам из выигранных сделок источника.")</p>
+            }
+            break;
+
+        case "speed":
+            <h2>@L("Длительность этапов")</h2>
+            <p class="muted small">@L("Дней на этапе по переходам в периоде: среднее / медиана. Цикл — от создания до выигрыша сделок, выигранных в периоде.")</p>
+            <div class="scroll">
+                <table class="compact crm-matrix" aria-label="@L("Длительность этапов")">
+                    <thead><tr><th>@L("Менеджер")</th>@foreach (var s in r.Durations) { <th class="num">@s.Stage</th> }<th class="num">@L("Цикл сделки")</th></tr></thead>
                     <tbody>
-                        @foreach (var x in r.Sources) { <tr><td>@x.Source</td><td class="num">@x.Leads</td><td class="num">@x.Deals</td><td class="num">@x.Won</td>@if (r.CanSeeAmounts) { <td class="num">@Amounts.Format(x.Revenue)</td> }</tr> }
+                        <tr class="crm-total">
+                            <th scope="row">@L("Вся организация")</th>
+                            @foreach (var s in r.Durations) { <td class="num">@Duration(s.Days)</td> }
+                            <td class="num">@Duration(r.Cycle)</td>
+                        </tr>
+                        @foreach (var m in r.ManagerDurations)
+                        {
+                            <tr>
+                                <th scope="row">@m.Manager</th>
+                                @foreach (var c in m.Stages) { <td class="num">@Duration(c)</td> }
+                                <td class="num">@Duration(m.Cycle)</td>
+                            </tr>
+                        }
                     </tbody>
                 </table>
+            </div>
+            break;
+
+        case "plan":
+            <h2>@L("План-факт по месяцам")</h2>
+            @if (!r.CanSeeAmounts)
+            {
+                <p class="muted small">@L("Суммы скрыты: нет права «Цены и суммы».")</p>
             }
-        </section>
-    </div>
-
-    <h2>@L("Менеджеры")</h2>
-    <div class="scroll">
-        <table class="compact">
-            <thead><tr><th>@L("Менеджер")</th><th class="num">@L("Активностей")</th><th class="num">@L("Сделок")</th><th class="num">@L("Выиграно")</th>@if (r.CanSeeAmounts) { <th class="num">@L("Сумма выигрышей")</th><th class="num">@L("План")</th><th class="num">@L("Факт")</th> }</tr></thead>
-            <tbody>
-                @foreach (var m in r.Managers)
+            else
+            {
+                <div class="scroll">
+                    <table class="compact" aria-label="@L("План-факт по месяцам")">
+                        <thead><tr><th>@L("Месяц")</th><th class="num">@L("План")</th><th class="num">@L("Факт")</th><th class="num">@L("Выполнение")</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var m in r.PlanFactMonths)
+                            {
+                                <tr><td>@($"{m.Month:00}.{m.Year}")</td><td class="num">@Amounts.Format(m.Plan)</td><td class="num">@Amounts.Format(m.Fact)</td><td class="num">@Pct(m.Done)</td>
+                                    <td>@if (m.Done is { } d) { <div class="crm-bar"><i style="width: @(Math.Min(100, (int)d))%"></i></div> }</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (r.ManagerPlanFact.Count > 0)
                 {
-                    <tr><td>@m.Manager</td><td class="num">@m.Activities</td><td class="num">@m.Deals</td><td class="num">@m.Won</td>
-                        @if (r.CanSeeAmounts) { <td class="num">@Amounts.Format(m.WonAmount)</td><td class="num">@Amounts.Format(m.Plan)</td><td class="num">@Amounts.Format(m.Fact)</td> }</tr>
+                    <h2>@L("План-факт по менеджерам")</h2>
+                    <p class="muted small">@L("В ячейке — факт, ниже — план и выполнение.")</p>
+                    <div class="scroll">
+                        <table class="compact crm-matrix" aria-label="@L("План-факт по менеджерам")">
+                            <thead><tr><th>@L("Менеджер")</th>@foreach (var m in r.PlanFactMonths) { <th class="num">@($"{m.Month:00}.{m.Year}")</th> }<th class="num">@L("Итого")</th></tr></thead>
+                            <tbody>
+                                @foreach (var x in r.ManagerPlanFact)
+                                {
+                                    <tr>
+                                        <th scope="row">@x.Manager</th>
+                                        @foreach (var m in x.Months) { <td class="num">@PlanCell(m.Fact, m.Plan, m.Done)</td> }
+                                        <td class="num">@PlanCell(x.Fact, x.Plan, x.Done)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
                 }
-            </tbody>
-        </table>
-    </div>
-    <p class="muted small">@(r.FactSource == CrmPlanFact.Payments ? L("Факт — оплаты по заказам покупателей из сделок.") : L("Факт — суммы выигранных сделок."))</p>
+                <p class="muted small">@(r.FactSource == CrmPlanFact.Payments ? L("Факт — оплаты по заказам покупателей из сделок.") : L("Факт — суммы выигранных сделок.")) @L("Месяцы периода берутся целиком, по всем воронкам.")</p>
+            }
 
-    @if (_canPlan)
-    {
-        <h2>@L("План продаж")</h2>
-        <form class="inline-form" @onsubmit="SavePlanAsync" aria-label="@L("План продаж")">
-            <label>@L("Месяц") <input type="month" @bind="_planMonth" @bind:format="yyyy-MM" /></label>
-            <label>
-                @L("Менеджер")
-                <select @bind="_planUser">
-                    <option value="">@L("Вся организация")</option>
-                    @foreach (var u in _options.Users)
-                    {
-                        <option value="@u.Id">@u.Name</option>
-                    }
-                </select>
-            </label>
-            <label>@L("Сумма") <input inputmode="decimal" @bind="_planAmount" required /></label>
-            <button type="submit" disabled="@_busy">@L("Сохранить план")</button>
-        </form>
-        @if (_plans.Count > 0)
-        {
-            <table class="compact">
-                <thead><tr><th>@L("Месяц")</th><th>@L("Менеджер")</th><th class="num">@L("План")</th></tr></thead>
-                <tbody>
-                    @foreach (var p in _plans) { <tr><td>@($"{p.Month:00}.{p.Year}")</td><td>@(p.User ?? L("Вся организация"))</td><td class="num">@Amounts.Format(p.Amount)</td></tr> }
-                </tbody>
-            </table>
-        }
+            @if (_canPlan)
+            {
+                <h2>@L("План продаж")</h2>
+                <form class="inline-form" @onsubmit="SavePlanAsync" aria-label="@L("План продаж")">
+                    <label>@L("Месяц") <input type="month" @bind="_planMonth" @bind:format="yyyy-MM" /></label>
+                    <label>
+                        @L("Менеджер")
+                        <select @bind="_planUser">
+                            <option value="">@L("Вся организация")</option>
+                            @foreach (var u in _options.Users)
+                            {
+                                <option value="@u.Id">@u.Name</option>
+                            }
+                        </select>
+                    </label>
+                    <label>@L("Сумма") <input inputmode="decimal" @bind="_planAmount" required /></label>
+                    <button type="submit" disabled="@_busy">@L("Сохранить план")</button>
+                </form>
+                @if (_plans.Count > 0)
+                {
+                    <table class="compact">
+                        <thead><tr><th>@L("Месяц")</th><th>@L("Менеджер")</th><th class="num">@L("План")</th></tr></thead>
+                        <tbody>
+                            @foreach (var p in _plans) { <tr><td>@($"{p.Month:00}.{p.Year}")</td><td>@(p.User ?? L("Вся организация"))</td><td class="num">@Amounts.Format(p.Amount)</td></tr> }
+                        </tbody>
+                    </table>
+                }
+            }
+            break;
+
+        default:
+            <h2>@L("Менеджеры")</h2>
+            <div class="scroll">
+                <table class="compact">
+                    <thead><tr><th>@L("Менеджер")</th><th class="num">@L("Активностей")</th><th class="num">@L("Сделок")</th><th class="num">@L("Выиграно")</th>@if (r.CanSeeAmounts) { <th class="num">@L("Сумма выигрышей")</th><th class="num">@L("План")</th><th class="num">@L("Факт")</th> }</tr></thead>
+                    <tbody>
+                        @foreach (var m in r.Managers)
+                        {
+                            <tr><td>@m.Manager</td><td class="num">@m.Activities</td><td class="num">@m.Deals</td><td class="num">@m.Won</td>
+                                @if (r.CanSeeAmounts) { <td class="num">@Amounts.Format(m.WonAmount)</td><td class="num">@Amounts.Format(m.Plan)</td><td class="num">@Amounts.Format(m.Fact)</td> }</tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <p class="muted small">@(r.FactSource == CrmPlanFact.Payments ? L("Факт — оплаты по заказам покупателей из сделок.") : L("Факт — суммы выигранных сделок."))</p>
+            break;
     }
 }
 
@@ -198,7 +337,22 @@ else
     private string _planUser = "";
     private string? _planAmount;
 
+    private string _tab = "funnel";
+
     private bool _canPlan => CurrentAccess.Has(Permissions.CrmSettings) && CurrentAccess.Has(Permissions.PriceView);
+
+    private string Pressed(string tab) => _tab == tab ? "true" : "false";
+
+    private static string Pct(decimal? value) => value is { } v ? $"{v:0.#} %" : "—";
+
+    private static string Days(decimal? value) => value?.ToString("0.#") ?? "—";
+
+    private static string Duration(CrmDurationDto d) => d.Count == 0 ? "—" : $"{Days(d.AvgDays)} / {Days(d.MedianDays)}";
+
+    private static RenderFragment PlanCell(decimal fact, decimal plan, decimal? done) => __builder =>
+    {
+        <span class="crm-cell"><b>@Amounts.Compact(fact)</b><small>@(plan > 0 ? $"{Amounts.Compact(plan)} · {Pct(done)}" : "—")</small></span>
+    };
 
     private string ExcelHref =>
         $"crm/report.xlsx?from={_from:yyyy-MM-dd}&to={_to:yyyy-MM-dd}&pipeline={_pipeline}" + (_responsible.Length > 0 ? $"&responsible={_responsible}" : "");

@@ -269,7 +269,7 @@ public sealed class CrmMailing
             throw new BusinessRuleException("crm.mailing.too_many", $"В одной рассылке не больше {MaxRecipients} получателей.");
         }
 
-        var r = new CrmMailingRecipient(contactId, email);
+        var r = new CrmMailingRecipient(OrganizationId, contactId, email);
         _recipients.Add(r);
         return r;
     }
@@ -290,13 +290,18 @@ public sealed class CrmMailingRecipient
     {
     }
 
-    internal CrmMailingRecipient(long contactId, string email)
+    internal CrmMailingRecipient(long organizationId, long contactId, string email)
     {
+        OrganizationId = organizationId;
         ContactId = contactId;
         Email = email;
     }
 
     public long Id { get; private set; }
+
+    /// <summary>Организация — для составных внешних ключей на рассылку и контакт (D682).</summary>
+    public long OrganizationId { get; private set; }
+
     public long MailingId { get; private set; }
     public long ContactId { get; private set; }
     public string Email { get; private set; } = string.Empty;

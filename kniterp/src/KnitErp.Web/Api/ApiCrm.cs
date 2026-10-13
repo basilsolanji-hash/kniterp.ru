@@ -13,13 +13,15 @@ public static class ApiCrm
 {
     public static void MapCrmApi(this RouteGroupBuilder api)
     {
+        // D681 (замечание проверки): ответ одинаков для нового лида и повторного обращения — 202 без Id и номера, чтобы по ответу нельзя
+        // было проверить, есть ли телефон или почта в базе. Номер лида видит менеджер в CRM.
         api.MapPost("/crm/leads", async (CrmIntakeService intake, CrmIntakeLead body, CancellationToken ct) =>
             {
-                var r = await intake.CreateLeadAsync(body, ct);
-                return r.Repeat ? ApiResult.Ok(r) : new ApiResult(StatusCodes.Status201Created, r);
+                await intake.CreateLeadAsync(body, ct);
+                return new ApiResult(StatusCodes.Status202Accepted, new CrmIntakeAccepted(true));
             })
             .AddEndpointFilter(ApiV1.IdempotencyAsync)
-            .WithSummary("Заявка с сайта или маркетплейса: новый лид (201) или повторное обращение к найденному по телефону/почте (200)");
+            .WithSummary("Заявка с сайта или маркетплейса: принята (202); новый лид или повторное обращение к найденному — решает CRM");
 
         api.MapPost("/crm/calls", async (CrmIntakeService intake, CrmCallEvent body, CancellationToken ct) =>
                 ApiResult.Ok(await intake.RegisterCallAsync(body, ct)))

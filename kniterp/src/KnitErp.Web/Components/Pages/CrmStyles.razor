@@ -66,6 +66,9 @@
         .crm-side .grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
         .crm-side .grid .wide { grid-column: 1 / -1; }
     }
+    .crm-order-actions td { border-top: 0; padding-top: 0; }
+    .crm-paid { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 8px; font-weight: 600; }
+    .crm-docs { border: 0; padding: 0; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 14px; }
     .crm-channel { display: inline-block; padding: 0 6px; border-radius: 6px; font-size: 11px; font-weight: 600; color: #fff; background: #6b7280; }
     .crm-channel-telegram { background: #229ed9; }
     .crm-channel-whatsapp { background: #1f9d55; }
@@ -82,5 +85,74 @@
         .crm-board { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); overflow-x: visible; }
         .crm-col { min-height: 0; }
         .crm-summary { grid-template-columns: 1fr 1fr; }
+    }
+    /* Отчёты CRM (D685–D689): вкладки разрезов переносятся на телефоне; матрицы «менеджер × этап / месяц» — в .scroll. */
+    .crm-report-tabs { flex-wrap: wrap; }
+    .crm-matrix th[scope=row] { text-align: left; font-weight: 500; max-width: 180px; overflow-wrap: anywhere; }
+    .crm-cell { display: inline-flex; flex-direction: column; align-items: flex-end; }
+    .crm-cell b { font-weight: 600; }
+    .crm-cell small { font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .crm-cell small:empty { display: none; }
+    @@media (max-width: 599px) {
+        /* Карточный вид таблиц: подпись столбца слева, значение и пояснение — одной строкой справа. */
+        .crm-cell { flex-direction: row; align-items: baseline; gap: 6px; }
+    }
+    .crm-matrix tr.crm-total th, .crm-matrix tr.crm-total td { font-weight: 600; background: var(--surface-2); }
+    /* D690–D693: «Мой день» на телефоне — крупные карточки задач, звонок и результат, диктовка, фото к сделке. Высота касания — по общим
+       правилам (D114, data-density), здесь не фиксируется; цвета — только переменные темы (светлая и тёмная). */
+    .crm-day-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+    .crm-day-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 10px; margin: 6px 0 16px; }
+    .crm-day-card { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0;
+                    display: flex; flex-direction: column; gap: 6px; overflow-wrap: anywhere; }
+    .crm-day-card.late { border-color: color-mix(in srgb, var(--warn-text) 45%, var(--line)); }
+    .crm-day-card h3 { margin: 0; font-size: 1.15em; font-weight: 600; }
+    .crm-day-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+    .crm-day-top .tag { margin-left: 0; }
+    .crm-day-client { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .crm-day-client > a, .crm-day-client > span:first-child { font-weight: 600; }
+    .crm-day-text { white-space: pre-wrap; color: var(--text-2); margin: 0; }
+    .crm-day-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .crm-day-actions > * { flex: 1 1 auto; text-align: center; }
+    .crm-day-actions .crm-day-call { flex-basis: 100%; font-size: 1.1em; }
+    .crm-day-phone { font-weight: 400; white-space: nowrap; margin-left: 4px; }
+    .crm-day-form { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; min-width: 0; }
+    .crm-day-form label { display: flex; flex-direction: column; gap: 3px; color: var(--text-2); min-width: 0; }
+    .crm-day-form label.check { flex-direction: row; align-items: center; }
+    .crm-day-form .crm-tabs { flex-wrap: wrap; margin: 0; }
+    .crm-day-form .crm-tabs button { flex: 1 1 auto; }
+    .crm-day-next { display: flex; flex-direction: column; gap: 6px; }
+    .crm-day-next input[type=number] { max-width: 140px; }
+    .crm-day-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .crm-day-chips button { flex: 1 1 auto; width: auto; }
+    .crm-day-chips button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+    .crm-voice { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .crm-voice label { display: flex; flex-direction: column; gap: 3px; color: var(--text-2); }
+    .crm-voice textarea { width: 100%; box-sizing: border-box; min-width: 0; }
+    .crm-voice-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .crm-voice-on { color: var(--bad-text); }
+    .crm-voice-hint { margin: 0; }
+    .crm-photos { margin: 12px 0; min-width: 0; }
+    .crm-photo-count { margin-left: 6px; font-weight: 400; }
+    .crm-photo-add { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+    .crm-photo-add label.wide { display: flex; flex-direction: column; gap: 3px; color: var(--text-2); }
+    .crm-photo-pick { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 5px 10px; border-radius: 4px;
+                      background: var(--accent); color: var(--on-accent); font-weight: 600; cursor: pointer; }
+    .crm-photo-pick.secondary { background: var(--line); color: var(--text); font-weight: 400; }
+    .crm-photo-pick.disabled { opacity: .5; cursor: default; }
+    .crm-photo-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .crm-photo-pick input[type=file] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; min-height: 0; padding: 0; }
+    .crm-photo-grid { list-style: none; margin: 6px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+    .crm-photo-grid li { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+    .crm-photo-thumb { padding: 0; background: var(--surface-3, var(--line)); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; aspect-ratio: 1 / 1; width: 100%; }
+    .crm-photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .crm-photo-view { position: fixed; inset: 0; z-index: 90; background: color-mix(in srgb, #000 70%, transparent); display: flex; align-items: center; justify-content: center; padding: 12px; }
+    .crm-photo-view-body { background: var(--surface); color: var(--text); border-radius: 10px; padding: 10px; max-width: min(960px, 100%); max-height: 100%; overflow-y: auto;
+                           display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .crm-photo-view-body img { max-width: 100%; max-height: 70vh; max-height: 70dvh; object-fit: contain; border-radius: 6px; align-self: center; }
+    @@media (max-width: 599px) {
+        .crm-day-head h1 { margin-bottom: 0; }
+        .crm-day-list { grid-template-columns: minmax(0, 1fr); }
+        .crm-day-card h3 { font-size: 1.2em; }
+        .crm-day-actions .crm-day-call { padding-top: 10px; padding-bottom: 10px; }
     }
 </style>

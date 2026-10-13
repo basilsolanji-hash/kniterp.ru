@@ -17,6 +17,9 @@ public sealed record CrmIntakeLead(
 /// <param name="Repeat">true — это повторное обращение: к найденному лиду добавлена активность, новый лид не создан.</param>
 public sealed record CrmIntakeResult(long LeadId, string Number, bool Repeat);
 
+/// <summary>Ответ API на заявку (D681): только «принято» — без Id и номера лида.</summary>
+public sealed record CrmIntakeAccepted(bool Accepted);
+
 /// <summary>Входящее письмо из почтового ящика организации (D676). Uid — номер письма в папке IMAP.</summary>
 public sealed record CrmInboundEmail(long Uid, string? MessageId, string? FromEmail, string? FromName, string? Subject, string? Text);
 
@@ -84,11 +87,19 @@ public sealed class CrmIntakeService(IKnitErpDbContext db, IAccessGuard guard, I
         return new CrmIntakeResult(lead.Id, lead.Number, false);
     }
 
+    /// <summary>Длительность звонка — не больше суток (D681).</summary>
+    public const int MaxCallSeconds = 86_400;
+
     public async Task<CrmCallResult> RegisterCallAsync(CrmCallEvent call, CancellationToken ct = default)
     {
         var ctx = await DemandAsync(ct);
         await CrmSettingsService.EnsureDefaultsAsync(db, ctx.OrganizationId, ct);
         var phone = CrmText.NormalizePhone(call.Phone) ?? throw new BusinessRuleException("crm.phone", "Телефон указан неверно: нужен номер с кодом страны, например +7 900 000-00-01.");
+        if (call.DurationSeconds is < 0 or > MaxCallSeconds)
+        {
+            throw new BusinessRuleException("crm.call.duration", $"Длительность звонка — от 0 до {MaxCallSeconds} секунд.");
+        }
+
         var externalId = CrmText.Optional(call.ExternalId, CrmActivity.ExternalRefMaxLength, "Внешний номер");
         await using var tx = await db.BeginTransactionAsync(ct);
         await db.LockAsync($"kniterp.crm.intake.{ctx.OrganizationId}", ct);

@@ -19,6 +19,7 @@ public sealed class CrmAppFixture : IAsyncLifetime
     private WebAppProcess? _app;
     private IPlaywright? _playwright;
     private string? _ownerState;
+    private CreatedOrganization? _org;
 
     public string BaseUrl => _app?.BaseUrl ?? string.Empty;
     public string AppLog => _app?.Log ?? string.Empty;
@@ -95,6 +96,31 @@ public sealed class CrmAppFixture : IAsyncLifetime
         {
             await s.SignIn.AcceptInvitationAsync(org.OwnerSetupToken, Password, Password);
         }
+
+        _org = org;
+    }
+
+    /// <summary>
+    /// «Мой день» (D690): сделка с контактом и телефоном, звонок Владельцу на сегодня и просроченная задача — через сервисы CRM от имени
+    /// Владельца. Срок — по московскому времени организации; телефон вымышленный.
+    /// </summary>
+    public async Task SeedManagerDayAsync(string stamp)
+    {
+        var org = _org!;
+        await using var crm = _host.Crm(org.OwnerUserId, org.OrganizationId);
+        long customer;
+        await using (var s = _host.As(org.OwnerUserId, org.OrganizationId))
+        {
+            customer = await s.Counterparties.CreateAsync(new KnitErp.Application.Catalog.CounterpartyCommand($"ООО «Звонок {stamp}»", null, null, false, true, null));
+        }
+
+        var contact = await crm.Contacts.CreateAsync(new KnitErp.Domain.Crm.CrmContactValues($"Тестова Вера {stamp}", "Закупщик", customer, Phone: "+7 900 000-00-31"));
+        var deal = await crm.Deals.CreateAsync(new KnitErp.Domain.Crm.CrmDealValues($"Кардиганы {stamp}", customer, contact, 20_000m));
+        var moscow = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "Europe/Moscow");
+        await crm.Activities.CreateAsync(new KnitErp.Application.Crm.CrmActivityCommand(KnitErp.Domain.Crm.CrmTarget.Deal, deal,
+            KnitErp.Domain.Crm.CrmActivityKind.Call, $"Обсудить образцы {stamp}", DueLocal: moscow.Date.AddHours(23).AddMinutes(59)));
+        await crm.Activities.CreateAsync(new KnitErp.Application.Crm.CrmActivityCommand(KnitErp.Domain.Crm.CrmTarget.Deal, deal,
+            KnitErp.Domain.Crm.CrmActivityKind.Task, $"Выслать прайс {stamp}", DueLocal: moscow.Date.AddDays(-1).AddHours(11)));
     }
 
     private static string TestInn()
@@ -327,6 +353,170 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Черновик сохранён" })).ToBeVisibleAsync();
         await Assertions.Expect(page.GetByLabel("Время отправки")).ToBeVisibleAsync();
         await Shot(page, "crm-10-mailing-template");
+    });
+
+    /// <summary>Приёмка (13.10.2026): лид → сделка → КП → заказ → счёт → оплата; оплата видна в сделке.</summary>
+    [SqlFact]
+    public Task Lead_deal_offer_order_invoice_payment() => RunAsync("crm-pay", false, "light", async page =>
+    {
+        await OpenAsync(page, "crm/leads");
+        await page.GetByLabel("Что нужно клиенту").FillAsync($"150 шарфов {Stamp}");
+        await page.GetByLabel("Контактное лицо").FillAsync("Ольга Оплатова");
+        await page.GetByLabel("Телефон").FillAsync("+7 900 000-00-09");
+        await page.GetByLabel("Компания").FillAsync($"ООО «Оплата {Stamp}»");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить лид" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/leads/\d+$"));
+        await WaitBlazorAsync(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Квалифицировать" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать сделку" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/deals/\d+$"));
+        await WaitBlazorAsync(page);
+        var dealUrl = page.Url;
+
+        await page.GetByLabel("Поиск позиции").FillAsync("СВ-E2E");
+        await page.GetByLabel("Поиск позиции").PressAsync("Tab");
+        await Assertions.Expect(page.GetByLabel("Позиция каталога")).ToHaveValueAsync(new Regex(@"\d+"));
+        await page.GetByLabel("Количество").FillAsync("150");
+        await page.GetByLabel("Цена").FillAsync("1000");
+        await page.GetByRole(AriaRole.Form, new() { Name = "Добавить позицию" }).GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Позиция добавлена" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Сформировать КП" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"КП-\d+") })).ToContainTextAsync("150 000,00");
+
+        // Заказ по КП → подтверждение из сделки → счёт.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Заказ по КП" }).ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { NameRegex = new Regex("^Создать заказ по КП-") }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Заказ покупателя создан" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Подтвердить", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Выставить счёт" })).ToBeVisibleAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Выставить счёт" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Link, new() { NameRegex = new Regex(@"^Счёт СЧ-\d+$") })).ToBeVisibleAsync();
+        await Assertions.Expect(page.Locator(".crm-paid")).ToContainTextAsync("Оплачено по сделке: 0,00 из 150 000,00");
+        await Shot(page, "crm-11-deal-invoice");
+
+        // Оплата — в карточке заказа (модуль продаж).
+        await page.GetByRole(AriaRole.Link, new() { Name = "Открыть", Exact = true }).First.ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/sales-orders/\d+$"));
+        await WaitBlazorAsync(page);
+        var pay = page.Locator("form", new() { Has = page.GetByRole(AriaRole.Button, new() { Name = "Записать оплату" }) });
+        await pay.GetByLabel("Сумма").FillAsync("150000");
+        await pay.GetByRole(AriaRole.Button, new() { Name = "Записать оплату" }).ClickAsync();
+        await Assertions.Expect(page.GetByText("Оплата записана")).ToBeVisibleAsync();
+
+        // Сделка: выиграна, оплачена.
+        await OpenAsync(page, dealUrl.Replace(app.BaseUrl, ""));
+        await Assertions.Expect(page.Locator(".page-head .tag")).ToHaveTextAsync("Выиграна");
+        await Assertions.Expect(page.Locator(".crm-paid")).ToContainTextAsync("150 000,00 из 150 000,00");
+        await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"ЗК-\d+") })).ToContainTextAsync("оплачен");
+        await Shot(page, "crm-12-deal-paid");
+    });
+
+    /// <summary>
+    /// Отчёты CRM (D685–D689): вкладки «Воронка», «Конверсия», «Источники», «Длительность», «План-факт», «Менеджеры» открываются на 1440 и 390 px
+    /// без горизонтальной прокрутки страницы (широкие таблицы — в своей прокрутке), Excel скачивается, ошибок JavaScript нет.
+    /// </summary>
+    [SqlFact]
+    public Task Reports_by_managers_and_sources_fit_390() => RunAsync("crm-reports", false, "light", async page =>
+    {
+        // Лид с источником и сделка из него — чтобы в разрезах были строки.
+        await OpenAsync(page, "crm/leads");
+        await page.GetByLabel("Что нужно клиенту").FillAsync($"150 жилетов {Stamp}");
+        await page.GetByLabel("Контактное лицо").FillAsync("Петрова Ольга");
+        await page.GetByLabel("Телефон").FillAsync("+7 900 000-00-05");
+        await page.GetByLabel("Компания").FillAsync($"ООО «Отчёт {Stamp}»");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Добавить лид" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/leads/\d+$"));
+        await WaitBlazorAsync(page);
+        await page.GetByRole(AriaRole.Button, new() { Name = "Квалифицировать" }).ClickAsync();
+        await page.GetByLabel("Сумма сделки").FillAsync("45000");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Создать сделку" }).ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/deals/\d+$"));
+        await WaitBlazorAsync(page);
+
+        var tabs = new[] { ("Воронка", "Воронка по менеджерам"), ("Конверсия", "Конверсия: лид → сделка → выигрыш"), ("Источники", "Источники лидов"),
+            ("Длительность", "Длительность этапов"), ("План-факт", "План-факт по месяцам"), ("Менеджеры", "Менеджеры") };
+        foreach (var (width, suffix) in new[] { (1440, "desktop"), (390, "phone") })
+        {
+            await page.SetViewportSizeAsync(width, width == 390 ? 844 : 900);
+            await OpenAsync(page, "crm/summary");
+            await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = "Сводка и отчёты CRM" })).ToBeVisibleAsync();
+            var group = page.GetByRole(AriaRole.Group, new() { Name = "Разрез отчёта" });
+            foreach (var (tab, heading) in tabs)
+            {
+                await group.GetByRole(AriaRole.Button, new() { Name = tab, Exact = true }).ClickAsync();
+                await Assertions.Expect(group.GetByRole(AriaRole.Button, new() { Name = tab, Exact = true })).ToHaveAttributeAsync("aria-pressed", "true");
+                await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { Name = heading, Exact = true })).ToBeVisibleAsync();
+                await Assertions.Expect(page.Locator(".error")).ToHaveCountAsync(0);
+                Assert.True(await NoHorizontalScrollAsync(page), $"{tab} {width}");
+                await Shot(page, $"crm-report-{suffix}-{Array.FindIndex(tabs, t => t.Item1 == tab) + 1}");
+            }
+        }
+
+        await Assertions.Expect(page.GetByRole(AriaRole.Table, new() { Name = "Конверсия по менеджерам" })).ToHaveCountAsync(0); // вкладка закрыта
+        await page.GetByRole(AriaRole.Group, new() { Name = "Разрез отчёта" }).GetByRole(AriaRole.Button, new() { Name = "Источники", Exact = true }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Table, new() { Name = "Источники лидов" })).ToContainTextAsync("Не указан");
+        var download = await page.RunAndWaitForDownloadAsync(() => page.GetByRole(AriaRole.Link, new() { Name = "Excel" }).ClickAsync());
+        Assert.EndsWith(".xlsx", download.SuggestedFilename);
+    });
+
+    /// <summary>
+    /// D690–D693: день менеджера на телефоне 390 px — «Мой день», «Позвонить» (tel:), результат звонка со следующим шагом, заметка,
+    /// «Выполнено»; без горизонтальной прокрутки, в светлой и тёмной теме, 0 ошибок JS. Фото к сделке проверяет интеграционный тест.
+    /// </summary>
+    [SqlFact]
+    public Task Manager_day_on_phone_call_note_photo() => RunAsync("crm-mobile-day", true, "light", async page =>
+    {
+        await app.SeedManagerDayAsync(Stamp);
+        await OpenAsync(page, "crm/today");
+        await Assertions.Expect(page.GetByRole(AriaRole.Heading, new() { NameRegex = new Regex("^Мой день") })).ToBeVisibleAsync();
+        var call = page.GetByRole(AriaRole.Article, new() { Name = $"Обсудить образцы {Stamp}" });
+        var overdue = page.GetByRole(AriaRole.Article, new() { Name = $"Выслать прайс {Stamp}" });
+        await Assertions.Expect(call).ToContainTextAsync($"ООО «Звонок {Stamp}»");
+        await Assertions.Expect(call).ToContainTextAsync("+7 900 000-00-31");
+        await Assertions.Expect(call.GetByRole(AriaRole.Link, new() { NameRegex = new Regex("^Позвонить") })).ToHaveAttributeAsync("href", "tel:+79000000031");
+        await Assertions.Expect(overdue).ToHaveClassAsync(new Regex("late"));
+        Assert.True(await NoHorizontalScrollAsync(page), "crm/today");
+        await Shot(page, "crm-mobile-01-today-dark");
+
+        // Дальше — светлая тема (выбор темы хранится в браузере, по умолчанию тёмная).
+        await page.EvaluateAsync("() => localStorage.setItem('kniterp.theme', 'light')");
+        await OpenAsync(page, "crm/today");
+        await Assertions.Expect(page.Locator("html")).ToHaveAttributeAsync("data-theme", "light");
+        Assert.True(await NoHorizontalScrollAsync(page), "crm/today light");
+        await Shot(page, "crm-mobile-01-today-light");
+
+        // Результат звонка: не дозвонился, комментарий, перезвонить завтра (подставляется сам).
+        await call.GetByRole(AriaRole.Button, new() { Name = "Результат звонка" }).ClickAsync();
+        var form = call.GetByRole(AriaRole.Form, new() { Name = "Результат звонка" });
+        await form.GetByRole(AriaRole.Button, new() { Name = "Не дозвонился" }).ClickAsync();
+        await Assertions.Expect(form.GetByLabel("Следующий шаг через, дней")).ToHaveValueAsync("1");
+        await form.GetByLabel("Комментарий").FillAsync("Занято, перезвонить утром");
+        var dictate = form.GetByRole(AriaRole.Button, new() { Name = "Надиктовать" });
+        if (await dictate.CountAsync() > 0)
+        {
+            // Браузер с Web Speech API: кнопка и подсказка о том, кто распознаёт речь.
+            await Assertions.Expect(form).ToContainTextAsync("knitERP не отправляет звук и текст сторонним сервисам");
+        }
+
+        Assert.True(await NoHorizontalScrollAsync(page), "call form");
+        await Shot(page, "crm-mobile-02-call-result");
+        await form.GetByRole(AriaRole.Button, new() { Name = "Сохранить звонок" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Звонок записан" })).ToBeVisibleAsync();
+        await Assertions.Expect(call).ToHaveCountAsync(0); // выполнен, «Перезвонить» — на завтра
+
+        // Заметка к просроченной задаче и «Выполнено» одним нажатием.
+        await overdue.GetByRole(AriaRole.Button, new() { Name = "Заметка" }).ClickAsync();
+        await overdue.GetByLabel("Заметка", new() { Exact = true }).FillAsync("Клиент просит прайс в PDF");
+        Assert.True(await NoHorizontalScrollAsync(page), "note form");
+        await Shot(page, "crm-mobile-03-note");
+        await overdue.GetByRole(AriaRole.Button, new() { Name = "Сохранить заметку" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Заметка добавлена" })).ToBeVisibleAsync();
+        await overdue.GetByRole(AriaRole.Button, new() { Name = "Выполнено" }).ClickAsync();
+        await Assertions.Expect(page.GetByRole(AriaRole.Status).Filter(new() { HasText = "Отмечено выполненным" })).ToBeVisibleAsync();
+        await Assertions.Expect(overdue).ToHaveCountAsync(0);
+
+        Assert.True(await NoHorizontalScrollAsync(page), "crm/today done");
+        await Shot(page, "crm-mobile-04-today-done");
     });
 
     private static Task Shot(IPage page, string name)

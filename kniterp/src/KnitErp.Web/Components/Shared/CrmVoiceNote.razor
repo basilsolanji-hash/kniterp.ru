@@ -1,0 +1,189 @@
+@using KnitErp.Domain.Crm
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@*
+    D693: поле заметки с диктовкой. Кнопка «Надиктовать» есть, только если браузер поддерживает Web Speech API (SpeechRecognition или
+    webkitSpeechRecognition), язык ru-RU; иначе — обычное поле. Распознанный текст дописывается в поле, пользователь правит и сохраняет
+    сам — компонент ничего не сохраняет. Подключение: <CrmVoiceNote @bind-Value="_note" Label="@L("Заметка")" />.
+*@
+<div class="crm-voice">
+    <label class="wide">
+        @(Label ?? L("Заметка"))
+        <textarea id="@Id" rows="@Rows" maxlength="@MaxLength" placeholder="@Placeholder" disabled="@Disabled"
+                  @bind:get="Value" @bind:set="SetAsync" @bind:event="oninput"></textarea>
+    </label>
+    @if (_supported)
+    {
+        <div class="crm-voice-bar">
+            @if (_listening)
+            {
+                <button type="button" class="secondary crm-voice-on" @onclick="StopAsync" aria-pressed="true">● @L("Остановить диктовку")</button>
+                <span class="muted small" role="status">@L("Говорите — текст появится в поле.")</span>
+            }
+            else
+            {
+                <button type="button" class="secondary" @onclick="StartAsync" disabled="@Disabled" aria-pressed="false">🎤 @L("Надиктовать")</button>
+            }
+        </div>
+        <p class="muted small crm-voice-hint">@L("Речь распознаёт браузер. knitERP не отправляет звук и текст сторонним сервисам; браузер может использовать для распознавания свой сервис (например, Chrome — Google). Проверьте текст перед сохранением.")</p>
+    }
+    @if (_error is not null)
+    {
+        <p class="error small" role="alert">@_error</p>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>Подпись поля (уже переведённая); по умолчанию «Заметка».</summary>
+    [Parameter] public string? Label { get; set; }
+
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter] public int Rows { get; set; } = 3;
+    [Parameter] public int MaxLength { get; set; } = CrmActivity.TextMaxLength;
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? Id { get; set; }
+
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<CrmVoiceNote>? _ref;
+    private bool _supported;
+    private bool _listening;
+    private string? _error;
+    private string _before = string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/crm-voice.js");
+            _supported = await _module.InvokeAsync<bool>("supported");
+            if (_supported)
+            {
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            _supported = false; // нет модуля или схема отключилась — остаётся обычное поле
+        }
+    }
+
+    private Task SetAsync(string? value)
+    {
+        Value = value;
+        return ValueChanged.InvokeAsync(value);
+    }
+
+    private async Task StartAsync()
+    {
+        if (_module is null || _listening)
+        {
+            return;
+        }
+
+        _error = null;
+        _before = (Value ?? string.Empty).TrimEnd();
+        _ref ??= DotNetObjectReference.Create(this);
+        try
+        {
+            _listening = await _module.InvokeAsync<bool>("start", _ref, "ru-RU");
+            if (!_listening)
+            {
+                _error = L("Не удалось включить диктовку. Попробуйте ещё раз.");
+            }
+        }
+        catch (JSException)
+        {
+            _error = L("Не удалось включить диктовку. Попробуйте ещё раз.");
+        }
+    }
+
+    private async Task StopAsync()
+    {
+        if (_module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _module.InvokeVoidAsync("stop");
+        }
+        catch (JSException)
+        {
+        }
+
+        _listening = false;
+    }
+
+    [JSInvokable]
+    public async Task OnSpeech(string final, string interim)
+    {
+        var spoken = (final + interim).Trim();
+        if (spoken.Length == 0)
+        {
+            return;
+        }
+
+        var text = _before.Length == 0 ? spoken : _before + " " + spoken;
+        if (text.Length > MaxLength)
+        {
+            text = text[..MaxLength];
+        }
+
+        await InvokeAsync(async () =>
+        {
+            await SetAsync(text);
+            StateHasChanged();
+        });
+    }
+
+    [JSInvokable]
+    public Task OnSpeechError(string code) => InvokeAsync(() =>
+    {
+        _error = code switch
+        {
+            "not-allowed" or "service-not-allowed" => L("Нет доступа к микрофону — разрешите его для этого сайта в настройках браузера."),
+            "no-speech" => L("Речь не услышана — попробуйте ещё раз ближе к микрофону."),
+            "aborted" => null,
+            _ => L("Диктовка прервалась. Попробуйте ещё раз."),
+        };
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task OnSpeechEnd() => InvokeAsync(() =>
+    {
+        _listening = false;
+        StateHasChanged();
+    });
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                if (_listening)
+                {
+                    await _module.InvokeVoidAsync("stop");
+                }
+
+                await _module.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException)
+            {
+            }
+        }
+
+        _ref?.Dispose();
+    }
+}
