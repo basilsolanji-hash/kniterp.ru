@@ -1,6 +1,7 @@
 using KnitErp.Application.Access;
 using KnitErp.Application.Catalog;
 using KnitErp.Application.Common;
+using KnitErp.Domain.Crm;
 using KnitErp.Application.Development;
 using KnitErp.Application.Organizations;
 using KnitErp.Domain.Access;
@@ -26,9 +27,16 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         return (new DevModelService(all.Db, guard, user, host.Clock), new DevSettingsService(all.Db, guard, user, host.Clock), all);
     }
 
+    private async Task<int> SaveCostAsync(long userId, long organizationId, long modelId)
+    {
+        await using var all = host.As(userId, organizationId);
+        var user = new TestUser { UserId = userId, OrganizationId = organizationId, ClientAddress = host.ClientAddress };
+        return await new DevCostService(all.Db, new AccessGuard(all.Db, user, host.Clock), user, host.Clock).SaveAsync(modelId, new DevCostScenario());
+    }
+
     private static DevModelHeader Header(string name = "Свитер «Северный»", long? collection = null, long? customer = null, bool hasPattern = true,
-        DateOnly? launch = null, IReadOnlyDictionary<DevRole, long?>? assignees = null) =>
-        new(name, collection, DevCategory.Sweater, DevAudience.Women, false, hasPattern, customer, null, launch ?? new DateOnly(2026, 12, 15),
+        DateOnly? launch = null, IReadOnlyDictionary<DevRole, long?>? assignees = null, long? deal = null) =>
+        new(name, collection, DevCategory.Sweater, DevAudience.Women, false, hasPattern, customer, deal, launch ?? new DateOnly(2026, 12, 15),
             DevPriority.Normal, assignees ?? new Dictionary<DevRole, long?>());
 
     [SqlFact]
@@ -147,6 +155,28 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
         Assert.Equal("dev.model.assignee", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
             other.CreateAsync(Header(assignees: new Dictionary<DevRole, long?> { [DevRole.Technologist] = a.OwnerUserId })))).Code);
         Assert.NotEmpty(await otherSettings.StagesAsync());
+
+        // Аудит 2026-10-12: сделка CRM — только своей организации; несуществующая тоже не принимается.
+        long foreignDeal, dealCustomer;
+        {
+            var (_, _, s) = As(a.OwnerUserId, a.OrganizationId);
+            await using var __ = s;
+            dealCustomer = await s.Counterparties.CreateAsync(new CounterpartyCommand("ООО «Вымышленный заказчик»", null, null, false, true, null));
+        }
+
+        await using (var crm = host.Crm(a.OwnerUserId, a.OrganizationId))
+        {
+            foreignDeal = await crm.Deals.CreateAsync(new CrmDealValues("Свитера", dealCustomer));
+        }
+
+        Assert.Equal("dev.model.deal", (await Assert.ThrowsAsync<BusinessRuleException>(() => other.CreateAsync(Header(deal: foreignDeal)))).Code);
+        Assert.Equal("dev.model.deal", (await Assert.ThrowsAsync<BusinessRuleException>(() => other.CreateAsync(Header(deal: long.MaxValue)))).Code);
+        {
+            var (models, _, s) = As(a.OwnerUserId, a.OrganizationId);
+            await using var __ = s;
+            var withDeal = await models.CreateAsync(Header("Со сделкой", deal: foreignDeal));
+            Assert.Equal(foreignDeal, (await models.GetAsync(withDeal)).DealId);
+        }
     }
 
     [SqlFact]
@@ -191,6 +221,11 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             await using var __ = s;
             var m = await models.GetAsync(id);
             Assert.Equal((900m, 2500m, "уточнено технологом"), (m.Brief.TargetCost!.Value, m.Brief.TargetPrice!.Value, m.Brief.Description!));
+            // D746: без сохранённого расчёта себестоимости утвердить нельзя.
+            Assert.Equal("dev.approve.cost", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+                models.MoveAsync(id, DevStage.Approved, "образец принят", m.RowVersion))).Code);
+            await SaveCostAsync(chief, org.OrganizationId, id);
+            m = await models.GetAsync(id);
             await models.MoveAsync(id, DevStage.Approved, "образец принят", m.RowVersion);
             m = await models.GetAsync(id);
             Assert.Equal(DevStage.Approved, m.Stage);
@@ -240,6 +275,9 @@ public sealed class DevModelTests(SqlTestHost host) : IClassFixture<SqlTestHost>
             assignees: new Dictionary<DevRole, long?> { [DevRole.Designer] = designer }));
         var cancelled = await models.CreateAsync(Header("Отменённая"));
         await models.CancelAsync(cancelled, "заказчик отказался", (await models.GetAsync(cancelled)).RowVersion);
+        // Аудит 2026-10-12: в отменённую модель файлы не загружаются.
+        Assert.Equal("dev.model.cancelled", (await Assert.ThrowsAsync<BusinessRuleException>(() =>
+            models.AddFileAsync(cancelled, DevFileKind.Photo, "x.png", Png, null))).Code);
 
         var board = await models.BoardAsync(new DevModelFilter());
         var idea = board.Single(c => c.Stage == DevStage.Idea);

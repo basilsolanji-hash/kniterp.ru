@@ -13,7 +13,7 @@ internal sealed record DevYarnNorm(long ItemId, string Code, string Name, string
 /// </summary>
 internal static class DevYarnNorms
 {
-    public static async Task<(List<DevYarnNorm> Norms, List<string> Warnings)> ForModelAsync(IKnitErpDbContext db, long org, long modelId, CancellationToken ct)
+    public static async Task<(List<DevYarnNorm> Norms, List<DevNote> Warnings)> ForModelAsync(IKnitErpDbContext db, long org, long modelId, CancellationToken ct)
     {
         var details = await db.DevDetails.AsNoTracking().Where(d => d.OrganizationId == org && d.ModelId == modelId).OrderBy(d => d.SortOrder).ThenBy(d => d.Id)
             .ToListAsync(ct);
@@ -33,10 +33,10 @@ internal static class DevYarnNorms
         var input = details.Select(d => best.TryGetValue(d.Id, out var f)
             ? new DevNormDetail(d.Name, d.Quantity, f.WeightGrams, shares.Where(s => s.SampleDetailId == f.Id).ToDictionary(s => s.ColorId, s => s.Percent))
             : new DevNormDetail(d.Name, d.Quantity, d.PlanWeightGrams, new Dictionary<long, decimal>())).ToList();
-        var warnings = new List<string>();
+        var warnings = new List<DevNote>();
         if (details.Count == 0)
         {
-            warnings.Add("У модели нет деталей.");
+            warnings.Add(DevNote.Of(DevNotes.NoDetails));
         }
 
         var result = DevNorms.Compute(input, colors.Select(c => c.Id).ToList());

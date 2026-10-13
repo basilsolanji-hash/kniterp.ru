@@ -218,3 +218,24 @@ public sealed class DevCostLine
     public decimal UnitPrice { get; private set; }
     public decimal Amount { get; private set; }
 }
+
+/// <summary>
+/// Правило утверждения (D746): без сохранённого расчёта — нельзя (если так настроено); маржа последней версии ниже порога — только
+/// с обоснованием в комментарии к переходу.
+/// </summary>
+public static class DevApprovalRules
+{
+    public static void Ensure(bool requireCost, decimal? minMarginPercent, bool hasRun, decimal? lastMarginPercent, string? comment)
+    {
+        if (requireCost && !hasRun)
+        {
+            throw new BusinessRuleException("dev.approve.cost", "Перед утверждением сохраните расчёт себестоимости (вкладка «Себестоимость»).");
+        }
+
+        if (hasRun && minMarginPercent is { } min && (lastMarginPercent ?? decimal.MinValue) < min && string.IsNullOrWhiteSpace(comment))
+        {
+            var threshold = min.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            throw new BusinessRuleException("dev.approve.margin", $"Маржа последнего расчёта ниже порога {threshold} % — укажите обоснование в комментарии к переходу.");
+        }
+    }
+}

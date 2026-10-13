@@ -11,7 +11,7 @@ public sealed record DevAlert(string Text, string Href, bool Warning, string Key
 
 /// <summary>
 /// Уведомления разработки (D796) — считаются при открытии колокольчика, ничего не хранится: модели на моей стадии, мои просрочки,
-/// главному технологу — модели на «Себестоимости» и «Согласовании», ждущие утверждения. Два запроса к базе.
+/// главному технологу — модели на «Себестоимости» и «Согласовании», ждущие утверждения; образцы, не возвращённые заказчиком к сроку (D723).
 /// </summary>
 public static class DevNotifications
 {
@@ -58,6 +58,17 @@ public static class DevNotifications
             if (waiting > 0)
             {
                 result.Add(new($"Модели ждут согласования и утверждения: {waiting}", "dev/models?view=table", false, $"dev:approve:{waiting}"));
+            }
+        }
+
+        // D723: образцы не вернули к сроку — тем, кто ведёт модели (право изменения).
+        if (ctx.Permissions.Has(Permissions.DevEdit))
+        {
+            var overdue = await db.DevSamples.AsNoTracking().CountAsync(s => s.OrganizationId == ctx.OrganizationId && s.Custody == DevSampleCustody.AtCustomer
+                                                                               && s.ReturnBy != null && s.ReturnBy < today, ct);
+            if (overdue > 0)
+            {
+                result.Add(new($"Образцы не вернули к сроку: {overdue}", "dev/analytics#samples-out", true, $"dev:samples:{overdue}:{today:yyyyMMdd}"));
             }
         }
 

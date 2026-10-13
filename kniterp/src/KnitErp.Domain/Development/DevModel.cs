@@ -101,6 +101,12 @@ public sealed class DevModel
     public long? ConstructorUserId { get; private set; }
     public long? TechnologistUserId { get; private set; }
     public long? ProgrammerUserId { get; private set; }
+    /// <summary>Предыдущая версия модели (D769): новая версия делается от переданной в производство.</summary>
+    public long? PreviousVersionId { get; private set; }
+
+    /// <summary>Номер версии модели: 1 — первая, далее +1 от предыдущей (D769).</summary>
+    public int VersionNo { get; private set; } = 1;
+
     /// <summary>Позиция «Готовая продукция», в которую передана модель (D750).</summary>
     public long? ProductionItemId { get; private set; }
 
@@ -264,6 +270,18 @@ public sealed class DevModel
         ProductionItemId = itemId;
         ProductionTechCardId = techCardId;
         return SetStage(DevStage.Handed, "Передано в производство", nowUtc, userId);
+    }
+
+    /// <summary>Отметить модель как следующую версию (D769).</summary>
+    public void MarkVersionOf(long previousId, int versionNo)
+    {
+        if (versionNo < 2 || previousId == Id)
+        {
+            throw new BusinessRuleException("dev.version.number", "Новая версия — от другой модели, номер версии от 2.");
+        }
+
+        PreviousVersionId = previousId;
+        VersionNo = versionNo;
     }
 
     public DevModelStageEntry Cancel(string? reason, DateTime nowUtc, long userId)

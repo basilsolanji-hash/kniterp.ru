@@ -50,6 +50,12 @@ public sealed class DevSettings
     /// <summary>Наценка по умолчанию, % (D742).</summary>
     public decimal MarkupPercent { get; private set; }
 
+    /// <summary>Утверждать модель только с сохранённым расчётом себестоимости (D746).</summary>
+    public bool RequireCostForApproval { get; private set; } = true;
+
+    /// <summary>Порог маржи, % от цены (D746): ниже — утверждение только с обоснованием в комментарии; пусто — без порога.</summary>
+    public decimal? MinMarginPercent { get; private set; }
+
     public byte[] RowVersion { get; private set; } = [];
 
     public const int DefaultTolerance = 10;
@@ -107,8 +113,14 @@ public sealed class DevSettings
     }
 
     /// <summary>Условия расчёта себестоимости (D740, D742): отходы пряжи, накладные, ставка за минуту, наценка по умолчанию.</summary>
-    public void SetCosting(decimal yarnWastePercent, decimal overheadPercent, decimal? laborRatePerMinute, decimal markupPercent)
+    public void SetCosting(decimal yarnWastePercent, decimal overheadPercent, decimal? laborRatePerMinute, decimal markupPercent,
+        bool requireCostForApproval = true, decimal? minMarginPercent = null)
     {
+        if (minMarginPercent is < -100 or > 100)
+        {
+            throw new BusinessRuleException("dev.cost.margin", "Порог маржи — от −100 до 100 %.");
+        }
+
         if (yarnWastePercent is < 0 or > 100)
         {
             throw new BusinessRuleException("dev.cost.percent", "Отходы пряжи — от 0 до 100 %.");
@@ -125,6 +137,8 @@ public sealed class DevSettings
         OverheadPercent = overheadPercent;
         LaborRatePerMinute = laborRatePerMinute;
         MarkupPercent = markupPercent;
+        RequireCostForApproval = requireCostForApproval;
+        MinMarginPercent = minMarginPercent;
     }
 
     /// <summary>Факт больше плана сверх допуска.</summary>

@@ -124,6 +124,12 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             hasPatternFile: files.Any(f => f.Kind == DevFileKind.Pattern),
             hasProgram: files.Any(f => f.Kind == DevFileKind.MachineProgram),
             hasResponsible: DevStages.ResponsibleRole(m.Stage) is not { } role || m.AssigneeOf(role) is not null);
+        // D769: соседние версии модели — ссылки «на основе» и «следующая версия».
+        var previous = m.PreviousVersionId is { } pid
+            ? await db.DevModels.AsNoTracking().Where(x => x.Id == pid && x.OrganizationId == ctx.OrganizationId).Select(x => new { x.Id, x.Number }).SingleOrDefaultAsync(ct)
+            : null;
+        var next2 = await db.DevModels.AsNoTracking().Where(x => x.OrganizationId == ctx.OrganizationId && x.PreviousVersionId == m.Id)
+            .Select(x => new { x.Id, x.Number }).SingleOrDefaultAsync(ct);
         return new DevModelDto(m.Id, m.Number, m.Name, m.CollectionId, collection, m.Category, m.Audience, m.ChildSafety, m.HasPattern, m.CustomerId, customer,
             m.DealId, m.PlannedLaunch, m.Priority, m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), m.CancelReason,
             DevModel.Roles.Select(r => new DevAssigneeDto(r, m.AssigneeOf(r), m.AssigneeOf(r) is { } u ? users.GetValueOrDefault(u) : null)).ToList(),
@@ -137,7 +143,8 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
                 users.GetValueOrDefault(f.UploadedByUserId) ?? "—")).ToList(),
             targets, next, canEdit && !DevStages.IsFinal(m.Stage), canApprove,
             DevModel.IsLate(m.Stage, m.PlannedLaunch, today), DevModel.IsStageOverdue(m.Stage, m.StageSinceUtc, plan.PlanDays(m.Stage), clock.UtcNow),
-            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false }, m.MainSketchFileId);
+            users.GetValueOrDefault(m.CreatedByUserId) ?? "—", m.CreatedAtUtc, m.RowVersion, hints, template is { IsEmpty: false }, m.MainSketchFileId,
+            m.VersionNo, m.PreviousVersionId, previous?.Number, next2?.Id, next2?.Number);
     }
 
     /// <summary>
@@ -290,6 +297,12 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
         {
             var plan = await DevStagePlan.LoadAsync(db, ctx.OrganizationId, ct);
             var before = m.Stage;
+            // Сначала право утверждать (его проверяет MoveTo), затем расчёт: без права — понятный отказ «утверждает главный технолог».
+            if (to == DevStage.Approved && ctx.Permissions.Has(Permissions.DevApprove))
+            {
+                await EnsureApprovableAsync(ctx, m, comment, ct);
+            }
+
             db.DevModelStages.Add(m.MoveTo(to, ctx.Permissions.Has(Permissions.DevApprove), plan.IsEnabled, comment, clock.UtcNow, ctx.UserId));
             Audit(ctx, AuditActions.DevStageChanged, id, DevStages.Name(before), DevStages.Name(to), m.Number);
         }, ct);
@@ -339,11 +352,20 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             throw new BusinessRuleException("dev.model.handed", "Модель передана в производство — изменения вносятся новой версией модели.");
         }
 
+        if (model.Stage == DevStage.Cancelled)
+        {
+            throw new BusinessRuleException("dev.model.cancelled", "Модель отменена — сначала верните её в работу.");
+        }
+
         var name = DevFile.CleanName(fileName);
         await using var tx = await db.BeginTransactionAsync(ct);
         try
         {
             await db.LockAsync($"kniterp.dev.files.{ctx.OrganizationId}.{modelId}", ct);
+            var used = await db.DevFiles.AsNoTracking().Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId)
+                .GroupBy(_ => 1).Select(g => new { Count = g.Count(), Bytes = g.Sum(f => (long)f.SizeBytes) }).SingleOrDefaultAsync(ct);
+            DevFile.EnsureQuota(used?.Count ?? 0, used?.Bytes ?? 0, content.Length);
+
             var last = await db.DevFiles.AsNoTracking()
                 .Where(f => f.OrganizationId == ctx.OrganizationId && f.ModelId == modelId && f.Kind == kind && f.FileName == name)
                 .MaxAsync(f => (int?)f.Version, ct) ?? 0;
@@ -555,6 +577,13 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
             throw new BusinessRuleException("dev.model.customer", "Заказчик не найден или в архиве.");
         }
 
+        // Аудит 2026-10-12: сделка — только своей организации (раньше номер принимался без проверки; в БД теперь составной FK).
+        if (h.DealId is { } did and > 0 && did != current?.DealId
+            && !await db.CrmDeals.AnyAsync(d => d.Id == did && d.OrganizationId == org, ct))
+        {
+            throw new BusinessRuleException("dev.model.deal", "Сделка не найдена.");
+        }
+
         var users = h.Assignees.Values.OfType<long>().Distinct().ToList();
         var unchanged = current is null ? [] : DevModel.Roles.Select(current.AssigneeOf).OfType<long>().ToList();
         var check = users.Except(unchanged).ToList();
@@ -569,6 +598,17 @@ public sealed class DevModelService(IKnitErpDbContext db, IAccessGuard guard, IC
     }
 
     /// <summary>Изменение модели: право, своя организация, версия строки, журнал; при отказе изменения забываются (один DbContext вкладки).</summary>
+    /// <summary>D746: утверждение — с сохранённым расчётом себестоимости; маржа ниже порога — с обоснованием.</summary>
+    private async Task EnsureApprovableAsync(AccessContext ctx, DevModel m, string? comment, CancellationToken ct)
+    {
+        var settings = await db.DevSettings.AsNoTracking().SingleOrDefaultAsync(x => x.OrganizationId == ctx.OrganizationId, ct)
+                       ?? DevSettings.Defaults(ctx.OrganizationId);
+        var last = await db.DevCostRuns.AsNoTracking().Where(r => r.OrganizationId == ctx.OrganizationId && r.ModelId == m.Id)
+            .OrderByDescending(r => r.Version).Select(r => new { r.Price, r.Margin }).FirstOrDefaultAsync(ct);
+        var marginPercent = last is null || last.Price == 0 ? (decimal?)null : last.Margin * 100m / last.Price;
+        DevApprovalRules.Ensure(settings.RequireCostForApproval, settings.MinMarginPercent, last is not null, marginPercent, comment);
+    }
+
     private async Task EditAsync(long id, byte[] rowVersion, string permission, Func<AccessContext, DevModel, Task> change, CancellationToken ct)
     {
         var ctx = await guard.DemandAsync(permission, ct);

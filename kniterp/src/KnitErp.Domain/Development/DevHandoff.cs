@@ -4,7 +4,7 @@ namespace KnitErp.Domain.Development;
 public sealed record DevNormDetail(string Name, int Quantity, decimal? WeightGrams, IReadOnlyDictionary<long, decimal> SharePercentByColor);
 
 /// <summary>Итог расчёта: граммы пряжи на изделие по цвету палитры и предупреждения (чего не хватило для расчёта).</summary>
-public sealed record DevNormResult(IReadOnlyDictionary<long, decimal> GramsByColor, IReadOnlyList<string> Warnings);
+public sealed record DevNormResult(IReadOnlyDictionary<long, decimal> GramsByColor, IReadOnlyList<DevNote> Warnings);
 
 /// <summary>
 /// Нормы пряжи на одно изделие для техкарты производства (D751): вес детали (факт образца, иначе план) × штук в изделии × доля цвета.
@@ -15,12 +15,12 @@ public static class DevNorms
     public static DevNormResult Compute(IReadOnlyList<DevNormDetail> details, IReadOnlyCollection<long> colorIds)
     {
         var grams = new Dictionary<long, decimal>();
-        var warnings = new List<string>();
+        var warnings = new List<DevNote>();
         foreach (var d in details)
         {
             if (d.WeightGrams is not { } weight || weight <= 0)
             {
-                warnings.Add($"«{d.Name}»: нет веса детали (ни факта образца, ни плана).");
+                warnings.Add(DevNote.Of(DevNotes.NoWeight, d.Name));
                 continue;
             }
 
@@ -32,7 +32,7 @@ public static class DevNorms
 
             if (shares.Count == 0)
             {
-                warnings.Add($"«{d.Name}»: нет долей цветов — внесите факт образца с долями цветов.");
+                warnings.Add(DevNote.Of(DevNotes.NoShares, d.Name));
                 continue;
             }
 

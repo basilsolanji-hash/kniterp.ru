@@ -32,7 +32,7 @@ public sealed record DevAccessoryDto(long Id, long ItemId, string Code, string N
 public sealed record DevCostingDto(
     IReadOnlyList<DevCostLineDto> Lines, decimal Yarn, decimal Accessories, decimal Labor, decimal Overhead, decimal Cost, decimal Price, decimal Margin,
     decimal? MarginPercent, decimal? TargetCost, decimal? TargetPrice, decimal? VersusTargetCost, decimal OverheadPercent, decimal YarnWastePercent,
-    decimal? LaborRatePerMinute, DevPriceMode Mode, decimal? MarkupPercent, IReadOnlyList<string> Warnings, IReadOnlyList<DevCostRunDto> Runs,
+    decimal? LaborRatePerMinute, DevPriceMode Mode, decimal? MarkupPercent, IReadOnlyList<DevNote> Warnings, IReadOnlyList<DevCostRunDto> Runs,
     IReadOnlyList<DevAccessoryDto> AccessoryList, IReadOnlyList<DevOptionDto> Materials, IReadOnlyList<DevOptionDto> AccessoryOptions, bool CanEdit);
 
 /// <summary>
@@ -182,7 +182,7 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
 
     // ---------- Расчёт ----------
 
-    private async Task<(List<DevCostLineDto> Lines, DevCostResult Result, DevSettings Settings, List<string> Warnings, DevCostScenario Scenario)> ComputeAsync(
+    private async Task<(List<DevCostLineDto> Lines, DevCostResult Result, DevSettings Settings, List<DevNote> Warnings, DevCostScenario Scenario)> ComputeAsync(
         long org, DevModel m, DevCostScenario? scenario, CancellationToken ct)
     {
         var s = scenario ?? new DevCostScenario();
@@ -217,7 +217,7 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
             else
             {
-                warnings.Add($"«{norm.Name}»: единица «{norm.Symbol}» — не кг и не г, в расчёт не вошла.");
+                warnings.Add(DevNote.Of(DevNotes.UnitForCost, norm.Name, norm.Symbol));
             }
         }
 
@@ -243,7 +243,7 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
                 : (0m, "нет цены");
             if (source == "нет цены")
             {
-                warnings.Add($"«{line.Name}»: нет цены ни в закупках, ни в каталоге — введите вручную.");
+                warnings.Add(DevNote.Of(DevNotes.NoPrice, line.Name));
             }
 
             priced.Add((line with { UnitPrice = price }, original, source));
@@ -267,13 +267,13 @@ public sealed class DevCostService(IKnitErpDbContext db, IAccessGuard guard, ICu
             }
             else
             {
-                warnings.Add($"Операция «{o.Name}»: нет ни расценки, ни нормы и ставки за минуту — работа не учтена.");
+                warnings.Add(DevNote.Of(DevNotes.NoLabor, o.Name));
             }
         }
 
         if (operations.Count == 0)
         {
-            warnings.Add("Операций технолога нет — работа не учтена.");
+            warnings.Add(DevNote.Of(DevNotes.NoOperations));
         }
 
         var markup = s.Mode == DevPriceMode.Markup ? s.MarkupPercent ?? settings.MarkupPercent : (decimal?)null;
