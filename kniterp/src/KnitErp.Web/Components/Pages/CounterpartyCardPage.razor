@@ -67,15 +67,17 @@ else
         {
             <button type="button" role="tab" class="@TabClass(Tab.Contracts)" aria-selected="@Selected(Tab.Contracts)" @onclick="() => OpenTabAsync(Tab.Contracts)" disabled="@_busy">@L("Договоры") @if (_contracts is not null) { <span class="muted">@_contracts.Count</span> }</button>
         }
-        @if (_card.CanSeeSales || _card.CanSeePurchases)
+        @* D804 (сессия 5, дополнение 13.10): вкладки — по роли контрагента: продажи — у покупателя, закупки — у поставщика. *@
+        @if ((_card.CanSeeSales && _card.Counterparty.IsCustomer) || (_card.CanSeePurchases && _card.Counterparty.IsSupplier))
         {
             <button type="button" role="tab" class="@TabClass(Tab.Orders)" aria-selected="@Selected(Tab.Orders)" @onclick="() => OpenTabAsync(Tab.Orders)" disabled="@_busy">@L("Заказы")</button>
         }
-        @if (_card.CanSeeSales || _card.CanSeeStockDocuments)
+        @if ((_card.CanSeeSales && _card.Counterparty.IsCustomer) || _card.CanSeeStockDocuments)
         {
             <button type="button" role="tab" class="@TabClass(Tab.Documents)" aria-selected="@Selected(Tab.Documents)" @onclick="() => OpenTabAsync(Tab.Documents)" disabled="@_busy">@L("Документы")</button>
         }
-        @foreach (var module in KnitErp.Web.Modules.ModuleUi.CounterpartyTabs.Where(t => t.Permission is null || CurrentAccess.HasOwnOnly(t.Permission)))
+        @foreach (var module in KnitErp.Web.Modules.ModuleUi.CounterpartyTabs.Where(t => (t.Permission is null || CurrentAccess.HasOwnOnly(t.Permission))
+                                                                                       && (_card.Counterparty.IsCustomer || !CustomerOnlyTabs.Contains(t.Key))))
         {
             @* D117: вкладки модулей (CRM — «Контакты и сделки»). *@
             <button type="button" role="tab" class="@(_tab == Tab.Module && _module == module ? "tab active" : "tab secondary")"
@@ -112,6 +114,9 @@ else
     public CurrentAccessDto CurrentAccess { get; set; } = default!;
 
     private enum Tab { Contracts, Orders, Documents, Discussion, Module }
+
+    /// <summary>D804: вкладки модулей, которые имеют смысл только у покупателя (условия продаж, почта для документов продаж).</summary>
+    private static readonly HashSet<string> CustomerOnlyTabs = ["sales", "sales-mail"];
 
     private KnitErp.Web.Modules.ModuleUi.CounterpartyTab? _module;
 
