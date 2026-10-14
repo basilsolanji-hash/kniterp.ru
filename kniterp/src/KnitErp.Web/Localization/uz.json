@@ -2876,7 +2876,6 @@
   "Нужно ваше внимание": "E'tiboringiz kerak",
   "Нужно выдать": "Berish kerak",
   "Нужно решение: товары без позиции ({0})": "Qaror kerak: pozitsiyasiz tovarlar ({0})",
-  "Нужны покупатель (контрагент с отметкой «Покупатель») и склад. Покупателя заведите в CRM, склад — в «Справочниках».": "Xaridor («Xaridor» belgili kontragent) va ombor kerak. Xaridorni CRMda, omborni «Maʼlumotnomalar»da yarating.",
   "Нужны поставщик (контрагент с отметкой «Поставщик») и склад. Заведите их в «Справочниках».": "Yetkazib beruvchi («Yetkazib beruvchi» belgili kontragent) va ombor kerak. Ularni «Maʼlumotnomalar»da yarating.",
   "Нулевое движение не записывается.": "Nol harakat yozilmaydi.",
   "О": "О",
@@ -6695,5 +6694,6 @@
   "Приходы и расходы денег по счетам и кассам; остатки считаются по этим операциям.": "Hisoblar va kassalar bo‘yicha pul kirim va chiqimlari; qoldiqlar shu operatsiyalar bo‘yicha hisoblanadi.",
   "Складских документов пока нет.": "Ombor hujjatlari hali yo‘q.",
   "Создать документ": "Hujjat yaratish",
-  "Создать заказ поставщику": "Yetkazib beruvchiga buyurtma yaratish"
+  "Создать заказ поставщику": "Yetkazib beruvchiga buyurtma yaratish",
+  "Нужны покупатель (контрагент с отметкой «Покупатель») и склад — оба заводятся в «Справочниках».": "Xaridor («Xaridor» belgisi bor kontragent) va ombor kerak — ikkalasi ham «Ma’lumotnomalar»da kiritiladi."
 }

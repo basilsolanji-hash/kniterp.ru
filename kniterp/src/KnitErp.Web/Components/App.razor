@@ -560,6 +560,15 @@
         /* D320: подсказка (похожие позиции и т. п.) — не ошибка. */
         .hint.warn { background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-line); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
         .hint.warn a { color: inherit; margin-left: 6px; }
+        /* D821 (чек-лист 4.1): обязательное поле — красная «*» сразу после подписи (скринридер и так читает «обязательное»). */
+        :is(.panel, .card, .inline-form, .sx-form, form) label:not(.inline):not(.check):has(> :is(input, select, textarea)[required]) {
+            flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 3px; }
+        :is(.panel, .card, .inline-form, .sx-form, form) label:not(.inline):not(.check):has(> :is(input, select, textarea)[required]) > :is(input, select, textarea) {
+            order: 2; flex-basis: 100%; }
+        :is(.panel, .card, .inline-form, .sx-form, form) label:not(.inline):not(.check):has(> :is(input, select, textarea)[required])::after {
+            content: "*"; color: var(--bad); order: 1; font-weight: 600; }
+        .req-mark { color: var(--bad); font-weight: 600; margin-left: 3px; }
+        .lookup-head { display: inline-flex; align-items: baseline; }
         /* D819: пустой список — пояснение и одно действие. */
         tr.empty-row > td { padding: 20px 12px; }
         .empty-state { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }

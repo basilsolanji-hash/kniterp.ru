@@ -37,7 +37,7 @@ else
             <h2>@L("Новый заказ поставщику")</h2>
             @if (_options.Suppliers.Count == 0 || _options.Warehouses.Count == 0)
             {
-                <p class="muted">@L("Нужны поставщик (контрагент с отметкой «Поставщик») и склад. Заведите их в «Справочниках».")</p>
+                <p class="muted">@L("Нужны поставщик (контрагент с отметкой «Поставщик») и склад. Заведите их в «Справочниках».") <a href="counterparties?new=1">@L("Добавить контрагента")</a> · <a href="warehouses">@L("Склады")</a></p>
                 <button type="button" class="secondary" @onclick="() => _options = null">@L("Закрыть")</button>
             }
             else

@@ -5,7 +5,7 @@
 *@
 <span class="lookup-select">
     @* Подпись указывает на сам список (for), поиск — между ними и подписан отдельно. *@
-    <label for="@_id">@Label</label>
+    <span class="lookup-head"><label for="@_id">@Label</label>@if (Required) { <span class="req-mark" aria-hidden="true">*</span> }</span>
     @if (Options.Count + _added.Count > SearchFrom)
     {
         <input class="lookup-search" type="search" @bind="_query" @bind:event="oninput" placeholder="@L("Поиск в списке")" aria-label="@L("Поиск: {0}", Label)" disabled="@Disabled" />
