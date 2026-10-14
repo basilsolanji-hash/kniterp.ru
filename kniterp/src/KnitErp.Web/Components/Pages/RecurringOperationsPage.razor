@@ -91,7 +91,7 @@ else
             <tbody>
                 @if (_data.Runs.Count == 0)
                 {
-                    <tr><td colspan="6" class="muted">@L("Черновиков пока нет.")</td></tr>
+                    <EmptyRow Colspan="6" Text="@L("Черновиков пока нет.")" Hint="@L("Черновики появляются по шаблонам в срок платежа; деньги списываются только после проведения.")" />
                 }
                 @foreach (var r in _data.Runs)
                 {
@@ -129,7 +129,7 @@ else
             <tbody>
                 @if (_data.Templates.Count == 0)
                 {
-                    <tr><td colspan="6" class="muted">@L("Шаблонов нет — добавьте аренду, связь или другой регулярный платёж.")</td></tr>
+                    <EmptyRow Colspan="6" Text="@L("Шаблонов пока нет.")" Hint="@L("Аренда, связь и другие регулярные платежи: по шаблону в срок создаётся черновик.")" />
                 }
                 @foreach (var t in _data.Templates)
                 {

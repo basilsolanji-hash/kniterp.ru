@@ -71,7 +71,7 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="6" class="muted">@L("Документов пока нет.")</td></tr>
+                    <EmptyRow Colspan="6" Text="@L("Документов ввода остатков пока нет.")" Hint="@L("Остатки на дату начала учёта: что лежит на каждом складе.")" />
                 }
                 @foreach (var d in _rows)
                 {

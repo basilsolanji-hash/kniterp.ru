@@ -55,7 +55,7 @@ else
             <tbody>
                 @if (_data.Departments.Count == 0)
                 {
-                    <tr><td colspan="3" class="muted">@L("Подразделений пока нет.")</td></tr>
+                    <EmptyRow Colspan="3" Text="@L("Подразделений пока нет.")" Hint="@L("Цеха и отделы фабрики: в них числятся сотрудники.")" />
                 }
                 @foreach (var d in _data.Departments)
                 {
@@ -121,7 +121,7 @@ else
             <tbody>
                 @if (_data.Positions.Count == 0)
                 {
-                    <tr><td colspan="3" class="muted">@L("Должностей пока нет.")</td></tr>
+                    <EmptyRow Colspan="3" Text="@L("Должностей пока нет.")" Hint="@L("Должность указывают в карточке сотрудника и в кадровых приказах.")" />
                 }
                 @foreach (var p in _data.Positions)
                 {

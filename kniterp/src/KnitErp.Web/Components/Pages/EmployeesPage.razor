@@ -157,9 +157,14 @@ else
                 </tr>
             </thead>
             <tbody>
-                @if (_list.Employees.Count == 0)
+                @if (_list.Employees.Count == 0 && _list.OwnOnly)
                 {
-                    <tr><td colspan="7" class="muted">@(_list.OwnOnly ? L("Карточка сотрудника не привязана к вашей учётной записи.") : L("Сотрудников не найдено."))</td></tr>
+                    <tr><td colspan="7" class="muted">@L("Карточка сотрудника не привязана к вашей учётной записи.")</td></tr>
+                }
+                else if (_list.Employees.Count == 0)
+                {
+                    <EmptyRow Colspan="7" Text="@L("Сотрудников пока нет.")" Hint="@L("Карточки сотрудников: подразделение, должность, приём и увольнение по кадровым приказам.")"
+                              Filtered="@(_search != "")" />
                 }
                 @foreach (var e in _list.Employees)
                 {

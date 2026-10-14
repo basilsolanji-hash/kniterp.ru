@@ -61,7 +61,7 @@ else
             <tbody>
                 @if (_data.Schedules.Count == 0)
                 {
-                    <tr><td colspan="4" class="muted">@L("Графиков пока нет.")</td></tr>
+                    <EmptyRow Colspan="4" Text="@L("Графиков пока нет.")" Hint="@L("График задаёт смены и выходные сотрудников; по нему считается норма времени в табеле.")" />
                 }
                 @foreach (var s in _data.Schedules)
                 {

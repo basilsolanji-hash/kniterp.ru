@@ -49,7 +49,7 @@ else
             <tbody>
                 @if (_units.Count == 0)
                 {
-                    <tr><td colspan="@(CanArchive ? 6 : 5)" class="muted">@L("Единиц пока нет.")</td></tr>
+                    <EmptyRow Colspan="@(CanArchive ? 6 : 5)" Text="@L("Единиц пока нет.")" Hint="@L("Единицы измерения для номенклатуры и документов: штуки, килограммы, метры.")" />
                 }
                 @foreach (var u in _units)
                 {

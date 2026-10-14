@@ -81,7 +81,8 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="7" class="muted">@L("Техкарт пока нет.")</td></tr>
+                    <EmptyRow Colspan="7" Text="@L("Техкарт пока нет.")" Hint="@L("Техкарта — нормы материалов и операции на изделие. По ней оформляют производственные заказы.")"
+                              Filtered="@(_search != "")" />
                 }
                 @foreach (var c in _rows)
                 {

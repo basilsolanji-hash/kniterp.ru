@@ -30,7 +30,8 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="7" class="muted">@L("Счетов поставщиков пока нет.")</td></tr>
+                    <EmptyRow Colspan="7" Text="@L("Счетов поставщиков пока нет.")" Hint="@L("Счета из заказов поставщикам: сумма, сколько оплачено и сколько осталось оплатить.")"
+                              Filtered="@(!string.IsNullOrEmpty(_search) || _unpaid)" />
                 }
                 @foreach (var r in _rows)
                 {
