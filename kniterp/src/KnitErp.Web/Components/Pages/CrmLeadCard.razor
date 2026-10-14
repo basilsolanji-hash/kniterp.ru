@@ -128,16 +128,7 @@ else
             <h2>@L("Отказ")</h2>
             <form @onsubmit="RejectAsync">
                 <div class="grid">
-                    <label>
-                        @L("Причина")
-                        <select @bind="_reason" required>
-                            <option value="">—</option>
-                            @foreach (var r in _options.LossReasons)
-                            {
-                                <option value="@r.Id">@r.Name</option>
-                            }
-                        </select>
-                    </label>
+                    <CrmRefSelect Kind="CrmReferenceKind.LossReason" Items="_options.LossReasons" @bind-Value="_reason" Label="@L("Причина")" Required="true" />
                     <label class="wide">@L("Комментарий") <input @bind="_rejectComment" maxlength="@CrmLead.CommentMaxLength" /></label>
                 </div>
                 <div class="actions">
@@ -176,16 +167,7 @@ else
                     <label>@L("Мессенджер") <input @bind="_f.Messenger" maxlength="@CrmText.MessengerMaxLength" placeholder="@L("@имя в Telegram или ссылка")" /></label>
                     <label>@L("Компания") <input @bind="_f.Company" maxlength="@CrmLead.NameMaxLength" /></label>
                     <label>@L("ИНН") <input inputmode="numeric" @bind="_f.Inn" @bind:after="CheckDuplicatesAsync" maxlength="12" /></label>
-                    <label>
-                        @L("Источник")
-                        <select @bind="_f.Source">
-                            <option value="">—</option>
-                            @foreach (var s in _options.Sources)
-                            {
-                                <option value="@s.Id">@s.Name</option>
-                            }
-                        </select>
-                    </label>
+                    <CrmRefSelect Kind="CrmReferenceKind.Source" Items="_options.Sources" @bind-Value="_f.Source" Label="@L("Источник")" />
                     <label>
                         @L("Канал продаж")
                         <select @bind="_f.Channel">

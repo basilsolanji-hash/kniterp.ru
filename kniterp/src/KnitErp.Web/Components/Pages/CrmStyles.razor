@@ -42,6 +42,11 @@
     .crm-toast > button { pointer-events: auto; padding: 0 8px; flex: 0 0 auto; }
     .crm-toc { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
     #pipelines, #automation, #voice, #messengers, #mailbox, #templates, #references { scroll-margin-top: 72px; }
+    /* D652: «+ Свой вариант» у списков справочников CRM — под списком, не ломает сетку формы. */
+    .crm-ref .link { align-self: flex-start; margin-top: 2px; }
+    .crm-ref-add { display: flex; gap: 6px; align-items: center; margin-top: 4px; min-width: 0; }
+    .crm-ref-add input { flex: 1 1 auto; min-width: 0; }
+    .crm-ref-add button { flex: 0 0 auto; }
     .crm-quick { margin-left: 8px; text-decoration: none; }
     .crm-layout td.nowrap { white-space: nowrap; }
     .crm-dups { border: 1px solid color-mix(in srgb, var(--warn-text) 45%, transparent); background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }

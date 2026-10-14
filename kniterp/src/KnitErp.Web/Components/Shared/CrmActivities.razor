@@ -175,7 +175,9 @@
 
 @code {
     private static readonly CrmActivityKind[] Kinds =
-        [CrmActivityKind.Call, CrmActivityKind.Task, CrmActivityKind.Meeting, CrmActivityKind.SamplesSent, CrmActivityKind.Email];
+        [CrmActivityKind.Call, CrmActivityKind.Task, CrmActivityKind.Meeting, CrmActivityKind.SamplesSent, CrmActivityKind.Email,
+         CrmActivityKind.VideoCall, CrmActivityKind.ClientVisit, CrmActivityKind.FactoryVisit, CrmActivityKind.Presentation,
+         CrmActivityKind.SampleApproval, CrmActivityKind.Negotiation, CrmActivityKind.Exhibition]; // D651
 
     [Parameter, EditorRequired] public CrmTarget Target { get; set; }
     [Parameter, EditorRequired] public long TargetId { get; set; }
@@ -357,6 +359,13 @@
         CrmActivityKind.OfferSent => L("КП отправлено"),
         CrmActivityKind.Note => L("Заметка"),
         CrmActivityKind.Message => L("Сообщение"),
+        CrmActivityKind.VideoCall => L("Видеозвонок"),
+        CrmActivityKind.ClientVisit => L("Визит к клиенту"),
+        CrmActivityKind.FactoryVisit => L("Визит клиента на фабрику"),
+        CrmActivityKind.Presentation => L("Показ коллекции"),
+        CrmActivityKind.SampleApproval => L("Согласование образца"),
+        CrmActivityKind.Negotiation => L("Переговоры по условиям"),
+        CrmActivityKind.Exhibition => L("Встреча на выставке"),
         _ => L("Повторное обращение"),
     };
 

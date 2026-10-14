@@ -46,16 +46,7 @@ else
             <label>@L("Почта") <input type="email" @bind="_email" @bind:after="CheckDuplicatesAsync" maxlength="@CrmText.EmailMaxLength" /></label>
             <label>@L("Компания") <input @bind="_company" maxlength="@CrmLead.NameMaxLength" /></label>
             <label>@L("ИНН") <input inputmode="numeric" @bind="_inn" maxlength="12" /></label>
-            <label>
-                @L("Источник")
-                <select @bind="_source">
-                    <option value="">—</option>
-                    @foreach (var s in _options.Sources)
-                    {
-                        <option value="@s.Id">@s.Name</option>
-                    }
-                </select>
-            </label>
+            <CrmRefSelect Kind="CrmReferenceKind.Source" Items="_options.Sources" @bind-Value="_source" Label="@L("Источник")" />
             @if (_options.CanSeeAmounts)
             {
                 <label>@L("Ожидаемая сумма") <input inputmode="decimal" @bind="_amount" /></label>

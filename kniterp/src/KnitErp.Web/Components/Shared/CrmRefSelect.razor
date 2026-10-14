@@ -1,0 +1,111 @@
+@using KnitErp.Application.Crm
+@using KnitErp.Domain.Crm
+@inject IKnitErpDbContextFactory Factory
+@inject ICurrentUser CurrentUser
+@inject IClock Clock
+
+@*
+    D652 (ТЗ интерфейса, раздел 0 п. 5): список источников или причин отказа CRM со строкой «+ Свой вариант» — новое значение
+    создаётся тут же сервисом настроек CRM (право «CRM: настройки» проверяет сервер) и сразу выбирается, без ухода со страницы.
+    Своим DbContext — запрос не пересекается с запросами страницы. Поле нового значения не привязано к форме страницы (form="…"),
+    поэтому Enter в нём не отправляет форму сделки или лида. Без права строки нет, подсказка — у списка.
+*@
+<label class="crm-ref">
+    @Label
+    <select value="@Value" @onchange="ChangedAsync" required="@Required" disabled="@Disabled"
+            title="@(CanAdd ? null : L("Нет нужного варианта — попросите руководителя добавить его в «Настройках CRM»."))">
+        <option value="">—</option>
+        @foreach (var i in Items.Concat(_added))
+        {
+            <option value="@i.Id">@i.Name</option>
+        }
+    </select>
+    @if (CanAdd && !Disabled)
+    {
+        @if (_adding)
+        {
+            <span class="crm-ref-add">
+                <input @bind="_name" form="crm-ref-none" maxlength="@CrmReference.NameMaxLength" aria-label="@L("Новое значение: {0}", Label)"
+                       placeholder="@L("Своё значение")" />
+                <button type="button" class="secondary" @onclick="AddAsync" disabled="@_busy">@L("Добавить")</button>
+                <button type="button" class="secondary" @onclick="() => _adding = false" aria-label="@L("Отмена")">×</button>
+            </span>
+            @if (_error is not null)
+            {
+                <span class="error small" role="alert">@_error</span>
+            }
+        }
+        else
+        {
+            <button type="button" class="link small" @onclick="() => { _adding = true; _error = null; }">@L("+ Свой вариант")</button>
+        }
+    }
+</label>
+
+@code {
+    [Parameter, EditorRequired] public CrmReferenceKind Kind { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<KnitErp.Application.Structure.LookupDto> Items { get; set; } = [];
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public bool Required { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    [CascadingParameter] public CurrentAccessDto? CurrentAccess { get; set; }
+
+    private readonly List<KnitErp.Application.Structure.LookupDto> _added = [];
+    private bool _adding;
+    private bool _busy;
+    private string? _name;
+    private string? _error;
+
+    /// <summary>Только подсказка: создать значение всё равно может лишь пользователь с правом «CRM: настройки» (сервер).</summary>
+    private bool CanAdd => CurrentAccess?.Has(Permissions.CrmSettings) == true;
+
+    private Task ChangedAsync(ChangeEventArgs e)
+    {
+        Value = e.Value?.ToString() ?? string.Empty;
+        return ValueChanged.InvokeAsync(Value);
+    }
+
+    private async Task AddAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        try
+        {
+            var name = _name?.Trim();
+            // Уже есть в списке (без учёта регистра) — просто выбрать его, не создавая дубль.
+            var existing = Items.Concat(_added).FirstOrDefault(i => string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase));
+            long id;
+            if (existing is not null)
+            {
+                id = existing.Id;
+            }
+            else
+            {
+                await using var db = Factory.Create();
+                var settings = new CrmSettingsService(db, new KnitErp.Application.Access.AccessGuard(db, CurrentUser, Clock), CurrentUser, Clock);
+                id = await settings.CreateReferenceAsync(Kind, name);
+                _added.Add(new KnitErp.Application.Structure.LookupDto(id, name!));
+            }
+
+            (_adding, _name) = (false, null);
+            Value = id.ToString();
+            await ValueChanged.InvokeAsync(Value);
+        }
+        catch (Exception ex) when (UiErrors.IsUserFacing(ex))
+        {
+            _error = UiErrors.Message(ex);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

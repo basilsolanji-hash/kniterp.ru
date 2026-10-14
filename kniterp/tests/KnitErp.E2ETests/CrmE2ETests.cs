@@ -314,6 +314,18 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await Assertions.Expect(page.Locator(".page-head .tag")).ToHaveTextAsync("В работе");
         await Shot(page, "crm-02-deal-offer");
         var href = await page.GetByRole(AriaRole.Link, new() { Name = "Печать", Exact = true }).First.GetAttributeAsync("href");
+
+        // D652: причины проигрыша нет в списке — «+ Свой вариант» создаёт её тут же и выбирает, сделка закрывается проигрышем.
+        await page.GetByRole(AriaRole.Button, new() { Name = "Проиграна", Exact = true }).ClickAsync();
+        var lose = page.Locator(".panel", new() { Has = page.GetByRole(AriaRole.Heading, new() { Name = "Сделка проиграна" }) });
+        await lose.GetByRole(AriaRole.Button, new() { Name = "+ Свой вариант" }).ClickAsync();
+        var reason = $"Не подошёл цвет пряжи {Stamp}";
+        await lose.GetByPlaceholder("Своё значение").FillAsync(reason);
+        await lose.GetByRole(AriaRole.Button, new() { Name = "Добавить", Exact = true }).ClickAsync();
+        await Assertions.Expect(lose.Locator("select option:checked")).ToHaveTextAsync(reason);
+        await lose.GetByRole(AriaRole.Button, new() { Name = "Закрыть проигрышем" }).ClickAsync();
+        await Assertions.Expect(page.Locator(".page-head .tag")).ToHaveTextAsync("Проиграна");
+        await Assertions.Expect(page.Locator(".crm-summary")).ToContainTextAsync(reason);
         await OpenAsync(page, href!);
         await Assertions.Expect(page.Locator("body")).ToContainTextAsync("Коммерческое предложение");
         await Assertions.Expect(page.Locator("body")).ToContainTextAsync("Свитер вязаный");

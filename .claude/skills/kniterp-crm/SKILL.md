@@ -47,11 +47,15 @@ description: Модуль CRM knitERP — лиды, сделки, контакт
 - Карточка сделки (D699): панель «Дальше» (`NextStep()`, `role=region`, имя «Дальше») дублирует главную кнопку блока — в e2e
   искать кнопку внутри региона или формы (`GetByRole(AriaRole.Region, new() { Name = "Дальше" })`), иначе строгий режим Playwright
   найдёт две. Итог действия — `.flash.crm-toast` (fixed, `pointer-events: none`), роль `status` прежняя.
+- Списки справочников CRM в формах — `CrmRefSelect` (D652: «+ Свой вариант» через `CrmSettingsService.CreateReferenceAsync`, свой
+  DbContext). Новые типовые значения справочников — в `CrmReference.Default*` и миграцией данных (`INSERT … WHERE NOT EXISTS` по
+  названию, только организациям с CRM), как `CrmReferenceDefaults`.
+- Скриптом правите текст миграции — не трогайте выражения ограничений: регулярка по `(1, N, ` однажды испортила `IN (1, 2, 3)`.
 - Razor: в `@code` не пишите `switch`-выражения с ветками `< 1024 =>` — парсер принимает `<` за разметку; используйте `?:` или `if`.
 
 ## Тесты
 - Модульные: `CrmRulesTests`, `CrmMessengerHooksTests`, `CrmMailRulesTests`, `CrmCsvTests`.
-- Интеграционные (SQL Server): `CrmTests`, `CrmFullCycleTests`, `CrmReviewTests` (замечания проверки), `CrmSalesLinkTests`, `CrmReportTests`, `CrmMobileTests`, `CrmVoiceSettingTests` (фейки `CrmTestKit.Max/Telegram/WhatsApp/Imap`, `host.Mail.Messages`),
+- Интеграционные (SQL Server): `CrmTests`, `CrmFullCycleTests`, `CrmReviewTests` (замечания проверки), `CrmSalesLinkTests`, `CrmReportTests`, `CrmMobileTests`, `CrmVoiceSettingTests`, `CrmReferenceDefaultsTests` (фейки `CrmTestKit.Max/Telegram/WhatsApp/Imap`, `host.Mail.Messages`),
   `ImapAddressTests`. Фильтр: `--filter "FullyQualifiedName~Crm"`.
 - e2e: `CrmE2ETests` (1440 и 390 px, светлая/тёмная, 0 ошибок JS, скриншоты `Shot(...)` в `KNITERP_E2E_ARTIFACTS`).
   `GetByRole(AriaRole.Status)` на страницах с предупреждением о почте — фильтровать по тексту (их два).

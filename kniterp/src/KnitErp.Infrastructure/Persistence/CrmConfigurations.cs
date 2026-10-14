@@ -357,7 +357,7 @@ internal sealed class CrmActivityConfiguration : IEntityTypeConfiguration<CrmAct
     {
         b.ToTable("crm_activities", t =>
         {
-            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 9 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 6");
+            t.HasCheckConstraint("ck_crm_activities_kind", "[Kind] BETWEEN 1 AND 16 AND [Target] IN (1, 2, 3) AND [Source] BETWEEN 1 AND 6");
             t.HasCheckConstraint("ck_crm_activities_done",
                 "([IsDone] = 1 AND [DoneAtUtc] IS NOT NULL AND [DoneByUserId] IS NOT NULL) OR ([IsDone] = 0 AND [DoneAtUtc] IS NULL AND [DoneByUserId] IS NULL)");
         });

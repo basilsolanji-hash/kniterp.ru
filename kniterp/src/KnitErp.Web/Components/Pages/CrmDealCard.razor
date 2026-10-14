@@ -114,16 +114,7 @@ else
             <h2>@L("Сделка проиграна")</h2>
             <form @onsubmit="LoseAsync">
                 <div class="grid">
-                    <label>
-                        @L("Причина")
-                        <select @bind="_lossReason" required>
-                            <option value="">—</option>
-                            @foreach (var r in _options.LossReasons)
-                            {
-                                <option value="@r.Id">@r.Name</option>
-                            }
-                        </select>
-                    </label>
+                    <CrmRefSelect Kind="CrmReferenceKind.LossReason" Items="_options.LossReasons" @bind-Value="_lossReason" Label="@L("Причина")" Required="true" />
                     <label class="wide">@L("Комментарий") <input @bind="_lossComment" maxlength="@CrmDeal.CommentMaxLength" /></label>
                 </div>
                 <div class="actions">
@@ -440,16 +431,7 @@ else
                                 </label>
                             }
                             <label>@L("Плановое закрытие") <input type="date" @bind="_f.Close" /></label>
-                            <label>
-                                @L("Источник")
-                                <select @bind="_f.Source">
-                                    <option value="">—</option>
-                                    @foreach (var s in _options.Sources)
-                                    {
-                                        <option value="@s.Id">@s.Name</option>
-                                    }
-                                </select>
-                            </label>
+                            <CrmRefSelect Kind="CrmReferenceKind.Source" Items="_options.Sources" @bind-Value="_f.Source" Label="@L("Источник")" />
                             <label>
                                 @L("Канал продаж")
                                 <select @bind="_f.Channel">

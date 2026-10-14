@@ -18,6 +18,15 @@ public enum CrmActivityKind : byte
 
     /// <summary>Сообщение в мессенджере (WhatsApp, Telegram, MAX — D644).</summary>
     Message = 9,
+
+    // D651 (требование владельца 13.10, п. 2): типовые виды работы с клиентом фабрики — для ручного ввода, без особой логики.
+    VideoCall = 10,
+    ClientVisit = 11,
+    FactoryVisit = 12,
+    Presentation = 13,
+    SampleApproval = 14,
+    Negotiation = 15,
+    Exhibition = 16,
 }
 
 /// <summary>К чему относится активность.</summary>
@@ -185,6 +194,13 @@ public sealed class CrmActivity
         CrmActivityKind.Note => "Заметка",
         CrmActivityKind.RepeatRequest => "Повторное обращение",
         CrmActivityKind.Message => "Сообщение",
+        CrmActivityKind.VideoCall => "Видеозвонок",
+        CrmActivityKind.ClientVisit => "Визит к клиенту",
+        CrmActivityKind.FactoryVisit => "Визит клиента на фабрику",
+        CrmActivityKind.Presentation => "Показ коллекции",
+        CrmActivityKind.SampleApproval => "Согласование образца",
+        CrmActivityKind.Negotiation => "Переговоры по условиям",
+        CrmActivityKind.Exhibition => "Встреча на выставке",
         _ => kind.ToString(),
     };
 
