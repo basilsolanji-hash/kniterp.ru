@@ -86,7 +86,7 @@ else
             <tbody>
                 @if (_feeds.Count == 0)
                 {
-                    <tr><td colspan="6" class="muted">@L("Фидов пока нет.")</td></tr>
+                    <EmptyRow Colspan="6" Text="@L("Фидов пока нет.")" Hint="@L("Фид — ссылка на файл с товарами, ценами и наличием для сайта и маркетплейсов.")" />
                 }
                 @foreach (var f in _feeds)
                 {

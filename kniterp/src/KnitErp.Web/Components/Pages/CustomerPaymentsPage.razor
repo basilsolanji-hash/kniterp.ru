@@ -81,7 +81,8 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="9" class="muted">@L("Оплат нет.")</td></tr>
+                    <EmptyRow Colspan="9" Text="@L("Оплат покупателей пока нет.")" Hint="@L("Деньги от покупателей: оплата уменьшает долг и разносится по заказам.")"
+                              Filtered="@(_search != "" || _from is not null || _to is not null)" />
                 }
                 @foreach (var p in _rows)
                 {

@@ -120,7 +120,7 @@ else
                     <tbody>
                         @if (_reports.Count == 0)
                         {
-                            <tr><td colspan="9" class="muted">@L("Отчётов ещё нет.")</td></tr>
+                            <EmptyRow Colspan="9" Text="@L("Отчётов маркетплейсов пока нет.")" Hint="@L("Отчёт площадки за период: продажи, возвраты, комиссия и сумма к перечислению.")" />
                         }
                         @foreach (var r in _reports)
                         {

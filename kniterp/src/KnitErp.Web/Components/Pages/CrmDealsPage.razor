@@ -212,7 +212,8 @@ else
                 <tbody>
                     @if (_page.Rows.Count == 0)
                     {
-                        <tr><td colspan="8" class="muted">@L("Сделок нет.")</td></tr>
+                        <EmptyRow Colspan="8" Text="@L("Сделок пока нет.")" Hint="@L("Сделка ведёт продажу покупателю по стадиям воронки: сумма, срок закрытия, ответственный.")"
+                                  Filtered="@(_tagId is not null || _responsible != "" || _source != "" || _from is not null || _to is not null || !string.IsNullOrEmpty(_search) || _mine)" />
                     }
                     @foreach (var d in _page.Rows)
                     {

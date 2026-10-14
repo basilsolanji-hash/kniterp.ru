@@ -121,7 +121,8 @@ else
             <tbody>
                 @if (_page.Rows.Count == 0)
                 {
-                    <tr><td colspan="9" class="muted">@L("Лидов нет.")</td></tr>
+                    <EmptyRow Colspan="9" Text="@L("Лидов пока нет.")" Hint="@L("Лид — входящий запрос клиента; его проверяют и превращают в сделку.")"
+                              Filtered="@(_status != "open" || _filterSource != "" || !string.IsNullOrEmpty(_search) || _mine || _tagId is not null)" />
                 }
                 @foreach (var l in _page.Rows)
                 {

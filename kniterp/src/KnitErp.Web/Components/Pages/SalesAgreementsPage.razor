@@ -155,7 +155,9 @@ else
                 <tbody>
                     @if (_rows.Count == 0)
                     {
-                        <tr><td colspan="9" class="muted">@L("Соглашений пока нет. Создайте типовое для всех или своё для крупного покупателя.")</td></tr>
+                        <EmptyRow Colspan="9" Text="@L("Соглашений пока нет.")" Hint="@L("Соглашение задаёт покупателю вид цены, скидку, предоплату, отсрочку и кредитный лимит — типовое для всех или своё.")"
+                                  Filtered="@(!string.IsNullOrEmpty(_search))"
+                                  CreateHref="@(CanEdit ? "sales-agreements?new=1" : null)" CreateText="@L("Новое соглашение")" />
                     }
                     @foreach (var a in _rows)
                     {

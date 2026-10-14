@@ -112,7 +112,8 @@ else
                 <tbody>
                     @if (_rows.Count == 0)
                     {
-                        <tr><td colspan="9" class="muted">@L("Партий пока нет.")</td></tr>
+                        <EmptyRow Colspan="9" Text="@L("Партий пока нет.")" Hint="@L("Партия пряжи — номер, цвет и крашение; её указывают в строках поступления.")"
+                                  Filtered="@(!string.IsNullOrEmpty(_search) || _onlyBalance)" />
                     }
                     @foreach (var b in _rows)
                     {

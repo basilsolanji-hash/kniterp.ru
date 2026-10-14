@@ -77,7 +77,8 @@ else
             <tbody>
                 @if (_rows.Count == 0)
                 {
-                    <tr><td colspan="6" class="muted">@L("Приказов пока нет.")</td></tr>
+                    <EmptyRow Colspan="6" Text="@L("Приказов пока нет.")" Hint="@L("Приём, перевод, отпуск и увольнение оформляются приказом; по нему меняется карточка сотрудника.")"
+                              Filtered="@(_kind != "" || _status != "")" />
                 }
                 @foreach (var r in _rows)
                 {

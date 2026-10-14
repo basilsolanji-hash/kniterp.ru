@@ -90,7 +90,7 @@ else
             <tbody>
                 @if (_rates.Count == 0)
                 {
-                    <tr><td colspan="5" class="muted">@L("Расценок пока нет.")</td></tr>
+                    <EmptyRow Colspan="5" Text="@L("Расценок пока нет.")" Hint="@L("Цена за единицу операции; по расценкам и выработке считается сдельный заработок.")" />
                 }
                 @foreach (var r in _rates)
                 {
