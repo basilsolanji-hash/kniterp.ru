@@ -339,11 +339,52 @@ new MutationObserver(function () {
         });
     }
 
+    // Чек-лист 4.1 (D822): ошибка — у поля. Сообщение сервера «ИНН: 10 цифр…» или «Допуск — от 0 до 10%» начинается с названия поля:
+    // поле с такой подписью подсвечивается (aria-invalid), связывается с сообщением (aria-describedby) и получает курсор.
+    // Только точное совпадение подписи — иначе ничего не делаем. Подсветка снимается, как только поле изменили или сообщение исчезло.
+    var errorSeq = 0;
+    function ownLabelText(label) {
+        var t = '';
+        label.childNodes.forEach(function (n) { if (n.nodeType === 3) t += n.textContent; });
+        return t.replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+    function markErrors() {
+        document.querySelectorAll('[aria-invalid="true"][data-knit-invalid]').forEach(function (el) {
+            var msg = document.getElementById(el.getAttribute('data-knit-invalid'));
+            if (!msg || !msg.isConnected || !msg.textContent.trim()) {
+                el.removeAttribute('aria-invalid'); el.removeAttribute('data-knit-invalid'); el.removeAttribute('aria-describedby');
+            }
+        });
+        document.querySelectorAll('main [role="alert"], main .error, main .flash.error').forEach(function (msg) {
+            var text = msg.textContent.replace(/\s+/g, ' ').trim();
+            if (!text || msg.getAttribute('data-knit-checked') === text) return;
+            msg.setAttribute('data-knit-checked', text);
+            var m = /^([^:—]{1,40}?)\s*(:| —)/.exec(text);
+            if (!m) return;
+            var name = m[1].toLowerCase();
+            var scope = msg.closest('form') || msg.closest('.panel') || document.querySelector('main');
+            var label = Array.prototype.find.call(scope.querySelectorAll('label'), function (l) { return ownLabelText(l) === name; });
+            if (!label) return;
+            var field = label.control || label.querySelector('input, select, textarea');
+            if (!field || field.disabled) return;
+            if (!msg.id) msg.id = 'knit-err-' + (++errorSeq);
+            field.setAttribute('aria-invalid', 'true');
+            field.setAttribute('data-knit-invalid', msg.id);
+            field.setAttribute('aria-describedby', msg.id);
+            field.focus({ preventScroll: false });
+        });
+    }
+    document.addEventListener('input', function (e) {
+        if (e.target.getAttribute && e.target.getAttribute('data-knit-invalid')) {
+            e.target.removeAttribute('aria-invalid'); e.target.removeAttribute('data-knit-invalid'); e.target.removeAttribute('aria-describedby');
+        }
+    });
+
     var queued = false;
     new MutationObserver(function () {
         if (queued) return;
         queued = true;
-        requestAnimationFrame(function () { queued = false; markRows(); autofocus(); });
+        requestAnimationFrame(function () { queued = false; markRows(); autofocus(); markErrors(); });
     }).observe(document.documentElement, { childList: true, subtree: true });
 
     window.kniterp = window.kniterp || {};

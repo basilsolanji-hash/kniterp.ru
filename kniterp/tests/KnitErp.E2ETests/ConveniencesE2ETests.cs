@@ -76,6 +76,16 @@ public sealed class ConveniencesE2ETests(HrAppFixture app) : IClassFixture<HrApp
             await page.GoBackAsync();
             await page.WaitForURLAsync(new Regex(@"/stock-documents\?"));
             await Assertions.Expect(status).ToHaveValueAsync(chosen);
+            // D822: ошибка сервера «ИНН: … — номер указан неверно» — поле ИНН подсвечено и связано с сообщением.
+            await OpenAsync(page, "counterparties?new=1");
+            await page.GetByLabel("Наименование").FillAsync($"ООО «Ошибка {Stamp}»");
+            var inn = page.GetByLabel("ИНН", new() { Exact = true });
+            await inn.FillAsync("123");
+            await page.GetByRole(AriaRole.Button, new() { Name = "Сохранить" }).ClickAsync();
+            await Assertions.Expect(inn).ToHaveAttributeAsync("aria-invalid", "true");
+            await Assertions.Expect(inn).ToBeFocusedAsync();
+            await inn.FillAsync("7707083893");
+            await Assertions.Expect(inn).Not.ToHaveAttributeAsync("aria-invalid", "true");
             Assert.Empty(errors);
         }
         catch
