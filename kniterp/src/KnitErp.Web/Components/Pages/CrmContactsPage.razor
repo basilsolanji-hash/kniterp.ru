@@ -4,6 +4,7 @@
 @inject CrmContactService Contacts
 @inject CrmDealService Deals
 @inject NavigationManager Navigation
+@inject CrmListState ListState
 
 <PageTitle>@L("Контакты") — knitERP</PageTitle>
 <CrmStyles />
@@ -86,12 +87,25 @@ else
             <tbody>
                 @if (_page.Rows.Count == 0)
                 {
-                    <tr><td colspan="6" class="muted">@L("Контактов нет.")</td></tr>
+                    <tr><td colspan="6" class="muted">
+                        @if (!string.IsNullOrWhiteSpace(_search) || _archived)
+                        {
+                            @L("По этим условиям контактов нет.")
+                        }
+                        else
+                        {
+                            @L("Контактов пока нет. Они появляются из лидов и заявок или добавляются здесь.")
+                            @if (CurrentAccess.Has(Permissions.CrmEdit))
+                            {
+                                <button type="button" class="link" @onclick="() => _creating = true">@L("Создать первый контакт")</button>
+                            }
+                        }
+                    </td></tr>
                 }
                 @foreach (var c in _page.Rows)
                 {
-                    <tr class="@(c.IsArchived ? "archived" : null)">
-                        <td><a href="crm/contacts/@c.Id">@c.FullName</a> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }</td>
+                    <tr class="crm-row @(c.IsArchived ? "archived" : null)">
+                        <td><a class="crm-open" href="crm/contacts/@c.Id">@c.FullName</a> @if (c.IsArchived) { <span class="tag">@L("архив")</span> }</td>
                         <td>@(c.Position ?? "—")</td>
                         <td>@if (c.CounterpartyId is { } cp) { <a href="counterparties/@cp">@c.Counterparty</a> } else { <span>—</span> }</td>
                         <td>@(c.Phone is { } p ? CrmText.FormatPhone(p) : "—")</td>
@@ -130,6 +144,11 @@ else
     {
         try
         {
+            if (ListState.Contacts is { } saved) // D653: возврат из карточки — тот же поиск и страница
+            {
+                (_search, _archived, _pageNo) = (saved.Search, saved.Archived, saved.Page);
+            }
+
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -138,7 +157,11 @@ else
         }
     }
 
-    private async Task LoadAsync() => _page = await Contacts.ListAsync(_search, null, _archived, _pageNo);
+    private async Task LoadAsync()
+    {
+        _page = await Contacts.ListAsync(_search, null, _archived, _pageNo);
+        ListState.Contacts = new CrmContactsListFilters(_search, _archived, _pageNo);
+    }
 
     private Task ReloadAsync()
     {

@@ -47,6 +47,14 @@
     .crm-ref-add { display: flex; gap: 6px; align-items: center; margin-top: 4px; min-width: 0; }
     .crm-ref-add input { flex: 1 1 auto; min-width: 0; }
     .crm-ref-add button { flex: 0 0 auto; }
+    /* D653: строка списка и карточка канбана открываются нажатием на любое место — главная ссылка растянута на строку (настоящая ссылка:
+       Ctrl и средняя кнопка — новая вкладка); кнопки, ссылки и поля внутри строки остаются над ней. Как .dev-row (D732). */
+    .crm-row { position: relative; cursor: pointer; }
+    tr.crm-row:hover, .crm-card.crm-row:hover { background: var(--hover-wash); }
+    .crm-row a.crm-open::after { content: ""; position: absolute; inset: 0; }
+    .crm-row a.crm-open:focus-visible { outline: none; }
+    .crm-row:has(a.crm-open:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .crm-row button, .crm-row a:not(.crm-open), .crm-row input, .crm-row select, .crm-row .tag-dots { position: relative; z-index: 1; }
     .crm-quick { margin-left: 8px; text-decoration: none; }
     .crm-layout td.nowrap { white-space: nowrap; }
     .crm-dups { border: 1px solid color-mix(in srgb, var(--warn-text) 45%, transparent); background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; margin: 8px 0; }

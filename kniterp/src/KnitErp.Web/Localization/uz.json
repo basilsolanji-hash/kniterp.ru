@@ -2238,7 +2238,6 @@
   "Лид сохранён.": "Lid saqlandi.",
   "Лид уже квалифицирован — по нему есть сделка.": "Lid allaqachon kvalifikatsiyalangan — u bo‘yicha bitim bor.",
   "Лидов": "Lidlar",
-  "Лидов нет.": "Lidlar yo‘q.",
   "Лиды": "Lidlar",
   "Лиды без действий": "Harakatsiz lidlar",
   "Лиды и сделки, созданные в периоде; выигрыш — на сегодня.": "Davrda yaratilgan lidlar va bitimlar; yutuq — bugungi kunga.",
@@ -6666,5 +6665,14 @@
   "Переговоры по условиям": "Shartlar bo‘yicha muzokaralar",
   "Показ коллекции": "Kolleksiya namoyishi",
   "Своё значение": "O‘z qiymatingiz",
-  "Согласование образца": "Namunani kelishish"
+  "Согласование образца": "Namunani kelishish",
+  "Контактов пока нет. Они появляются из лидов и заявок или добавляются здесь.": "Hozircha kontaktlar yo‘q. Ular lidlar va arizalardan paydo bo‘ladi yoki shu yerda qo‘shiladi.",
+  "Открытых лидов нет. Добавьте первый в форме выше или вставьте сообщение клиента — поля заполнятся сами.": "Ochiq lidlar yo‘q. Birinchisini yuqoridagi shaklda qo‘shing yoki mijoz xabarini qo‘ying — maydonlar o‘zi to‘ldiriladi.",
+  "По этим условиям контактов нет.": "Bu shartlar bo‘yicha kontaktlar yo‘q.",
+  "По этим условиям лидов нет.": "Bu shartlar bo‘yicha lidlar yo‘q.",
+  "По этим условиям сделок нет.": "Bu shartlar bo‘yicha bitimlar yo‘q.",
+  "Сбросить фильтры": "Filtrlarni tozalash",
+  "Сделок пока нет. Сделка появляется из квалифицированного лида или создаётся здесь.": "Hozircha bitimlar yo‘q. Bitim saralangan liddan paydo bo‘ladi yoki shu yerda yaratiladi.",
+  "Создать первую сделку": "Birinchi bitimni yaratish",
+  "Создать первый контакт": "Birinchi kontaktni yaratish"
 }

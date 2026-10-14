@@ -4,6 +4,7 @@
 @inject CrmLeadService Leads
 @inject KnitErp.Application.Tagging.TagService TagLookup
 @inject NavigationManager Navigation
+@inject CrmListState ListState
 
 <PageTitle>@L("Лиды") — knitERP</PageTitle>
 <CrmStyles />
@@ -111,12 +112,14 @@ else
             <tbody>
                 @if (_page.Rows.Count == 0)
                 {
-                    <tr><td colspan="9" class="muted">@L("Лидов нет.")</td></tr>
+                    <tr><td colspan="9" class="muted">@(_status == "open" && _tagId is null && _filterSource.Length == 0 && string.IsNullOrWhiteSpace(_search) && !_mine
+                        ? L("Открытых лидов нет. Добавьте первый в форме выше или вставьте сообщение клиента — поля заполнятся сами.")
+                        : L("По этим условиям лидов нет."))</td></tr>
                 }
                 @foreach (var l in _page.Rows)
                 {
-                    <tr class="@(l.Status == CrmLeadStatus.Rejected ? "archived" : null)">
-                        <td><a href="crm/leads/@l.Id">@l.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(l.Id)" /></td>
+                    <tr class="crm-row @(l.Status == CrmLeadStatus.Rejected ? "archived" : null)">
+                        <td><a class="crm-open" href="crm/leads/@l.Id">@l.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(l.Id)" /></td>
                         <td>@l.Title</td>
                         <td><span class="tag @StatusClass(l.Status)">@L(l.StatusName)</span></td>
                         <td>@(l.ContactName ?? "—")</td>
@@ -173,6 +176,11 @@ else
         try
         {
             _options = await Leads.OptionsAsync();
+            if (ListState.Leads is { } saved) // D653: возврат из карточки — те же фильтры и страница
+            {
+                (_status, _filterSource, _tagId, _search, _mine, _pageNo) = (saved.Status, saved.Source, saved.TagId, saved.Search, saved.Mine, saved.Page);
+            }
+
             await LoadAsync();
         }
         catch (AccessDeniedException ex)
@@ -187,6 +195,7 @@ else
             byte.TryParse(_status, out var st) ? (CrmLeadStatus)st : null, _search, null, long.TryParse(_filterSource, out var src) ? src : null,
             _mine, _tagId, _status == "open", _pageNo));
         _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.CrmLead, _page.Rows.Select(r => r.Id).ToList());
+        ListState.Leads = new CrmLeadsListFilters(_status, _filterSource, _tagId, _search, _mine, _pageNo);
     }
 
     private Task ReloadAsync()

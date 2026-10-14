@@ -4,6 +4,7 @@
 @inject CrmDealService Deals
 @inject KnitErp.Application.Tagging.TagService TagLookup
 @inject NavigationManager Navigation
+@inject CrmListState ListState
 
 <PageTitle>@L("Сделки") — knitERP</PageTitle>
 <CrmStyles />
@@ -156,8 +157,8 @@ else
                     <ul class="crm-cards">
                         @foreach (var d in col.Deals)
                         {
-                            <li class="crm-card" draggable="@(_board.CanEdit ? "true" : "false")" @ondragstart="() => _drag = d" @key="d.Id">
-                                <a class="crm-title" href="crm/deals/@d.Id">@d.Title</a>
+                            <li class="crm-card crm-row" draggable="@(_board.CanEdit ? "true" : "false")" @ondragstart="() => _drag = d" @key="d.Id">
+                                <a class="crm-title crm-open" href="crm/deals/@d.Id">@d.Title</a>
                                 <div class="crm-meta">
                                     <span>@d.Number</span><span>@d.Counterparty</span>
                                     @if (d.Amount is { } a)
@@ -211,12 +212,25 @@ else
                 <tbody>
                     @if (_page.Rows.Count == 0)
                     {
-                        <tr><td colspan="8" class="muted">@L("Сделок нет.")</td></tr>
+                        <tr><td colspan="8" class="muted">
+                            @if (Filtered)
+                            {
+                                @L("По этим условиям сделок нет.") <button type="button" class="link" @onclick="ResetFiltersAsync" disabled="@_busy">@L("Сбросить фильтры")</button>
+                            }
+                            else
+                            {
+                                @L("Сделок пока нет. Сделка появляется из квалифицированного лида или создаётся здесь.")
+                                @if (_options.CanEdit)
+                                {
+                                    <button type="button" class="link" @onclick="() => _creating = true">@L("Создать первую сделку")</button>
+                                }
+                            }
+                        </td></tr>
                     }
                     @foreach (var d in _page.Rows)
                     {
-                        <tr>
-                            <td><a href="crm/deals/@d.Id">@d.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(d.Id)" /></td>
+                        <tr class="crm-row">
+                            <td><a class="crm-open" href="crm/deals/@d.Id">@d.Number</a><TagDots Tags="@_tagMap.GetValueOrDefault(d.Id)" /></td>
                             <td>@d.Title</td>
                             <td>@d.Counterparty</td>
                             <td><span class="stage stage-@d.StageColor">@d.Stage</span></td>
@@ -284,6 +298,14 @@ else
             _view = ViewQuery == "table" ? "table" : "board";
             _options = await Deals.OptionsAsync();
             _pipeline = _options.Pipelines.FirstOrDefault()?.Id.ToString() ?? "";
+            // D653: возврат из карточки — те же воронка, фильтры, вид и страница (если воронка ещё доступна).
+            if (ListState.Deals is { } saved && _options.Pipelines.Any(p => p.Id.ToString() == saved.Pipeline))
+            {
+                (_pipeline, _tagId, _responsible, _source, _from, _to, _search, _mine, _pageNo) =
+                    (saved.Pipeline, saved.TagId, saved.Responsible, saved.Source, saved.From, saved.To, saved.Search, saved.Mine, saved.Page);
+                _view = ViewQuery is null ? saved.View : _view;
+            }
+
             _newPipeline = _pipeline;
             _customers = await Deals.CounterpartiesAsync(null);
             await LoadAsync();
@@ -310,6 +332,17 @@ else
             _page = await Deals.ListAsync(Filter());
             _tagMap = await TagLookup.MapAsync(KnitErp.Domain.Tagging.TaggedEntity.CrmDeal, _page.Rows.Select(d => d.Id).ToList());
         }
+
+        ListState.Deals = new CrmDealsListFilters(_view, _pipeline, _tagId, _responsible, _source, _from, _to, _search, _mine, _pageNo);
+    }
+
+    private bool Filtered => _tagId is not null || _responsible.Length > 0 || _source.Length > 0 || _from is not null || _to is not null
+                             || !string.IsNullOrWhiteSpace(_search) || _mine;
+
+    private Task ResetFiltersAsync()
+    {
+        (_tagId, _responsible, _source, _from, _to, _search, _mine) = (null, "", "", null, null, null, false);
+        return ReloadAsync();
     }
 
     private Task ReloadAsync()

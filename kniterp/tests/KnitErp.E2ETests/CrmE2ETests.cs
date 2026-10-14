@@ -436,6 +436,25 @@ public sealed class CrmE2ETests(CrmAppFixture app) : IClassFixture<CrmAppFixture
         await Assertions.Expect(page.GetByRole(AriaRole.Row, new() { NameRegex = new Regex(@"ЗК-\d+") })).ToContainTextAsync("оплачен");
         await Assertions.Expect(page.GetByRole(AriaRole.Region, new() { Name = "Дальше" })).ToHaveCountAsync(0);
         await Shot(page, "crm-12-deal-paid");
+
+        // D653: строка таблицы открывает сделку нажатием на любую ячейку; возврат по «Сделки» — с тем же видом и поиском.
+        await OpenAsync(page, "crm/deals?view=table");
+        await page.GetByRole(AriaRole.Textbox, new() { Name = "Поиск", Exact = true }).FillAsync($"150 шарфов {Stamp}");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Показать" }).ClickAsync();
+        var row = page.Locator("tr.crm-row").Filter(new() { HasText = $"150 шарфов {Stamp}" });
+        await Assertions.Expect(row).ToHaveCountAsync(1);
+        // Нажатие над ячейкой «Покупатель»: попадает в растянутую ссылку строки (так и задумано), а не в саму ячейку.
+        var cell = await row.Locator("td").Nth(2).BoundingBoxAsync();
+        var box = await row.BoundingBoxAsync();
+        await row.ClickAsync(new() { Position = new() { X = cell!.X - box!.X + 10, Y = box.Height / 2 } });
+        await page.WaitForURLAsync(new Regex(@"/crm/deals/\d+$"));
+        await WaitBlazorAsync(page);
+        await page.GetByRole(AriaRole.Link, new() { Name = "Сделки", Exact = true }).First.ClickAsync();
+        await page.WaitForURLAsync(new Regex(@"/crm/deals$"));
+        await WaitBlazorAsync(page);
+        await Assertions.Expect(page.GetByRole(AriaRole.Textbox, new() { Name = "Поиск", Exact = true })).ToHaveValueAsync($"150 шарфов {Stamp}");
+        await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Таблица" })).ToHaveAttributeAsync("aria-pressed", "true");
+        await Assertions.Expect(page.Locator("tr.crm-row")).ToHaveCountAsync(1);
     });
 
     /// <summary>
